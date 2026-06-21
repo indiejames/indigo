@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/indiejames/twist/internal/config"
 	"github.com/indiejames/twist/internal/document"
 )
 
@@ -55,12 +57,19 @@ var (
 			Bold(true)
 
 	cursorStyle = lipgloss.NewStyle().Reverse(true)
+
+	gutterStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#606060"))
+
+	gutterCurStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#AAAAAA"))
 )
 
 // Model is the Bubble Tea model for a single buffer view.
 type Model struct {
 	rpc          *RPC
 	buf          *document.Buffer
+	cfg          *config.Config
 	bufID        uint32
 	version      uint64
 	mode         Mode
@@ -76,10 +85,11 @@ type Model struct {
 }
 
 // New creates a Model after the buffer is already open with the server.
-func New(rpc *RPC, bufID uint32, content string, version uint64, filePath string) Model {
+func New(rpc *RPC, bufID uint32, content string, version uint64, filePath string, cfg *config.Config) Model {
 	return Model{
 		rpc:      rpc,
 		buf:      document.New(filePath, content),
+		cfg:      cfg,
 		bufID:    bufID,
 		version:  version,
 		filePath: filePath,
@@ -476,38 +486,23 @@ func (m Model) doDisconnect() tea.Cmd {
 // ---- cursor movement ----
 
 func (m *Model) moveCursor(dLine, dCol int) {
-	line := m.cursor.Line + dLine
-	if line < 0 {
-		line = 0
-	}
+	line := max(0, m.cursor.Line+dLine)
 	if line >= m.buf.LineCount() {
 		line = max(0, m.buf.LineCount()-1)
 	}
-	col := m.cursor.Col + dCol
 	lineLen := m.buf.LineLen(line)
 	maxCol := lineLen
 	if m.mode == ModeNormal && maxCol > 0 {
-		maxCol-- // in normal mode cursor sits on a character
+		maxCol--
 	}
-	if col < 0 {
-		col = 0
-	}
-	if col > maxCol {
-		col = maxCol
-	}
+	col := max(0, min(m.cursor.Col+dCol, maxCol))
 	m.cursor = document.Pos{Line: line, Col: col}
 	m.scrollToCursor()
 }
 
 func (m *Model) clampCursor() {
-	line := m.cursor.Line
-	if line >= m.buf.LineCount() {
-		line = max(0, m.buf.LineCount()-1)
-	}
-	col := m.cursor.Col
-	if col > m.buf.LineLen(line) {
-		col = m.buf.LineLen(line)
-	}
+	line := min(m.cursor.Line, max(0, m.buf.LineCount()-1))
+	col := min(m.cursor.Col, m.buf.LineLen(line))
 	m.cursor = document.Pos{Line: line, Col: col}
 	m.scrollToCursor()
 }
@@ -520,17 +515,19 @@ func (m *Model) scrollToCursor() {
 	if m.cursor.Line >= m.topLine+vis {
 		m.topLine = m.cursor.Line - vis + 1
 	}
-	if m.topLine < 0 {
-		m.topLine = 0
-	}
+	m.topLine = max(0, m.topLine)
 }
 
 func (m Model) visibleLines() int {
-	h := m.height - 1 // reserve one line for status bar
-	if h < 1 {
-		return 1
+	return max(1, m.height-1)
+}
+
+// gutterWidth returns the number of columns reserved for line numbers (0 when disabled).
+func (m Model) gutterWidth() int {
+	if m.cfg == nil || !m.cfg.LineNumbers {
+		return 0
 	}
-	return h
+	return len(fmt.Sprint(m.buf.LineCount())) + 1
 }
 
 // ---- View ----
@@ -545,30 +542,38 @@ func (m Model) View() string {
 
 	vis := m.visibleLines()
 	lineCount := m.buf.LineCount()
+	gutterW := m.gutterWidth()
 	var sb strings.Builder
 
-	for i := 0; i < vis; i++ {
+	for i := range vis {
 		lineNum := m.topLine + i
 		if lineNum >= lineCount {
+			if gutterW > 0 {
+				sb.WriteString(gutterStyle.Render(strings.Repeat(" ", gutterW)))
+			}
 			sb.WriteString("~\n")
 			continue
+		}
+
+		if gutterW > 0 {
+			numStr := fmt.Sprintf("%*d ", gutterW-1, lineNum+1)
+			if lineNum == m.cursor.Line {
+				sb.WriteString(gutterCurStyle.Render(numStr))
+			} else {
+				sb.WriteString(gutterStyle.Render(numStr))
+			}
 		}
 
 		line := m.buf.Line(lineNum)
 		runes := []rune(line)
 
 		if lineNum == m.cursor.Line {
-			// Render line with cursor highlight.
-			curCol := m.cursor.Col
-			if curCol > len(runes) {
-				curCol = len(runes)
-			}
+			curCol := min(m.cursor.Col, len(runes))
 			sb.WriteString(string(runes[:curCol]))
 			if curCol < len(runes) {
 				sb.WriteString(cursorStyle.Render(string(runes[curCol : curCol+1])))
 				sb.WriteString(string(runes[curCol+1:]))
 			} else {
-				// Cursor at end of line: show a space.
 				sb.WriteString(cursorStyle.Render(" "))
 			}
 		} else {
@@ -587,7 +592,6 @@ func (m Model) renderStatusBar() string {
 		return ""
 	}
 
-	// Left: mode indicator.
 	modeLabel := "NORMAL"
 	ms := normalModeStyle
 	if m.mode == ModeInsert {
@@ -597,12 +601,10 @@ func (m Model) renderStatusBar() string {
 	left := ms.Render("  " + modeLabel + "  ")
 	leftW := lipgloss.Width(left)
 
-	// Right: line:col position.
 	posStr := fmt.Sprintf("  %d:%d  ", m.cursor.Line+1, m.cursor.Col+1)
 	right := barStyle.Render(posStr)
 	rightW := lipgloss.Width(right)
 
-	// Center: file path (+ dirty marker), warn message, or error.
 	var centerContent string
 	switch {
 	case m.warnQuit:
@@ -619,10 +621,7 @@ func (m Model) renderStatusBar() string {
 		}
 	}
 
-	centerW := m.width - leftW - rightW
-	if centerW < 0 {
-		centerW = 0
-	}
+	centerW := max(0, m.width-leftW-rightW)
 	center := barStyle.Width(centerW).Align(lipgloss.Center).Render(centerContent)
 
 	return left + center + right

@@ -19,12 +19,24 @@ func defaults() *Config {
 	}
 }
 
+// configDir returns the XDG config home: $XDG_CONFIG_HOME if set, else ~/.config.
+func configDir() (string, error) {
+	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
+		return d, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config"), nil
+}
+
 // Load reads the config file, returning defaults for any missing or
 // unreadable file. A parse error is the only failure that is returned.
 func Load() (*Config, error) {
 	cfg := defaults()
 
-	dir, err := os.UserConfigDir()
+	dir, err := configDir()
 	if err != nil {
 		return cfg, nil
 	}

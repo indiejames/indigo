@@ -1,0 +1,30 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+twist
+
+# Common binary output directories
+bin/
+dist/
+out/
+
+# Test binaries and coverage reports
+*.test
+*.out
+*.coverprofile
+profile.cov
+
+# Go workspace files (should not be shared)
+go.work
+go.work.sum
+
+# Local environment variables
+.env
+.env.local
+
+# Dependency directories (Optional)
+# Only uncomment if you explicitly want to vendor dependencies
+# vendor/

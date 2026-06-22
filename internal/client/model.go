@@ -907,19 +907,15 @@ func findWordAt(runes []rune, col int) (start, end int, found bool) {
 	}
 	i := min(col, n-1)
 	if !isWordChar(runes[i]) {
-		// Skip non-word chars forward.
+		// Not on a word char: skip forward to the next word.
 		for i < n && !isWordChar(runes[i]) {
 			i++
 		}
 		if i >= n {
 			return -1, -1, false
 		}
-	} else {
-		// Walk back to word start.
-		for i > 0 && isWordChar(runes[i-1]) {
-			i--
-		}
 	}
+	// Select from here (cursor or start of next word) to end of word.
 	start = i
 	for i < n && isWordChar(runes[i]) {
 		i++

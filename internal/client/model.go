@@ -522,12 +522,23 @@ func (m Model) visibleLines() int {
 	return max(1, m.height-1)
 }
 
+// displayLineCount returns the number of lines that receive a line number.
+// A trailing empty line (from a final newline) never gets a number — it only
+// becomes numbered once the user types at least one character on it.
+func (m Model) displayLineCount() int {
+	lc := m.buf.LineCount()
+	if lc > 1 && m.buf.Line(lc-1) == "" {
+		return lc - 1
+	}
+	return lc
+}
+
 // gutterWidth returns the number of columns reserved for line numbers (0 when disabled).
 func (m Model) gutterWidth() int {
 	if m.cfg == nil || !m.cfg.LineNumbers {
 		return 0
 	}
-	return len(fmt.Sprint(m.buf.LineCount())) + 1
+	return len(fmt.Sprint(m.displayLineCount())) + 1
 }
 
 // ---- View ----
@@ -541,17 +552,34 @@ func (m Model) View() string {
 	}
 
 	vis := m.visibleLines()
-	lineCount := m.buf.LineCount()
+	bufLineCount := m.buf.LineCount()
+	dispLineCount := m.displayLineCount()
 	gutterW := m.gutterWidth()
 	var sb strings.Builder
 
 	for i := range vis {
 		lineNum := m.topLine + i
-		if lineNum >= lineCount {
+
+		// Past all buffer content: show tilde.
+		if lineNum >= bufLineCount {
 			if gutterW > 0 {
 				sb.WriteString(gutterStyle.Render(strings.Repeat(" ", gutterW)))
 			}
 			sb.WriteString("~\n")
+			continue
+		}
+
+		// Trailing empty line: no number. Show cursor if it's here, tilde otherwise.
+		if lineNum >= dispLineCount {
+			if gutterW > 0 {
+				sb.WriteString(gutterStyle.Render(strings.Repeat(" ", gutterW)))
+			}
+			if lineNum == m.cursor.Line {
+				sb.WriteString(cursorStyle.Render(" "))
+			} else {
+				sb.WriteString("~")
+			}
+			sb.WriteByte('\n')
 			continue
 		}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -58,12 +59,34 @@ var (
 
 	cursorStyle = lipgloss.NewStyle().Reverse(true)
 
+	selectionStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#2D5F8A")).
+			Foreground(lipgloss.Color("#FFFFFF"))
+
 	gutterStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#606060"))
 
 	gutterCurStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#AAAAAA"))
 )
+
+// Selection tracks the selected range in the buffer.
+// [Anchor, Head] is inclusive on both ends for display purposes.
+// IsLine marks a linewise selection (x) which deletes the entire line + newline.
+type Selection struct {
+	Anchor document.Pos
+	Head   document.Pos
+	IsLine bool
+}
+
+// ordered returns (start, end) in document order (start <= end).
+func (s *Selection) ordered() (start, end document.Pos) {
+	if s.Anchor.Line < s.Head.Line ||
+		(s.Anchor.Line == s.Head.Line && s.Anchor.Col <= s.Head.Col) {
+		return s.Anchor, s.Head
+	}
+	return s.Head, s.Anchor
+}
 
 // Model is the Bubble Tea model for a single buffer view.
 type Model struct {
@@ -82,6 +105,8 @@ type Model struct {
 	quitting     bool
 	warnQuit     bool // showing unsaved-changes warning
 	checkingQuit bool // client-count RPC in flight
+	sel          *Selection
+	dragging     bool
 }
 
 // New creates a Model after the buffer is already open with the server.
@@ -147,6 +172,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Sequence(m.doDisconnect(), tea.Quit)
 
+	case tea.MouseMsg:
+		switch {
+		case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
+			m.handleMousePress(msg.X, msg.Y)
+		case msg.Action == tea.MouseActionMotion && m.dragging:
+			m.handleMouseDrag(msg.X, msg.Y)
+		case msg.Action == tea.MouseActionRelease && msg.Button == tea.MouseButtonLeft:
+			m.dragging = false
+			// A press+release on the same spot is just a cursor move; clear selection.
+			if m.sel != nil && m.sel.Anchor == m.sel.Head {
+				m.sel = nil
+			}
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -197,21 +237,21 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Sequence(m.doDisconnect(), tea.Quit)
 		}
 
+	case "esc":
+		m.sel = nil
+
+	// Enter insert mode — clear any selection first.
 	case "i":
+		m.sel = nil
 		m.mode = ModeInsert
-		m.status = ""
 
 	case "a":
-		// Insert after cursor
+		m.sel = nil
 		m.mode = ModeInsert
-		lineLen := m.buf.LineLen(m.cursor.Line)
-		if m.cursor.Col < lineLen {
-			m.cursor.Col++
-		}
-		m.status = ""
+		m.cursor.Col = m.buf.LineLen(m.cursor.Line)
 
 	case "o":
-		// Open new line below
+		m.sel = nil
 		m.mode = ModeInsert
 		line := m.cursor.Line
 		op := document.Op{
@@ -224,7 +264,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.sendOp(op)
 
 	case "O":
-		// Open new line above
+		m.sel = nil
 		m.mode = ModeInsert
 		col := 0
 		if m.cursor.Line > 0 {
@@ -242,61 +282,57 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "s", "ctrl+s":
 		return m, m.doSave()
 
-	// Movement
+	// Selection: w = next word, x = current line.
+	case "w":
+		m.selectWord()
+
+	case "x":
+		m.selectLine()
+
+	// Operators: act on selection (no-op if nothing selected).
+	case "d":
+		m2, cmd := m.deleteSelection()
+		return m2, cmd
+
+	case "c":
+		m2, cmd := m.deleteSelection()
+		m2.mode = ModeInsert
+		return m2, cmd
+
+	// Movement — clears selection.
 	case "h", "left":
+		m.sel = nil
 		m.moveCursor(0, -1)
 	case "l", "right":
+		m.sel = nil
 		m.moveCursor(0, 1)
 	case "j", "down":
+		m.sel = nil
 		m.moveCursor(1, 0)
 	case "k", "up":
+		m.sel = nil
 		m.moveCursor(-1, 0)
 	case "ctrl+f", "pgdown":
+		m.sel = nil
 		m.moveCursor(m.visibleLines(), 0)
 	case "ctrl+b", "pgup":
+		m.sel = nil
 		m.moveCursor(-m.visibleLines(), 0)
 	case "g":
+		m.sel = nil
 		m.cursor = document.Pos{Line: 0, Col: 0}
 		m.topLine = 0
 	case "G":
+		m.sel = nil
 		last := max(0, m.buf.LineCount()-1)
 		m.cursor = document.Pos{Line: last, Col: 0}
 		m.scrollToCursor()
 	case "0", "home":
+		m.sel = nil
 		m.cursor.Col = 0
 	case "$", "end":
+		m.sel = nil
 		m.cursor.Col = max(0, m.buf.LineLen(m.cursor.Line)-1)
-
-	// Delete character under cursor (x)
-	case "x":
-		lineLen := m.buf.LineLen(m.cursor.Line)
-		if lineLen > 0 {
-			op := document.Op{
-				ClientID: m.rpc.ClientID(),
-				Type:     document.OpDelete,
-				FromLine: m.cursor.Line,
-				FromCol:  m.cursor.Col,
-				ToLine:   m.cursor.Line,
-				ToCol:    m.cursor.Col + 1,
-			}
-			return m, m.sendOp(op)
-		}
-
-	// Delete line (dd)
-	case "d":
-		// Simplified: delete to end of line
-		lineLen := m.buf.LineLen(m.cursor.Line)
-		if lineLen > 0 {
-			op := document.Op{
-				ClientID: m.rpc.ClientID(),
-				Type:     document.OpDelete,
-				FromLine: m.cursor.Line,
-				FromCol:  0,
-				ToLine:   m.cursor.Line,
-				ToCol:    lineLen,
-			}
-			return m, m.sendOp(op)
-		}
 	}
 	return m, nil
 }
@@ -483,6 +519,254 @@ func (m Model) doDisconnect() tea.Cmd {
 	}
 }
 
+// clickToPos converts a terminal (x, y) coordinate to a buffer position.
+// Returns ok=false if the click is outside the text area (e.g. on the status bar).
+func (m *Model) clickToPos(x, y int) (document.Pos, bool) {
+	if y >= m.height-1 {
+		return document.Pos{}, false
+	}
+	lineNum := m.topLine + y
+	disp := m.displayLineCount()
+	if lineNum >= disp {
+		lineNum = max(0, disp-1)
+	}
+	col := max(0, x-m.gutterWidth())
+	lineLen := m.buf.LineLen(lineNum)
+	maxCol := lineLen
+	if m.mode == ModeNormal && maxCol > 0 {
+		maxCol--
+	}
+	col = min(col, maxCol)
+	return document.Pos{Line: lineNum, Col: col}, true
+}
+
+func (m *Model) handleMousePress(x, y int) {
+	pos, ok := m.clickToPos(x, y)
+	if !ok {
+		return
+	}
+	m.cursor = pos
+	m.sel = &Selection{Anchor: pos, Head: pos}
+	m.dragging = true
+}
+
+func (m *Model) handleMouseDrag(x, y int) {
+	pos, ok := m.clickToPos(x, y)
+	if !ok {
+		return
+	}
+	m.cursor = pos
+	if m.sel != nil {
+		m.sel.Head = pos
+	}
+}
+
+// ---- selection helpers ----
+
+// selectWord selects the word at the cursor. If a word is already selected,
+// advances to the next word on the same line.
+func (m *Model) selectWord() {
+	runes := []rune(m.buf.Line(m.cursor.Line))
+	lineNum := m.cursor.Line
+	if m.sel != nil && !m.sel.IsLine {
+		// Advance: find next word after the current selection head.
+		_, end := m.sel.ordered()
+		if end.Line == lineNum {
+			s, e, ok := findNextWordFrom(runes, end.Col)
+			if ok {
+				m.sel = &Selection{Anchor: document.Pos{Line: lineNum, Col: s}, Head: document.Pos{Line: lineNum, Col: e}}
+				m.cursor = m.sel.Head
+				m.scrollToCursor()
+				return
+			}
+		}
+	}
+	// Fresh word select from cursor.
+	s, e, ok := findWordAt(runes, m.cursor.Col)
+	if ok {
+		m.sel = &Selection{Anchor: document.Pos{Line: lineNum, Col: s}, Head: document.Pos{Line: lineNum, Col: e}}
+		m.cursor = m.sel.Head
+		m.scrollToCursor()
+	}
+}
+
+// selectLine selects the entire current line.
+func (m *Model) selectLine() {
+	line := m.cursor.Line
+	lineLen := m.buf.LineLen(line)
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: line, Col: 0},
+		Head:   document.Pos{Line: line, Col: max(0, lineLen-1)},
+		IsLine: true,
+	}
+	m.cursor = m.sel.Head
+}
+
+// deleteSelection deletes the selected text and returns the updated model + cmd.
+// If there is no selection the model is returned unchanged.
+func (m Model) deleteSelection() (Model, tea.Cmd) {
+	if m.sel == nil {
+		return m, nil
+	}
+	start, end := m.sel.ordered()
+	op := document.Op{
+		ClientID: m.rpc.ClientID(),
+		Type:     document.OpDelete,
+		FromLine: start.Line,
+		FromCol:  start.Col,
+	}
+	if m.sel.IsLine {
+		lc := m.buf.LineCount()
+		if end.Line+1 < lc {
+			op.ToLine = end.Line + 1
+			op.ToCol = 0
+		} else {
+			op.ToLine = end.Line
+			op.ToCol = m.buf.LineLen(end.Line)
+		}
+	} else {
+		lineLen := m.buf.LineLen(end.Line)
+		if end.Col+1 <= lineLen {
+			op.ToLine = end.Line
+			op.ToCol = end.Col + 1
+		} else {
+			lc := m.buf.LineCount()
+			if end.Line+1 < lc {
+				op.ToLine = end.Line + 1
+				op.ToCol = 0
+			} else {
+				op.ToLine = end.Line
+				op.ToCol = lineLen
+			}
+		}
+	}
+	m.cursor = start
+	m.sel = nil
+	return m, m.sendOp(op)
+}
+
+// ---- word finding ----
+
+func isWordChar(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
+}
+
+// findWordAt returns the inclusive [start, end] of the word at or ahead of col.
+func findWordAt(runes []rune, col int) (start, end int, found bool) {
+	n := len(runes)
+	if n == 0 {
+		return -1, -1, false
+	}
+	i := min(col, n-1)
+	if !isWordChar(runes[i]) {
+		// Skip non-word chars forward.
+		for i < n && !isWordChar(runes[i]) {
+			i++
+		}
+		if i >= n {
+			return -1, -1, false
+		}
+	} else {
+		// Walk back to word start.
+		for i > 0 && isWordChar(runes[i-1]) {
+			i--
+		}
+	}
+	start = i
+	for i < n && isWordChar(runes[i]) {
+		i++
+	}
+	return start, i - 1, true
+}
+
+// findNextWordFrom returns the inclusive [start, end] of the next word that
+// begins strictly after afterEnd.
+func findNextWordFrom(runes []rune, afterEnd int) (start, end int, found bool) {
+	n := len(runes)
+	i := afterEnd + 1
+	// Skip any remaining word chars (tail of current word).
+	for i < n && isWordChar(runes[i]) {
+		i++
+	}
+	// Skip non-word chars.
+	for i < n && !isWordChar(runes[i]) {
+		i++
+	}
+	if i >= n {
+		return -1, -1, false
+	}
+	start = i
+	for i < n && isWordChar(runes[i]) {
+		i++
+	}
+	return start, i - 1, true
+}
+
+// ---- selection rendering helpers ----
+
+// selectionCols returns the inclusive [selA, selB] column range selected on
+// lineNum, or (-1, -1) when lineNum is not inside the current selection.
+func (m Model) selectionCols(lineNum, lineLen int) (selA, selB int) {
+	if m.sel == nil {
+		return -1, -1
+	}
+	start, end := m.sel.ordered()
+	if lineNum < start.Line || lineNum > end.Line {
+		return -1, -1
+	}
+	selA = 0
+	if lineNum == start.Line {
+		selA = start.Col
+	}
+	selB = max(0, lineLen-1)
+	if !m.sel.IsLine && lineNum == end.Line {
+		selB = min(end.Col, max(0, lineLen-1))
+	}
+	if lineLen == 0 || selA > selB {
+		return -1, -1
+	}
+	return selA, selB
+}
+
+// renderLineRunes writes runes with selection and cursor highlighting applied.
+// selA/selB are inclusive selected column bounds (-1,-1 for no selection).
+// curCol is the cursor column (-1 if cursor is not on this line).
+func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int) {
+	n := len(runes)
+	hasCursor := curCol >= 0
+	hasSel := selA >= 0
+	i := 0
+	for i < n {
+		isCursor := hasCursor && i == curCol
+		inSel := hasSel && i >= selA && i <= selB
+		switch {
+		case isCursor:
+			sb.WriteString(cursorStyle.Render(string(runes[i : i+1])))
+			i++
+		case inSel:
+			// Batch consecutive selected chars (stopping before cursor).
+			j := i + 1
+			for j < n && !(hasCursor && j == curCol) && j >= selA && j <= selB {
+				j++
+			}
+			sb.WriteString(selectionStyle.Render(string(runes[i:j])))
+			i = j
+		default:
+			// Batch consecutive plain chars.
+			j := i + 1
+			for j < n && !(hasCursor && j == curCol) && !(hasSel && j >= selA && j <= selB) {
+				j++
+			}
+			sb.WriteString(string(runes[i:j]))
+			i = j
+		}
+	}
+	// Cursor past end of line.
+	if hasCursor && curCol >= n {
+		sb.WriteString(cursorStyle.Render(" "))
+	}
+}
+
 // ---- cursor movement ----
 
 func (m *Model) moveCursor(dLine, dCol int) {
@@ -594,19 +878,12 @@ func (m Model) View() string {
 
 		line := m.buf.Line(lineNum)
 		runes := []rune(line)
-
+		selA, selB := m.selectionCols(lineNum, len(runes))
+		curCol := -1
 		if lineNum == m.cursor.Line {
-			curCol := min(m.cursor.Col, len(runes))
-			sb.WriteString(string(runes[:curCol]))
-			if curCol < len(runes) {
-				sb.WriteString(cursorStyle.Render(string(runes[curCol : curCol+1])))
-				sb.WriteString(string(runes[curCol+1:]))
-			} else {
-				sb.WriteString(cursorStyle.Render(" "))
-			}
-		} else {
-			sb.WriteString(line)
+			curCol = min(m.cursor.Col, len(runes))
 		}
+		renderLineRunes(&sb, runes, selA, selB, curCol)
 		sb.WriteByte('\n')
 	}
 

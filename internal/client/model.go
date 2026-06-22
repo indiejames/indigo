@@ -413,12 +413,12 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		last := max(0, m.buf.LineCount()-1)
 		m.cursor = document.Pos{Line: last, Col: 0}
 		m.scrollToCursor()
-	case "0", "home":
+	case "0", "^", "home":
 		m.sel = nil
 		m.cursor.Col = 0
 	case "$", "end":
 		m.sel = nil
-		m.cursor.Col = max(0, m.buf.LineLen(m.cursor.Line)-1)
+		m.cursor.Col = m.buf.LineLen(m.cursor.Line)
 	}
 	return m, nil
 }

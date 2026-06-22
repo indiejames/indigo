@@ -61,6 +61,18 @@ var (
 
 	cursorStyle = lipgloss.NewStyle().Reverse(true)
 
+	popupBg          = lipgloss.Color("#1E2A38")
+	popupBorderStyle = lipgloss.NewStyle().
+				Background(popupBg).
+				Foreground(lipgloss.Color("#4488CC"))
+	popupKeyStyle = lipgloss.NewStyle().
+			Background(popupBg).
+			Foreground(lipgloss.Color("#FFDD44")).
+			Bold(true)
+	popupTextStyle = lipgloss.NewStyle().
+			Background(popupBg).
+			Foreground(lipgloss.Color("#CCDDEE"))
+
 	selectionStyle = lipgloss.NewStyle().
 			Background(lipgloss.Color("#2D5F8A")).
 			Foreground(lipgloss.Color("#FFFFFF"))
@@ -90,6 +102,87 @@ func (s *Selection) ordered() (start, end document.Pos) {
 	return s.Head, s.Anchor
 }
 
+// command is a node in the prefix-command tree.
+// Leaf nodes have execute set; branch nodes have children.
+type command struct {
+	key       rune
+	label     string
+	menuTitle string
+	children  []command
+	execute   func(m Model) (tea.Model, tea.Cmd)
+}
+
+// prefixCmds is the root of the prefix-command tree for Normal mode.
+var prefixCmds = []command{
+	{
+		key:       'm',
+		label:     "Match",
+		menuTitle: "Match",
+		children: []command{
+			{key: 'm', label: "Go to matching bracket"},
+			{
+				key:       'i',
+				label:     "Select inside object",
+				menuTitle: "Match Inside",
+				children: []command{
+					{key: 'w', label: "Word", execute: executeSelectInsideWord},
+					{key: 'm', label: "Closes surrounding pair"},
+					{key: '.', label: "... or any character acting as a pair"},
+				},
+			},
+		},
+	},
+}
+
+// findCommand navigates prefixCmds following seq and returns the final node.
+func findCommand(seq []rune) (*command, bool) {
+	cmds := prefixCmds
+	var found *command
+	for _, r := range seq {
+		matched := false
+		for i := range cmds {
+			if cmds[i].key == r {
+				found = &cmds[i]
+				cmds = cmds[i].children
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return nil, false
+		}
+	}
+	return found, found != nil
+}
+
+// executeSelectInsideWord selects the full word enclosing the cursor.
+func executeSelectInsideWord(m Model) (tea.Model, tea.Cmd) {
+	runes := []rune(m.buf.Line(m.cursor.Line))
+	if len(runes) == 0 {
+		return m, nil
+	}
+	col := min(m.cursor.Col, len(runes)-1)
+	if !isWordChar(runes[col]) {
+		return m, nil
+	}
+	start := col
+	for start > 0 && isWordChar(runes[start-1]) {
+		start--
+	}
+	end := col
+	for end+1 < len(runes) && isWordChar(runes[end+1]) {
+		end++
+	}
+	lineNum := m.cursor.Line
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: lineNum, Col: start},
+		Head:   document.Pos{Line: lineNum, Col: end},
+	}
+	m.cursor = m.sel.Head
+	m.scrollToCursor()
+	return m, nil
+}
+
 // Model is the Bubble Tea model for a single buffer view.
 type Model struct {
 	rpc          *RPC
@@ -114,6 +207,7 @@ type Model struct {
 	currentGroup   []document.Op  // non-nil while accumulating ops for the current Insert session
 	savedUndoDepth int            // len(undoStack) at the time of the last save
 	cmdBuf         string         // text typed after ':' while in ModeCommand
+	prefixSeq      []rune         // keys typed so far for a multi-key Normal-mode command
 }
 
 // New creates a Model after the buffer is already open with the server.
@@ -239,6 +333,29 @@ func (m Model) handleWarnQuit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle active prefix sequence before the main switch.
+	if len(m.prefixSeq) > 0 {
+		if msg.String() == "esc" {
+			m.prefixSeq = nil
+			return m, nil
+		}
+		if len(msg.Runes) > 0 {
+			newSeq := append(append([]rune(nil), m.prefixSeq...), msg.Runes[0])
+			if cmd, ok := findCommand(newSeq); ok {
+				if cmd.execute != nil {
+					m.prefixSeq = nil
+					return cmd.execute(m)
+				}
+				if len(cmd.children) > 0 {
+					m.prefixSeq = newSeq
+					return m, nil
+				}
+			}
+		}
+		m.prefixSeq = nil
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "ctrl+c":
 		if m.buf.Dirty() && !m.checkingQuit {
@@ -419,6 +536,18 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "$", "end":
 		m.sel = nil
 		m.cursor.Col = m.buf.LineLen(m.cursor.Line)
+
+	default:
+		// Check whether this key starts a prefix command sequence.
+		if len(msg.Runes) > 0 {
+			r := msg.Runes[0]
+			for _, c := range prefixCmds {
+				if c.key == r {
+					m.prefixSeq = []rune{r}
+					return m, nil
+				}
+			}
+		}
 	}
 	return m, nil
 }
@@ -1069,6 +1198,124 @@ func (m Model) gutterWidth() int {
 	return len(fmt.Sprint(m.displayLineCount())) + 1
 }
 
+// ---- View helpers ----
+
+// renderLine renders screen row i (0-based, relative to topLine) without a trailing newline.
+func (m Model) renderLine(i int) string {
+	lineNum := m.topLine + i
+	bufLineCount := m.buf.LineCount()
+	dispLineCount := m.displayLineCount()
+	gutterW := m.gutterWidth()
+	var sb strings.Builder
+
+	if lineNum >= bufLineCount {
+		if gutterW > 0 {
+			sb.WriteString(gutterStyle.Render(strings.Repeat(" ", gutterW)))
+		}
+		sb.WriteString("~")
+		return sb.String()
+	}
+
+	if lineNum >= dispLineCount {
+		if gutterW > 0 {
+			sb.WriteString(gutterStyle.Render(strings.Repeat(" ", gutterW)))
+		}
+		if lineNum == m.cursor.Line {
+			sb.WriteString(cursorStyle.Render(" "))
+		} else {
+			sb.WriteString("~")
+		}
+		return sb.String()
+	}
+
+	if gutterW > 0 {
+		numStr := fmt.Sprintf("%*d ", gutterW-1, lineNum+1)
+		if lineNum == m.cursor.Line {
+			sb.WriteString(gutterCurStyle.Render(numStr))
+		} else {
+			sb.WriteString(gutterStyle.Render(numStr))
+		}
+	}
+
+	line := m.buf.Line(lineNum)
+	runes := []rune(line)
+	selA, selB := m.selectionCols(lineNum, len(runes))
+	curCol := -1
+	if lineNum == m.cursor.Line {
+		curCol = min(m.cursor.Col, len(runes))
+	}
+	renderLineRunes(&sb, runes, selA, selB, curCol)
+	return sb.String()
+}
+
+// renderPopupBox builds the styled lines of a popup menu with rounded borders.
+func renderPopupBox(title string, items []command, maxW int) []string {
+	// Compute needed inner width.
+	minInner := len([]rune(title))
+	for _, item := range items {
+		w := len([]rune(fmt.Sprintf("  %c  %s  ", item.key, item.label)))
+		if w > minInner {
+			minInner = w
+		}
+	}
+	innerW := minInner
+	if innerW+2 > maxW {
+		innerW = max(2, maxW-2)
+	}
+
+	// Top border with centered title.
+	titleStr := title
+	titleRunes := []rune(titleStr)
+	if len(titleRunes) > innerW {
+		titleRunes = titleRunes[:innerW]
+		titleStr = string(titleRunes)
+	}
+	remaining := max(0, innerW-len(titleRunes))
+	top := popupBorderStyle.Render("╭") +
+		popupTextStyle.Render(titleStr) +
+		popupBorderStyle.Render(strings.Repeat("─", remaining)+"╮")
+
+	lines := []string{top}
+	for _, item := range items {
+		keyPart := fmt.Sprintf("  %c", item.key)
+		sep := "  "
+		label := item.label
+		// Truncate label if needed.
+		maxLabel := innerW - len([]rune(keyPart+sep+"  "))
+		if maxLabel < 0 {
+			maxLabel = 0
+		}
+		labelRunes := []rune(label)
+		if len(labelRunes) > maxLabel {
+			label = string(labelRunes[:maxLabel])
+		}
+		content := keyPart + sep + label
+		padW := innerW - len([]rune(content))
+		if padW < 0 {
+			padW = 0
+		}
+		row := popupBorderStyle.Render("│") +
+			popupKeyStyle.Render(keyPart) +
+			popupTextStyle.Render(sep+label+strings.Repeat(" ", padW)) +
+			popupBorderStyle.Render("│")
+		lines = append(lines, row)
+	}
+
+	bottom := popupBorderStyle.Render("╰" + strings.Repeat("─", innerW) + "╯")
+	lines = append(lines, bottom)
+	return lines
+}
+
+// overlayRight truncates mainLine to popCol visual columns and appends popupLine.
+func overlayRight(mainLine, popupLine string, popCol int) string {
+	truncated := lipgloss.NewStyle().MaxWidth(popCol).Render(mainLine)
+	tw := lipgloss.Width(truncated)
+	if tw < popCol {
+		truncated += strings.Repeat(" ", popCol-tw)
+	}
+	return truncated + popupLine
+}
+
 // ---- View ----
 
 func (m Model) View() string {
@@ -1080,59 +1327,36 @@ func (m Model) View() string {
 	}
 
 	vis := m.visibleLines()
-	bufLineCount := m.buf.LineCount()
-	dispLineCount := m.displayLineCount()
-	gutterW := m.gutterWidth()
-	var sb strings.Builder
-
+	lines := make([]string, vis)
 	for i := range vis {
-		lineNum := m.topLine + i
-
-		// Past all buffer content: show tilde.
-		if lineNum >= bufLineCount {
-			if gutterW > 0 {
-				sb.WriteString(gutterStyle.Render(strings.Repeat(" ", gutterW)))
-			}
-			sb.WriteString("~\n")
-			continue
-		}
-
-		// Trailing empty line: no number. Show cursor if it's here, tilde otherwise.
-		if lineNum >= dispLineCount {
-			if gutterW > 0 {
-				sb.WriteString(gutterStyle.Render(strings.Repeat(" ", gutterW)))
-			}
-			if lineNum == m.cursor.Line {
-				sb.WriteString(cursorStyle.Render(" "))
-			} else {
-				sb.WriteString("~")
-			}
-			sb.WriteByte('\n')
-			continue
-		}
-
-		if gutterW > 0 {
-			numStr := fmt.Sprintf("%*d ", gutterW-1, lineNum+1)
-			if lineNum == m.cursor.Line {
-				sb.WriteString(gutterCurStyle.Render(numStr))
-			} else {
-				sb.WriteString(gutterStyle.Render(numStr))
-			}
-		}
-
-		line := m.buf.Line(lineNum)
-		runes := []rune(line)
-		selA, selB := m.selectionCols(lineNum, len(runes))
-		curCol := -1
-		if lineNum == m.cursor.Line {
-			curCol = min(m.cursor.Col, len(runes))
-		}
-		renderLineRunes(&sb, runes, selA, selB, curCol)
-		sb.WriteByte('\n')
+		lines[i] = m.renderLine(i)
 	}
 
-	sb.WriteString(m.renderStatusBar())
+	// Overlay prefix-command popup in the bottom-right corner.
+	if len(m.prefixSeq) > 0 {
+		if cmd, ok := findCommand(m.prefixSeq); ok && len(cmd.children) > 0 {
+			popup := renderPopupBox(cmd.menuTitle, cmd.children, m.width)
+			popH := len(popup)
+			popW := lipgloss.Width(popup[0])
+			popCol := m.width - popW
+			if popCol >= 0 {
+				startRow := max(0, vis-popH)
+				for pi, popLine := range popup {
+					row := startRow + pi
+					if row < vis {
+						lines[row] = overlayRight(lines[row], popLine, popCol)
+					}
+				}
+			}
+		}
+	}
 
+	var sb strings.Builder
+	for _, line := range lines {
+		sb.WriteString(line)
+		sb.WriteByte('\n')
+	}
+	sb.WriteString(m.renderStatusBar())
 	return sb.String()
 }
 

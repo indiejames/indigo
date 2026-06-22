@@ -107,6 +107,10 @@ type Model struct {
 	checkingQuit bool // client-count RPC in flight
 	sel          *Selection
 	dragging     bool
+	undoStack      [][]document.Op // each entry is a group of inverse ops applied in reverse
+	redoStack      [][]document.Op // mirrors undoStack; cleared on any new edit
+	currentGroup   []document.Op  // non-nil while accumulating ops for the current Insert session
+	savedUndoDepth int            // len(undoStack) at the time of the last save
 }
 
 // New creates a Model after the buffer is already open with the server.
@@ -155,6 +159,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case savedMsg:
 		m.buf.SetClean()
 		m.status = ""
+		m.savedUndoDepth = len(m.undoStack)
 		return m, nil
 
 	case clientCountMsg:
@@ -240,18 +245,21 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.sel = nil
 
-	// Enter insert mode — clear any selection first.
+	// Enter insert mode — clear any selection and start an undo group.
 	case "i":
 		m.sel = nil
+		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
 
 	case "a":
 		m.sel = nil
+		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
 		m.cursor.Col = m.buf.LineLen(m.cursor.Line)
 
 	case "o":
 		m.sel = nil
+		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
 		line := m.cursor.Line
 		op := document.Op{
@@ -261,10 +269,12 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			InsertCol:  m.buf.LineLen(line),
 			InsertText: "\n",
 		}
-		return m, m.sendOp(op)
+		m.cursor = document.Pos{Line: line + 1, Col: 0}
+		return applyOp(m, op)
 
 	case "O":
 		m.sel = nil
+		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
 		col := 0
 		if m.cursor.Line > 0 {
@@ -277,10 +287,73 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			InsertCol:  col,
 			InsertText: "\n",
 		}
-		return m, m.sendOp(op)
+		m.cursor = document.Pos{Line: m.cursor.Line, Col: 0}
+		return applyOp(m, op)
 
 	case "s", "ctrl+s":
 		return m, m.doSave()
+
+	case "u":
+		if len(m.undoStack) > 0 {
+			group := m.undoStack[len(m.undoStack)-1]
+			m.undoStack = m.undoStack[:len(m.undoStack)-1]
+			m.sel = nil
+			var cmds []tea.Cmd
+			var redoGroup []document.Op
+			for i := len(group) - 1; i >= 0; i-- {
+				inv := group[i]
+				inv.ClientID = m.rpc.ClientID()
+				reInv := inverseOp(m, inv) // compute re-inverse before applying
+				m.buf.Apply(inv)
+				cmds = append(cmds, m.sendToServer(inv))
+				redoGroup = append(redoGroup, reInv)
+			}
+			m.redoStack = append(m.redoStack, redoGroup)
+			if len(group) > 0 {
+				first := group[0]
+				if first.Type == document.OpDelete {
+					m.cursor = document.Pos{Line: first.FromLine, Col: first.FromCol}
+				} else {
+					m.cursor = document.Pos{Line: first.InsertLine, Col: first.InsertCol}
+				}
+				m.scrollToCursor()
+			}
+			if len(m.undoStack) == m.savedUndoDepth {
+				m.buf.SetClean()
+			}
+			return m, tea.Sequence(cmds...)
+		}
+
+	case "U":
+		if len(m.redoStack) > 0 {
+			group := m.redoStack[len(m.redoStack)-1]
+			m.redoStack = m.redoStack[:len(m.redoStack)-1]
+			m.sel = nil
+			var cmds []tea.Cmd
+			var newUndoGroup []document.Op
+			for i := len(group) - 1; i >= 0; i-- {
+				op := group[i]
+				op.ClientID = m.rpc.ClientID()
+				inv := inverseOp(m, op) // compute inverse before applying
+				m.buf.Apply(op)
+				cmds = append(cmds, m.sendToServer(op))
+				newUndoGroup = append(newUndoGroup, inv)
+			}
+			m.undoStack = append(m.undoStack, newUndoGroup)
+			if len(group) > 0 {
+				first := group[len(group)-1] // first applied during redo
+				if first.Type == document.OpInsert {
+					m.cursor = document.Pos{Line: first.InsertLine, Col: first.InsertCol}
+				} else {
+					m.cursor = document.Pos{Line: first.FromLine, Col: first.FromCol}
+				}
+				m.scrollToCursor()
+			}
+			if len(m.undoStack) == m.savedUndoDepth {
+				m.buf.SetClean()
+			}
+			return m, tea.Sequence(cmds...)
+		}
 
 	// Selection: w = next word, x = current line.
 	case "w":
@@ -295,6 +368,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m2, cmd
 
 	case "c":
+		m.currentGroup = []document.Op{}
 		m2, cmd := m.deleteSelection()
 		m2.mode = ModeInsert
 		return m2, cmd
@@ -341,10 +415,14 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.mode = ModeNormal
-		// Move cursor left one if not at col 0 (Vim/Helix convention)
 		if m.cursor.Col > 0 {
 			m.cursor.Col--
 		}
+		// Commit the undo group accumulated during this Insert session.
+		if len(m.currentGroup) > 0 {
+			m.undoStack = append(m.undoStack, m.currentGroup)
+		}
+		m.currentGroup = nil
 		return m, nil
 
 	case "ctrl+c":
@@ -365,9 +443,8 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				ToCol:    m.cursor.Col,
 			}
 			m.cursor.Col--
-			return m, m.sendOp(op)
+			return applyOp(m, op)
 		} else if m.cursor.Line > 0 {
-			// Merge with previous line
 			prevLen := m.buf.LineLen(m.cursor.Line - 1)
 			op := document.Op{
 				ClientID: m.rpc.ClientID(),
@@ -378,7 +455,7 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				ToCol:    0,
 			}
 			m.cursor = document.Pos{Line: m.cursor.Line - 1, Col: prevLen}
-			return m, m.sendOp(op)
+			return applyOp(m, op)
 		}
 
 	case "delete":
@@ -392,7 +469,7 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				ToLine:   m.cursor.Line,
 				ToCol:    m.cursor.Col + 1,
 			}
-			return m, m.sendOp(op)
+			return applyOp(m, op)
 		} else if m.cursor.Line < m.buf.LineCount()-1 {
 			op := document.Op{
 				ClientID: m.rpc.ClientID(),
@@ -402,7 +479,7 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				ToLine:   m.cursor.Line + 1,
 				ToCol:    0,
 			}
-			return m, m.sendOp(op)
+			return applyOp(m, op)
 		}
 
 	case "enter":
@@ -414,7 +491,7 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			InsertText: "\n",
 		}
 		m.cursor = document.Pos{Line: m.cursor.Line + 1, Col: 0}
-		return m, m.sendOp(op)
+		return applyOp(m, op)
 
 	case "tab":
 		op := document.Op{
@@ -425,7 +502,7 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			InsertText: "\t",
 		}
 		m.cursor.Col++
-		return m, m.sendOp(op)
+		return applyOp(m, op)
 
 	case "left":
 		m.moveCursor(0, -1)
@@ -441,7 +518,6 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor.Col = m.buf.LineLen(m.cursor.Line)
 
 	default:
-		// Printable rune(s)
 		if len(msg.Runes) > 0 {
 			text := string(msg.Runes)
 			op := document.Op{
@@ -452,7 +528,7 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				InsertText: text,
 			}
 			m.cursor.Col += len(msg.Runes)
-			return m, m.sendOp(op)
+			return applyOp(m, op)
 		}
 	}
 	return m, nil
@@ -461,6 +537,12 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // sendOp applies the op locally and sends it to the server.
 func (m Model) sendOp(op document.Op) tea.Cmd {
 	m.buf.Apply(op)
+	return m.sendToServer(op)
+}
+
+// sendToServer sends op to the server without applying it locally.
+// Used by undo when local apply is handled separately.
+func (m Model) sendToServer(op document.Op) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -471,6 +553,87 @@ func (m Model) sendOp(op document.Op) tea.Cmd {
 		m.version = ver
 		return nil
 	}
+}
+
+// applyOp records the inverse of op for undo, then applies op locally and
+// queues an async send to the server.
+//
+// If m.currentGroup is non-nil (i.e. we are inside an Insert session), the
+// inverse is appended to the group instead of pushed immediately; the group is
+// committed to undoStack when the user presses ESC.
+func applyOp(m Model, op document.Op) (Model, tea.Cmd) {
+	inv := inverseOp(m, op)
+	if m.currentGroup != nil {
+		m.currentGroup = append(m.currentGroup, inv)
+	} else {
+		m.undoStack = append(m.undoStack, []document.Op{inv})
+	}
+	m.redoStack = nil // any new edit invalidates the redo history
+	return m, m.sendOp(op)
+}
+
+// inverseOp returns the op that reverses op.
+// For OpInsert the inverse is an OpDelete of the same span.
+// For OpDelete the inverse is an OpInsert of the text that was there.
+// The buffer must NOT yet have op applied when this is called.
+func inverseOp(m Model, op document.Op) document.Op {
+	switch op.Type {
+	case document.OpInsert:
+		toLine, toCol := insertEndPos(op.InsertLine, op.InsertCol, op.InsertText)
+		return document.Op{
+			Type:     document.OpDelete,
+			FromLine: op.InsertLine,
+			FromCol:  op.InsertCol,
+			ToLine:   toLine,
+			ToCol:    toCol,
+		}
+	case document.OpDelete:
+		return document.Op{
+			Type:       document.OpInsert,
+			InsertLine: op.FromLine,
+			InsertCol:  op.FromCol,
+			InsertText: bufText(m, op.FromLine, op.FromCol, op.ToLine, op.ToCol),
+		}
+	}
+	return document.Op{Type: document.OpNoop}
+}
+
+// insertEndPos returns the buffer position immediately after inserting text
+// starting at (fromLine, fromCol).
+func insertEndPos(fromLine, fromCol int, text string) (toLine, toCol int) {
+	toLine, toCol = fromLine, fromCol
+	for _, r := range text {
+		if r == '\n' {
+			toLine++
+			toCol = 0
+		} else {
+			toCol++
+		}
+	}
+	return
+}
+
+// bufText extracts the text in [fromLine:fromCol, toLine:toCol) from the buffer.
+func bufText(m Model, fromLine, fromCol, toLine, toCol int) string {
+	if fromLine == toLine {
+		runes := []rune(m.buf.Line(fromLine))
+		end := min(toCol, len(runes))
+		start := min(fromCol, end)
+		return string(runes[start:end])
+	}
+	var sb strings.Builder
+	first := []rune(m.buf.Line(fromLine))
+	if fromCol <= len(first) {
+		sb.WriteString(string(first[fromCol:]))
+	}
+	sb.WriteByte('\n')
+	for l := fromLine + 1; l < toLine; l++ {
+		sb.WriteString(m.buf.Line(l))
+		sb.WriteByte('\n')
+	}
+	last := []rune(m.buf.Line(toLine))
+	sb.WriteString(string(last[:min(toCol, len(last))]))
+	return sb.String()
 }
 
 func (m Model) fetchUpdates() tea.Cmd {
@@ -642,7 +805,7 @@ func (m Model) deleteSelection() (Model, tea.Cmd) {
 	}
 	m.cursor = start
 	m.sel = nil
-	return m, m.sendOp(op)
+	return applyOp(m, op)
 }
 
 // ---- word finding ----

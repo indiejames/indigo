@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -19,6 +20,7 @@ type Mode int
 const (
 	ModeNormal Mode = iota
 	ModeInsert
+	ModeCommand
 )
 
 // tickMsg is sent periodically to poll for remote updates.
@@ -111,6 +113,7 @@ type Model struct {
 	redoStack      [][]document.Op // mirrors undoStack; cleared on any new edit
 	currentGroup   []document.Op  // non-nil while accumulating ops for the current Insert session
 	savedUndoDepth int            // len(undoStack) at the time of the last save
+	cmdBuf         string         // text typed after ':' while in ModeCommand
 }
 
 // New creates a Model after the buffer is already open with the server.
@@ -204,10 +207,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	// Clear transient error on any key.
 	m.status = ""
-	if m.mode == ModeNormal {
+	switch m.mode {
+	case ModeNormal:
 		return m.handleNormal(msg)
+	case ModeInsert:
+		return m.handleInsert(msg)
+	case ModeCommand:
+		return m.handleCommand(msg)
 	}
-	return m.handleInsert(msg)
+	return m, nil
 }
 
 func (m Model) handleWarnQuit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -232,7 +240,7 @@ func (m Model) handleWarnQuit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		if m.buf.Dirty() && !m.checkingQuit {
 			m.checkingQuit = true
 			return m, m.fetchClientCount()
@@ -241,6 +249,10 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Sequence(m.doDisconnect(), tea.Quit)
 		}
+
+	case ":":
+		m.mode = ModeCommand
+		m.cmdBuf = ""
 
 	case "esc":
 		m.sel = nil
@@ -290,7 +302,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = document.Pos{Line: m.cursor.Line, Col: 0}
 		return applyOp(m, op)
 
-	case "s", "ctrl+s":
+	case "ctrl+s":
 		return m, m.doSave()
 
 	case "u":
@@ -534,6 +546,71 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = ModeNormal
+		m.cmdBuf = ""
+	case "enter":
+		return m.executeCommand()
+	case "backspace":
+		runes := []rune(m.cmdBuf)
+		if len(runes) > 0 {
+			m.cmdBuf = string(runes[:len(runes)-1])
+		} else {
+			m.mode = ModeNormal
+		}
+	default:
+		if len(msg.Runes) > 0 {
+			m.cmdBuf += string(msg.Runes)
+		}
+	}
+	return m, nil
+}
+
+func (m Model) executeCommand() (tea.Model, tea.Cmd) {
+	cmd := strings.TrimSpace(m.cmdBuf)
+	m.mode = ModeNormal
+	m.cmdBuf = ""
+
+	// Bare number → go to line.
+	if n, err := strconv.Atoi(cmd); err == nil {
+		lc := m.displayLineCount()
+		if n < 1 || n > lc {
+			m.status = fmt.Sprintf("E: line %d out of range (1-%d)", n, lc)
+			return m, nil
+		}
+		m.cursor = document.Pos{Line: n - 1, Col: 0}
+		m.scrollToCursor()
+		return m, nil
+	}
+
+	switch cmd {
+	case "w", "write":
+		return m, m.doSave()
+	case "q", "quit":
+		if m.buf.Dirty() {
+			m.status = "E: unsaved changes (use :q! to discard)"
+			return m, nil
+		}
+		m.quitting = true
+		return m, tea.Sequence(m.doDisconnect(), tea.Quit)
+	case "q!":
+		m.quitting = true
+		return m, tea.Sequence(m.doDisconnect(), tea.Quit)
+	case "wq", "wqa", "x":
+		return m, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			m.rpc.Save(ctx, m.bufID)
+			return saveAndQuitMsg{}
+		}
+	default:
+		m.status = fmt.Sprintf("E: unknown command: %s", cmd)
+	}
+	return m, nil
+}
+
 // sendOp applies the op locally and sends it to the server.
 func (m Model) sendOp(op document.Op) tea.Cmd {
 	m.buf.Apply(op)
@@ -769,7 +846,15 @@ func (m *Model) selectLine() {
 // If there is no selection the model is returned unchanged.
 func (m Model) deleteSelection() (Model, tea.Cmd) {
 	if m.sel == nil {
-		return m, nil
+		lineLen := m.buf.LineLen(m.cursor.Line)
+		if lineLen == 0 {
+			return m, nil
+		}
+		col := min(m.cursor.Col, lineLen-1)
+		m.sel = &Selection{
+			Anchor: document.Pos{Line: m.cursor.Line, Col: col},
+			Head:   document.Pos{Line: m.cursor.Line, Col: col},
+		}
 	}
 	start, end := m.sel.ordered()
 	op := document.Op{
@@ -1058,6 +1143,17 @@ func (m Model) View() string {
 func (m Model) renderStatusBar() string {
 	if m.width == 0 {
 		return ""
+	}
+
+	if m.mode == ModeCommand {
+		prompt := ":" + m.cmdBuf
+		promptRunes := []rune(prompt)
+		maxPromptW := m.width - 1
+		if len(promptRunes) > maxPromptW {
+			promptRunes = promptRunes[len(promptRunes)-maxPromptW:]
+		}
+		padW := max(0, m.width-len(promptRunes)-1)
+		return barStyle.Render(string(promptRunes)) + cursorStyle.Render(" ") + barStyle.Width(padW).Render("")
 	}
 
 	modeLabel := "NORMAL"

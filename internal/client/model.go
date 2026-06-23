@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -10,9 +11,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/indiejames/twist/internal/config"
 	"github.com/indiejames/twist/internal/document"
+	"github.com/indiejames/twist/internal/highlight"
 )
 
 type Mode int
@@ -43,6 +46,9 @@ type clientCountMsg struct{ count uint32 }
 
 // saveAndQuitMsg triggers a quit after a save has completed.
 type saveAndQuitMsg struct{}
+
+// highlightMsg carries freshly computed syntax-highlight spans.
+type highlightMsg struct{ spans highlight.LineSpans }
 
 var (
 	barStyle = lipgloss.NewStyle().
@@ -83,6 +89,8 @@ var (
 	gutterCurStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#AAAAAA"))
 )
+
+const tabWidth = 4
 
 // Selection tracks the selected range in the buffer.
 // [Anchor, Head] is inclusive on both ends for display purposes.
@@ -208,6 +216,8 @@ type Model struct {
 	savedUndoDepth int            // len(undoStack) at the time of the last save
 	cmdBuf         string         // text typed after ':' while in ModeCommand
 	prefixSeq      []rune         // keys typed so far for a multi-key Normal-mode command
+	hlr            *highlight.Highlighter
+	hlSpans        highlight.LineSpans
 }
 
 // New creates a Model after the buffer is already open with the server.
@@ -219,6 +229,7 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath string
 		bufID:    bufID,
 		version:  version,
 		filePath: filePath,
+		hlr:      highlight.New(filePath),
 	}
 }
 
@@ -227,7 +238,7 @@ func tick() tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tick()
+	return tea.Batch(tick(), m.reparseHighlight())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -247,7 +258,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.version = msg.version
 		m.clampCursor()
-		return m, nil
+		return m, m.reparseHighlight()
 
 	case errorMsg:
 		m.status = "ERR: " + msg.err.Error()
@@ -273,6 +284,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.buf.SetClean()
 		m.quitting = true
 		return m, tea.Sequence(m.doDisconnect(), tea.Quit)
+
+	case highlightMsg:
+		m.hlSpans = msg.spans
+		return m, nil
 
 	case tea.MouseMsg:
 		switch {
@@ -775,7 +790,7 @@ func applyOp(m Model, op document.Op) (Model, tea.Cmd) {
 		m.undoStack = append(m.undoStack, []document.Op{inv})
 	}
 	m.redoStack = nil // any new edit invalidates the redo history
-	return m, m.sendOp(op)
+	return m, tea.Batch(m.sendOp(op), m.reparseHighlight())
 }
 
 // inverseOp returns the op that reverses op.
@@ -875,6 +890,17 @@ func (m Model) fetchClientCount() tea.Cmd {
 			return clientCountMsg{count: 1}
 		}
 		return clientCountMsg{count: count}
+	}
+}
+
+func (m Model) reparseHighlight() tea.Cmd {
+	if m.hlr == nil {
+		return nil
+	}
+	content := []byte(m.buf.Content())
+	hlr := m.hlr
+	return func() tea.Msg {
+		return highlightMsg{spans: hlr.Highlight(content)}
 	}
 }
 
@@ -1101,13 +1127,47 @@ func (m Model) selectionCols(lineNum, lineLen int) (selA, selB int) {
 	return selA, selB
 }
 
+// expandTabsRemap replaces tab runes with spaces (tabWidth-column tab stops).
+// Returns the expanded slice and colMap where colMap[i] = visual column of original rune i.
+// colMap has len(runes)+1 entries; colMap[len(runes)] is the total visual width.
+func expandTabsRemap(runes []rune) (expanded []rune, colMap []int) {
+	colMap = make([]int, len(runes)+1)
+	vcol := 0
+	for i, r := range runes {
+		colMap[i] = vcol
+		if r == '\t' {
+			spaces := tabWidth - (vcol % tabWidth)
+			for k := 0; k < spaces; k++ {
+				expanded = append(expanded, ' ')
+			}
+			vcol += spaces
+		} else {
+			expanded = append(expanded, r)
+			vcol++
+		}
+	}
+	colMap[len(runes)] = vcol
+	return
+}
+
 // renderLineRunes writes runes with selection and cursor highlighting applied.
 // selA/selB are inclusive selected column bounds (-1,-1 for no selection).
 // curCol is the cursor column (-1 if cursor is not on this line).
-func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int) {
+func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, spans []highlight.Span) {
 	n := len(runes)
 	hasCursor := curCol >= 0
 	hasSel := selA >= 0
+
+	// spanIdxAt returns the index of the first (highest-priority) span covering col, or -1.
+	spanIdxAt := func(col int) int {
+		for i, s := range spans {
+			if col >= s.StartCol && col < s.EndCol {
+				return i
+			}
+		}
+		return -1
+	}
+
 	i := 0
 	for i < n {
 		isCursor := hasCursor && i == curCol
@@ -1117,7 +1177,6 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int) 
 			sb.WriteString(cursorStyle.Render(string(runes[i : i+1])))
 			i++
 		case inSel:
-			// Batch consecutive selected chars (stopping before cursor).
 			j := i + 1
 			for j < n && !(hasCursor && j == curCol) && j >= selA && j <= selB {
 				j++
@@ -1125,16 +1184,32 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int) 
 			sb.WriteString(selectionStyle.Render(string(runes[i:j])))
 			i = j
 		default:
-			// Batch consecutive plain chars.
+			// Batch consecutive plain chars with the same highlight span.
+			si := spanIdxAt(i)
 			j := i + 1
-			for j < n && !(hasCursor && j == curCol) && !(hasSel && j >= selA && j <= selB) {
+			for j < n {
+				if hasCursor && j == curCol {
+					break
+				}
+				if hasSel && j >= selA && j <= selB {
+					break
+				}
+				if spanIdxAt(j) != si {
+					break
+				}
 				j++
 			}
-			sb.WriteString(string(runes[i:j]))
+			text := string(runes[i:j])
+			if si >= 0 {
+				sb.WriteString(spans[si].ANSI)
+				sb.WriteString(text)
+				sb.WriteString(highlight.ANSIReset)
+			} else {
+				sb.WriteString(text)
+			}
 			i = j
 		}
 	}
-	// Cursor past end of line.
 	if hasCursor && curCol >= n {
 		sb.WriteString(cursorStyle.Render(" "))
 	}
@@ -1201,6 +1276,8 @@ func (m Model) gutterWidth() int {
 // ---- View helpers ----
 
 // renderLine renders screen row i (0-based, relative to topLine) without a trailing newline.
+// Tabs are expanded to spaces so that cellbuf correctly measures visual widths.
+// Each line is padded to m.width so prior content is always fully overwritten.
 func (m Model) renderLine(i int) string {
 	lineNum := m.topLine + i
 	bufLineCount := m.buf.LineCount()
@@ -1208,12 +1285,23 @@ func (m Model) renderLine(i int) string {
 	gutterW := m.gutterWidth()
 	var sb strings.Builder
 
+	padToWidth := func(s string) string {
+		if m.width <= 0 {
+			return s
+		}
+		w := lipgloss.Width(s)
+		if w < m.width {
+			return s + strings.Repeat(" ", m.width-w)
+		}
+		return s
+	}
+
 	if lineNum >= bufLineCount {
 		if gutterW > 0 {
 			sb.WriteString(gutterStyle.Render(strings.Repeat(" ", gutterW)))
 		}
 		sb.WriteString("~")
-		return sb.String()
+		return padToWidth(sb.String())
 	}
 
 	if lineNum >= dispLineCount {
@@ -1225,7 +1313,7 @@ func (m Model) renderLine(i int) string {
 		} else {
 			sb.WriteString("~")
 		}
-		return sb.String()
+		return padToWidth(sb.String())
 	}
 
 	if gutterW > 0 {
@@ -1239,13 +1327,52 @@ func (m Model) renderLine(i int) string {
 
 	line := m.buf.Line(lineNum)
 	runes := []rune(line)
+	expandedRunes, colMap := expandTabsRemap(runes)
+
+	// Remap selection columns from rune indices to visual columns.
 	selA, selB := m.selectionCols(lineNum, len(runes))
+	if selA >= 0 {
+		newSelA := colMap[selA]
+		var newSelB int
+		if selB+1 <= len(runes) {
+			newSelB = colMap[selB+1] - 1
+		} else {
+			newSelB = colMap[len(runes)] - 1
+		}
+		selA = newSelA
+		selB = max(newSelA, newSelB)
+	}
+
+	// Remap cursor column from rune index to visual column.
 	curCol := -1
 	if lineNum == m.cursor.Line {
-		curCol = min(m.cursor.Col, len(runes))
+		c := min(m.cursor.Col, len(runes))
+		curCol = colMap[c]
 	}
-	renderLineRunes(&sb, runes, selA, selB, curCol)
-	return sb.String()
+
+	// Remap highlight spans from rune indices to visual columns.
+	var remappedSpans []highlight.Span
+	if spans := m.hlSpans[lineNum]; len(spans) > 0 {
+		remappedSpans = make([]highlight.Span, len(spans))
+		for idx, s := range spans {
+			newStart := 0
+			if s.StartCol < len(colMap) {
+				newStart = colMap[s.StartCol]
+			}
+			newEnd := math.MaxInt
+			if s.EndCol != math.MaxInt {
+				if s.EndCol < len(colMap) {
+					newEnd = colMap[s.EndCol]
+				} else {
+					newEnd = colMap[len(runes)]
+				}
+			}
+			remappedSpans[idx] = highlight.Span{StartCol: newStart, EndCol: newEnd, ANSI: s.ANSI}
+		}
+	}
+
+	renderLineRunes(&sb, expandedRunes, selA, selB, curCol, remappedSpans)
+	return padToWidth(sb.String())
 }
 
 // renderPopupBox builds the styled lines of a popup menu with rounded borders.
@@ -1308,7 +1435,7 @@ func renderPopupBox(title string, items []command, maxW int) []string {
 
 // overlayRight truncates mainLine to popCol visual columns and appends popupLine.
 func overlayRight(mainLine, popupLine string, popCol int) string {
-	truncated := lipgloss.NewStyle().MaxWidth(popCol).Render(mainLine)
+	truncated := ansi.Truncate(mainLine, popCol, "")
 	tw := lipgloss.Width(truncated)
 	if tw < popCol {
 		truncated += strings.Repeat(" ", popCol-tw)

@@ -47,8 +47,21 @@ type clientCountMsg struct{ count uint32 }
 // saveAndQuitMsg triggers a quit after a save has completed.
 type saveAndQuitMsg struct{}
 
-// highlightMsg carries freshly computed syntax-highlight spans.
-type highlightMsg struct{ spans highlight.LineSpans }
+// highlightMsg carries freshly computed syntax-highlight spans and parse time.
+type highlightMsg struct {
+	spans    highlight.LineSpans
+	duration time.Duration
+}
+
+// metricsData holds timing samples for the metrics overlay.
+// Stored behind a pointer so View()'s value receiver can write back.
+type metricsData struct {
+	show               bool
+	lastKeyAt          time.Time
+	renderDuration     time.Duration
+	highlightDuration  time.Duration
+	keyToFrameDuration time.Duration
+}
 
 var (
 	barStyle = lipgloss.NewStyle().
@@ -218,6 +231,7 @@ type Model struct {
 	prefixSeq      []rune         // keys typed so far for a multi-key Normal-mode command
 	hlr            *highlight.Highlighter
 	hlSpans        highlight.LineSpans
+	metrics        *metricsData
 }
 
 // New creates a Model after the buffer is already open with the server.
@@ -230,6 +244,7 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath string
 		version:  version,
 		filePath: filePath,
 		hlr:      highlight.New(filePath),
+		metrics:  &metricsData{},
 	}
 }
 
@@ -287,6 +302,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case highlightMsg:
 		m.hlSpans = msg.spans
+		if m.metrics != nil {
+			m.metrics.highlightDuration = msg.duration
+		}
 		return m, nil
 
 	case tea.MouseMsg:
@@ -305,6 +323,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.metrics != nil {
+			m.metrics.lastKeyAt = time.Now()
+		}
 		return m.handleKey(msg)
 	}
 	return m, nil
@@ -749,6 +770,10 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 			m.rpc.Save(ctx, m.bufID)
 			return saveAndQuitMsg{}
 		}
+	case "metrics":
+		if m.metrics != nil {
+			m.metrics.show = !m.metrics.show
+		}
 	default:
 		m.status = fmt.Sprintf("E: unknown command: %s", cmd)
 	}
@@ -900,7 +925,9 @@ func (m Model) reparseHighlight() tea.Cmd {
 	content := []byte(m.buf.Content())
 	hlr := m.hlr
 	return func() tea.Msg {
-		return highlightMsg{spans: hlr.Highlight(content)}
+		start := time.Now()
+		spans := hlr.Highlight(content)
+		return highlightMsg{spans: spans, duration: time.Since(start)}
 	}
 }
 
@@ -1433,6 +1460,47 @@ func renderPopupBox(title string, items []command, maxW int) []string {
 	return lines
 }
 
+// metricsInnerW is the fixed visible width between the box borders.
+// Layout per row: 1 space + 9 label + 1 space + 8 value (right-aligned) + 1 space = 20.
+const metricsInnerW = 20
+
+// renderMetricsBox builds the styled lines of the metrics overlay panel.
+func renderMetricsBox(m *metricsData) []string {
+	fmtDur := func(d time.Duration) string {
+		µs := d.Microseconds()
+		if µs < 1000 {
+			return fmt.Sprintf("%dµs", µs)
+		}
+		ms := float64(µs) / 1000
+		if ms < 1000 {
+			return fmt.Sprintf("%.2fms", ms)
+		}
+		return fmt.Sprintf("%.1fs", ms/1000)
+	}
+	rows := []struct{ label, val string }{
+		{"render   ", fmtDur(m.renderDuration)},
+		{"parse    ", fmtDur(m.highlightDuration)},
+		{"key→frame", fmtDur(m.keyToFrameDuration)},
+	}
+	title := "Metrics"
+	top := popupBorderStyle.Render("╭") +
+		popupTextStyle.Render(title) +
+		popupBorderStyle.Render(strings.Repeat("─", metricsInnerW-len([]rune(title)))+"╮")
+	lines := []string{top}
+	for _, r := range rows {
+		// Right-align value in an 8-char field so the panel width never changes.
+		valField := fmt.Sprintf("%8s", r.val)
+		line := popupBorderStyle.Render("│") +
+			popupTextStyle.Render(" "+r.label+" ") +
+			popupKeyStyle.Render(valField) +
+			popupTextStyle.Render(" ") +
+			popupBorderStyle.Render("│")
+		lines = append(lines, line)
+	}
+	lines = append(lines, popupBorderStyle.Render("╰"+strings.Repeat("─", metricsInnerW)+"╯"))
+	return lines
+}
+
 // overlayRight truncates mainLine to popCol visual columns and appends popupLine.
 func overlayRight(mainLine, popupLine string, popCol int) string {
 	truncated := ansi.Truncate(mainLine, popCol, "")
@@ -1451,6 +1519,20 @@ func (m Model) View() string {
 	}
 	if m.width == 0 {
 		return "loading…"
+	}
+
+	// Record timing via the shared pointer so the value receiver can write back.
+	if m.metrics != nil {
+		viewStart := time.Now()
+		defer func() {
+			m.metrics.renderDuration = time.Since(viewStart)
+			// Only capture key→frame for the first View() after a key press,
+			// then zero lastKeyAt so tick-driven redraws don't keep updating it.
+			if !m.metrics.lastKeyAt.IsZero() {
+				m.metrics.keyToFrameDuration = time.Since(m.metrics.lastKeyAt)
+				m.metrics.lastKeyAt = time.Time{}
+			}
+		}()
 	}
 
 	vis := m.visibleLines()
@@ -1473,6 +1555,20 @@ func (m Model) View() string {
 					if row < vis {
 						lines[row] = overlayRight(lines[row], popLine, popCol)
 					}
+				}
+			}
+		}
+	}
+
+	// Overlay metrics panel in the top-right corner.
+	if m.metrics != nil && m.metrics.show {
+		box := renderMetricsBox(m.metrics)
+		boxW := lipgloss.Width(box[0])
+		boxCol := m.width - boxW
+		if boxCol >= 0 {
+			for ri, boxLine := range box {
+				if ri < vis {
+					lines[ri] = overlayRight(lines[ri], boxLine, boxCol)
 				}
 			}
 		}

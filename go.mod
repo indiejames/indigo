@@ -3,14 +3,64 @@ module github.com/indiejames/twist
 go 1.26.1
 
 require (
-	capnproto.org/go/capnp/v3 v3.1.0-alpha.2 // indirect
-	github.com/BurntSushi/toml v1.6.0 // indirect
+	capnproto.org/go/capnp/v3 v3.1.0-alpha.2
+	github.com/BurntSushi/toml v1.6.0
+	github.com/alexaandru/go-sitter-forest/asm v1.9.1
+	github.com/alexaandru/go-sitter-forest/bash v1.9.6
+	github.com/alexaandru/go-sitter-forest/c v1.9.4
+	github.com/alexaandru/go-sitter-forest/c_sharp v1.9.6
+	github.com/alexaandru/go-sitter-forest/clojure v1.9.1
+	github.com/alexaandru/go-sitter-forest/cpp v1.9.5
+	github.com/alexaandru/go-sitter-forest/css v1.9.4
+	github.com/alexaandru/go-sitter-forest/cue v1.9.1
+	github.com/alexaandru/go-sitter-forest/dart v1.9.4
+	github.com/alexaandru/go-sitter-forest/dockerfile v1.9.1
+	github.com/alexaandru/go-sitter-forest/elixir v1.9.5
+	github.com/alexaandru/go-sitter-forest/elm v1.9.1
+	github.com/alexaandru/go-sitter-forest/erlang v1.9.7
+	github.com/alexaandru/go-sitter-forest/gdscript v1.9.6
+	github.com/alexaandru/go-sitter-forest/gleam v1.9.9
+	github.com/alexaandru/go-sitter-forest/go v1.9.4
+	github.com/alexaandru/go-sitter-forest/graphql v1.9.0
+	github.com/alexaandru/go-sitter-forest/groovy v1.9.4
+	github.com/alexaandru/go-sitter-forest/haskell v1.9.2
+	github.com/alexaandru/go-sitter-forest/hcl v1.9.3
+	github.com/alexaandru/go-sitter-forest/html v1.9.1
+	github.com/alexaandru/go-sitter-forest/java v1.9.5
+	github.com/alexaandru/go-sitter-forest/javascript v1.9.2
+	github.com/alexaandru/go-sitter-forest/json v1.9.1
+	github.com/alexaandru/go-sitter-forest/julia v1.9.10
+	github.com/alexaandru/go-sitter-forest/kotlin v1.9.4
+	github.com/alexaandru/go-sitter-forest/lua v1.9.3
+	github.com/alexaandru/go-sitter-forest/markdown v1.9.5
+	github.com/alexaandru/go-sitter-forest/nim v1.9.1
+	github.com/alexaandru/go-sitter-forest/nix v1.9.4
+	github.com/alexaandru/go-sitter-forest/ocaml v1.9.6
+	github.com/alexaandru/go-sitter-forest/php v1.9.5
+	github.com/alexaandru/go-sitter-forest/proto v1.9.1
+	github.com/alexaandru/go-sitter-forest/python v1.9.10
+	github.com/alexaandru/go-sitter-forest/r v1.9.6
+	github.com/alexaandru/go-sitter-forest/ruby v1.9.3
+	github.com/alexaandru/go-sitter-forest/rust v1.9.13
+	github.com/alexaandru/go-sitter-forest/scala v1.9.8
+	github.com/alexaandru/go-sitter-forest/sql v1.9.13
+	github.com/alexaandru/go-sitter-forest/svelte v1.9.2
+	github.com/alexaandru/go-sitter-forest/swift v1.9.5
+	github.com/alexaandru/go-sitter-forest/toml v1.9.2
+	github.com/alexaandru/go-sitter-forest/tsx v1.9.2
+	github.com/alexaandru/go-sitter-forest/typescript v1.9.4
+	github.com/alexaandru/go-sitter-forest/yaml v1.9.6
+	github.com/alexaandru/go-sitter-forest/zig v1.9.4
+	github.com/alexaandru/go-tree-sitter-bare v1.11.0
+	github.com/charmbracelet/bubbletea v1.3.10
+	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/charmbracelet/x/ansi v0.11.6
+)
+
+require (
+	github.com/alexaandru/go-sitter-forest/php_only v1.9.6 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
-	github.com/charmbracelet/bubbles v1.0.0 // indirect
-	github.com/charmbracelet/bubbletea v1.3.10 // indirect
 	github.com/charmbracelet/colorprofile v0.4.1 // indirect
-	github.com/charmbracelet/lipgloss v1.1.0 // indirect
-	github.com/charmbracelet/x/ansi v0.11.6 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.9.0 // indirect
@@ -26,9 +76,9 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	golang.org/x/sync v0.7.0 // indirect
+	golang.org/x/exp v0.0.0-20250210185358-939b2ce775ac // indirect
+	golang.org/x/sync v0.11.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.3.8 // indirect
 )

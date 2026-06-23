@@ -25,6 +25,8 @@ go.work.sum
 .env
 .env.local
 
+examples
+
 # Dependency directories (Optional)
 # Only uncomment if you explicitly want to vendor dependencies
 # vendor/

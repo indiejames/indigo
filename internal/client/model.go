@@ -65,8 +65,8 @@ type metricsData struct {
 
 var (
 	barStyle = lipgloss.NewStyle().
-		Background(lipgloss.Color("#087AC8")).
-		Foreground(lipgloss.Color("#FFFFFF"))
+			Background(lipgloss.Color("#087AC8")).
+			Foreground(lipgloss.Color("#FFFFFF"))
 
 	normalModeStyle = lipgloss.NewStyle().
 			Background(lipgloss.Color("#087AC8")).
@@ -206,29 +206,29 @@ func executeSelectInsideWord(m Model) (tea.Model, tea.Cmd) {
 
 // Model is the Bubble Tea model for a single buffer view.
 type Model struct {
-	rpc          *RPC
-	buf          *document.Buffer
-	cfg          *config.Config
-	bufID        uint32
-	version      uint64
-	mode         Mode
-	cursor       document.Pos
-	topLine      int // first visible line
-	width        int
-	height       int
-	filePath     string
-	status       string // transient error message shown in modeline
-	quitting     bool
-	warnQuit     bool // showing unsaved-changes warning
-	checkingQuit bool // client-count RPC in flight
-	sel          *Selection
-	dragging     bool
+	rpc            *RPC
+	buf            *document.Buffer
+	cfg            *config.Config
+	bufID          uint32
+	version        uint64
+	mode           Mode
+	cursor         document.Pos
+	topLine        int // first visible line
+	width          int
+	height         int
+	filePath       string
+	status         string // transient error message shown in modeline
+	quitting       bool
+	warnQuit       bool // showing unsaved-changes warning
+	checkingQuit   bool // client-count RPC in flight
+	sel            *Selection
+	dragging       bool
 	undoStack      [][]document.Op // each entry is a group of inverse ops applied in reverse
 	redoStack      [][]document.Op // mirrors undoStack; cleared on any new edit
-	currentGroup   []document.Op  // non-nil while accumulating ops for the current Insert session
-	savedUndoDepth int            // len(undoStack) at the time of the last save
-	cmdBuf         string         // text typed after ':' while in ModeCommand
-	prefixSeq      []rune         // keys typed so far for a multi-key Normal-mode command
+	currentGroup   []document.Op   // non-nil while accumulating ops for the current Insert session
+	savedUndoDepth int             // len(undoStack) at the time of the last save
+	cmdBuf         string          // text typed after ':' while in ModeCommand
+	prefixSeq      []rune          // keys typed so far for a multi-key Normal-mode command
 	hlr            *highlight.Highlighter
 	hlSpans        highlight.LineSpans
 	metrics        *metricsData
@@ -416,7 +416,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
 
-	case "a":
+	case "A":
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert

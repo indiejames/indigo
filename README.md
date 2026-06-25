@@ -1,4 +1,4 @@
-# Indigo
+# indigo
 
 A terminal text editor written in Go using a client/server model via Cap'n Proto RPC.
 

@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/indiejames/twist/internal/document"
+	"github.com/indiejames/indigo/internal/document"
 )
 
 // ordered returns (start, end) in document order (start <= end).

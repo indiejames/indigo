@@ -13,8 +13,8 @@ import (
 	capnp "capnproto.org/go/capnp/v3"
 	"capnproto.org/go/capnp/v3/rpc"
 
-	"github.com/indiejames/twist/internal/document"
-	proto "github.com/indiejames/twist/internal/proto"
+	"github.com/indiejames/indigo/internal/document"
+	proto "github.com/indiejames/indigo/internal/proto"
 )
 
 // SocketPath returns the Unix socket path for a given working directory.
@@ -24,7 +24,7 @@ func SocketPath(dir string) string {
 		abs = dir
 	}
 	h := sha256.Sum256([]byte(abs))
-	return filepath.Join(os.TempDir(), fmt.Sprintf("twist-%x.sock", h[:8]))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("indigo-%x.sock", h[:8]))
 }
 
 // IsRunning returns true if a server socket exists and is accepting connections.
@@ -45,11 +45,11 @@ type bufferEntry struct {
 
 // editorService implements proto.EditorService_Server.
 type editorService struct {
-	mu       sync.Mutex
-	buffers  map[uint32]*bufferEntry
-	nextBuf  uint32
-	clients  map[uint64]struct{}
-	nextClt  uint64
+	mu      sync.Mutex
+	buffers map[uint32]*bufferEntry
+	nextBuf uint32
+	clients map[uint64]struct{}
+	nextClt uint64
 
 	// shutdown is called when the last client disconnects cleanly.
 	shutdown func()

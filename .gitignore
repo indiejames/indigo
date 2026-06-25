@@ -4,7 +4,7 @@
 *.dll
 *.so
 *.dylib
-twist
+io
 
 # Common binary output directories
 bin/

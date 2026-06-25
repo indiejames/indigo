@@ -7,8 +7,8 @@ import (
 
 	"capnproto.org/go/capnp/v3/rpc"
 
-	"github.com/indiejames/twist/internal/document"
-	proto "github.com/indiejames/twist/internal/proto"
+	"github.com/indiejames/indigo/internal/document"
+	proto "github.com/indiejames/indigo/internal/proto"
 )
 
 // RPC wraps a Cap'n Proto connection to the editor server.

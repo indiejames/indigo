@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/indiejames/twist/internal/highlight"
+	"github.com/indiejames/indigo/internal/highlight"
 )
 
 const tabWidth = 4

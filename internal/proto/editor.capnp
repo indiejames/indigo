@@ -1,7 +1,7 @@
 using Go = import "/go.capnp";
 @0xd75b3b54eb3ed6a2;
 $Go.package("proto");
-$Go.import("github.com/indiejames/twist/internal/proto");
+$Go.import("github.com/indiejames/indigo/internal/proto");
 
 # EditorService is the capability exposed by the server over a Unix socket.
 interface EditorService {

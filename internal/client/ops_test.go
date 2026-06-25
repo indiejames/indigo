@@ -3,7 +3,7 @@ package client
 import (
 	"testing"
 
-	"github.com/indiejames/twist/internal/document"
+	"github.com/indiejames/indigo/internal/document"
 )
 
 func TestInsertEndPos(t *testing.T) {

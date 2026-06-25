@@ -1,5 +1,5 @@
-BINARY  := twist
-CMD     := ./cmd/twist
+BINARY  := io
+CMD     := ./cmd/indigo
 OUT     := $(BINARY)
 
 # Default: all languages included.

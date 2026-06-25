@@ -1,4 +1,4 @@
-module github.com/indiejames/twist
+module github.com/indiejames/indigo
 
 go 1.26.1
 

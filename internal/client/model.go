@@ -6,9 +6,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/indiejames/twist/internal/config"
-	"github.com/indiejames/twist/internal/document"
-	"github.com/indiejames/twist/internal/highlight"
+	"github.com/indiejames/indigo/internal/config"
+	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/highlight"
 )
 
 type Mode int

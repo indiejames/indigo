@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/indiejames/twist/internal/document"
+	"github.com/indiejames/indigo/internal/document"
 )
 
 // sendOp applies the op locally and sends it to the server.

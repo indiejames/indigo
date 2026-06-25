@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/indiejames/twist/internal/document"
+	"github.com/indiejames/indigo/internal/document"
 )
 
 // fakeKey creates a KeyMsg that matches the given string representation,

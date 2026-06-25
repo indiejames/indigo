@@ -1,6 +1,6 @@
 package client
 
-import "github.com/indiejames/twist/internal/document"
+import "github.com/indiejames/indigo/internal/document"
 
 // clickToPos converts a terminal (x, y) coordinate to a buffer position.
 // Returns ok=false if the click is outside the text area (e.g. on the status bar).

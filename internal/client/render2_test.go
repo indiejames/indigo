@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/indiejames/twist/internal/document"
+	"github.com/indiejames/indigo/internal/document"
 )
 
 // --- renderLineRunes ---

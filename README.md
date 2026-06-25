@@ -1,11 +1,11 @@
-# twist
+# Indigo
 
-A terminal text editor with collaborative editing via Cap'n Proto RPC.
+A terminal text editor written in Go using a client/server model via Cap'n Proto RPC.
 
 ## Usage
 
 ```
-twist <file>
+io <file>
 ```
 
 ## Syntax Highlighting
@@ -61,7 +61,7 @@ twist <file>
 
 ## Configuration
 
-Config file: `~/.config/twist/config.toml`
+Config file: `~/.config/indigo/config.toml`
 
 ```toml
 line_numbers = true  # default: true

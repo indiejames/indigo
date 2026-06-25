@@ -24,7 +24,7 @@ func TestLoadValidFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	cfgDir := filepath.Join(dir, "twist")
+	cfgDir := filepath.Join(dir, "indigo")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestLoadInvalidToml(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	cfgDir := filepath.Join(dir, "twist")
+	cfgDir := filepath.Join(dir, "indigo")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

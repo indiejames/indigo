@@ -7,7 +7,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Config holds user preferences loaded from ~/.config/twist/config.toml.
+// Config holds user preferences loaded from ~/.config/indigo/config.toml.
 // Absent keys keep their default values.
 type Config struct {
 	LineNumbers bool `toml:"line_numbers"`
@@ -41,7 +41,7 @@ func Load() (*Config, error) {
 		return cfg, nil
 	}
 
-	path := filepath.Join(dir, "twist", "config.toml")
+	path := filepath.Join(dir, "indigo", "config.toml")
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {

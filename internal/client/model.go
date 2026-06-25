@@ -40,6 +40,9 @@ type clientCountMsg struct{ count uint32 }
 // saveAndQuitMsg triggers a quit after a save has completed.
 type saveAndQuitMsg struct{}
 
+// discardRecoveryMsg carries original file content after the server discards the recovery file.
+type discardRecoveryMsg struct{ content string }
+
 // highlightMsg carries freshly computed syntax-highlight spans and parse time.
 type highlightMsg struct {
 	spans    highlight.LineSpans
@@ -133,19 +136,25 @@ type Model struct {
 	hlr            *highlight.Highlighter
 	hlSpans        highlight.LineSpans
 	metrics        *metricsData
+	recoveryPrompt bool // waiting for user to accept or discard recovery content
 }
 
 // New creates a Model after the buffer is already open with the server.
-func New(rpc *RPC, bufID uint32, content string, version uint64, filePath string, cfg *config.Config) Model {
+func New(rpc *RPC, bufID uint32, content string, version uint64, filePath string, cfg *config.Config, fromRecovery bool) Model {
+	buf := document.New(filePath, content)
+	if fromRecovery {
+		buf.MarkDirty()
+	}
 	return Model{
-		rpc:      rpc,
-		buf:      document.New(filePath, content),
-		cfg:      cfg,
-		bufID:    bufID,
-		version:  version,
-		filePath: filePath,
-		hlr:      highlight.New(filePath),
-		metrics:  &metricsData{},
+		rpc:            rpc,
+		buf:            buf,
+		cfg:            cfg,
+		bufID:          bufID,
+		version:        version,
+		filePath:       filePath,
+		hlr:            highlight.New(filePath),
+		metrics:        &metricsData{},
+		recoveryPrompt: fromRecovery,
 	}
 }
 
@@ -207,6 +216,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.metrics.highlightDuration = msg.duration
 		}
 		return m, nil
+
+	case discardRecoveryMsg:
+		m.buf = document.New(m.filePath, msg.content)
+		m.version = 0
+		m.undoStack = nil
+		m.redoStack = nil
+		m.currentGroup = nil
+		m.savedUndoDepth = 0
+		return m, m.reparseHighlight()
 
 	case tea.MouseMsg:
 		switch {

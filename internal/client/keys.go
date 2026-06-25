@@ -94,6 +94,9 @@ func executeSelectInsideWord(m Model) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.recoveryPrompt {
+		return m.handleRecoveryPrompt(msg)
+	}
 	if m.warnQuit {
 		return m.handleWarnQuit(msg)
 	}
@@ -106,6 +109,25 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleInsert(msg)
 	case ModeCommand:
 		return m.handleCommand(msg)
+	}
+	return m, nil
+}
+
+func (m Model) handleRecoveryPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y", "enter":
+		m.recoveryPrompt = false
+	case "n", "N", "esc":
+		m.recoveryPrompt = false
+		return m, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			content, err := m.rpc.DiscardRecovery(ctx, m.bufID)
+			if err != nil {
+				return errorMsg{err}
+			}
+			return discardRecoveryMsg{content}
+		}
 	}
 	return m, nil
 }

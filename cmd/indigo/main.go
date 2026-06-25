@@ -26,7 +26,10 @@ func main() {
 	if err != nil {
 		fatalf("resolve path: %v", err)
 	}
-	workDir := filepath.Dir(absPath)
+	workDir := gitRoot(absPath)
+	if workDir == "" {
+		workDir = filepath.Dir(absPath)
+	}
 	sockPath := server.SocketPath(workDir)
 
 	if !server.IsRunning(sockPath) {
@@ -49,13 +52,13 @@ func main() {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	bufID, content, version, err := rpc.OpenFile(ctx, absPath)
+	bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, absPath)
 	cancel()
 	if err != nil {
 		fatalf("open file: %v", err)
 	}
 
-	m := client.New(rpc, bufID, content, version, absPath, cfg)
+	m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fatalf("run: %v", err)
@@ -89,6 +92,24 @@ func waitForServer(sockPath string, timeout time.Duration) error {
 		time.Sleep(50 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for %s", sockPath)
+}
+
+func gitRoot(path string) string {
+	dir := path
+	if info, err := os.Stat(dir); err == nil && !info.IsDir() {
+		dir = filepath.Dir(dir)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
 }
 
 func fatalf(format string, args ...any) {

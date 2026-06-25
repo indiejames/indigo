@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	capnp "capnproto.org/go/capnp/v3"
 	"capnproto.org/go/capnp/v3/rpc"
 
+	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
@@ -50,17 +52,38 @@ type editorService struct {
 	nextBuf uint32
 	clients map[uint64]struct{}
 	nextClt uint64
+	recDir  string
 
 	// shutdown is called when the last client disconnects cleanly.
 	shutdown func()
 }
 
-func newEditorService(shutdown func()) *editorService {
+func newEditorService(recDir string, shutdown func()) *editorService {
 	return &editorService{
 		buffers:  make(map[uint32]*bufferEntry),
 		clients:  make(map[uint64]struct{}),
+		recDir:   recDir,
 		shutdown: shutdown,
 	}
+}
+
+// recoveryFilePath returns the path for the recovery file for a given source file.
+func recoveryFilePath(recDir, filePath string) string {
+	h := sha256.Sum256([]byte(filePath))
+	return filepath.Join(recDir, fmt.Sprintf("%x.recover", h[:]))
+}
+
+// setupRecoveryDir returns (creating if necessary) ~/.indigo/recovery.
+func setupRecoveryDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(home, ".indigo", "recovery")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", err
+	}
+	return dir, nil
 }
 
 func (s *editorService) Connect(_ context.Context, call proto.EditorService_connect) error {
@@ -103,11 +126,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 		return err
 	}
 
-	content := ""
-	data, rerr := os.ReadFile(path)
-	if rerr == nil {
-		content = string(data)
-	}
+	content, fromRecovery := s.loadContent(path)
 
 	s.mu.Lock()
 	// Check if file is already open.
@@ -133,6 +152,9 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	s.nextBuf++
 	bufID := s.nextBuf
 	buf := document.New(path, content)
+	if fromRecovery {
+		buf.MarkDirty()
+	}
 	s.buffers[bufID] = &bufferEntry{
 		buf:     buf,
 		clients: map[uint64]struct{}{clientID: {}},
@@ -149,7 +171,59 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 		return err
 	}
 	res.SetVersion(ver)
+	res.SetFromRecovery(fromRecovery)
 	return nil
+}
+
+func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorService_discardRecovery) error {
+	args := call.Args()
+	bufID := args.BufferId()
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+	s.mu.Unlock()
+
+	os.Remove(recoveryFilePath(s.recDir, path))
+
+	content := ""
+	if data, err := os.ReadFile(path); err == nil {
+		content = string(data)
+	}
+
+	s.mu.Lock()
+	if e, ok := s.buffers[bufID]; ok {
+		e.buf = document.New(path, content)
+	}
+	s.mu.Unlock()
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	return res.SetContent(content)
+}
+
+// loadContent reads a file's content, preferring a newer recovery file if one exists.
+func (s *editorService) loadContent(path string) (content string, fromRecovery bool) {
+	var origModTime time.Time
+	if info, err := os.Stat(path); err == nil {
+		origModTime = info.ModTime()
+	}
+	if data, err := os.ReadFile(path); err == nil {
+		content = string(data)
+	}
+	rp := recoveryFilePath(s.recDir, path)
+	if recInfo, err := os.Stat(rp); err == nil && recInfo.ModTime().After(origModTime) {
+		if recData, err := os.ReadFile(rp); err == nil {
+			return string(recData), true
+		}
+	}
+	return content, false
 }
 
 func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_getUpdates) error {
@@ -272,6 +346,7 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 		return err
 	}
 	entry.buf.SetClean()
+	os.Remove(recoveryFilePath(s.recDir, entry.buf.Path()))
 
 	_, err := call.AllocResults()
 	return err
@@ -299,14 +374,20 @@ func (s *editorService) CloseBuffer(_ context.Context, call proto.EditorService_
 	clientID := args.ClientId()
 	bufID := args.BufferId()
 
+	var removedPath string
 	s.mu.Lock()
 	if entry, ok := s.buffers[bufID]; ok {
 		delete(entry.clients, clientID)
 		if len(entry.clients) == 0 {
+			removedPath = entry.buf.Path()
 			delete(s.buffers, bufID)
 		}
 	}
 	s.mu.Unlock()
+
+	if removedPath != "" {
+		os.Remove(recoveryFilePath(s.recDir, removedPath))
+	}
 
 	_, err := call.AllocResults()
 	return err
@@ -349,17 +430,71 @@ func New(dir string) (*Server, error) {
 		return nil, fmt.Errorf("securing socket %s: %w", sockPath, err)
 	}
 
+	recDir, err := setupRecoveryDir()
+	if err != nil {
+		ln.Close()
+		os.Remove(sockPath)
+		return nil, fmt.Errorf("recovery dir: %w", err)
+	}
+
 	srv := &Server{
 		socketPath: sockPath,
 		listener:   ln,
 		done:       make(chan struct{}),
 	}
-	srv.svc = newEditorService(func() {
+	srv.svc = newEditorService(recDir, func() {
 		close(srv.done)
 	})
 
+	cfg, _ := config.Load()
+	interval := time.Duration(cfg.RecoveryIntervalSecs) * time.Second
+	srv.startFlushLoop(interval, cfg.RecoveryMaxBytes)
 	go srv.serve()
 	return srv, nil
+}
+
+func (s *Server) startFlushLoop(interval time.Duration, maxBytes int64) {
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				s.flushDirtyBuffers(maxBytes)
+			case <-s.done:
+				return
+			}
+		}
+	}()
+}
+
+func (s *Server) flushDirtyBuffers(maxBytes int64) {
+	// Snapshot buffer references while holding the lock, then do all I/O outside it.
+	s.svc.mu.Lock()
+	bufs := make([]*document.Buffer, 0, len(s.svc.buffers))
+	for _, e := range s.svc.buffers {
+		bufs = append(bufs, e.buf)
+	}
+	s.svc.mu.Unlock()
+
+	for _, buf := range bufs {
+		rp := recoveryFilePath(s.svc.recDir, buf.Path())
+		if !buf.Dirty() {
+			os.Remove(rp)
+			continue
+		}
+		if buf.ByteLen() > int(maxBytes) {
+			os.Remove(rp)
+			continue
+		}
+		content := buf.Content()
+		if sha256.Sum256([]byte(content)) == buf.SavedHash() {
+			// Content is back to saved state (e.g. after undo) — no recovery needed.
+			os.Remove(rp)
+		} else {
+			os.WriteFile(rp, []byte(content), 0600)
+		}
+	}
 }
 
 func (s *Server) serve() {
@@ -396,7 +531,20 @@ func (s *Server) serve() {
 func (s *Server) Wait() {
 	<-s.done
 	s.listener.Close()
+	s.deleteAllRecoveryFiles()
 	os.Remove(s.socketPath)
+}
+
+func (s *Server) deleteAllRecoveryFiles() {
+	s.svc.mu.Lock()
+	paths := make([]string, 0, len(s.svc.buffers))
+	for _, e := range s.svc.buffers {
+		paths = append(paths, e.buf.Path())
+	}
+	s.svc.mu.Unlock()
+	for _, p := range paths {
+		os.Remove(recoveryFilePath(s.svc.recDir, p))
+	}
 }
 
 // DirtyBuffers delegates to the service.

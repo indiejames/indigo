@@ -1,6 +1,7 @@
 package document
 
 import (
+	"crypto/sha256"
 	"sync"
 	"unicode/utf8"
 )
@@ -50,13 +51,15 @@ type Buffer struct {
 	history   []Op
 	path      string
 	dirty     bool
+	savedHash [32]byte // sha256 of content at last load or save
 }
 
 // New creates a Buffer from raw file content.
 func New(path, content string) *Buffer {
 	return &Buffer{
-		path: path,
-		rope: ropeFromRunes([]rune(content)),
+		path:      path,
+		rope:      ropeFromRunes([]rune(content)),
+		savedHash: sha256.Sum256([]byte(content)),
 	}
 }
 
@@ -76,7 +79,20 @@ func (b *Buffer) Version() uint64 {
 
 func (b *Buffer) SetClean() {
 	b.mu.Lock()
+	b.savedHash = sha256.Sum256([]byte(string(b.logicalSlice(0, b.totalLen()))))
 	b.dirty = false
+	b.mu.Unlock()
+}
+
+func (b *Buffer) SavedHash() [32]byte {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.savedHash
+}
+
+func (b *Buffer) MarkDirty() {
+	b.mu.Lock()
+	b.dirty = true
 	b.mu.Unlock()
 }
 

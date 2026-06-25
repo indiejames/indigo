@@ -343,6 +343,11 @@ func New(dir string) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen %s: %w", sockPath, err)
 	}
+	if err := os.Chmod(sockPath, 0600); err != nil {
+		ln.Close()
+		os.Remove(sockPath)
+		return nil, fmt.Errorf("securing socket %s: %w", sockPath, err)
+	}
 
 	srv := &Server{
 		socketPath: sockPath,

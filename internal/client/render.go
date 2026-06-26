@@ -177,7 +177,7 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 			i++
 		case inSel:
 			j := i + 1
-			for j < n && !(hasCursor && j == curCol) && j >= selA && j <= selB {
+			for j < n && (!hasCursor || j != curCol) && j >= selA && j <= selB {
 				j++
 			}
 			sb.WriteString(selectionStyle.Render(string(runes[i:j])))
@@ -492,7 +492,6 @@ func renderSigHelpBar(sh *ClientSigHelp, width int) string {
 		if idx >= 0 {
 			before := label[:idx]
 			after := label[idx+len(paramLabel):]
-			label = before + popupKeyStyle.Render(paramLabel) + popupTextStyle.Render(after)
 			label = popupTextStyle.Render(before) + popupKeyStyle.Render(paramLabel) + popupTextStyle.Render(after)
 		} else {
 			label = popupTextStyle.Render(label)

@@ -196,11 +196,8 @@ func TestHandleNormalDeleteEmptyLine(t *testing.T) {
 	// 'd' on empty line → no-op (no RPC needed)
 	m := newTestModel("\n")
 	m.cursor = document.Pos{Line: 0, Col: 0}
-	m2, cmd := m.handleNormal(fakeKey("d"))
+	m2, _ := m.handleNormal(fakeKey("d"))
 	_ = m2
-	if cmd != nil {
-		// Still valid: deleteSelection returns nil cmd on empty line
-	}
 }
 
 func TestHandleNormalPrefixCommandM(t *testing.T) {

@@ -91,9 +91,6 @@ func TestHandleMouseDragUpdatesHead(t *testing.T) {
 	m.handleMousePress(0, 0)
 	// Now drag to col 5
 	m.handleMouseDrag(5, 0)
-	if m.cursor.Col != 4 { // normal mode clamps to lineLen-1=10, col 5 is fine actually
-		// "hello world" is 11 chars, maxCol in normal mode = 10, so col 5 is valid
-	}
 	if m.sel == nil {
 		t.Fatal("sel should remain set after drag")
 	}

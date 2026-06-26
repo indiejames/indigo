@@ -109,7 +109,7 @@ func startServer(workDir string) {
 	if err != nil {
 		fatalf("start server: %v", err)
 	}
-	proc.Release()
+	proc.Release() //nolint:errcheck
 }
 
 func waitForServer(sockPath string, timeout time.Duration) error {

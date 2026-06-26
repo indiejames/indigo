@@ -106,7 +106,7 @@ func Load() (*Config, error) {
 		}
 		return cfg, err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	if _, err := toml.NewDecoder(f).Decode(cfg); err != nil {
 		return cfg, err

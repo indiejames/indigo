@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/sahilm/fuzzy"
 )
 
 // ignoredDirs are never walked when building the file list.
@@ -16,15 +17,16 @@ var ignoredDirs = map[string]bool{
 	".svn": true, ".hg": true, "__pycache__": true, ".cache": true,
 }
 
-// filePicker is the fuzzy file-selection overlay.
+// filePicker is the file-selection overlay.
 type filePicker struct {
-	workDir  string
-	all      []string // workspace-relative paths, sorted
-	filtered []string // current filtered view
-	query    string
-	cursor   int
-	width    int
-	height   int
+	workDir     string
+	all         []string // workspace-relative paths, sorted
+	filtered    []string // current filtered view
+	query       string
+	cursor      int
+	width       int
+	height      int
+	fuzzySearch bool
 }
 
 // pickedMsg is sent when the user selects a file.
@@ -33,8 +35,8 @@ type pickedMsg struct{ absPath string }
 // pickerCancelledMsg is sent when the user presses Esc.
 type pickerCancelledMsg struct{}
 
-func newFilePicker(workDir string, w, h int) *filePicker {
-	fp := &filePicker{workDir: workDir, width: w, height: h}
+func newFilePicker(workDir string, w, h int, fuzzySearch bool) *filePicker {
+	fp := &filePicker{workDir: workDir, width: w, height: h, fuzzySearch: fuzzySearch}
 	fp.all = collectFiles(workDir)
 	fp.filtered = fp.all
 	return fp
@@ -67,11 +69,19 @@ func (fp *filePicker) setQuery(q string) {
 		fp.filtered = fp.all
 		return
 	}
-	lower := strings.ToLower(q)
-	fp.filtered = nil
-	for _, p := range fp.all {
-		if strings.Contains(strings.ToLower(p), lower) {
-			fp.filtered = append(fp.filtered, p)
+	if fp.fuzzySearch {
+		matches := fuzzy.Find(q, fp.all)
+		fp.filtered = make([]string, len(matches))
+		for i, m := range matches {
+			fp.filtered[i] = fp.all[m.Index]
+		}
+	} else {
+		lower := strings.ToLower(q)
+		fp.filtered = nil
+		for _, p := range fp.all {
+			if strings.Contains(strings.ToLower(p), lower) {
+				fp.filtered = append(fp.filtered, p)
+			}
 		}
 	}
 }

@@ -689,9 +689,9 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		return m, m.doCloseBuffer()
 	case "wq", "x", "write-quit":
 		return m, m.doSaveAndClose()
-	case "qa", "quitall":
+	case "qa", "quit-all":
 		return m, func() tea.Msg { return QuitAllMsg{} }
-	case "qa!", "quitall!":
+	case "qa!", "quit-all!":
 		return m, func() tea.Msg { return QuitAllMsg{Force: true} }
 	case "wqa":
 		return m, func() tea.Msg { return QuitAllMsg{SaveAll: true} }

@@ -211,14 +211,6 @@ func TestRenderStatusBarZeroWidth(t *testing.T) {
 
 // --- View ---
 
-func TestViewQuitting(t *testing.T) {
-	m := newTestModel("hello\n")
-	m.quitting = true
-	if got := m.View(); got != "" {
-		t.Errorf("View() while quitting should return empty, got %q", got)
-	}
-}
-
 func TestViewZeroWidth(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.width = 0

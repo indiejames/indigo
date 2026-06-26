@@ -37,6 +37,7 @@ type Config struct {
 	RecoveryIntervalSecs int              `toml:"recovery_interval_secs"`
 	LanguageServers      []LanguageServer `toml:"language_server"`
 	HideTabs             bool             `toml:"hide_tabs"`
+	FuzzySearch          bool             `toml:"fuzzy_search"`
 }
 
 func defaults() *Config {
@@ -44,6 +45,7 @@ func defaults() *Config {
 		LineNumbers:          true,
 		RecoveryMaxBytes:     100 * 1024 * 1024,
 		RecoveryIntervalSecs: 5,
+		FuzzySearch:          true,
 	}
 }
 

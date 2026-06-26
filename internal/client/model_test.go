@@ -97,12 +97,10 @@ func TestExecuteCommandUnknown(t *testing.T) {
 
 func TestExecuteCommandQuitClean(t *testing.T) {
 	m := newTestModel("unchanged")
-	// Buffer starts clean.
 	m.cmdBuf = "quit"
-	m2, _ := m.executeCommand()
-	got := m2.(Model)
-	if !got.quitting {
-		t.Error("quit on clean buffer should set quitting")
+	_, cmd := m.executeCommand()
+	if cmd == nil {
+		t.Error("quit on clean buffer should return a close cmd")
 	}
 }
 
@@ -111,10 +109,10 @@ func TestExecuteCommandQuitDirty(t *testing.T) {
 	m.buf.Apply(document.Op{Type: document.OpInsert, InsertLine: 0, InsertCol: 4, InsertText: "!"})
 
 	m.cmdBuf = "quit"
-	m2, _ := m.executeCommand()
+	m2, cmd := m.executeCommand()
 	got := m2.(Model)
-	if got.quitting {
-		t.Error("quit on dirty buffer should not quit")
+	if cmd != nil {
+		t.Error("quit on dirty buffer should not return a close cmd")
 	}
 	if got.status == "" {
 		t.Error("quit on dirty buffer should set error status")
@@ -125,12 +123,11 @@ func TestExecuteCommandForceQuit(t *testing.T) {
 	m := newTestModel("text")
 	m.buf.Apply(document.Op{Type: document.OpInsert, InsertLine: 0, InsertCol: 4, InsertText: "!"})
 
-	for _, cmd := range []string{"q!", "quit!"} {
-		m.cmdBuf = cmd
-		m2, _ := m.executeCommand()
-		got := m2.(Model)
-		if !got.quitting {
-			t.Errorf("%q: expected quitting=true", cmd)
+	for _, name := range []string{"q!", "quit!"} {
+		m.cmdBuf = name
+		_, cmd := m.executeCommand()
+		if cmd == nil {
+			t.Errorf("%q: expected a close cmd", name)
 		}
 	}
 }

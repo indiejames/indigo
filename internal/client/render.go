@@ -665,9 +665,6 @@ func renderCompletionPopup(items []ClientCompletion, selected, maxW int) []strin
 // ---- View ----
 
 func (m Model) View() string {
-	if m.quitting {
-		return ""
-	}
 	if m.width == 0 {
 		return "loading…"
 	}

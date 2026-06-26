@@ -161,12 +161,26 @@ func (m Model) reparseHighlight() tea.Cmd {
 	}
 }
 
-func (m Model) doDisconnect() tea.Cmd {
+// doCloseBuffer tells the server this client is done with this buffer,
+// then signals the App to remove it from the buffer list.
+func (m Model) doCloseBuffer() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		m.rpc.CloseBuffer(ctx, m.bufID)
-		m.rpc.Disconnect(ctx)
-		return nil
+		m.rpc.CloseBuffer(ctx, m.bufID) //nolint:errcheck
+		return CloseBufferMsg{}
+	}
+}
+
+// doSaveAndClose saves the buffer, then closes it.
+func (m Model) doSaveAndClose() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := m.rpc.Save(ctx, m.bufID); err != nil {
+			return errorMsg{err}
+		}
+		m.rpc.CloseBuffer(ctx, m.bufID) //nolint:errcheck
+		return CloseBufferMsg{}
 	}
 }

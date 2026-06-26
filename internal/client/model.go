@@ -41,9 +41,6 @@ type savedMsg struct{}
 // clientCountMsg carries the result of a bufferClientCount RPC.
 type clientCountMsg struct{ count uint32 }
 
-// saveAndQuitMsg triggers a quit after a save has completed.
-type saveAndQuitMsg struct{}
-
 // discardRecoveryMsg carries original file content after the server discards the recovery file.
 type discardRecoveryMsg struct{ content string }
 
@@ -66,6 +63,25 @@ type triggerCompletionMsg struct{}
 type definitionMsg struct {
 	loc   ClientLocation
 	found bool
+}
+
+// CloseBufferMsg signals the App that this buffer wants to close.
+// The App decides whether to remove it from the list or quit entirely.
+type CloseBufferMsg struct{}
+
+// OpenPickerMsg signals the App to open the file picker.
+type OpenPickerMsg struct{}
+
+// NextBufferMsg signals the App to switch to the next buffer.
+type NextBufferMsg struct{}
+
+// PrevBufferMsg signals the App to switch to the previous buffer.
+type PrevBufferMsg struct{}
+
+// QuitAllMsg signals the App to quit all buffers (:qa / :qa! / :wqa).
+type QuitAllMsg struct {
+	Force   bool // :qa! — skip dirty check
+	SaveAll bool // :wqa — save dirty buffers first
 }
 
 // highlightMsg carries freshly computed syntax-highlight spans and parse time.
@@ -164,8 +180,7 @@ type Model struct {
 	height         int
 	filePath       string
 	status         string // transient error message shown in modeline
-	quitting       bool
-	warnQuit       bool // showing unsaved-changes warning
+	warnQuit       bool   // showing unsaved-changes warning
 	checkingQuit   bool // client-count RPC in flight
 	sel            *Selection
 	dragging       bool
@@ -210,6 +225,15 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath string
 		recoveryPrompt: fromRecovery,
 	}
 }
+
+// Dirty reports whether the buffer has unsaved changes.
+func (m Model) Dirty() bool { return m.buf.Dirty() }
+
+// FilePath returns the absolute path of the file this buffer is editing.
+func (m Model) FilePath() string { return m.filePath }
+
+// BufID returns the server-assigned buffer identifier.
+func (m Model) BufID() uint32 { return m.bufID }
 
 // AtLine moves the initial cursor to the given 0-based line number.
 func (m Model) AtLine(line int) Model {
@@ -266,15 +290,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.count <= 1 {
 			m.warnQuit = true
 		} else {
-			m.quitting = true
-			return m, tea.Sequence(m.doDisconnect(), tea.Quit)
+			// Another client has the buffer — safe to close without warning.
+			return m, m.doCloseBuffer()
 		}
 		return m, nil
-
-	case saveAndQuitMsg:
-		m.buf.SetClean()
-		m.quitting = true
-		return m, tea.Sequence(m.doDisconnect(), tea.Quit)
 
 	case highlightMsg:
 		m.hlSpans = msg.spans

@@ -15,11 +15,15 @@ type cmdDesc struct {
 }
 
 var allCmds = []cmdDesc{
+	{"edit",       "Open file picker"},
 	{"metrics",    "Toggle metrics overlay"},
-	{"quit",       "Quit (fails if unsaved)"},
-	{"quit!",      "Quit, discarding changes"},
+	{"quit",       "Close buffer (fails if unsaved)"},
+	{"quit!",      "Close buffer, discarding changes"},
+	{"quit-all",   "Quit all (fails if any unsaved)"},
+	{"quit-all!",  "Quit all, discarding changes"},
 	{"save",       "Save file"},
-	{"write-quit", "Save and quit"},
+	{"wqa",        "Save all and quit"},
+	{"write-quit", "Save and close buffer"},
 }
 
 // fuzzyMatch reports whether every rune of pattern appears in s as a subsequence.

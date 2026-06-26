@@ -98,10 +98,17 @@ func TestHandleNormalMoveLeft(t *testing.T) {
 func TestHandleNormalGotoTop(t *testing.T) {
 	m := newTestModel("a\nb\nc\n")
 	m.cursor.Line = 2
+	// First 'g' enters the prefix sequence.
 	m2, _ := m.handleNormal(fakeKey("g"))
-	got := m2.(Model)
+	mid := m2.(Model)
+	if mid.cursor.Line != 2 {
+		t.Errorf("g (first): cursor should not move yet, got line %d", mid.cursor.Line)
+	}
+	// Second 'g' executes gg → go to top.
+	m3, _ := mid.handleNormal(fakeKey("g"))
+	got := m3.(Model)
 	if got.cursor.Line != 0 || got.cursor.Col != 0 {
-		t.Errorf("g: cursor = %v, want {0,0}", got.cursor)
+		t.Errorf("gg: cursor = %v, want {0,0}", got.cursor)
 	}
 }
 
@@ -306,49 +313,48 @@ func TestHandleInsertEnd(t *testing.T) {
 func TestHandleWarnQuitDiscardQ(t *testing.T) {
 	m := newTestModel("text")
 	m.warnQuit = true
-	m2, _ := m.handleWarnQuit(fakeKey("q"))
+	m2, cmd := m.handleWarnQuit(fakeKey("q"))
 	got := m2.(Model)
 	if got.warnQuit {
 		t.Error("q: warnQuit should be false")
 	}
-	if !got.quitting {
-		t.Error("q: quitting should be true")
+	if cmd == nil {
+		t.Error("q: should return a close cmd")
 	}
 }
 
 func TestHandleWarnQuitDiscardCapQ(t *testing.T) {
 	m := newTestModel("text")
 	m.warnQuit = true
-	m2, _ := m.handleWarnQuit(fakeKey("Q"))
-	got := m2.(Model)
-	if !got.quitting {
-		t.Error("Q: quitting should be true")
+	_, cmd := m.handleWarnQuit(fakeKey("Q"))
+	if cmd == nil {
+		t.Error("Q: should return a close cmd")
 	}
 }
 
 func TestHandleWarnQuitEscCancels(t *testing.T) {
 	m := newTestModel("text")
 	m.warnQuit = true
-	m2, _ := m.handleWarnQuit(fakeKey("esc"))
+	m2, cmd := m.handleWarnQuit(fakeKey("esc"))
 	got := m2.(Model)
 	if got.warnQuit {
 		t.Error("esc: warnQuit should be false")
 	}
-	if got.quitting {
-		t.Error("esc: quitting should be false")
+	if cmd != nil {
+		t.Error("esc: should not return a close cmd")
 	}
 }
 
 func TestHandleWarnQuitNKey(t *testing.T) {
 	m := newTestModel("text")
 	m.warnQuit = true
-	m2, _ := m.handleWarnQuit(fakeKey("n"))
+	m2, cmd := m.handleWarnQuit(fakeKey("n"))
 	got := m2.(Model)
 	if got.warnQuit {
 		t.Error("n: warnQuit should be false")
 	}
-	if got.quitting {
-		t.Error("n: quitting should be false")
+	if cmd != nil {
+		t.Error("n: should not return a close cmd")
 	}
 }
 

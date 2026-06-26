@@ -43,8 +43,8 @@ func Dial(socketPath string) (*RPC, error) {
 
 func (r *RPC) ClientID() uint64 { return r.clientID }
 
-// OpenFile asks the server to open path and returns (bufferID, content, version).
-func (r *RPC) OpenFile(ctx context.Context, path string) (uint32, string, uint64, error) {
+// OpenFile asks the server to open path and returns (bufferID, content, version, fromRecovery).
+func (r *RPC) OpenFile(ctx context.Context, path string) (uint32, string, uint64, bool, error) {
 	fut, rel := r.svc.OpenFile(ctx, func(p proto.EditorService_openFile_Params) error {
 		p.SetClientId(r.clientID)
 		return p.SetPath(path)
@@ -52,13 +52,33 @@ func (r *RPC) OpenFile(ctx context.Context, path string) (uint32, string, uint64
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return 0, "", 0, err
+		return 0, "", 0, false, err
 	}
 	content, err := res.Content()
 	if err != nil {
-		return 0, "", 0, err
+		return 0, "", 0, false, err
 	}
-	return res.BufferId(), content, res.Version(), nil
+	return res.BufferId(), content, res.Version(), res.FromRecovery(), nil
+}
+
+// DiscardRecovery tells the server to delete the recovery file and reload the
+// original file content into the buffer. Returns the original file content.
+func (r *RPC) DiscardRecovery(ctx context.Context, bufID uint32) (string, error) {
+	fut, rel := r.svc.DiscardRecovery(ctx, func(p proto.EditorService_discardRecovery_Params) error {
+		p.SetClientId(r.clientID)
+		p.SetBufferId(bufID)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return "", err
+	}
+	content, err := res.Content()
+	if err != nil {
+		return "", err
+	}
+	return content, nil
 }
 
 // ApplyOp sends an edit operation to the server and returns the new version.

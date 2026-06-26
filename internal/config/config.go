@@ -10,12 +10,16 @@ import (
 // Config holds user preferences loaded from ~/.config/indigo/config.toml.
 // Absent keys keep their default values.
 type Config struct {
-	LineNumbers bool `toml:"line_numbers"`
+	LineNumbers          bool  `toml:"line_numbers"`
+	RecoveryMaxBytes     int64 `toml:"recovery_max_bytes"`
+	RecoveryIntervalSecs int   `toml:"recovery_interval_secs"`
 }
 
 func defaults() *Config {
 	return &Config{
-		LineNumbers: true,
+		LineNumbers:          true,
+		RecoveryMaxBytes:     100 * 1024 * 1024, // 100 MiB
+		RecoveryIntervalSecs: 5,
 	}
 }
 

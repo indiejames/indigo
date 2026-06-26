@@ -5,14 +5,15 @@ $Go.import("github.com/indiejames/indigo/internal/proto");
 
 # EditorService is the capability exposed by the server over a Unix socket.
 interface EditorService {
-  connect    @0 ()                                               -> (clientId :UInt64);
-  disconnect @1 (clientId :UInt64)                              -> ();
-  openFile   @2 (clientId :UInt64, path :Text)                  -> (bufferId :UInt32, content :Text, version :UInt64);
-  getUpdates @3 (clientId :UInt64, bufferId :UInt32, sinceVersion :UInt64) -> (ops :List(EditOp), version :UInt64);
-  applyOp    @4 (clientId :UInt64, bufferId :UInt32, op :EditOp) -> (version :UInt64);
-  save       @5 (clientId :UInt64, bufferId :UInt32)            -> ();
-  closeBuffer        @6 (clientId :UInt64, bufferId :UInt32)           -> ();
-  bufferClientCount  @7 (bufferId :UInt32)                             -> (count :UInt32);
+  connect         @0 ()                                                        -> (clientId :UInt64);
+  disconnect      @1 (clientId :UInt64)                                        -> ();
+  openFile        @2 (clientId :UInt64, path :Text)                            -> (bufferId :UInt32, content :Text, version :UInt64, fromRecovery :Bool);
+  getUpdates      @3 (clientId :UInt64, bufferId :UInt32, sinceVersion :UInt64) -> (ops :List(EditOp), version :UInt64);
+  applyOp         @4 (clientId :UInt64, bufferId :UInt32, op :EditOp)          -> (version :UInt64);
+  save            @5 (clientId :UInt64, bufferId :UInt32)                      -> ();
+  closeBuffer     @6 (clientId :UInt64, bufferId :UInt32)                      -> ();
+  bufferClientCount @7 (bufferId :UInt32)                                      -> (count :UInt32);
+  discardRecovery @8 (clientId :UInt64, bufferId :UInt32)                      -> (content :Text);
 }
 
 struct EditOp {

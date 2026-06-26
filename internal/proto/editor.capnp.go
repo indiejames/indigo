@@ -22,7 +22,7 @@ func (c EditorService) Connect(ctx context.Context, params func(EditorService_co
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      0,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "connect",
 		},
 	}
@@ -42,7 +42,7 @@ func (c EditorService) Disconnect(ctx context.Context, params func(EditorService
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      1,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "disconnect",
 		},
 	}
@@ -62,7 +62,7 @@ func (c EditorService) OpenFile(ctx context.Context, params func(EditorService_o
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      2,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "openFile",
 		},
 	}
@@ -82,7 +82,7 @@ func (c EditorService) GetUpdates(ctx context.Context, params func(EditorService
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      3,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getUpdates",
 		},
 	}
@@ -102,7 +102,7 @@ func (c EditorService) ApplyOp(ctx context.Context, params func(EditorService_ap
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      4,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "applyOp",
 		},
 	}
@@ -122,7 +122,7 @@ func (c EditorService) Save(ctx context.Context, params func(EditorService_save_
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      5,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "save",
 		},
 	}
@@ -142,7 +142,7 @@ func (c EditorService) CloseBuffer(ctx context.Context, params func(EditorServic
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      6,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "closeBuffer",
 		},
 	}
@@ -162,7 +162,7 @@ func (c EditorService) BufferClientCount(ctx context.Context, params func(Editor
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      7,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "bufferClientCount",
 		},
 	}
@@ -173,6 +173,26 @@ func (c EditorService) BufferClientCount(ctx context.Context, params func(Editor
 
 	ans, release := capnp.Client(c).SendCall(ctx, s)
 	return EditorService_bufferClientCount_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) DiscardRecovery(ctx context.Context, params func(EditorService_discardRecovery_Params) error) (EditorService_discardRecovery_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      8,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "discardRecovery",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 16, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_discardRecovery_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_discardRecovery_Results_Future{Future: ans.Future()}, release
 
 }
 
@@ -264,6 +284,8 @@ type EditorService_Server interface {
 	CloseBuffer(context.Context, EditorService_closeBuffer) error
 
 	BufferClientCount(context.Context, EditorService_bufferClientCount) error
+
+	DiscardRecovery(context.Context, EditorService_discardRecovery) error
 }
 
 // EditorService_NewServer creates a new Server from an implementation of EditorService_Server.
@@ -282,14 +304,14 @@ func EditorService_ServerToClient(s EditorService_Server) EditorService {
 // This can be used to create a more complicated Server.
 func EditorService_Methods(methods []server.Method, s EditorService_Server) []server.Method {
 	if cap(methods) == 0 {
-		methods = make([]server.Method, 0, 8)
+		methods = make([]server.Method, 0, 9)
 	}
 
 	methods = append(methods, server.Method{
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      0,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "connect",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -301,7 +323,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      1,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "disconnect",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -313,7 +335,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      2,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "openFile",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -325,7 +347,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      3,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getUpdates",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -337,7 +359,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      4,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "applyOp",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -349,7 +371,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      5,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "save",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -361,7 +383,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      6,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "closeBuffer",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -373,11 +395,23 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      7,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "bufferClientCount",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
 			return s.BufferClientCount(ctx, EditorService_bufferClientCount{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      8,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "discardRecovery",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.DiscardRecovery(ctx, EditorService_discardRecovery{call})
 		},
 	})
 
@@ -518,6 +552,23 @@ func (c EditorService_bufferClientCount) Args() EditorService_bufferClientCount_
 func (c EditorService_bufferClientCount) AllocResults() (EditorService_bufferClientCount_Results, error) {
 	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 8, PointerCount: 0})
 	return EditorService_bufferClientCount_Results(r), err
+}
+
+// EditorService_discardRecovery holds the state for a server call to EditorService.discardRecovery.
+// See server.Call for documentation.
+type EditorService_discardRecovery struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_discardRecovery) Args() EditorService_discardRecovery_Params {
+	return EditorService_discardRecovery_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_discardRecovery) AllocResults() (EditorService_discardRecovery_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_discardRecovery_Results(r), err
 }
 
 // EditorService_List is a list of EditorService.
@@ -972,6 +1023,14 @@ func (s EditorService_openFile_Results) Version() uint64 {
 
 func (s EditorService_openFile_Results) SetVersion(v uint64) {
 	capnp.Struct(s).SetUint64(8, v)
+}
+
+func (s EditorService_openFile_Results) FromRecovery() bool {
+	return capnp.Struct(s).Bit(32)
+}
+
+func (s EditorService_openFile_Results) SetFromRecovery(v bool) {
+	capnp.Struct(s).SetBit(32, v)
 }
 
 // EditorService_openFile_Results_List is a list of EditorService_openFile_Results.
@@ -1787,6 +1846,168 @@ func (f EditorService_bufferClientCount_Results_Future) Struct() (EditorService_
 	return EditorService_bufferClientCount_Results(p.Struct()), err
 }
 
+type EditorService_discardRecovery_Params capnp.Struct
+
+// EditorService_discardRecovery_Params_TypeID is the unique identifier for the type EditorService_discardRecovery_Params.
+const EditorService_discardRecovery_Params_TypeID = 0xaed406d1812d9f83
+
+func NewEditorService_discardRecovery_Params(s *capnp.Segment) (EditorService_discardRecovery_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0})
+	return EditorService_discardRecovery_Params(st), err
+}
+
+func NewRootEditorService_discardRecovery_Params(s *capnp.Segment) (EditorService_discardRecovery_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0})
+	return EditorService_discardRecovery_Params(st), err
+}
+
+func ReadRootEditorService_discardRecovery_Params(msg *capnp.Message) (EditorService_discardRecovery_Params, error) {
+	root, err := msg.Root()
+	return EditorService_discardRecovery_Params(root.Struct()), err
+}
+
+func (s EditorService_discardRecovery_Params) String() string {
+	str, _ := text.Marshal(0xaed406d1812d9f83, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_discardRecovery_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_discardRecovery_Params) DecodeFromPtr(p capnp.Ptr) EditorService_discardRecovery_Params {
+	return EditorService_discardRecovery_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_discardRecovery_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_discardRecovery_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_discardRecovery_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_discardRecovery_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_discardRecovery_Params) ClientId() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s EditorService_discardRecovery_Params) SetClientId(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
+func (s EditorService_discardRecovery_Params) BufferId() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s EditorService_discardRecovery_Params) SetBufferId(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+// EditorService_discardRecovery_Params_List is a list of EditorService_discardRecovery_Params.
+type EditorService_discardRecovery_Params_List = capnp.StructList[EditorService_discardRecovery_Params]
+
+// NewEditorService_discardRecovery_Params creates a new list of EditorService_discardRecovery_Params.
+func NewEditorService_discardRecovery_Params_List(s *capnp.Segment, sz int32) (EditorService_discardRecovery_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_discardRecovery_Params](l), err
+}
+
+// EditorService_discardRecovery_Params_Future is a wrapper for a EditorService_discardRecovery_Params promised by a client call.
+type EditorService_discardRecovery_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_discardRecovery_Params_Future) Struct() (EditorService_discardRecovery_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_discardRecovery_Params(p.Struct()), err
+}
+
+type EditorService_discardRecovery_Results capnp.Struct
+
+// EditorService_discardRecovery_Results_TypeID is the unique identifier for the type EditorService_discardRecovery_Results.
+const EditorService_discardRecovery_Results_TypeID = 0x88464e707e21dab3
+
+func NewEditorService_discardRecovery_Results(s *capnp.Segment) (EditorService_discardRecovery_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_discardRecovery_Results(st), err
+}
+
+func NewRootEditorService_discardRecovery_Results(s *capnp.Segment) (EditorService_discardRecovery_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_discardRecovery_Results(st), err
+}
+
+func ReadRootEditorService_discardRecovery_Results(msg *capnp.Message) (EditorService_discardRecovery_Results, error) {
+	root, err := msg.Root()
+	return EditorService_discardRecovery_Results(root.Struct()), err
+}
+
+func (s EditorService_discardRecovery_Results) String() string {
+	str, _ := text.Marshal(0x88464e707e21dab3, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_discardRecovery_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_discardRecovery_Results) DecodeFromPtr(p capnp.Ptr) EditorService_discardRecovery_Results {
+	return EditorService_discardRecovery_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_discardRecovery_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_discardRecovery_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_discardRecovery_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_discardRecovery_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_discardRecovery_Results) Content() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s EditorService_discardRecovery_Results) HasContent() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_discardRecovery_Results) ContentBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_discardRecovery_Results) SetContent(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+// EditorService_discardRecovery_Results_List is a list of EditorService_discardRecovery_Results.
+type EditorService_discardRecovery_Results_List = capnp.StructList[EditorService_discardRecovery_Results]
+
+// NewEditorService_discardRecovery_Results creates a new list of EditorService_discardRecovery_Results.
+func NewEditorService_discardRecovery_Results_List(s *capnp.Segment, sz int32) (EditorService_discardRecovery_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_discardRecovery_Results](l), err
+}
+
+// EditorService_discardRecovery_Results_Future is a wrapper for a EditorService_discardRecovery_Results promised by a client call.
+type EditorService_discardRecovery_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_discardRecovery_Results_Future) Struct() (EditorService_discardRecovery_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_discardRecovery_Results(p.Struct()), err
+}
+
 type EditOp capnp.Struct
 
 // EditOp_TypeID is the unique identifier for the type EditOp.
@@ -1990,97 +2211,104 @@ func NewEditOp_OpType_List(s *capnp.Segment, sz int32) (EditOp_OpType_List, erro
 	return capnp.NewEnumList[EditOp_OpType](s, sz)
 }
 
-const schema_d75b3b54eb3ed6a2 = "x\xda\xccVol\x14e\x13\x9f\xd9g\xef\xf6\xee\xed" +
-	"\xc1u\xdf=Bi \xe5\x85\xbey\xdb\x02\x85\xd2\xbe" +
-	"\xa1\x16\xf0\xae-\x18h \xbd\xed\x15#\x88\x89\xc7\xf5" +
-	"\xa9\x1c^o7\xb7[\xb41Zj$\x11\x13\x84\x12" +
-	"c$\x06\x15\xa2Fc\x00\x01\xff$D\x8d\x98hH" +
-	"\x134\x90\xa8\x01\xe5\x03\xfe\x89\x0a\x06\xad\x18\x03\x1f\xca" +
-	"\x9a\xd9\xbb\xdd\xdbb+\xb4|\xf1\xe3\xfev\x9ey~" +
-	"3\xf3\x9byf\x11\x13cb\xdd\x94_$\x10\xd4\x8d" +
-	">\xbf\xf5\xf8\x83\x0do\xee\xfc}\xc76\x90k\x10@" +
-	"\x94\x00\xea\xcf\xb3\xe3\x08\xa2\xf5\xd8\x81-\x97\xe7\x1e\xbe" +
-	"6\x00j\x0d\x0a\x00>\xa4\x7f\xa7\xd8\x10\x02*\x17\xd8" +
-	"a@\xeb\x95c\x03\x1f\xee\xde/\xee\x01u&\xfa\xad" +
-	"\x03_\xdcy\xa9s\xe9\xbd_\x16,\x07\xc4rT\x06" +
-	"\xc5\xe9\x00\xf5{\xc5%\x02\xa05\xe7\xf9\xea\xbe\xfb\xde" +
-	"\x1axn\x94\xc3\x9f\xfc\xe7\xc8\xe1\x88\x9f\x1c\x0e\xce\xed" +
-	"\xdf\xb9\xef\xa5\x93\xc7\xc8\x82\x15\xd8\xec\x95\xbe!\x83\x83" +
-	"\x12\x19\x9c<t\xfc\xcc\xf5\xa6g\xdf\xf3\xb0U\x03\xbf" +
-	"\x11\xdb\xb7\x876\x96\xcf\xfb\xe3\xd7\x0f\xe8\xa8\xf3ke" +
-	"\xe0\x0c\x1d]\x1f\x88\x02Z\xaf^\xe6\x97\x9b_k\x19" +
-	"*\xdcn\x1b\xf4\x05.\x92\xc1\xce\xc0C\x80\xd6\x82\x17" +
-	"F\x86[c=\xa7\x0a\x1e\xf2\xf4\x86\xf3.|A\xb2" +
-	"H>s\x15\xcbG~>\xe5\xbd\x83\x07\xe7\x08\x80\xca" +
-	"\xa3A\xba\xa3\xec\xab\xe3#\x8f\xec\xda\xf6)\xc8s\x85" +
-	"bv\x00\xeb\xf7\x05;P9\x12\x94\x00\x94\x83\xc1v" +
-	"@\x0b_\xd4v\xd7\x0f\x0f\x9c\x01y&+f\x0e\xb0" +
-	"\xfe\x04Y~N\x96\xf5\xa7\x83\x92\xa0T\x97H\x00\xd6" +
-	"\xee\xeb\xc6\x85\x13#3\xbe\x1e\xc5M.\xb1\xd9\xff\xb7" +
-	"\x84\xb8\xcd{\xb2\xf1\xec\xbf\x9f\x9a~\xde\x1b\xde`\xc9" +
-	"Q2\xd8o\x1b\x1c\xad\x9c\xb5\xbdjG\xf3w\x9e\xd4" +
-	"\xf9BC\x94\xba\xcd\xe7\x9e\xbe\xf2\xc3\xbbo\xfc\xe8\x0d" +
-	"\xebZI9\x85%\x87(\xacK\xab\x9b?\xfbd\xde" +
-	"\x13W<G\xff\x1f\xbaHG\xf1\xa3\x97\x97\xfe\xef\xdb" +
-	"%W\xbdG\xabCv\xca\x96\xdbG\xad\xa3\xa5\xbbj" +
-	"\xdf94\xe25H\x86\xec\x8a\xf6\x86\xa2\xb0\xc0Jg" +
-	"M\x9e\xcb&3\xbe\x85zN3\xb5\x85\xbc+mj" +
-	"\xb9\xdaTR\xcf\xeaM+\xed\x8f\x04\xcfmM\xa7x" +
-	"\xad\x91\xdc\xca+;\xa2\xdc\xe8\xcd\x98\x86{\xd0\x7f\xf3" +
-	"\x83I]\xcf\xf4\xb5\xeb\x95\xf1d.\xd9c\x00\xa8!" +
-	"&\x02\x88\x08 \xafl\x03PW0T\xe3\x02\xca(" +
-	"D\x88\xa4\xbc\x96\xc05\x0c\xd5{\x04$L\x00\x90\xd7" +
-	"\x95\x03\xa8q\x86\xeaF\x01\xadT&\xcd\xb3\xe6\xea." +
-	"\x00\xc0 \x08\x18\x04\xb46\xf5vw\xf3\\\x1e\x0b\x80" +
-	"\x80\x01@\xa6\xe9X\xea\xd5\x01\x96\x02\xba\xc4\xd9x\xc4" +
-	"Y\xbb\xae\x8a\xe8U\x136E\xdb\xf5\xce>\x9d\xabU" +
-	"\x0es%\x88m\x00\x89\x002LD\x90\xc8\xa3M^" +
-	"\x91\xb1\x05 \x11\"\xbc\x8cp!`\x07\xa0L\xc3\x1a" +
-	"\x80D)\xe13\x09g\xbe\x08\xf5\x982\x037\x00$" +
-	"\xca\x08\xaf$\\\xf4GP\x04P\xfe\x83\x1d\x00\x89\xd9" +
-	"\x84\xcfG\x01\xd1\x17A\x1f\x80Rm\x9bW\x11\xdc@" +
-	"\xe6~)\x82~\x00\xa5\xce\xa6\xb3\x88\xf0e\x84K\x81" +
-	"\x08\x89T\xb9\xc3\xa6\xd3@x\x8c\xf0@0\x82\x01\x00" +
-	"e96\x01$\x1a\x09_Ax\xf0_\x11\x0c\x02(" +
-	"\xcd\xb8\x18 \xb1\x8c\xf0U8v\xaa\xfb\xb7\xf2\x9c\x91" +
-	"\xd6\xb2\xcew\xd8\xec\xd39\x86\x8b\xf9\x02\xc4\xb0\x9dh" +
-	"\x83\xe7\xcc5i`Y\xee\x94\xa4\x00\xb6j\x80\x99\x1b" +
-	"\xb0N\x0e\xeca\x13C `\x08\xd0\xea\xcei=k" +
-	"\xd2Y\xee\xa9g?a\xad\x9a{0jjd\xe1|" +
-	"V\x98\x9a\xe7\xe7D\x04\xaa\xe9<{W:\xc3+;" +
-	"H\xdc\xcc4\xc6Qh\xa1\xc6\xf2\xda\x16\x00u\x15C" +
-	"\xb5\x93\x0a\x8cy\x85\xaa-E\xd5\x8e\xa5\xc6\xfe\x94\x96" +
-	"5y\xd6\x8d\xf0\xc64N\x84\xf0\x03\xdc\\\xa7w%" +
-	"MnPSI\xc9\x1ec\"=%\x0bNSm\x01" +
-	"P;\x19\xaa\xf7\xdfzSYF:\x9b\xe2w\xf3\x1c" +
-	"\x84'\xcb>\x95\xd1\x0c\xdeb\xbb\xae\xec\xe0\x15\x93\x9e" +
-	"'v\xb5L4T\xd1\x8d}\x0a\x15!\xc0P\x8d\x08" +
-	"\xb7\x95`/\xc5x2LsK\x0d\xb8\xb7TS2" +
-	"\xab\x18\xaa\x0d\x9e\x0c\xd7\x11\xb8\x88\xa1\xbal\x02\xc9\x9c" +
-	"\x8cH\xed1\x8a\xe3\xf1q4ZW\x03\xa0\xceg\xa8" +
-	"6\x8eM'\xac'\xcd\xcdn\xb79<\xa4\x9b\xf3\xc8" +
-	"\x87\xd1j{l\xd5z\xb3\xa6]\x07)c\x8e\xaa\xc3" +
-	"\xe2b\x1d*Rd\xf5\x97\x90\xc5\xf1\xaej\xd7k\xed" +
-	"i\x8b<\x8e\xa8\x86l\xa5\xce\xaa\xa1\xa9\"Ok\x02" +
-	"@A\x9e\xd2\x04\x10\xcej\x9a\x1e\xcd\x8f\x8eh\x17\xcf" +
-	"p\x93\xdf\xdc\xb5\x13E\xde\xf5l\xe6\x03p\x1fft" +
-	"\x1eSy\xb8\x05\x04\xf9{\x09\x8b\xcf':O\xb0|" +
-	"v\x03\x08\xf2i\x09\x05w_Ag\xaf\x92?n\x03" +
-	"A~_B\xe6.R\xe8,\x0e\xf2\x11:\xf7\xba\x84" +
-	"\xc5\xbd\x0e\x9d\x95I\xdeG\xf7\x0dJ\xe8s\xb7\x08t" +
-	"\xd6By{\x0d\x08r\x9f\x84~w\x81Bg\x09\x93" +
-	"{6\x81 s\x09%w\x85@gE\x92\xd7\xef\x01" +
-	"A^'\xd1\xd0\xc9\xf2\x94\x19C\xab+m\xd8\x1f\xc0" +
-	"\xecOGN\x00\x10C\xcb\x19(\xc0\xb8\x11\xc3\xfeB" +
-	"\x87\xc50L\x8f~\x8c\x04\x94\xef\x07\x90\xbay.\xe6" +
-	"h\xb95\x83\x8e\x0a\xd0\x8ca\x1c';\xc4:\xb8\x11" +
-	"\xa6)\xe0\xd5\xf4\x1c\x00\xb5\x92\xa1\x1a+jz9u" +
-	"w#Cu\x85\x80\x92\xa6\x1b8\x150\xce\xf0\x86G" +
-	"~\xea\xdf\xcc\xd6[]s\xe2\x15\xc9\x7fB\xcf\x17\xaa" +
-	"\xe7nN\xb7\xd7\xa7\xe4\x85\xf5\x8cj\xd36{\x1bC" +
-	"\xb5L\xb8m\xae\x8e\xbeR\xa6[\xce\xc9\x84:\xd6P" +
-	"\xf7\xb2\x1c+\xcb\x93c\xe9\xbc\x9c\xb7~\xd1\x9f\x01\x00" +
-	"\x00\xff\xffwJ\xbf\xa1"
+const schema_d75b3b54eb3ed6a2 = "x\xda\xc4Vol\x14[\x15?\xe7\xde\xd9\xce\xeef" +
+	"\xf7m\xc7Y\xf2\x0a\xcf\xa6\xef\xcf\x1a\xdb\xf2h\xe8k" +
+	"\xcd\xeb\xeb\xe3\xb9\xdb\x16\x9e>\x02vo\xb7\x18AH" +
+	"Xvoeq\xbb3\xeeN\xab\xf5\x0f\xa5(\x09\x98" +
+	" \x7f\xa2F4\x8a6b\x8cF\x10\x10M\x88\x1a\xf1" +
+	"\x83\x01\x124\x10\xa3\xa1\xca\x07\xa3\x06\x0dJ$\x18C" +
+	"?\x941gvgv(\x0b\xb6_|\x1f\xe77\xe7" +
+	"\x9e\xfb;\xe7\xfc\xce\xb9g\xedf%\xa5tGO\x06" +
+	"\x81\x89|\xa0\xc9\xde\xff\xd1\xde\x1f\x1e\xfe\xf7\xa1}\xa0" +
+	"=\x87\x00\x8a\x0a\xd0\xf3\x1ee\x10A\xb1\xf7\xce\xee\xb9" +
+	"\xfb\xd2\x99\xf9\x19\x10\xcf!\x03\x08 \xfdkUF\x10" +
+	"P\xefP\xce\x00\xda\xe7\xe7^\xd8k~\xe0\xcd\x83\xd5" +
+	"\xb3U\x83+\xcaW\xc9\xe0\xa6\x92\x04\xb4O\x9d\x9f\xf9" +
+	"\xc5\xd1o)\xc7AD\xb1\xc9\x9e\xfd\xdd{\xef\x8c\xbe" +
+	"\xfe\xe1\xdfW-\xf5yeV\xc7\xc0\xb3\x00=\xa1\xc0" +
+	"\xab\x0c\xd0~\xf1k\x1dS;~4\xf3\x95G.\xdc" +
+	"\xaa\xee\"\x7fR\xbd\x0dh\x7f\xf6\xe4\x9a\x99\xebM\xbf" +
+	"=]\xb3p\xd8\x0e\x04\x8f\x93\x81\x08~\x1c\xd0>\xf6" +
+	"\xd2\xf4\xe1\xaf\x7f\xf3\xf2y2\xe05\x83\x0b\xc1=d" +
+	"p)H\x94/\x9f\xbex\xe3a\xff\x97\x7f\xea\x0bW" +
+	"\x86>I\xe1^\xb8\xba}\xd5\xea\xff\xfc\xeb\xe7t\xd4" +
+	"\xfd%B\xdb\xe8\xe8\x8e\x10\x05\xf3\x9d\xbb\xf2\xee\xc0w" +
+	"\x07\xaf\xfa/\xffL\xa8L\x06\x87Bt\xf9\x9ao," +
+	"\xdc\x1bJ\x8d_\xaby\xa8\xf2\xffg\xd5\xc5\xbcc\x91" +
+	"\xfd\xe2\x03\\\xb5\xf0\x8fk\xfe;\xb6\x86\xbfG\x06\x85" +
+	"0\xdd\xd1\xf2\x87\x8b\x0b\x9f:\xb2\xef\xd7\xa0\xc5Y=" +
+	"{tCxN\xffR\x98\xd2v,<\x0ch\xe3I" +
+	"\xe3h\xcf\xbd\x99\x1b\xa0Ey=\xb1\x80\xfa\xa9\xf0\x9c" +
+	"~\x96\x0c{~\x10~\x1f\xd3\xbb#*\x80}\xf4a" +
+	"\xe5O\x97\x16V\xfe\xf1\x11f+#\x0e\xf7wE\x88" +
+	"\xd9\xea\x83}7\xdf\xf1\xf9go\xf9\x83;\x16\xe9'" +
+	"\x83\x13\x8e\xc1\xb9D\xeb\x81\xf6C\x03\x7f\xf1%n!" +
+	"2B\x89\xdb=\xf7\x85\xfb\xb7\x7f\xf2\xfd\xbf\xf9\x83\xfa" +
+	"{d\xd6\x89:BA\xddyk\xe07\xbfZ\xfd\xb9" +
+	"\xfb\xbe\xa3\xad\xd12\x1d\xc5_~\xfb\xf5w\xff\xf9\xd5" +
+	"\x07\xfe\xa3\xa1\xa8\x93\xb0\x15Q:j\x9fk>\xd2\xf5" +
+	"\xe3\xd3\x0b~\x83\xd7\xa2N=7D\x93\xb0\xc6\x96\xf9" +
+	"\x82e\x94\xbbr\xa1\xacY2\xfb78_\x19Y\x9e" +
+	",\xe4dW%;)\x13#\xb22Q\xb4*\xe0\x1a" +
+	"6\xb0\xcb\x9afqj\xd8L\xa4\xb3\xe5\xec8VD" +
+	"\x84+\x00\x0a\x02h\x1b6\x02\x88\xf5\x1cE\x9a\xa1\x86" +
+	",N\x1c\xb4\xcd\x04n\xe2(>\xc4\x900\x06\xa0m" +
+	"Y\x05 \xd2\x1c\xc5v\x86v\xaeX\x90%\xeb\xad<" +
+	"\x00`\x08\x18\x86\x00\xed]\x13cc\xb2\\\xc5\x82\xc0" +
+	"0\x08\xc8\x0d\x13\x9b\xfdE\xc6f@/\xa0@\x03\xa2" +
+	"\xf9B%\x97-\xe7Gd\xce\x98\x94\xe5\xa9jl\xdc" +
+	"\xaa\x08\xc5c\x1c\x1d\x04\x10A\x8e\"\xcep:g\x94" +
+	",Y\xb20\x02\x0c#>\xdf\xe8\xfaV\xadaS(" +
+	"\xe8\xd7\x1d\xf6'\x87\xcd\xd1)S\x8av\xd7\xa9\x1e\xc2" +
+	"\x8d\x00\x99 r\xcc\xc4\x912\x81N&t\x0d\x07\x01" +
+	"2\x11\xc2[\x08gA'\x1b\xfa\x0a\xec\x04\xc84\x13" +
+	"\xfeN\xc2y N\xdd\xa8\xaf\xc4m\x00\x99\x16\xc2\x13" +
+	"\x84+MqT\x00\xf4\x17p\x04 \xf3<\xe1/#" +
+	"C\x0c\xc41\x00\xa0w8\xe6\xed\x04\xf7\x92y\x93\x1a" +
+	"\xc7&\x00\xbd\xdb\xa1\xb3\x96\xf0u\x84\xab\xc1\xb83P" +
+	"^s\xe8\xf4\x12\x9e\"<\x18\x8ac\x10@\x7f\x03\xfb" +
+	"\x012}\x84\xaf'<\x14\x8ec\x08@\x1f\xc0W\x00" +
+	"2\xeb\x08\x7f?6\xae\xdb\xf4\xa4,W\x0aF\xc9\xfd" +
+	"\x8eYS\xa6\xc4X=_\x80\x18\x03\xb4\x0b\xa5\x8a," +
+	"[\x9b\x0a\xc0K\xd2\xado\x0d\x1c2\x00\x8b\x8b\xb0Q" +
+	"\x09\xfc\x13\xf5\xba\x8c\x95\x8d\xf1M\x85\x92\xf4\x89c\x9a" +
+	"\xb0!\xc3;\x98\xb4\x0c\xb2p?\xdb,\xc3\xf7\xd3+" +
+	"\xac\xd2@4\x86)Ko\x16\x8a\xd5NP\x8bVE" +
+	"4{j\xc9\x92\x94wr\x14E\x86\xb5\xa2j\x05R" +
+	"P\x9e\xa30\xa9\xa2X\xd5\xf78\x81\xbb9\x0a\x8b\xca" +
+	"\xf9\xbcSN\xedc{\x00\x84\xc9Q|\x9a5\x14\xf8" +
+	"b\xfd-N\xa6\x137\x89\x19b$gD`\x88\xcb" +
+	"l\x01\xb7g\x83^L\x1d\x14S;G\xd1\xeb\xeb\xd9" +
+	"n\x02\xd7r\x14\xeb\x96\xde\x9fO\xcd\xeaG\xa4\xb5\xc5" +
+	"\xccg-YI\xa4\xb3\xb1rv|YcCc\xee" +
+	"\xdc\xa0\x14\x8er\x14;\x97\xc1\xabR(\xe5\xe4\x07e" +
+	"\x19b\x8fd\xf3itsE\xa3\"\x07\x1d_\x89\x91" +
+	"du$>\xf5\x80;\x13\xff\xd7\x88Y\\\xd2\xa5\x92" +
+	"H\xb7e\x9d\xa4\xfd\xbf\xeb\xe6u\x03\x09\x87?\x91\x80" +
+	"\xdb\x0c\xdd\x9d\x00\xe2e\x8e\xa2\xaf\xf1\xfd13k\xed" +
+	"~l\xbe6\x12n\x95\xe8\x90\xe3b\xc8\x98(Y\x94" +
+	"\xda\x18\xd5\xc1\x9f\xdaW\xea\xa9m\xcb\x91\xd5cA1" +
+	"\xcf\xf7\xb0\xd9E\x93\x9a\x9b2\x8d(\"\x8e\x9eZ;" +
+	"i\"i+\xfa\x01\x90i\xd1~\x80X\xc90\xccd" +
+	"u\xec$\xf3\xb2(-\xd9\xc0W\x8d'\xcf9\xbe\x12" +
+	"<\x00\xe0\xbd\xf8\xe8\xbe\xd2\xce\xbcgz\x00U\xac\xbf" +
+	"\xcc\xe8\xbe\xee\xda\xfc6`\xda=\x15\x99\xb7\x08\xa1\xbb" +
+	"\xd1i\x7f\xdd\x08L\xbb\xa5\"\xf764tw\x12\xed" +
+	":\x9d\xbb\xa2b}\xe3Dw\x17\xd3~6\x08L;" +
+	"\xabb\xc0[P\xd0]X\xb5S\x9d\xc0\xb4\x13*6" +
+	"y\x9b\x19\xba\xdb\x9dvx\x170\xed\x80\x8a\xaa\xb7\x9d" +
+	"\xa0\xbb{iS\xc7\x81i\x13*\x06\xbdu\x12\xddE" +
+	"V+\xec\x07\xa6eU\x9a\\%\x99\xb3Rh\xd3\xc0" +
+	"\xa1\x0f\xe0\xce\xa7\xab\x1f\x00H\xa1\xedN\x01\xe0\xb2\x92" +
+	"\xc2\xe9Z\xd3\xa40F\xabG\x8a\x14SU<\xa8c" +
+	"\xb2\x9cr\xd5:TDW\x05\xe8^A3\x0dkC" +
+	"\x0dR\x98\xc6%\x8f\x9f\x11\xd9\xe6\xb4\xb3_\xc9/\x02" +
+	"\x88\x04G\x91\xaa+\xf9\x0d\xea\xda>\x8eb=C\xd5" +
+	"0+\xf8\x0c`\x9a\xe3\xa2\x0d\xe4\x19xrK\xf3'" +
+	"\xadX\xc9\xf4\xdb\xd3\xcb\xb5\"\xb9o\xc02\xdb/\x9d" +
+	"-\xab\xc4\xda\xd7}D0\xc2Q\xb4\xb0\xe5\x93qu" +
+	"\x92\xb3\xbc\x8a,\x89|\xa3\x01\xeb\xe7\xd1(QK\xe4" +
+	"\xe1>LK\xf7\xfc\xdf\x00\x00\x00\xff\xffG\xe5\xac3"
 
 func RegisterSchema(reg *schemas.Registry) {
 	reg.Register(&schemas.Schema{
@@ -2088,8 +2316,10 @@ func RegisterSchema(reg *schemas.Registry) {
 		Nodes: []uint64{
 			0x8089f48db0346b82,
 			0x81f9af23ee6aa27e,
+			0x88464e707e21dab3,
 			0x9204a190c081b3a5,
 			0x9881b45d79299b22,
+			0xaed406d1812d9f83,
 			0xb3c8a09d8d7f2391,
 			0xbc963afed2baaec8,
 			0xbef0f62b1a5ccab5,

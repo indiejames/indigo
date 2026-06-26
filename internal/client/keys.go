@@ -35,6 +35,26 @@ var prefixCmds = []command{
 		},
 	},
 	{
+		key:       ']',
+		label:     "Next",
+		menuTitle: "Next",
+		children: []command{
+			{key: 'b', label: "Next buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
+				return m, func() tea.Msg { return NextBufferMsg{} }
+			}},
+		},
+	},
+	{
+		key:       '[',
+		label:     "Prev",
+		menuTitle: "Prev",
+		children: []command{
+			{key: 'b', label: "Previous buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
+				return m, func() tea.Msg { return PrevBufferMsg{} }
+			}},
+		},
+	},
+	{
 		key:       'm',
 		label:     "Match",
 		menuTitle: "Match",
@@ -170,16 +190,10 @@ func (m Model) handleWarnQuit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "s", "ctrl+s":
 		m.warnQuit = false
-		return m, func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			m.rpc.Save(ctx, m.bufID)
-			return saveAndQuitMsg{}
-		}
+		return m, m.doSaveAndClose()
 	case "q", "Q":
 		m.warnQuit = false
-		m.quitting = true
-		return m, tea.Sequence(m.doDisconnect(), tea.Quit)
+		return m, m.doCloseBuffer()
 	case "esc", "n", "N":
 		m.warnQuit = false
 	}
@@ -217,9 +231,10 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.fetchClientCount()
 		}
 		if !m.checkingQuit {
-			m.quitting = true
-			return m, tea.Sequence(m.doDisconnect(), tea.Quit)
+			return m, m.doCloseBuffer()
 		}
+	case "ctrl+p":
+		return m, func() tea.Msg { return OpenPickerMsg{} }
 
 	case ":":
 		m.mode = ModeCommand
@@ -446,8 +461,7 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "ctrl+c":
-		m.quitting = true
-		return m, tea.Sequence(m.doDisconnect(), tea.Quit)
+		return m, m.doCloseBuffer()
 
 	case "ctrl+s":
 		return m, m.doSave()
@@ -667,21 +681,22 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		return m, m.doSave()
 	case "q", "quit":
 		if m.buf.Dirty() {
-			m.status = "E: unsaved changes (use :quit! to discard)"
+			m.status = "E: unsaved changes (use :q! to discard)"
 			return m, nil
 		}
-		m.quitting = true
-		return m, tea.Sequence(m.doDisconnect(), tea.Quit)
+		return m, m.doCloseBuffer()
 	case "q!", "quit!":
-		m.quitting = true
-		return m, tea.Sequence(m.doDisconnect(), tea.Quit)
-	case "wq", "wqa", "x", "write-quit":
-		return m, func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			m.rpc.Save(ctx, m.bufID)
-			return saveAndQuitMsg{}
-		}
+		return m, m.doCloseBuffer()
+	case "wq", "x", "write-quit":
+		return m, m.doSaveAndClose()
+	case "qa", "quitall":
+		return m, func() tea.Msg { return QuitAllMsg{} }
+	case "qa!", "quitall!":
+		return m, func() tea.Msg { return QuitAllMsg{Force: true} }
+	case "wqa":
+		return m, func() tea.Msg { return QuitAllMsg{SaveAll: true} }
+	case "e", "edit":
+		return m, func() tea.Msg { return OpenPickerMsg{} }
 	case "metrics":
 		if m.metrics != nil {
 			m.metrics.show = !m.metrics.show

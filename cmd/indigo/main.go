@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/indiejames/indigo/internal/app"
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/server"
@@ -18,7 +19,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: indigo [+line] <file>")
+		fmt.Fprintln(os.Stderr, "usage: indigo [+line] <file|dir>")
 		os.Exit(1)
 	}
 
@@ -32,29 +33,19 @@ func main() {
 		}
 	}
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: indigo [+line] <file>")
+		fmt.Fprintln(os.Stderr, "usage: indigo [+line] <file|dir>")
 		os.Exit(1)
 	}
-	filePath := args[0]
+	target := args[0]
 
-	// Resolve absolute path so server can identify the working directory.
-	absPath, err := filepath.Abs(filePath)
+	absTarget, err := filepath.Abs(target)
 	if err != nil {
 		fatalf("resolve path: %v", err)
 	}
-	workDir := gitRoot(absPath)
-	if workDir == "" {
-		workDir = filepath.Dir(absPath)
-	}
-	sockPath := server.SocketPath(workDir)
 
-	if !server.IsRunning(sockPath) {
-		startServer(workDir)
-	}
-
-	// Give the server a moment to start if we just spawned it.
-	if err := waitForServer(sockPath, 3*time.Second); err != nil {
-		fatalf("server did not start: %v", err)
+	info, err := os.Stat(absTarget)
+	if err != nil {
+		fatalf("stat %s: %v", absTarget, err)
 	}
 
 	cfg, err := config.Load()
@@ -62,44 +53,63 @@ func main() {
 		fatalf("load config: %v", err)
 	}
 
+	// Determine workspace root.
+	var workDir string
+	if info.IsDir() {
+		workDir = absTarget
+	} else {
+		workDir = gitRoot(absTarget)
+		if workDir == "" {
+			workDir = filepath.Dir(absTarget)
+		}
+	}
+
+	sockPath := server.SocketPath(workDir)
+	if !server.IsRunning(sockPath) {
+		startServer(workDir)
+	}
+	if err := waitForServer(sockPath, 3*time.Second); err != nil {
+		fatalf("server did not start: %v", err)
+	}
+
 	rpc, err := client.Dial(sockPath)
 	if err != nil {
 		fatalf("connect to server: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, absPath)
-	cancel()
-	if err != nil {
-		fatalf("open file: %v", err)
+	var a *app.App
+	if info.IsDir() {
+		// Start with the file picker open.
+		a = app.NewWithPicker(rpc, cfg, absTarget)
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, absTarget)
+		cancel()
+		if err != nil {
+			fatalf("open file: %v", err)
+		}
+		a = app.New(rpc, bufID, content, version, absTarget, cfg, fromRecovery, workDir, startLine)
 	}
 
-	m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
-	if startLine > 0 {
-		m = m.AtLine(startLine)
-	}
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fatalf("run: %v", err)
 	}
 }
 
 func startServer(workDir string) {
-	// Fork a background server process.
-	// We re-exec ourselves with the hidden --server flag.
 	exe, err := os.Executable()
 	if err != nil {
 		fatalf("locate executable: %v", err)
 	}
-
 	proc, err := os.StartProcess(exe, []string{exe, "--server", workDir}, &os.ProcAttr{
 		Dir:   workDir,
-		Files: []*os.File{nil, nil, nil}, // detach stdio
+		Files: []*os.File{nil, nil, nil},
 	})
 	if err != nil {
 		fatalf("start server: %v", err)
 	}
-	proc.Release() // don't wait — server runs independently
+	proc.Release()
 }
 
 func waitForServer(sockPath string, timeout time.Duration) error {
@@ -137,7 +147,6 @@ func fatalf(format string, args ...any) {
 }
 
 func init() {
-	// If invoked as `indigo --server <dir>`, run in server mode.
 	if len(os.Args) == 3 && os.Args[1] == "--server" {
 		runServer(os.Args[2])
 		os.Exit(0)

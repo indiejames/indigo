@@ -36,6 +36,7 @@ type Config struct {
 	RecoveryMaxBytes     int64            `toml:"recovery_max_bytes"`
 	RecoveryIntervalSecs int              `toml:"recovery_interval_secs"`
 	LanguageServers      []LanguageServer `toml:"language_server"`
+	HideTabs             bool             `toml:"hide_tabs"`
 }
 
 func defaults() *Config {

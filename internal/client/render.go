@@ -6,6 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"path/filepath"
+
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -68,12 +71,35 @@ func (m Model) displayLineCount() int {
 	return lc
 }
 
-// gutterWidth returns the number of columns reserved for line numbers (0 when disabled).
+// gutterWidth returns the number of columns reserved for line numbers (and diag marker).
 func (m Model) gutterWidth() int {
 	if m.cfg == nil || !m.cfg.LineNumbers {
+		if len(m.diagnostics) > 0 {
+			return 2 // just the diag marker column
+		}
 		return 0
 	}
-	return len(fmt.Sprint(m.displayLineCount())) + 1
+	w := len(fmt.Sprint(m.displayLineCount())) + 1
+	if len(m.diagnostics) > 0 {
+		w += 2 // space + marker
+	}
+	return w
+}
+
+// diagMarker returns a styled "● " for the most severe diagnostic on line, or "  ".
+func (m Model) diagMarker(lineNum int) string {
+	diags := m.diagsOnLine(lineNum)
+	if len(diags) == 0 {
+		return "  "
+	}
+	switch diags[0].Severity {
+	case 1:
+		return diagErrorStyle.Render("●") + " "
+	case 2:
+		return diagWarnStyle.Render("●") + " "
+	default:
+		return diagInfoStyle.Render("●") + " "
+	}
 }
 
 // selectionCols returns the inclusive [selA, selB] column range selected on
@@ -230,11 +256,19 @@ func (m Model) renderLine(i int) string {
 	}
 
 	if gutterW > 0 {
-		numStr := fmt.Sprintf("%*d ", gutterW-1, lineNum+1)
+		hasDiags := len(m.diagnostics) > 0
+		numW := gutterW
+		if hasDiags {
+			numW -= 2
+		}
+		numStr := fmt.Sprintf("%*d ", numW-1, lineNum+1)
 		if lineNum == m.cursor.Line {
 			sb.WriteString(gutterCurStyle.Render(numStr))
 		} else {
 			sb.WriteString(gutterStyle.Render(numStr))
+		}
+		if hasDiags {
+			sb.WriteString(m.diagMarker(lineNum))
 		}
 	}
 
@@ -393,6 +427,241 @@ func overlayRight(mainLine, popupLine string, popCol int) string {
 	return truncated + popupLine
 }
 
+// glamourCache caches the renderer so View() doesn't recreate it every frame.
+var glamourCache struct {
+	r     *glamour.TermRenderer
+	width int
+}
+
+// renderHoverPopup renders LSP hover content as markdown inside a rounded border.
+func renderHoverPopup(content string, maxW int) []string {
+	// Leave room for the lipgloss border (2) and 1-char padding each side.
+	renderW := min(76, maxW-4)
+	if renderW < 20 {
+		renderW = 20
+	}
+
+	// Re-use the cached renderer unless the wrap width changed (terminal resize).
+	// Use WithStandardStyle("dark") — WithAutoStyle() sends ANSI terminal queries
+	// that corrupt bubbletea's input stream.
+	if glamourCache.r == nil || glamourCache.width != renderW {
+		r, err := glamour.NewTermRenderer(
+			glamour.WithStandardStyle("dark"),
+			glamour.WithWordWrap(renderW),
+		)
+		if err == nil {
+			glamourCache.r = r
+			glamourCache.width = renderW
+		}
+	}
+
+	body := content
+	if glamourCache.r != nil {
+		if rendered, err := glamourCache.r.Render(content); err == nil {
+			if trimmed := strings.TrimSpace(rendered); trimmed != "" {
+				body = trimmed
+			}
+		}
+	}
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#4488CC"))
+
+	lines := strings.Split(boxStyle.Render(body), "\n")
+	// Trim any trailing empty lines that lipgloss may append.
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+// renderSigHelpBar builds a single-line signature-help display.
+func renderSigHelpBar(sh *ClientSigHelp, width int) string {
+	if sh == nil || len(sh.Signatures) == 0 {
+		return ""
+	}
+	sig := sh.Signatures[sh.ActiveSignature]
+	activeParam := sh.ActiveParameter
+
+	// Build label with active parameter highlighted.
+	label := sig.Label
+	if activeParam < len(sig.Params) {
+		paramLabel := sig.Params[activeParam].Label
+		idx := strings.Index(label, paramLabel)
+		if idx >= 0 {
+			before := label[:idx]
+			after := label[idx+len(paramLabel):]
+			label = before + popupKeyStyle.Render(paramLabel) + popupTextStyle.Render(after)
+			label = popupTextStyle.Render(before) + popupKeyStyle.Render(paramLabel) + popupTextStyle.Render(after)
+		} else {
+			label = popupTextStyle.Render(label)
+		}
+	} else {
+		label = popupTextStyle.Render(label)
+	}
+
+	if len(sh.Signatures) > 1 {
+		counter := fmt.Sprintf(" [%d/%d]", sh.ActiveSignature+1, len(sh.Signatures))
+		label += popupBorderStyle.Render(counter)
+	}
+	w := lipgloss.Width(label)
+	if w < width {
+		label += popupTextStyle.Render(strings.Repeat(" ", width-w))
+	}
+	return label
+}
+
+// kindAbbrev returns a short 3-char label for a completion kind.
+func kindAbbrev(k uint8) string {
+	switch k {
+	case 2:
+		return "mth"
+	case 3:
+		return "fn "
+	case 4:
+		return "new"
+	case 5:
+		return "fld"
+	case 6:
+		return "var"
+	case 7:
+		return "cls"
+	case 8:
+		return "ifc"
+	case 9:
+		return "mod"
+	case 10:
+		return "prp"
+	case 13:
+		return "enm"
+	case 14:
+		return "kwd"
+	case 15:
+		return "snp"
+	case 21:
+		return "cst"
+	case 22:
+		return "str"
+	case 25:
+		return "typ"
+	default:
+		return "   "
+	}
+}
+
+// renderCompletionPopup builds styled completion list lines.
+// Layout per row (between │ borders, width = innerW):
+//
+//	" " + kind(3) + " " + label + "  " + detail + trailing_spaces
+//
+// innerW is computed from the widest label and detail across all items.
+func renderCompletionPopup(items []ClientCompletion, selected, maxW int) []string {
+	const maxVisible = 10
+	const kindW = 3
+	const maxLabelW = 30
+	const maxDetailW = 25
+
+	// Measure natural widths.
+	labelW, detailW := 0, 0
+	for _, it := range items {
+		l := it.InsertText
+		if l == "" {
+			l = it.Label
+		}
+		if w := len([]rune(l)); w > labelW {
+			labelW = w
+		}
+		if w := len([]rune(it.Detail)); w > detailW {
+			detailW = w
+		}
+	}
+	labelW = min(labelW, maxLabelW)
+	detailW = min(detailW, maxDetailW)
+
+	// innerW = 1(lead) + kindW + 1(sep) + labelW + 2(sep) + detailW + 1(trail)
+	// If no items have detail, omit the detail columns.
+	hasDetail := detailW > 0
+	innerW := 1 + kindW + 1 + labelW + 1
+	if hasDetail {
+		innerW += 1 + detailW // extra sep + detail
+	}
+	// Cap to screen: total box = innerW+2 must fit in maxW.
+	if innerW+2 > maxW {
+		innerW = max(20, maxW-2)
+		// Trim detail first, then label.
+		available := innerW - 1 - kindW - 1 - 1 // subtract fixed cols
+		if hasDetail {
+			detailW = min(detailW, available/3)
+			labelW = available - detailW - 1 // 1 for detail sep
+			if labelW < 5 {
+				labelW = 5
+				detailW = 0
+				hasDetail = false
+			}
+		} else {
+			labelW = available
+		}
+		innerW = 1 + kindW + 1 + labelW + 1
+		if hasDetail {
+			innerW += 1 + detailW
+		}
+	}
+
+	// Visible window into the list.
+	start := 0
+	if selected >= maxVisible {
+		start = selected - maxVisible + 1
+	}
+	end := min(start+maxVisible, len(items))
+
+	title := "Completions"
+	titleR := []rune(title)
+	dashCount := max(0, innerW-len(titleR))
+	top := popupBorderStyle.Render("╭" + string(titleR) + strings.Repeat("─", dashCount) + "╮")
+	lines := []string{top}
+
+	for i := start; i < end; i++ {
+		it := items[i]
+		label := it.InsertText
+		if label == "" {
+			label = it.Label
+		}
+		lr := []rune(label)
+		if len(lr) > labelW {
+			lr = lr[:labelW]
+		}
+		kind := kindAbbrev(it.Kind)
+
+		detailPart := ""
+		if hasDetail {
+			dr := []rune(it.Detail)
+			if len(dr) > detailW {
+				dr = dr[:detailW]
+			}
+			detailPart = "  " + string(dr)
+		}
+
+		// trailing spaces to fill innerW exactly.
+		// filled = 1(lead) + kindW + 1(sep) + len(lr) + len(detailPart) + 1(trail minimum)
+		filled := 1 + kindW + 1 + len(lr) + len([]rune(detailPart))
+		trail := max(1, innerW-filled)
+
+		if i == selected {
+			content := " " + kind + " " + string(lr) + detailPart + strings.Repeat(" ", trail)
+			lines = append(lines, popupBorderStyle.Render("│")+selectionStyle.Render(content)+popupBorderStyle.Render("│"))
+		} else {
+			lines = append(lines,
+				popupBorderStyle.Render("│")+
+					popupKeyStyle.Render(" "+kind+" ")+
+					popupTextStyle.Render(string(lr)+detailPart+strings.Repeat(" ", trail))+
+					popupBorderStyle.Render("│"))
+		}
+	}
+	lines = append(lines, popupBorderStyle.Render("╰"+strings.Repeat("─", innerW)+"╯"))
+	return lines
+}
+
 // ---- View ----
 
 func (m Model) View() string {
@@ -456,6 +725,69 @@ func (m Model) View() string {
 		}
 	}
 
+	// Overlay hover popup (centered).
+	if m.hoverContent != nil {
+		popup := renderHoverPopup(*m.hoverContent, m.width)
+		popH := len(popup)
+		popW := lipgloss.Width(popup[0])
+		popCol := (m.width - popW) / 2
+		if popCol < 0 {
+			popCol = 0
+		}
+		startRow := max(0, vis/2-popH/2)
+		for pi, popLine := range popup {
+			if row := startRow + pi; row < vis {
+				lines[row] = overlayRight(lines[row], popLine, popCol)
+			}
+		}
+	}
+
+	// Overlay signature help above the status bar.
+	if m.sigHelp != nil {
+		bar := renderSigHelpBar(m.sigHelp, m.width)
+		if bar != "" && vis > 0 {
+			lines[vis-1] = bar
+		}
+	}
+
+	// Overlay completion popup near the cursor.
+	if m.completionOn && len(m.completions) > 0 {
+		popup := renderCompletionPopup(m.completions, m.completionIdx, m.width)
+		popH := len(popup)
+		popW := lipgloss.Width(popup[0])
+
+		// Horizontal: align left edge with the cursor's screen column.
+		gutterW := m.gutterWidth()
+		cursorVisCol := m.cursor.Col
+		if line := m.buf.Line(m.cursor.Line); len(line) > 0 {
+			_, colMap := expandTabsRemap([]rune(line))
+			if m.cursor.Col < len(colMap) {
+				cursorVisCol = colMap[m.cursor.Col]
+			}
+		}
+		popCol := gutterW + cursorVisCol
+		// Shift left if the popup would overflow the right edge.
+		if popCol+popW > m.width {
+			popCol = max(0, m.width-popW)
+		}
+
+		// Vertical: prefer below the cursor, fall back to above.
+		cursorScreenRow := m.cursor.Line - m.topLine
+		startRow := cursorScreenRow + 1
+		if startRow+popH > vis {
+			startRow = cursorScreenRow - popH
+		}
+		if startRow < 0 {
+			startRow = 0
+		}
+
+		for pi, popLine := range popup {
+			if row := startRow + pi; row >= 0 && row < vis {
+				lines[row] = overlayRight(lines[row], popLine, popCol)
+			}
+		}
+	}
+
 	// Overlay metrics panel in the top-right corner.
 	if m.metrics != nil && m.metrics.show {
 		box := renderMetricsBox(m.metrics)
@@ -477,6 +809,88 @@ func (m Model) View() string {
 	}
 	sb.WriteString(m.renderStatusBar())
 	return sb.String()
+}
+
+// fileTypeName maps a file extension to a human-readable language name.
+func fileTypeName(path string) string {
+	switch strings.TrimPrefix(filepath.Ext(path), ".") {
+	case "go":
+		return "Go"
+	case "rs":
+		return "Rust"
+	case "ts":
+		return "TypeScript"
+	case "tsx":
+		return "TSX"
+	case "js":
+		return "JavaScript"
+	case "jsx":
+		return "JSX"
+	case "py":
+		return "Python"
+	case "c":
+		return "C"
+	case "cpp", "cc", "cxx":
+		return "C++"
+	case "h":
+		return "C Header"
+	case "hpp":
+		return "C++ Header"
+	case "java":
+		return "Java"
+	case "rb":
+		return "Ruby"
+	case "lua":
+		return "Lua"
+	case "zig":
+		return "Zig"
+	case "md":
+		return "Markdown"
+	case "toml":
+		return "TOML"
+	case "json":
+		return "JSON"
+	case "yaml", "yml":
+		return "YAML"
+	case "sh", "bash":
+		return "Shell"
+	case "html", "htm":
+		return "HTML"
+	case "css":
+		return "CSS"
+	case "sql":
+		return "SQL"
+	case "proto":
+		return "Protobuf"
+	case "capnp":
+		return "Cap'n Proto"
+	default:
+		ext := strings.TrimPrefix(filepath.Ext(path), ".")
+		if ext != "" {
+			return ext
+		}
+		return "Plain Text"
+	}
+}
+
+// lspServerName returns the command name of the configured LSP server for the
+// current file, or "" if none is configured.
+func (m Model) lspServerName() string {
+	if m.cfg == nil {
+		return ""
+	}
+	ext := strings.TrimPrefix(filepath.Ext(m.filePath), ".")
+	if ext == "" {
+		return ""
+	}
+	for _, ls := range m.cfg.EffectiveLanguageServers() {
+		for _, e := range ls.Extensions {
+			if e == ext {
+				return ls.Command
+			}
+		}
+	}
+	return ""
 }
 
 func (m Model) renderStatusBar() string {
@@ -504,8 +918,23 @@ func (m Model) renderStatusBar() string {
 	left := ms.Render("  " + modeLabel + "  ")
 	leftW := lipgloss.Width(left)
 
+	// Right side: [file type] [lsp] [line:col]
 	posStr := fmt.Sprintf("  %d:%d  ", m.cursor.Line+1, m.cursor.Col+1)
 	right := barStyle.Render(posStr)
+
+	ftName := fileTypeName(m.filePath)
+	right = fileTypeStyle.Render("  "+ftName+"  ") + right
+
+	if lsp := m.lspServerName(); lsp != "" {
+		var lspSeg string
+		if m.lspActive {
+			lspSeg = lspActiveStyle.Render("  " + lsp + " ●  ")
+		} else {
+			lspSeg = lspIdleStyle.Render("  " + lsp + "  ")
+		}
+		right = lspSeg + right
+	}
+
 	rightW := lipgloss.Width(right)
 
 	var centerContent string
@@ -520,9 +949,19 @@ func (m Model) renderStatusBar() string {
 			centerContent = m.filePath + " [+]   " + m.status
 		}
 	default:
-		centerContent = m.filePath
-		if m.buf.Dirty() {
-			centerContent += " [+]"
+		// Show most-severe diagnostic on the cursor line, if any.
+		if diags := m.diagsOnLine(m.cursor.Line); len(diags) > 0 {
+			d := diags[0]
+			src := d.Source
+			if src != "" {
+				src = "[" + src + "] "
+			}
+			centerContent = src + d.Message
+		} else {
+			centerContent = m.filePath
+			if m.buf.Dirty() {
+				centerContent += " [+]"
+			}
 		}
 	}
 

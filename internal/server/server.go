@@ -16,6 +16,7 @@ import (
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/lsp"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
 
@@ -53,16 +54,26 @@ type editorService struct {
 	clients map[uint64]struct{}
 	nextClt uint64
 	recDir  string
+	lspMgr  *lsp.Manager
 
 	// shutdown is called when the last client disconnects cleanly.
 	shutdown func()
 }
 
-func newEditorService(recDir string, shutdown func()) *editorService {
+func newEditorService(recDir, workspaceDir string, lspServers []config.LanguageServer, shutdown func()) *editorService {
+	servers := make([]lsp.ServerConfig, len(lspServers))
+	for i, ls := range lspServers {
+		servers[i] = lsp.ServerConfig{
+			Extensions: ls.Extensions,
+			Command:    ls.Command,
+			Args:       ls.Args,
+		}
+	}
 	return &editorService{
 		buffers:  make(map[uint32]*bufferEntry),
 		clients:  make(map[uint64]struct{}),
 		recDir:   recDir,
+		lspMgr:   lsp.NewManager(workspaceDir, servers),
 		shutdown: shutdown,
 	}
 }
@@ -172,6 +183,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	}
 	res.SetVersion(ver)
 	res.SetFromRecovery(fromRecovery)
+	go s.lspMgr.DidOpen(path, content)
 	return nil
 }
 
@@ -328,6 +340,11 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 		return err
 	}
 	res.SetVersion(newVersion)
+
+	path := entry.buf.Path()
+	content := entry.buf.Content()
+	go s.lspMgr.DidChange(path, content)
+
 	return nil
 }
 
@@ -342,11 +359,13 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 
-	if err := os.WriteFile(entry.buf.Path(), []byte(entry.buf.Content()), 0644); err != nil {
+	path := entry.buf.Path()
+	if err := os.WriteFile(path, []byte(entry.buf.Content()), 0644); err != nil {
 		return err
 	}
 	entry.buf.SetClean()
-	os.Remove(recoveryFilePath(s.recDir, entry.buf.Path()))
+	os.Remove(recoveryFilePath(s.recDir, path))
+	go s.lspMgr.DidSave(path)
 
 	_, err := call.AllocResults()
 	return err
@@ -387,10 +406,204 @@ func (s *editorService) CloseBuffer(_ context.Context, call proto.EditorService_
 
 	if removedPath != "" {
 		os.Remove(recoveryFilePath(s.recDir, removedPath))
+		go s.lspMgr.DidClose(removedPath)
 	}
 
 	_, err := call.AllocResults()
 	return err
+}
+
+func (s *editorService) GetDiagnostics(_ context.Context, call proto.EditorService_getDiagnostics) error {
+	bufID := call.Args().BufId()
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+	s.mu.Unlock()
+
+	diags := s.lspMgr.GetDiagnostics(path)
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	if len(diags) == 0 {
+		return nil
+	}
+	list, err := res.NewItems(int32(len(diags)))
+	if err != nil {
+		return err
+	}
+	for i, d := range diags {
+		item := list.At(i)
+		item.SetLine(uint32(d.Range.Start.Line))
+		item.SetCol(uint32(d.Range.Start.Character))
+		item.SetEndLine(uint32(d.Range.End.Line))
+		item.SetEndCol(uint32(d.Range.End.Character))
+		item.SetSeverity(uint8(d.Severity))
+		item.SetMessage_(d.Message)   //nolint:errcheck
+		item.SetSource(d.Source)      //nolint:errcheck
+	}
+	return nil
+}
+
+func (s *editorService) Hover(_ context.Context, call proto.EditorService_hover) error {
+	args := call.Args()
+	bufID := args.BufId()
+	line := int(args.Line())
+	col := int(args.Col())
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+	s.mu.Unlock()
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	result, err := res.NewResult()
+	if err != nil {
+		return err
+	}
+	h, err := s.lspMgr.Hover(path, line, col)
+	if err != nil || h == nil {
+		return nil
+	}
+	result.SetFound(true)
+	result.SetContents(h.Text()) //nolint:errcheck
+	return nil
+}
+
+func (s *editorService) SignatureHelp(_ context.Context, call proto.EditorService_signatureHelp) error {
+	args := call.Args()
+	bufID := args.BufId()
+	line := int(args.Line())
+	col := int(args.Col())
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+	s.mu.Unlock()
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	result, err := res.NewResult()
+	if err != nil {
+		return err
+	}
+	sh, err := s.lspMgr.SignatureHelp(path, line, col)
+	if err != nil || sh == nil || len(sh.Signatures) == 0 {
+		return nil
+	}
+	result.SetFound(true)
+	result.SetActiveSignature(uint32(sh.ActiveSignature))
+	result.SetActiveParameter(uint32(sh.ActiveParameter))
+	sigs, err := result.NewSignatures(int32(len(sh.Signatures)))
+	if err != nil {
+		return nil
+	}
+	for i, sig := range sh.Signatures {
+		s := sigs.At(i)
+		s.SetLabel(sig.Label)                 //nolint:errcheck
+		s.SetDocumentation(sig.Documentation) //nolint:errcheck
+		if len(sig.Parameters) > 0 {
+			params, err := s.NewParameters(int32(len(sig.Parameters)))
+			if err != nil {
+				continue
+			}
+			for j, p := range sig.Parameters {
+				params.At(j).SetLabel(p.Label) //nolint:errcheck
+			}
+		}
+	}
+	return nil
+}
+
+func (s *editorService) Complete(_ context.Context, call proto.EditorService_complete) error {
+	args := call.Args()
+	bufID := args.BufId()
+	line := int(args.Line())
+	col := int(args.Col())
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+	s.mu.Unlock()
+
+	items, err := s.lspMgr.Complete(path, line, col)
+	res, rerr := call.AllocResults()
+	if rerr != nil {
+		return rerr
+	}
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+	list, err := res.NewItems(int32(len(items)))
+	if err != nil {
+		return err
+	}
+	for i, it := range items {
+		ci := list.At(i)
+		ci.SetLabel(it.Label)           //nolint:errcheck
+		ci.SetKind(uint8(it.Kind))
+		ci.SetDetail(it.Detail)         //nolint:errcheck
+		ci.SetInsertText(it.InsertText) //nolint:errcheck
+	}
+	return nil
+}
+
+func (s *editorService) Definition(_ context.Context, call proto.EditorService_definition) error {
+	args := call.Args()
+	bufID := args.BufId()
+	line := int(args.Line())
+	col := int(args.Col())
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+	s.mu.Unlock()
+
+	locs, err := s.lspMgr.Definition(path, line, col)
+	res, rerr := call.AllocResults()
+	if rerr != nil {
+		return rerr
+	}
+	if err != nil || len(locs) == 0 {
+		return nil
+	}
+	loc := locs[0]
+	result, err := res.NewResult()
+	if err != nil {
+		return err
+	}
+	result.SetFound(true)
+	result.SetPath(lsp.URIToPath(loc.URI)) //nolint:errcheck
+	result.SetLine(uint32(loc.Range.Start.Line))
+	result.SetCol(uint32(loc.Range.Start.Character))
+	return nil
 }
 
 // DirtyBuffers returns paths of unsaved buffers.
@@ -437,16 +650,17 @@ func New(dir string) (*Server, error) {
 		return nil, fmt.Errorf("recovery dir: %w", err)
 	}
 
+	cfg, _ := config.Load()
+
 	srv := &Server{
 		socketPath: sockPath,
 		listener:   ln,
 		done:       make(chan struct{}),
 	}
-	srv.svc = newEditorService(recDir, func() {
+	srv.svc = newEditorService(recDir, dir, cfg.EffectiveLanguageServers(), func() {
 		close(srv.done)
 	})
 
-	cfg, _ := config.Load()
 	interval := time.Duration(cfg.RecoveryIntervalSecs) * time.Second
 	srv.startFlushLoop(interval, cfg.RecoveryMaxBytes)
 	go srv.serve()
@@ -532,6 +746,7 @@ func (s *Server) Wait() {
 	<-s.done
 	s.listener.Close()
 	s.deleteAllRecoveryFiles()
+	s.svc.lspMgr.Shutdown()
 	os.Remove(s.socketPath)
 }
 

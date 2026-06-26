@@ -14,6 +14,58 @@ interface EditorService {
   closeBuffer     @6 (clientId :UInt64, bufferId :UInt32)                      -> ();
   bufferClientCount @7 (bufferId :UInt32)                                      -> (count :UInt32);
   discardRecovery @8 (clientId :UInt64, bufferId :UInt32)                      -> (content :Text);
+  getDiagnostics  @9  (bufId :UInt32)                                          -> (items :List(LspDiagnostic));
+  hover           @10 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :HoverResult);
+  signatureHelp   @11 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :SignatureHelp);
+  complete        @12 (bufId :UInt32, line :UInt32, col :UInt32)               -> (items :List(CompletionItem));
+  definition      @13 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :DefinitionResult);
+}
+
+struct DefinitionResult {
+  found @0 :Bool;
+  path  @1 :Text;
+  line  @2 :UInt32;
+  col   @3 :UInt32;
+}
+
+struct LspDiagnostic {
+  line     @0 :UInt32;
+  col      @1 :UInt32;
+  endLine  @2 :UInt32;
+  endCol   @3 :UInt32;
+  severity @4 :UInt8;
+  message  @5 :Text;
+  source   @6 :Text;
+}
+
+struct HoverResult {
+  contents @0 :Text;
+  found    @1 :Bool;
+}
+
+struct SignatureParam {
+  label @0 :Text;
+}
+
+struct SignatureInfo {
+  label           @0 :Text;
+  documentation   @1 :Text;
+  parameters      @2 :List(SignatureParam);
+  activeParameter @3 :UInt32;
+}
+
+struct SignatureHelp {
+  signatures      @0 :List(SignatureInfo);
+  activeSignature @1 :UInt32;
+  activeParameter @2 :UInt32;
+  found           @3 :Bool;
+}
+
+struct CompletionItem {
+  label      @0 :Text;
+  kind       @1 :UInt8;
+  detail     @2 :Text;
+  insertText @3 :Text;
 }
 
 struct EditOp {

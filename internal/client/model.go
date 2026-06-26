@@ -1,6 +1,10 @@
 package client
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -42,6 +46,27 @@ type saveAndQuitMsg struct{}
 
 // discardRecoveryMsg carries original file content after the server discards the recovery file.
 type discardRecoveryMsg struct{ content string }
+
+// diagnosticsMsg carries fresh diagnostics from the server.
+type diagnosticsMsg struct{ diags []ClientDiag }
+
+// hoverMsg carries a hover result.
+type hoverMsg struct{ result ClientHoverResult }
+
+// sigHelpMsg carries a signature-help result (nil Signatures = dismiss).
+type sigHelpMsg struct{ help *ClientSigHelp }
+
+// completionsMsg carries fresh completion items.
+type completionsMsg struct{ items []ClientCompletion }
+
+// triggerCompletionMsg fires after the auto-trigger debounce delay.
+type triggerCompletionMsg struct{}
+
+// definitionMsg carries the result of a go-to-definition request.
+type definitionMsg struct {
+	loc   ClientLocation
+	found bool
+}
 
 // highlightMsg carries freshly computed syntax-highlight spans and parse time.
 type highlightMsg struct {
@@ -97,6 +122,23 @@ var (
 
 	gutterCurStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#AAAAAA"))
+
+	diagErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555"))
+	diagWarnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFDD44"))
+	diagInfoStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#88AAFF"))
+
+	// Status bar right-side indicators.
+	fileTypeStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#065A96")).
+			Foreground(lipgloss.Color("#CCDDFF"))
+
+	lspIdleStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#065A96")).
+			Foreground(lipgloss.Color("#667788")) // dim — configured but not yet confirmed running
+
+	lspActiveStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#065A96")).
+			Foreground(lipgloss.Color("#AAFFAA")) // green — confirmed running
 )
 
 // Selection tracks the selected range in the buffer.
@@ -137,6 +179,17 @@ type Model struct {
 	hlSpans        highlight.LineSpans
 	metrics        *metricsData
 	recoveryPrompt bool // waiting for user to accept or discard recovery content
+
+	// LSP state
+	diagnostics      []ClientDiag
+	diagTick         int            // counter; fetch every 10 ticks (~1.2s)
+	lspActive        bool           // true once first diagnostic poll returns (LSP is running)
+	hoverContent     *string        // non-nil = hover popup visible
+	sigHelp          *ClientSigHelp // non-nil = signature help popup visible
+	completions      []ClientCompletion
+	completionOn     bool
+	completionIdx    int
+	completionPrefix string
 }
 
 // New creates a Model after the buffer is already open with the server.
@@ -158,6 +211,14 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath string
 	}
 }
 
+// AtLine moves the initial cursor to the given 0-based line number.
+func (m Model) AtLine(line int) Model {
+	line = max(0, min(line, m.buf.LineCount()-1))
+	m.cursor = document.Pos{Line: line, Col: 0}
+	m.scrollToCursor()
+	return m
+}
+
 func tick() tea.Cmd {
 	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return tickMsg{} })
 }
@@ -175,7 +236,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		return m, tea.Batch(m.fetchUpdates(), tick())
+		m.diagTick++
+		cmds := []tea.Cmd{m.fetchUpdates(), tick()}
+		if m.diagTick%10 == 0 {
+			cmds = append(cmds, m.fetchDiagnostics())
+		}
+		return m, tea.Batch(cmds...)
 
 	case updatesMsg:
 		for _, op := range msg.ops {
@@ -226,6 +292,55 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.savedUndoDepth = 0
 		return m, m.reparseHighlight()
 
+	case diagnosticsMsg:
+		m.diagnostics = msg.diags
+		m.lspActive = true
+		return m, nil
+
+	case hoverMsg:
+		if msg.result.Found {
+			m.hoverContent = &msg.result.Contents
+		}
+		return m, nil
+
+	case sigHelpMsg:
+		m.sigHelp = msg.help
+		return m, nil
+
+	case completionsMsg:
+		if len(msg.items) == 0 {
+			m.completionOn = false
+			m.completions = nil
+		} else {
+			m.completions = msg.items
+			m.completionOn = true
+			m.completionIdx = 0
+		}
+		return m, nil
+
+	case triggerCompletionMsg:
+		return m, m.fetchCompletions()
+
+	case definitionMsg:
+		if !msg.found {
+			m.status = "No definition found"
+			return m, nil
+		}
+		if msg.loc.Path == m.filePath {
+			m.cursor = document.Pos{Line: msg.loc.Line, Col: msg.loc.Col}
+			m.scrollToCursor()
+			return m, nil
+		}
+		// Different file: open a new indigo instance via ExecProcess.
+		exe, err := os.Executable()
+		if err != nil {
+			m.status = "Cannot open definition: " + err.Error()
+			return m, nil
+		}
+		lineArg := fmt.Sprintf("+%d", msg.loc.Line+1)
+		cmd := exec.Command(exe, lineArg, msg.loc.Path)
+		return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
+
 	case tea.MouseMsg:
 		switch {
 		case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
@@ -248,4 +363,102 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	}
 	return m, nil
+}
+
+func (m Model) fetchDiagnostics() tea.Cmd {
+	bufID := m.bufID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		diags, err := m.rpc.GetDiagnostics(ctx, bufID)
+		if err != nil {
+			return nil
+		}
+		return diagnosticsMsg{diags}
+	}
+}
+
+func (m Model) fetchHover() tea.Cmd {
+	bufID := m.bufID
+	line, col := m.cursor.Line, m.cursor.Col
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		result, err := m.rpc.Hover(ctx, bufID, line, col)
+		if err != nil {
+			return nil
+		}
+		return hoverMsg{result}
+	}
+}
+
+func (m Model) fetchSignatureHelp() tea.Cmd {
+	bufID := m.bufID
+	line, col := m.cursor.Line, m.cursor.Col
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		sh, err := m.rpc.SignatureHelp(ctx, bufID, line, col)
+		if err != nil || len(sh.Signatures) == 0 {
+			return sigHelpMsg{nil}
+		}
+		return sigHelpMsg{&sh}
+	}
+}
+
+func (m Model) fetchCompletions() tea.Cmd {
+	bufID := m.bufID
+	line, col := m.cursor.Line, m.cursor.Col
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		items, err := m.rpc.Complete(ctx, bufID, line, col)
+		if err != nil {
+			return nil
+		}
+		return completionsMsg{items}
+	}
+}
+
+func (m Model) fetchDefinition() tea.Cmd {
+	bufID := m.bufID
+	line, col := m.cursor.Line, m.cursor.Col
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		loc, found, err := m.rpc.Definition(ctx, bufID, line, col)
+		if err != nil {
+			return nil
+		}
+		return definitionMsg{loc: loc, found: found}
+	}
+}
+
+// currentWordPrefix returns the identifier fragment immediately before the cursor.
+func (m Model) currentWordPrefix() string {
+	line := m.buf.Line(m.cursor.Line)
+	runes := []rune(line)
+	col := min(m.cursor.Col, len(runes))
+	start := col
+	for start > 0 && isWordChar(runes[start-1]) {
+		start--
+	}
+	return string(runes[start:col])
+}
+
+// diagsOnLine returns diagnostics on the given line, most severe first.
+func (m Model) diagsOnLine(line int) []ClientDiag {
+	var out []ClientDiag
+	for _, d := range m.diagnostics {
+		if d.Line == line {
+			out = append(out, d)
+		}
+	}
+	// Sort: lower severity number = more severe (1=error, 2=warn, ...)
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j].Severity < out[j-1].Severity; j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out
 }

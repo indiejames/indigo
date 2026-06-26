@@ -18,6 +18,14 @@ interface EditorService {
   hover           @10 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :HoverResult);
   signatureHelp   @11 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :SignatureHelp);
   complete        @12 (bufId :UInt32, line :UInt32, col :UInt32)               -> (items :List(CompletionItem));
+  definition      @13 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :DefinitionResult);
+}
+
+struct DefinitionResult {
+  found @0 :Bool;
+  path  @1 :Text;
+  line  @2 :UInt32;
+  col   @3 :UInt32;
 }
 
 struct LspDiagnostic {

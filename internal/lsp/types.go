@@ -5,8 +5,8 @@ import "fmt"
 // pathToURI converts an absolute file path to a file URI.
 func pathToURI(absPath string) string { return "file://" + absPath }
 
-// uriToPath strips the file:// prefix.
-func uriToPath(uri string) string {
+// URIToPath strips the file:// prefix.
+func URIToPath(uri string) string {
 	if len(uri) > 7 && uri[:7] == "file://" {
 		return uri[7:]
 	}
@@ -308,4 +308,17 @@ type CompletionItem struct {
 type CompletionList struct {
 	IsIncomplete bool             `json:"isIncomplete"`
 	Items        []CompletionItem `json:"items"`
+}
+
+// ---- textDocument/definition ----
+
+type DefinitionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+// Location is a file URI + range returned by textDocument/definition.
+type Location struct {
+	URI   string `json:"uri"`
+	Range Range  `json:"range"`
 }

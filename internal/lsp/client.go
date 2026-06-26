@@ -214,6 +214,33 @@ func (c *Client) Complete(path string, line, col int) ([]CompletionItem, error) 
 	return items, nil
 }
 
+// Definition returns the definition location(s) for the symbol at (line, col).
+func (c *Client) Definition(path string, line, col int) ([]Location, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	raw, err := c.conn.Call(ctx, "textDocument/definition", DefinitionParams{
+		TextDocument: TextDocumentIdentifier{URI: pathToURI(path)},
+		Position:     Position{Line: line, Character: col},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if string(raw) == "null" {
+		return nil, nil
+	}
+	// Response may be Location or []Location.
+	var single Location
+	var multi []Location
+	if err := json.Unmarshal(raw, &multi); err == nil && len(multi) > 0 {
+		return multi, nil
+	}
+	if err := json.Unmarshal(raw, &single); err == nil && single.URI != "" {
+		return []Location{single}, nil
+	}
+	return nil, nil
+}
+
 // GetDiagnostics returns the most recent diagnostics for path.
 func (c *Client) GetDiagnostics(path string) []Diagnostic {
 	c.diagMu.RLock()

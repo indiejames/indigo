@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,10 +18,24 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: indigo <file>")
+		fmt.Fprintln(os.Stderr, "usage: indigo [+line] <file>")
 		os.Exit(1)
 	}
-	filePath := os.Args[1]
+
+	// Parse optional +N line argument (e.g. indigo +42 foo.go).
+	startLine := 0
+	args := os.Args[1:]
+	if len(args) >= 2 && strings.HasPrefix(args[0], "+") {
+		if n, err := strconv.Atoi(args[0][1:]); err == nil && n > 0 {
+			startLine = n - 1 // convert to 0-based
+			args = args[1:]
+		}
+	}
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: indigo [+line] <file>")
+		os.Exit(1)
+	}
+	filePath := args[0]
 
 	// Resolve absolute path so server can identify the working directory.
 	absPath, err := filepath.Abs(filePath)
@@ -59,6 +75,9 @@ func main() {
 	}
 
 	m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
+	if startLine > 0 {
+		m = m.AtLine(startLine)
+	}
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fatalf("run: %v", err)

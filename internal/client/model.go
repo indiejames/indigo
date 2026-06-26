@@ -2,6 +2,9 @@ package client
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"os/exec"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -58,6 +61,12 @@ type completionsMsg struct{ items []ClientCompletion }
 
 // triggerCompletionMsg fires after the auto-trigger debounce delay.
 type triggerCompletionMsg struct{}
+
+// definitionMsg carries the result of a go-to-definition request.
+type definitionMsg struct {
+	loc   ClientLocation
+	found bool
+}
 
 // highlightMsg carries freshly computed syntax-highlight spans and parse time.
 type highlightMsg struct {
@@ -202,6 +211,14 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath string
 	}
 }
 
+// AtLine moves the initial cursor to the given 0-based line number.
+func (m Model) AtLine(line int) Model {
+	line = max(0, min(line, m.buf.LineCount()-1))
+	m.cursor = document.Pos{Line: line, Col: 0}
+	m.scrollToCursor()
+	return m
+}
+
 func tick() tea.Cmd {
 	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return tickMsg{} })
 }
@@ -304,6 +321,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case triggerCompletionMsg:
 		return m, m.fetchCompletions()
 
+	case definitionMsg:
+		if !msg.found {
+			m.status = "No definition found"
+			return m, nil
+		}
+		if msg.loc.Path == m.filePath {
+			m.cursor = document.Pos{Line: msg.loc.Line, Col: msg.loc.Col}
+			m.scrollToCursor()
+			return m, nil
+		}
+		// Different file: open a new indigo instance via ExecProcess.
+		exe, err := os.Executable()
+		if err != nil {
+			m.status = "Cannot open definition: " + err.Error()
+			return m, nil
+		}
+		lineArg := fmt.Sprintf("+%d", msg.loc.Line+1)
+		cmd := exec.Command(exe, lineArg, msg.loc.Path)
+		return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
+
 	case tea.MouseMsg:
 		switch {
 		case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
@@ -380,6 +417,20 @@ func (m Model) fetchCompletions() tea.Cmd {
 			return nil
 		}
 		return completionsMsg{items}
+	}
+}
+
+func (m Model) fetchDefinition() tea.Cmd {
+	bufID := m.bufID
+	line, col := m.cursor.Line, m.cursor.Col
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		loc, found, err := m.rpc.Definition(ctx, bufID, line, col)
+		if err != nil {
+			return nil
+		}
+		return definitionMsg{loc: loc, found: found}
 	}
 }
 

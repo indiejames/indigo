@@ -25,6 +25,16 @@ type command struct {
 // prefixCmds is the root of the prefix-command tree for Normal mode.
 var prefixCmds = []command{
 	{
+		key:       'g',
+		label:     "Go",
+		menuTitle: "Go",
+		children: []command{
+			{key: 'g', label: "Go to top of file", execute: executeGoToTop},
+			{key: 'e', label: "Go to end of file", execute: executeGoToEnd},
+			{key: 'd', label: "Go to definition", execute: executeGoToDefinition},
+		},
+	},
+	{
 		key:       'm',
 		label:     "Match",
 		menuTitle: "Match",
@@ -63,6 +73,25 @@ func findCommand(seq []rune) (*command, bool) {
 		}
 	}
 	return found, found != nil
+}
+
+func executeGoToTop(m Model) (tea.Model, tea.Cmd) {
+	m.sel = nil
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m.topLine = 0
+	return m, nil
+}
+
+func executeGoToEnd(m Model) (tea.Model, tea.Cmd) {
+	m.sel = nil
+	last := max(0, m.buf.LineCount()-1)
+	m.cursor = document.Pos{Line: last, Col: 0}
+	m.scrollToCursor()
+	return m, nil
+}
+
+func executeGoToDefinition(m Model) (tea.Model, tea.Cmd) {
+	return m, m.fetchDefinition()
 }
 
 // executeSelectInsideWord selects the full word enclosing the cursor.
@@ -349,10 +378,6 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+b", "pgup":
 		m.sel = nil
 		m.moveCursor(-m.visibleLines(), 0)
-	case "g":
-		m.sel = nil
-		m.cursor = document.Pos{Line: 0, Col: 0}
-		m.topLine = 0
 	case "G":
 		m.sel = nil
 		last := max(0, m.buf.LineCount()-1)

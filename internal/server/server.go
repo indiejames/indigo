@@ -571,6 +571,41 @@ func (s *editorService) Complete(_ context.Context, call proto.EditorService_com
 	return nil
 }
 
+func (s *editorService) Definition(_ context.Context, call proto.EditorService_definition) error {
+	args := call.Args()
+	bufID := args.BufId()
+	line := int(args.Line())
+	col := int(args.Col())
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+	s.mu.Unlock()
+
+	locs, err := s.lspMgr.Definition(path, line, col)
+	res, rerr := call.AllocResults()
+	if rerr != nil {
+		return rerr
+	}
+	if err != nil || len(locs) == 0 {
+		return nil
+	}
+	loc := locs[0]
+	result, err := res.NewResult()
+	if err != nil {
+		return err
+	}
+	result.SetFound(true)
+	result.SetPath(lsp.URIToPath(loc.URI)) //nolint:errcheck
+	result.SetLine(uint32(loc.Range.Start.Line))
+	result.SetCol(uint32(loc.Range.Start.Character))
+	return nil
+}
+
 // DirtyBuffers returns paths of unsaved buffers.
 func (s *editorService) DirtyBuffers() []string {
 	s.mu.Lock()

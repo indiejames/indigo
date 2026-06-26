@@ -367,6 +367,41 @@ func (r *RPC) Complete(ctx context.Context, bufID uint32, line, col int) ([]Clie
 	return out, nil
 }
 
+// ClientLocation is a resolved definition location.
+type ClientLocation struct {
+	Path string
+	Line int
+	Col  int
+}
+
+// Definition fetches the definition location for the symbol at (line, col) in bufID.
+func (r *RPC) Definition(ctx context.Context, bufID uint32, line, col int) (ClientLocation, bool, error) {
+	fut, rel := r.svc.Definition(ctx, func(p proto.EditorService_definition_Params) error {
+		p.SetBufId(bufID)
+		p.SetLine(uint32(line))
+		p.SetCol(uint32(col))
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return ClientLocation{}, false, err
+	}
+	result, err := res.Result()
+	if err != nil {
+		return ClientLocation{}, false, err
+	}
+	if !result.Found() {
+		return ClientLocation{}, false, nil
+	}
+	path, _ := result.Path()
+	return ClientLocation{
+		Path: path,
+		Line: int(result.Line()),
+		Col:  int(result.Col()),
+	}, true, nil
+}
+
 // Disconnect unregisters this client from the server.
 func (r *RPC) Disconnect(ctx context.Context) error {
 	fut, rel := r.svc.Disconnect(ctx, func(p proto.EditorService_disconnect_Params) error {

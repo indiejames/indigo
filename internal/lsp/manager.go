@@ -105,6 +105,14 @@ func (m *Manager) DidClose(path string) {
 	}
 }
 
+// Definition returns definition locations for the symbol at (line, col) in path.
+func (m *Manager) Definition(path string, line, col int) ([]Location, error) {
+	if c := m.clientForPath(path); c != nil {
+		return c.Definition(path, line, col)
+	}
+	return nil, nil
+}
+
 // GetDiagnostics returns the current diagnostics for path.
 func (m *Manager) GetDiagnostics(path string) []Diagnostic {
 	if c := m.clientForPath(path); c != nil {

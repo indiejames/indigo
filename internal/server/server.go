@@ -36,7 +36,7 @@ func IsRunning(socketPath string) bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	conn.Close() //nolint:errcheck
 	return true
 }
 
@@ -200,7 +200,7 @@ func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorServ
 	path := entry.buf.Path()
 	s.mu.Unlock()
 
-	os.Remove(recoveryFilePath(s.recDir, path))
+	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
 
 	content := ""
 	if data, err := os.ReadFile(path); err == nil {
@@ -364,7 +364,7 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 		return err
 	}
 	entry.buf.SetClean()
-	os.Remove(recoveryFilePath(s.recDir, path))
+	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
 	go s.lspMgr.DidSave(path)
 
 	_, err := call.AllocResults()
@@ -405,7 +405,7 @@ func (s *editorService) CloseBuffer(_ context.Context, call proto.EditorService_
 	s.mu.Unlock()
 
 	if removedPath != "" {
-		os.Remove(recoveryFilePath(s.recDir, removedPath))
+		os.Remove(recoveryFilePath(s.recDir, removedPath)) //nolint:errcheck
 		go s.lspMgr.DidClose(removedPath)
 	}
 
@@ -631,22 +631,22 @@ type Server struct {
 // New creates and starts a server for the given working directory.
 func New(dir string) (*Server, error) {
 	sockPath := SocketPath(dir)
-	os.Remove(sockPath) // clean up stale socket
+	os.Remove(sockPath) //nolint:errcheck // clean up stale socket
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
 		return nil, fmt.Errorf("listen %s: %w", sockPath, err)
 	}
 	if err := os.Chmod(sockPath, 0600); err != nil {
-		ln.Close()
-		os.Remove(sockPath)
+		ln.Close() //nolint:errcheck
+		os.Remove(sockPath) //nolint:errcheck
 		return nil, fmt.Errorf("securing socket %s: %w", sockPath, err)
 	}
 
 	recDir, err := setupRecoveryDir()
 	if err != nil {
-		ln.Close()
-		os.Remove(sockPath)
+		ln.Close() //nolint:errcheck
+		os.Remove(sockPath) //nolint:errcheck
 		return nil, fmt.Errorf("recovery dir: %w", err)
 	}
 
@@ -694,19 +694,19 @@ func (s *Server) flushDirtyBuffers(maxBytes int64) {
 	for _, buf := range bufs {
 		rp := recoveryFilePath(s.svc.recDir, buf.Path())
 		if !buf.Dirty() {
-			os.Remove(rp)
+			os.Remove(rp) //nolint:errcheck
 			continue
 		}
 		if buf.ByteLen() > int(maxBytes) {
-			os.Remove(rp)
+			os.Remove(rp) //nolint:errcheck
 			continue
 		}
 		content := buf.Content()
 		if sha256.Sum256([]byte(content)) == buf.SavedHash() {
 			// Content is back to saved state (e.g. after undo) — no recovery needed.
-			os.Remove(rp)
+			os.Remove(rp) //nolint:errcheck
 		} else {
-			os.WriteFile(rp, []byte(content), 0600)
+			os.WriteFile(rp, []byte(content), 0600) //nolint:errcheck
 		}
 	}
 }
@@ -724,7 +724,7 @@ func (s *Server) serve() {
 		s.connCount.Add(1)
 		go func(c net.Conn) {
 			defer func() {
-				c.Close()
+				c.Close() //nolint:errcheck
 				s.connCount.Add(-1)
 			}()
 			transport := rpc.NewStreamTransport(c)
@@ -732,7 +732,7 @@ func (s *Server) serve() {
 				BootstrapClient: capnp.Client(proto.EditorService_ServerToClient(s.svc)),
 			}
 			conn := rpc.NewConn(transport, opts)
-			defer conn.Close()
+			defer conn.Close() //nolint:errcheck
 			select {
 			case <-conn.Done():
 			case <-s.done:
@@ -744,10 +744,10 @@ func (s *Server) serve() {
 // Wait blocks until the server should exit (all clients disconnected).
 func (s *Server) Wait() {
 	<-s.done
-	s.listener.Close()
+	s.listener.Close() //nolint:errcheck
 	s.deleteAllRecoveryFiles()
 	s.svc.lspMgr.Shutdown()
-	os.Remove(s.socketPath)
+	os.Remove(s.socketPath) //nolint:errcheck
 }
 
 func (s *Server) deleteAllRecoveryFiles() {
@@ -758,7 +758,7 @@ func (s *Server) deleteAllRecoveryFiles() {
 	}
 	s.svc.mu.Unlock()
 	for _, p := range paths {
-		os.Remove(recoveryFilePath(s.svc.recDir, p))
+		os.Remove(recoveryFilePath(s.svc.recDir, p)) //nolint:errcheck
 	}
 }
 

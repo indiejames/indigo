@@ -257,7 +257,7 @@ func (c *Client) Shutdown() {
 	defer cancel()
 	c.conn.Call(ctx, "shutdown", nil) //nolint:errcheck
 	c.conn.Notify("exit", nil)        //nolint:errcheck
-	c.cmd.Process.Kill()
+	c.cmd.Process.Kill() //nolint:errcheck
 	c.cmd.Wait() //nolint:errcheck
 }
 

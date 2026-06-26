@@ -34,7 +34,7 @@ func Dial(socketPath string) (*RPC, error) {
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		conn.Close()
+		conn.Close() //nolint:errcheck
 		return nil, fmt.Errorf("connect: %w", err)
 	}
 
@@ -411,6 +411,6 @@ func (r *RPC) Disconnect(ctx context.Context) error {
 	defer rel()
 	_, err := fut.Struct()
 	r.svc.Release()
-	r.conn.Close()
+	r.conn.Close() //nolint:errcheck
 	return err
 }

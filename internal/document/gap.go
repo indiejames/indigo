@@ -17,14 +17,6 @@ func (g *gapBuf) runeLen() int {
 	return g.gapStart + (len(g.buf) - g.gapEnd)
 }
 
-// runeAt returns the rune at logical position pos.
-func (g *gapBuf) runeAt(pos int) rune {
-	if pos < g.gapStart {
-		return g.buf[pos]
-	}
-	return g.buf[pos+(g.gapEnd-g.gapStart)]
-}
-
 // moveGapTo moves the gap so that gapStart == pos (a logical content position).
 func (g *gapBuf) moveGapTo(pos int) {
 	n := g.runeLen()

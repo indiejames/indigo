@@ -29,7 +29,10 @@ test:
 vet:
 	go vet -tags lang_all ./...
 
+lint:
+	golangci-lint run --build-tags lang_all ./...
+
 clean:
 	rm -f $(BINARY)
 
-.PHONY: build build-release build-minimal build-no-heavy build-custom test vet clean
+.PHONY: build build-release build-minimal build-no-heavy build-custom test vet lint clean

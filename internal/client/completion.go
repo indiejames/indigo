@@ -16,6 +16,8 @@ type cmdDesc struct {
 
 var allCmds = []cmdDesc{
 	{"edit",       "Open file picker"},
+	{"fmt",        "Format current buffer"},
+	{"format",     "Format current buffer"},
 	{"metrics",    "Toggle metrics overlay"},
 	{"quit",       "Close buffer (fails if unsaved)"},
 	{"quit!",      "Close buffer, discarding changes"},

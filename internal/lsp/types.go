@@ -1,6 +1,10 @@
 package lsp
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
 
 // pathToURI converts an absolute file path to a file URI.
 func pathToURI(absPath string) string { return "file://" + absPath }
@@ -82,21 +86,14 @@ const (
 	SyncIncremental TextDocumentSyncKind = 2
 )
 
-type TextDocumentSyncOptions struct {
-	OpenClose bool                 `json:"openClose"`
-	Change    TextDocumentSyncKind `json:"change"`
-	Save      *SaveOptions         `json:"save,omitempty"`
-}
-
-type SaveOptions struct {
-	IncludeText bool `json:"includeText"`
-}
-
 type ServerCapabilities struct {
-	TextDocumentSync   *TextDocumentSyncOptions `json:"textDocumentSync,omitempty"`
-	HoverProvider      any                      `json:"hoverProvider,omitempty"`
-	SignatureHelpProvider *SignatureHelpOptions  `json:"signatureHelpProvider,omitempty"`
-	CompletionProvider *CompletionOptions        `json:"completionProvider,omitempty"`
+	// TextDocumentSync is json.RawMessage because the LSP spec allows either
+	// a TextDocumentSyncKind integer or a TextDocumentSyncOptions object.
+	TextDocumentSync           json.RawMessage `json:"textDocumentSync,omitempty"`
+	HoverProvider              any             `json:"hoverProvider,omitempty"`
+	SignatureHelpProvider      any             `json:"signatureHelpProvider,omitempty"`
+	CompletionProvider         any             `json:"completionProvider,omitempty"`
+	DocumentFormattingProvider any             `json:"documentFormattingProvider,omitempty"`
 }
 
 type SignatureHelpOptions struct {
@@ -108,10 +105,11 @@ type CompletionOptions struct {
 }
 
 type InitializeParams struct {
-	ProcessID  int        `json:"processId"`
-	ClientInfo ClientInfo `json:"clientInfo"`
-	RootURI    string     `json:"rootUri"`
-	Capabilities struct{} `json:"capabilities"`
+	ProcessID            int        `json:"processId"`
+	ClientInfo           ClientInfo `json:"clientInfo"`
+	RootURI              string     `json:"rootUri"`
+	Capabilities         struct{}   `json:"capabilities"`
+	InitializationOptions map[string]any `json:"initializationOptions,omitempty"`
 }
 
 type InitializeResult struct {
@@ -170,6 +168,23 @@ type PublishDiagnosticsParams struct {
 	Diagnostics []Diagnostic `json:"diagnostics"`
 }
 
+// ---- textDocument/formatting ----
+
+type FormattingOptions struct {
+	TabSize      int  `json:"tabSize"`
+	InsertSpaces bool `json:"insertSpaces"`
+}
+
+type DocumentFormattingParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Options      FormattingOptions      `json:"options"`
+}
+
+type TextEdit struct {
+	Range   Range  `json:"range"`
+	NewText string `json:"newText"`
+}
+
 // ---- textDocument/hover ----
 
 type HoverParams struct {
@@ -183,15 +198,47 @@ type MarkupContent struct {
 }
 
 type Hover struct {
-	Contents MarkupContent `json:"contents"`
-	Range    *Range        `json:"range,omitempty"`
+	// Contents is json.RawMessage because the LSP spec allows three shapes:
+	// MarkupContent {kind,value}, MarkedString {language,value}|string, or []MarkedString.
+	Contents json.RawMessage `json:"contents"`
+	Range    *Range          `json:"range,omitempty"`
 }
 
 func (h *Hover) Text() string {
-	if h == nil {
+	if h == nil || len(h.Contents) == 0 {
 		return ""
 	}
-	return h.Contents.Value
+	// Try MarkupContent {kind, value}.
+	var mc MarkupContent
+	if err := json.Unmarshal(h.Contents, &mc); err == nil && mc.Value != "" {
+		return mc.Value
+	}
+	// Try plain string (legacy MarkedString).
+	var s string
+	if err := json.Unmarshal(h.Contents, &s); err == nil {
+		return s
+	}
+	// Try array of MarkedString ({language,value} | string).
+	var arr []json.RawMessage
+	if err := json.Unmarshal(h.Contents, &arr); err == nil {
+		var parts []string
+		for _, item := range arr {
+			var ms struct {
+				Language string `json:"language"`
+				Value    string `json:"value"`
+			}
+			if err := json.Unmarshal(item, &ms); err == nil && ms.Value != "" {
+				parts = append(parts, ms.Value)
+				continue
+			}
+			var plain string
+			if err := json.Unmarshal(item, &plain); err == nil && plain != "" {
+				parts = append(parts, plain)
+			}
+		}
+		return strings.Join(parts, "\n\n")
+	}
+	return ""
 }
 
 // ---- textDocument/signatureHelp ----

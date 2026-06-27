@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,11 +15,12 @@ import (
 
 // Client manages a single language server process.
 type Client struct {
-	cmd  *exec.Cmd
-	conn *jsonrpcConn
+	cmd     *exec.Cmd
+	conn    *jsonrpcConn
+	logFile *os.File
 
 	mu          sync.Mutex
-	docVersions map[string]int  // uri → version
+	docVersions map[string]int // uri → version
 	initialized bool
 	caps        ServerCapabilities
 	rootURI     string
@@ -30,12 +32,23 @@ type Client struct {
 // NewClient starts the language server process and returns a ready-to-use client.
 // Initialize() must be called before using the client.
 func NewClient(command string, args []string, rootDir string) (*Client, error) {
-	if _, err := exec.LookPath(command); err != nil {
+	// Open the log file first so we can record LookPath failures too.
+	logPath := filepath.Join(os.TempDir(), "indigo-lsp-"+filepath.Base(command)+".log")
+	logFile, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+
+	resolved, err := exec.LookPath(command)
+	if err != nil {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "LookPath(%q) failed: %v\nPATH=%s\n", command, err, os.Getenv("PATH"))
+			logFile.Close() //nolint:errcheck
+		}
 		return nil, fmt.Errorf("language server %q not found: %w", command, err)
 	}
 
-	cmd := exec.Command(command, args...)
-	cmd.Stderr = nil // discard language server stderr
+	cmd := exec.Command(resolved, args...)
+	if logFile != nil {
+		cmd.Stderr = logFile
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -51,6 +64,7 @@ func NewClient(command string, args []string, rootDir string) (*Client, error) {
 
 	c := &Client{
 		cmd:         cmd,
+		logFile:     logFile,
 		docVersions: make(map[string]int),
 		diagnostics: make(map[string][]Diagnostic),
 		rootURI:     pathToURI(rootDir),
@@ -65,17 +79,29 @@ func (c *Client) Initialize() error {
 		ProcessID:  os.Getpid(),
 		ClientInfo: ClientInfo{Name: "indigo", Version: "0.1"},
 		RootURI:    c.rootURI,
+		InitializationOptions: map[string]any{
+			// Let typescript-language-server handle files that have no tsconfig.json.
+			"tsserver": map[string]any{
+				"useSyntaxServer": "never",
+			},
+		},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	raw, err := c.conn.Call(ctx, "initialize", params)
+	if c.logFile != nil {
+		fmt.Fprintf(c.logFile, "initialize response: err=%v raw=%s\n", err, raw)
+	}
 	if err != nil {
 		return fmt.Errorf("initialize: %w", err)
 	}
 	var result InitializeResult
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return err
+	if unmarshalErr := json.Unmarshal(raw, &result); unmarshalErr != nil {
+		if c.logFile != nil {
+			fmt.Fprintf(c.logFile, "unmarshal capabilities error: %v\n", unmarshalErr)
+		}
+		// Proceed with empty capabilities rather than aborting — the server is running.
 	}
 	c.mu.Lock()
 	c.caps = result.Capabilities
@@ -86,11 +112,16 @@ func (c *Client) Initialize() error {
 }
 
 // DidOpen notifies the server that a file has been opened.
+// Idempotent: if the file is already tracked, returns without sending a second notification.
 func (c *Client) DidOpen(path, content string) error {
 	ext := strings.TrimPrefix(filepath.Ext(path), ".")
 	uri := pathToURI(path)
 
 	c.mu.Lock()
+	if _, already := c.docVersions[uri]; already {
+		c.mu.Unlock()
+		return nil
+	}
 	c.docVersions[uri] = 1
 	c.mu.Unlock()
 
@@ -249,6 +280,90 @@ func (c *Client) GetDiagnostics(path string) []Diagnostic {
 	out := make([]Diagnostic, len(diags))
 	copy(out, diags)
 	return out
+}
+
+// Format requests textDocument/formatting and applies the returned edits.
+// Returns (content, false, nil) when the server reports no formatting support.
+func (c *Client) Format(path, content string) (string, bool, error) {
+	c.mu.Lock()
+	hasFormatting := c.caps.DocumentFormattingProvider != nil
+	c.mu.Unlock()
+	if !hasFormatting {
+		return content, false, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	params := DocumentFormattingParams{
+		TextDocument: TextDocumentIdentifier{URI: pathToURI(path)},
+		Options:      FormattingOptions{TabSize: 4, InsertSpaces: true},
+	}
+	raw, err := c.conn.Call(ctx, "textDocument/formatting", params)
+	if err != nil {
+		return content, false, err
+	}
+	if string(raw) == "null" {
+		return content, false, nil
+	}
+
+	var edits []TextEdit
+	if err := json.Unmarshal(raw, &edits); err != nil {
+		return content, false, err
+	}
+	if len(edits) == 0 {
+		return content, false, nil
+	}
+
+	result, err := applyEdits(content, edits)
+	if err != nil {
+		return content, false, err
+	}
+	return result, result != content, nil
+}
+
+// applyEdits applies a set of LSP TextEdits to content, returning the result.
+// Edits are applied from last to first to preserve earlier positions.
+func applyEdits(content string, edits []TextEdit) (string, error) {
+	lines := strings.Split(content, "\n")
+
+	sort.Slice(edits, func(i, j int) bool {
+		a, b := edits[i].Range.Start, edits[j].Range.Start
+		if a.Line != b.Line {
+			return a.Line > b.Line
+		}
+		return a.Character > b.Character
+	})
+
+	for _, edit := range edits {
+		s, e := edit.Range.Start, edit.Range.End
+		if s.Line >= len(lines) || e.Line >= len(lines) {
+			return content, fmt.Errorf("edit range out of bounds")
+		}
+		startRunes := []rune(lines[s.Line])
+		endRunes := []rune(lines[e.Line])
+
+		sc := s.Character
+		if sc > len(startRunes) {
+			sc = len(startRunes)
+		}
+		ec := e.Character
+		if ec > len(endRunes) {
+			ec = len(endRunes)
+		}
+
+		prefix := string(startRunes[:sc])
+		suffix := string(endRunes[ec:])
+		replacement := strings.Split(prefix+edit.NewText+suffix, "\n")
+
+		updated := make([]string, 0, len(lines)-(e.Line-s.Line+1)+len(replacement))
+		updated = append(updated, lines[:s.Line]...)
+		updated = append(updated, replacement...)
+		updated = append(updated, lines[e.Line+1:]...)
+		lines = updated
+	}
+
+	return strings.Join(lines, "\n"), nil
 }
 
 // Shutdown sends shutdown + exit and kills the process.

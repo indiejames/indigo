@@ -20,8 +20,12 @@ type appQuitMsg struct{}
 // openFileMsg asks the App to open a file by absolute path.
 type openFileMsg struct{ absPath string }
 
-// switchBufferMsg asks the App to switch to an already-open buffer by index.
-type switchBufferMsg struct{ idx int }
+// switchBufferMsg asks the App to switch to an already-open buffer by index,
+// optionally scrolling to a 0-based line number (-1 = don't scroll).
+type switchBufferMsg struct {
+	idx  int
+	line int
+}
 
 // App is the top-level Bubble Tea model. It owns a list of editor buffers,
 // routes messages to the active one, manages the file picker, and handles
@@ -118,20 +122,30 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case openFileMsg:
 		return a, a.doOpenFile(msg.absPath)
 
+	case client.OpenFileAtMsg:
+		return a, a.doOpenFileAt(msg.Path, msg.Line)
+
 	case switchBufferMsg:
 		if msg.idx >= 0 && msg.idx < len(a.buffers) {
 			a.active = msg.idx
+			if msg.line >= 0 {
+				a.buffers[a.active] = a.buffers[a.active].AtLine(msg.line)
+			}
 		}
 		return a, nil
 
 	// ---- file opened ----
 	case bufferOpenedMsg:
-		a.buffers = append(a.buffers, msg.model)
+		m := msg.model
+		if msg.line >= 0 {
+			m = m.AtLine(msg.line)
+		}
+		a.buffers = append(a.buffers, m)
 		a.active = len(a.buffers) - 1
 		// Resize ALL buffers — the tab bar may have just become visible,
 		// which changes the available height for every buffer.
 		a.resizeAllBuffers()
-		return a, msg.model.Init()
+		return a, m.Init()
 
 	case errorOpenMsg:
 		a.status = "E: " + msg.err.Error()
@@ -280,15 +294,22 @@ func (a App) showTabBar() bool {
 
 // ---- async commands ----
 
-type bufferOpenedMsg struct{ model client.Model }
+type bufferOpenedMsg struct {
+	model client.Model
+	line  int // 0-based target line; -1 = no jump
+}
 type errorOpenMsg struct{ err error }
 
 func (a App) doOpenFile(absPath string) tea.Cmd {
+	return a.doOpenFileAt(absPath, -1)
+}
+
+func (a App) doOpenFileAt(absPath string, line int) tea.Cmd {
 	// Check if already open — switch to it instead of opening again.
 	for i, m := range a.buffers {
 		if m.FilePath() == absPath {
 			idx := i
-			return func() tea.Msg { return switchBufferMsg{idx: idx} }
+			return func() tea.Msg { return switchBufferMsg{idx: idx, line: line} }
 		}
 	}
 	rpc := a.rpc
@@ -301,7 +322,7 @@ func (a App) doOpenFile(absPath string) tea.Cmd {
 			return errorOpenMsg{err}
 		}
 		m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
-		return bufferOpenedMsg{model: m}
+		return bufferOpenedMsg{model: m, line: line}
 	}
 }
 

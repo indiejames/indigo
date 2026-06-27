@@ -2,9 +2,6 @@ package client
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"os/exec"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -45,7 +42,10 @@ type clientCountMsg struct{ count uint32 }
 type discardRecoveryMsg struct{ content string }
 
 // diagnosticsMsg carries fresh diagnostics from the server.
-type diagnosticsMsg struct{ diags []ClientDiag }
+type diagnosticsMsg struct {
+	diags    []ClientDiag
+	lspReady bool // true only when the LSP client process is actually running
+}
 
 // hoverMsg carries a hover result.
 type hoverMsg struct{ result ClientHoverResult }
@@ -67,7 +67,21 @@ type definitionMsg struct {
 
 // CloseBufferMsg signals the App that this buffer wants to close.
 // The App decides whether to remove it from the list or quit entirely.
+type formatResultMsg struct {
+	content     string
+	changed     bool
+	thenSave    bool
+	noFormatter bool
+}
+
 type CloseBufferMsg struct{}
+
+// OpenFileAtMsg signals the App to open a file at a specific 0-based line,
+// reusing an existing buffer if the file is already open.
+type OpenFileAtMsg struct {
+	Path string
+	Line int
+}
 
 // OpenPickerMsg signals the App to open the file picker.
 type OpenPickerMsg struct{}
@@ -313,12 +327,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case diagnosticsMsg:
 		m.diagnostics = msg.diags
-		m.lspActive = true
+		if msg.lspReady {
+			m.lspActive = true
+		}
 		return m, nil
 
 	case hoverMsg:
-		if msg.result.Found {
+		if msg.result.Found && msg.result.Contents != "" {
 			m.hoverContent = &msg.result.Contents
+		} else if !msg.result.Found {
+			m.status = "No hover info"
 		}
 		return m, nil
 
@@ -340,6 +358,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case triggerCompletionMsg:
 		return m, m.fetchCompletions()
 
+	case formatResultMsg:
+		if msg.changed {
+			m.buf = document.New(m.filePath, msg.content)
+			m.undoStack = nil
+			m.redoStack = nil
+			m.currentGroup = nil
+			m.savedUndoDepth = 0
+			m.cursor = document.Pos{
+				Line: min(m.cursor.Line, m.buf.LineCount()-1),
+			}
+			m.scrollToCursor()
+			if !msg.thenSave {
+				m.status = "Formatted"
+			}
+		} else if !msg.thenSave {
+			if msg.noFormatter {
+				m.status = "No formatter available"
+			} else {
+				m.status = "Already formatted"
+			}
+		}
+		if msg.thenSave {
+			return m, m.doSaveNow()
+		}
+		return m, nil
+
 	case definitionMsg:
 		if !msg.found {
 			m.status = "No definition found"
@@ -350,15 +394,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.scrollToCursor()
 			return m, nil
 		}
-		// Different file: open a new indigo instance via ExecProcess.
-		exe, err := os.Executable()
-		if err != nil {
-			m.status = "Cannot open definition: " + err.Error()
-			return m, nil
+		// Different file: ask the App to open it in a new buffer.
+		loc := msg.loc
+		return m, func() tea.Msg {
+			return OpenFileAtMsg{Path: loc.Path, Line: loc.Line}
 		}
-		lineArg := fmt.Sprintf("+%d", msg.loc.Line+1)
-		cmd := exec.Command(exe, lineArg, msg.loc.Path)
-		return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
 
 	case tea.MouseMsg:
 		switch {
@@ -389,11 +429,11 @@ func (m Model) fetchDiagnostics() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		diags, err := m.rpc.GetDiagnostics(ctx, bufID)
+		result, err := m.rpc.GetDiagnostics(ctx, bufID)
 		if err != nil {
 			return nil
 		}
-		return diagnosticsMsg{diags}
+		return diagnosticsMsg{diags: result.Diags, lspReady: result.LspReady}
 	}
 }
 
@@ -405,7 +445,7 @@ func (m Model) fetchHover() tea.Cmd {
 		defer cancel()
 		result, err := m.rpc.Hover(ctx, bufID, line, col)
 		if err != nil {
-			return nil
+			return errorMsg{err}
 		}
 		return hoverMsg{result}
 	}
@@ -450,6 +490,19 @@ func (m Model) fetchDefinition() tea.Cmd {
 			return nil
 		}
 		return definitionMsg{loc: loc, found: found}
+	}
+}
+
+func (m Model) fetchFormat(thenSave bool) tea.Cmd {
+	bufID := m.bufID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		content, changed, noFormatter, err := m.rpc.Format(ctx, bufID)
+		if err != nil {
+			return errorMsg{err}
+		}
+		return formatResultMsg{content: content, changed: changed, thenSave: thenSave, noFormatter: noFormatter}
 	}
 }
 

@@ -38,14 +38,15 @@ func TestFilteredCmds(t *testing.T) {
 		input string
 		want  []string
 	}{
-		{"", []string{"edit", "metrics", "quit", "quit!", "quit-all", "quit-all!", "save", "wqa", "write-quit"}},
+		{"", []string{"edit", "fmt", "format", "metrics", "quit", "quit!", "quit-all", "quit-all!", "save", "wqa", "write-quit"}},
 		// "q" is a subsequence of quit*, wqa, write-quit
 		{"q", []string{"quit", "quit!", "quit-all", "quit-all!", "wqa", "write-quit"}},
 		{"q!", []string{"quit!", "quit-all!"}},
 		// "s" is a subsequence of "metrics" (last char) and "save"
 		{"s", []string{"metrics", "save"}},
 		{"wq", []string{"wqa", "write-quit"}},
-		{"m", []string{"metrics"}},
+		// "m" matches fmt, format, and metrics (m is a subsequence of all three)
+		{"m", []string{"fmt", "format", "metrics"}},
 		{"z", nil},
 		{"123", nil},  // line number — no results
 		{"0abc", nil}, // starts with digit

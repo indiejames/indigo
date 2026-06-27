@@ -124,7 +124,16 @@ func (m Model) fetchUpdates() tea.Cmd {
 	}
 }
 
+// doSave formats first (when format_on_save is enabled) then saves.
 func (m Model) doSave() tea.Cmd {
+	if m.cfg != nil && m.cfg.FormatOnSave {
+		return m.fetchFormat(true)
+	}
+	return m.doSaveNow()
+}
+
+// doSaveNow writes the buffer to disk unconditionally.
+func (m Model) doSaveNow() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

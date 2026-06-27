@@ -677,6 +677,8 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 	}
 
 	switch cmd {
+	case "fmt", "format":
+		return m, m.fetchFormat(false)
 	case "w", "write", "s", "save":
 		return m, m.doSave()
 	case "q", "quit":

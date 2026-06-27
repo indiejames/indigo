@@ -198,6 +198,8 @@ type Model struct {
 	checkingQuit   bool // client-count RPC in flight
 	sel            *Selection
 	dragging       bool
+	lastClickAt    time.Time
+	lastClickPos   document.Pos
 	undoStack      [][]document.Op // each entry is a group of inverse ops applied in reverse
 	redoStack      [][]document.Op // mirrors undoStack; cleared on any new edit
 	currentGroup   []document.Op   // non-nil while accumulating ops for the current Insert session

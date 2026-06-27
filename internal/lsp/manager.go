@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,10 +16,11 @@ type ServerConfig struct {
 
 // Manager holds one Client per language, lazily started.
 type Manager struct {
-	mu      sync.Mutex
-	clients map[string]*Client // languageID → Client
-	servers []ServerConfig
-	rootDir string
+	mu          sync.Mutex
+	clients     map[string]*Client // languageID → Client
+	servers     []ServerConfig
+	rootDir     string
+	fileContent map[string]string // path → content stored by DidOpen for ensureOpened
 }
 
 // NewManager creates a Manager for the given workspace root.
@@ -26,9 +28,10 @@ type Manager struct {
 // should come first so they shadow the built-in defaults.
 func NewManager(rootDir string, servers []ServerConfig) *Manager {
 	return &Manager{
-		clients: make(map[string]*Client),
-		servers: servers,
-		rootDir: rootDir,
+		clients:     make(map[string]*Client),
+		servers:     servers,
+		rootDir:     rootDir,
+		fileContent: make(map[string]string),
 	}
 }
 
@@ -57,14 +60,26 @@ func (m *Manager) clientForPath(path string) *Client {
 	}
 
 	langID := languageIDForExt(ext)
-	m.mu.Lock()
-	defer m.mu.Unlock()
 
+	// Fast path: client already running.
+	m.mu.Lock()
 	if c, ok := m.clients[langID]; ok {
+		m.mu.Unlock()
 		return c
 	}
+	m.mu.Unlock()
 
-	c, err := NewClient(cfg.Command, cfg.Args, m.rootDir)
+	// Slow path: start and initialize the server without holding the mutex so
+	// diagnostics polls and other operations can proceed concurrently.
+	cmd := cfg.Command
+	c, err := NewClient(cmd, cfg.Args, m.rootDir)
+	if err != nil {
+		// Also check <workDir>/node_modules/.bin/ for locally-installed servers.
+		local := filepath.Join(m.rootDir, "node_modules", ".bin", filepath.Base(cmd))
+		if info, statErr := os.Stat(local); statErr == nil && !info.IsDir() {
+			c, err = NewClient(local, cfg.Args, m.rootDir)
+		}
+	}
 	if err != nil {
 		// Language server not installed — silently skip.
 		return nil
@@ -73,13 +88,39 @@ func (m *Manager) clientForPath(path string) *Client {
 		c.Shutdown()
 		return nil
 	}
+
+	// Store the client, guarding against two goroutines both reaching this point.
+	m.mu.Lock()
+	if existing, ok := m.clients[langID]; ok {
+		// Another goroutine finished first; discard ours.
+		m.mu.Unlock()
+		c.Shutdown()
+		return existing
+	}
 	m.clients[langID] = c
+	m.mu.Unlock()
 	return c
 }
 
 // DidOpen notifies the appropriate language server that path was opened.
+// Content is cached before the client is started so that ensureOpened can
+// guarantee DidOpen is sent before any hover/complete/etc requests.
 func (m *Manager) DidOpen(path, content string) {
+	m.mu.Lock()
+	m.fileContent[path] = content
+	m.mu.Unlock()
 	if c := m.clientForPath(path); c != nil {
+		c.DidOpen(path, content) //nolint:errcheck
+	}
+}
+
+// ensureOpened sends textDocument/didOpen for path if it has not been sent yet.
+// Client.DidOpen is idempotent, so calling this multiple times is safe.
+func (m *Manager) ensureOpened(c *Client, path string) {
+	m.mu.Lock()
+	content, ok := m.fileContent[path]
+	m.mu.Unlock()
+	if ok {
 		c.DidOpen(path, content) //nolint:errcheck
 	}
 }
@@ -108,6 +149,7 @@ func (m *Manager) DidClose(path string) {
 // Definition returns definition locations for the symbol at (line, col) in path.
 func (m *Manager) Definition(path string, line, col int) ([]Location, error) {
 	if c := m.clientForPath(path); c != nil {
+		m.ensureOpened(c, path)
 		return c.Definition(path, line, col)
 	}
 	return nil, nil
@@ -121,9 +163,23 @@ func (m *Manager) GetDiagnostics(path string) []Diagnostic {
 	return nil
 }
 
+// HasClient reports whether an initialized language server client exists for path.
+func (m *Manager) HasClient(path string) bool {
+	ext := strings.TrimPrefix(filepath.Ext(path), ".")
+	if ext == "" {
+		return false
+	}
+	langID := languageIDForExt(ext)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.clients[langID]
+	return ok
+}
+
 // Hover returns hover information for path at (line, col).
 func (m *Manager) Hover(path string, line, col int) (*Hover, error) {
 	if c := m.clientForPath(path); c != nil {
+		m.ensureOpened(c, path)
 		return c.Hover(path, line, col)
 	}
 	return nil, nil
@@ -132,6 +188,7 @@ func (m *Manager) Hover(path string, line, col int) (*Hover, error) {
 // SignatureHelp returns signature help for path at (line, col).
 func (m *Manager) SignatureHelp(path string, line, col int) (*SignatureHelp, error) {
 	if c := m.clientForPath(path); c != nil {
+		m.ensureOpened(c, path)
 		return c.SignatureHelp(path, line, col)
 	}
 	return nil, nil
@@ -140,9 +197,19 @@ func (m *Manager) SignatureHelp(path string, line, col int) (*SignatureHelp, err
 // Complete returns completion items for path at (line, col).
 func (m *Manager) Complete(path string, line, col int) ([]CompletionItem, error) {
 	if c := m.clientForPath(path); c != nil {
+		m.ensureOpened(c, path)
 		return c.Complete(path, line, col)
 	}
 	return nil, nil
+}
+
+// Format requests formatting for path from its language server.
+// Returns (content, false, nil) when no server is configured or formatting is unsupported.
+func (m *Manager) Format(path, content string) (string, bool, error) {
+	if c := m.clientForPath(path); c != nil {
+		return c.Format(path, content)
+	}
+	return content, false, nil
 }
 
 // Shutdown cleanly shuts down all running language servers.

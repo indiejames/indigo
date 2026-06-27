@@ -14,11 +14,12 @@ interface EditorService {
   closeBuffer     @6 (clientId :UInt64, bufferId :UInt32)                      -> ();
   bufferClientCount @7 (bufferId :UInt32)                                      -> (count :UInt32);
   discardRecovery @8 (clientId :UInt64, bufferId :UInt32)                      -> (content :Text);
-  getDiagnostics  @9  (bufId :UInt32)                                          -> (items :List(LspDiagnostic));
+  getDiagnostics  @9  (bufId :UInt32)                                          -> (items :List(LspDiagnostic), lspReady :Bool);
   hover           @10 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :HoverResult);
   signatureHelp   @11 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :SignatureHelp);
   complete        @12 (bufId :UInt32, line :UInt32, col :UInt32)               -> (items :List(CompletionItem));
   definition      @13 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :DefinitionResult);
+  format          @14 (bufId :UInt32)                                           -> (content :Text, changed :Bool, noFormatter :Bool);
 }
 
 struct DefinitionResult {

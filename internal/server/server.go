@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/format"
 	"github.com/indiejames/indigo/internal/lsp"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
@@ -55,25 +57,30 @@ type editorService struct {
 	nextClt uint64
 	recDir  string
 	lspMgr  *lsp.Manager
+	fmtMgr  *format.Manager
+	cfg     *config.Config
 
 	// shutdown is called when the last client disconnects cleanly.
 	shutdown func()
 }
 
-func newEditorService(recDir, workspaceDir string, lspServers []config.LanguageServer, shutdown func()) *editorService {
-	servers := make([]lsp.ServerConfig, len(lspServers))
-	for i, ls := range lspServers {
+func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown func()) *editorService {
+	servers := make([]lsp.ServerConfig, len(cfg.EffectiveLanguageServers()))
+	for i, ls := range cfg.EffectiveLanguageServers() {
 		servers[i] = lsp.ServerConfig{
 			Extensions: ls.Extensions,
 			Command:    ls.Command,
 			Args:       ls.Args,
 		}
 	}
+	lspMgr := lsp.NewManager(workspaceDir, servers)
 	return &editorService{
 		buffers:  make(map[uint32]*bufferEntry),
 		clients:  make(map[uint64]struct{}),
 		recDir:   recDir,
-		lspMgr:   lsp.NewManager(workspaceDir, servers),
+		lspMgr:   lspMgr,
+		fmtMgr:   format.NewManager(lspMgr, cfg, workspaceDir),
+		cfg:      cfg,
 		shutdown: shutdown,
 	}
 }
@@ -360,7 +367,20 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 	}
 
 	path := entry.buf.Path()
-	if err := os.WriteFile(path, []byte(entry.buf.Content()), 0644); err != nil {
+	content := entry.buf.Content()
+
+	if s.cfg.FormatOnSave {
+		if formatted, changed, err := s.fmtMgr.Format(path, content); err == nil && changed {
+			content = formatted
+			entry.buf = document.New(path, content)
+			s.mu.Lock()
+			s.buffers[bufID] = entry
+			s.mu.Unlock()
+			go s.lspMgr.DidChange(path, content)
+		}
+	}
+
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return err
 	}
 	entry.buf.SetClean()
@@ -426,11 +446,13 @@ func (s *editorService) GetDiagnostics(_ context.Context, call proto.EditorServi
 	s.mu.Unlock()
 
 	diags := s.lspMgr.GetDiagnostics(path)
+	ready := s.lspMgr.HasClient(path)
 
 	res, err := call.AllocResults()
 	if err != nil {
 		return err
 	}
+	res.SetLspReady(ready)
 	if len(diags) == 0 {
 		return nil
 	}
@@ -475,11 +497,18 @@ func (s *editorService) Hover(_ context.Context, call proto.EditorService_hover)
 		return err
 	}
 	h, err := s.lspMgr.Hover(path, line, col)
-	if err != nil || h == nil {
+	if err != nil {
+		return err
+	}
+	if h == nil {
+		return nil
+	}
+	text := h.Text()
+	if text == "" {
 		return nil
 	}
 	result.SetFound(true)
-	result.SetContents(h.Text()) //nolint:errcheck
+	result.SetContents(text) //nolint:errcheck
 	return nil
 }
 
@@ -606,6 +635,50 @@ func (s *editorService) Definition(_ context.Context, call proto.EditorService_d
 	return nil
 }
 
+func (s *editorService) Format(_ context.Context, call proto.EditorService_format) error {
+	bufID := call.Args().BufId()
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+	content := entry.buf.Content()
+	s.mu.Unlock()
+
+	formatted, changed, fmtErr := s.fmtMgr.Format(path, content)
+
+	noFormatter := errors.Is(fmtErr, format.ErrNoFormatter)
+	if fmtErr != nil && !noFormatter {
+		return fmtErr
+	}
+
+	if changed {
+		newBuf := document.New(path, formatted)
+		newBuf.MarkDirty()
+		s.mu.Lock()
+		entry.buf = newBuf
+		s.buffers[bufID] = entry
+		s.mu.Unlock()
+		go s.lspMgr.DidChange(path, formatted)
+	}
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	if changed {
+		if err := res.SetContent(formatted); err != nil {
+			return err
+		}
+	}
+	res.SetChanged(changed)
+	res.SetNoFormatter(noFormatter)
+	return nil
+}
+
 // DirtyBuffers returns paths of unsaved buffers.
 func (s *editorService) DirtyBuffers() []string {
 	s.mu.Lock()
@@ -657,7 +730,7 @@ func New(dir string) (*Server, error) {
 		listener:   ln,
 		done:       make(chan struct{}),
 	}
-	srv.svc = newEditorService(recDir, dir, cfg.EffectiveLanguageServers(), func() {
+	srv.svc = newEditorService(recDir, dir, cfg, func() {
 		close(srv.done)
 	})
 

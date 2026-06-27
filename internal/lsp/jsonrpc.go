@@ -122,15 +122,23 @@ func (c *jsonrpcConn) readLoop(r io.Reader) {
 			continue
 		}
 		if msg.ID != nil && msg.Method == "" {
-			// Response.
+			// Response to one of our requests.
 			if ch, ok := c.pending.Load(*msg.ID); ok {
 				ch.(chan *jsonrpcMsg) <- &msg
 			}
 		} else if msg.Method != "" && msg.ID == nil {
-			// Notification.
+			// Notification from server.
 			if c.handler != nil {
 				c.handler(msg.Method, msg.Params)
 			}
+		} else if msg.ID != nil && msg.Method != "" {
+			// Server-to-client request (e.g. window/workDoneProgress/create).
+			// Acknowledge with a null result so the server isn't left waiting.
+			c.write(jsonrpcMsg{ //nolint:errcheck
+				JSONRPC: "2.0",
+				ID:      msg.ID,
+				Result:  json.RawMessage("null"),
+			})
 		}
 	}
 }

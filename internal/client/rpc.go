@@ -241,7 +241,13 @@ type ClientCompletion struct {
 }
 
 // GetDiagnostics fetches the current diagnostics for bufID from the server.
-func (r *RPC) GetDiagnostics(ctx context.Context, bufID uint32) ([]ClientDiag, error) {
+// DiagnosticsResult bundles diagnostics with the server's lspReady flag.
+type DiagnosticsResult struct {
+	Diags    []ClientDiag
+	LspReady bool
+}
+
+func (r *RPC) GetDiagnostics(ctx context.Context, bufID uint32) (DiagnosticsResult, error) {
 	fut, rel := r.svc.GetDiagnostics(ctx, func(p proto.EditorService_getDiagnostics_Params) error {
 		p.SetBufId(bufID)
 		return nil
@@ -249,11 +255,11 @@ func (r *RPC) GetDiagnostics(ctx context.Context, bufID uint32) ([]ClientDiag, e
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return nil, err
+		return DiagnosticsResult{}, err
 	}
 	list, err := res.Items()
 	if err != nil {
-		return nil, err
+		return DiagnosticsResult{}, err
 	}
 	out := make([]ClientDiag, list.Len())
 	for i := range out {
@@ -268,7 +274,7 @@ func (r *RPC) GetDiagnostics(ctx context.Context, bufID uint32) ([]ClientDiag, e
 			Source:   src,
 		}
 	}
-	return out, nil
+	return DiagnosticsResult{Diags: out, LspReady: res.LspReady()}, nil
 }
 
 // Hover fetches hover information for bufID at (line, col).
@@ -403,6 +409,23 @@ func (r *RPC) Definition(ctx context.Context, bufID uint32, line, col int) (Clie
 }
 
 // Disconnect unregisters this client from the server.
+func (r *RPC) Format(ctx context.Context, bufID uint32) (content string, changed bool, noFormatter bool, err error) {
+	fut, rel := r.svc.Format(ctx, func(p proto.EditorService_format_Params) error {
+		p.SetBufId(bufID)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return "", false, false, err
+	}
+	content, err = res.Content()
+	if err != nil {
+		return "", false, false, err
+	}
+	return content, res.Changed(), res.NoFormatter(), nil
+}
+
 func (r *RPC) Disconnect(ctx context.Context) error {
 	fut, rel := r.svc.Disconnect(ctx, func(p proto.EditorService_disconnect_Params) error {
 		p.SetClientId(r.clientID)

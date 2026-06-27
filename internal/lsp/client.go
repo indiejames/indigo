@@ -39,7 +39,7 @@ func NewClient(command string, args []string, rootDir string) (*Client, error) {
 	resolved, err := exec.LookPath(command)
 	if err != nil {
 		if logFile != nil {
-			fmt.Fprintf(logFile, "LookPath(%q) failed: %v\nPATH=%s\n", command, err, os.Getenv("PATH"))
+			fmt.Fprintf(logFile, "LookPath(%q) failed: %v\nPATH=%s\n", command, err, os.Getenv("PATH")) //nolint:errcheck
 			logFile.Close() //nolint:errcheck
 		}
 		return nil, fmt.Errorf("language server %q not found: %w", command, err)
@@ -91,7 +91,7 @@ func (c *Client) Initialize() error {
 
 	raw, err := c.conn.Call(ctx, "initialize", params)
 	if c.logFile != nil {
-		fmt.Fprintf(c.logFile, "initialize response: err=%v raw=%s\n", err, raw)
+		fmt.Fprintf(c.logFile, "initialize response: err=%v raw=%s\n", err, raw) //nolint:errcheck
 	}
 	if err != nil {
 		return fmt.Errorf("initialize: %w", err)
@@ -99,7 +99,7 @@ func (c *Client) Initialize() error {
 	var result InitializeResult
 	if unmarshalErr := json.Unmarshal(raw, &result); unmarshalErr != nil {
 		if c.logFile != nil {
-			fmt.Fprintf(c.logFile, "unmarshal capabilities error: %v\n", unmarshalErr)
+			fmt.Fprintf(c.logFile, "unmarshal capabilities error: %v\n", unmarshalErr) //nolint:errcheck
 		}
 		// Proceed with empty capabilities rather than aborting — the server is running.
 	}

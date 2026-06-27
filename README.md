@@ -1,68 +1,130 @@
 # indigo
 
-A terminal text editor written in Go using a client/server model via Cap'n Proto RPC.
+A terminal text editor with modal editing and built-in language server support. Inspired by Vim and Helix.
 
-## Usage
+**Note:** indigo is in the early days, and while somewhat usable, should not yet be relied on for production environments.
+
+## Who it's for
+
+indigo is for developers who:
+
+- Prefer staying in the terminal and are comfortable with modal editing
+- Want **LSP features out of the box** — diagnostics, hover docs, go-to-definition, completions — without writing any config
+- Work across multiple languages and want syntax highlighting and formatting to just work
+
+If you want an editor that does the right thing for your language automatically (gopls for Go, rust-analyzer for Rust, typescript-language-server for TypeScript, etc.) the moment you open a file, indigo is for you.
+
+## Install
+
+> **Note:** Binary releases are not yet available. For now, build from source:
 
 ```
-io <file>
+go install github.com/indiejames/indigo/cmd/indigo@latest
 ```
 
-## Syntax Highlighting
+The binary is named `io`. Requires Go 1.21+.
 
-| Extension(s)                      | Language        |
-|-----------------------------------|-----------------|
-| `.s` `.asm`                       | Assembly        |
-| `.sh` `.bash`                     | Bash            |
-| `.c` `.h`                         | C               |
-| `.clj` `.cljs` `.cljc` `.edn`     | Clojure         |
-| `.css`                            | CSS             |
-| `.cue`                            | CUE             |
-| `.cc` `.cpp` `.cxx` `.c++` `.hpp` | C++             |
-| `.cs`                             | C#              |
-| `.dart`                           | Dart            |
-| `Dockerfile`                      | Dockerfile      |
-| `.ex` `.exs`                      | Elixir          |
-| `.elm`                            | Elm             |
-| `.erl` `.hrl`                     | Erlang          |
-| `.gd`                             | GDScript        |
-| `.gleam`                          | Gleam           |
-| `.go`                             | Go              |
-| `.graphql` `.gql`                 | GraphQL         |
-| `.groovy` `.gvy` `.gy` `.gsh`     | Groovy          |
-| `.hs` `.lhs`                      | Haskell         |
-| `.html` `.htm`                    | HTML            |
-| `.java`                           | Java            |
-| `.js` `.mjs` `.cjs`               | JavaScript      |
-| `.json`                           | JSON            |
-| `.jl`                             | Julia           |
-| `.kt` `.kts`                      | Kotlin          |
-| `.lua`                            | Lua             |
-| `.md` `.markdown`                 | Markdown        |
-| `.ml` `.mli`                      | OCaml           |
-| `.nim`                            | Nim             |
-| `.nix`                            | Nix             |
-| `.php`                            | PHP             |
-| `.proto`                          | Protobuf        |
-| `.py`                             | Python          |
-| `.r`                              | R               |
-| `.rb`                             | Ruby            |
-| `.rs`                             | Rust            |
-| `.scala` `.sc`                    | Scala           |
-| `.sql`                            | SQL             |
-| `.svelte`                         | Svelte          |
-| `.swift`                          | Swift           |
-| `.tf` `.hcl`                      | HCL / Terraform |
-| `.toml`                           | TOML            |
-| `.ts`                             | TypeScript      |
-| `.tsx`                            | TSX             |
-| `.yaml` `.yml`                    | YAML            |
-| `.zig`                            | Zig             |
+## Quick start
+
+```
+io file.go          # open a file
+io .                # open directory (shows file picker)
+io +42 file.go      # open a file at line 42
+```
+
+indigo uses a **client/server model**: the first invocation starts a background server for your workspace (rooted at the nearest `.git` directory); subsequent `io` sessions in the same workspace connect to the existing server. The server exits automatically when all editor sessions close.
+
+## Key bindings
+
+### Normal mode
+
+| Key                 | Action                                       |
+|---------------------|----------------------------------------------|
+| `i`                 | Enter insert mode                            |
+| `A`                 | Enter insert mode at end of line             |
+| `o` / `O`           | Open new line below / above                  |
+| `h` `j` `k` `l`     | Move left / down / up / right                |
+| `0` `$`             | Start / end of line                          |
+| `G`                 | End of file                                  |
+| `gg`                | Top of file                                  |
+| `Ctrl+f` / `Ctrl+b` | Page down / up                               |
+| `w`                 | Select word (repeat to advance to next word) |
+| `x`                 | Select current line                          |
+| `d`                 | Delete selection (or character under cursor) |
+| `c`                 | Delete selection and enter insert mode       |
+| `y`                 | Copy selection to system clipboard           |
+| `u` / `U`           | Undo / redo                                  |
+| `K`                 | Show hover documentation (LSP)               |
+| `gd`                | Go to definition (LSP)                       |
+| `Ctrl+s`            | Save                                         |
+| `Ctrl+p`            | Open file picker                             |
+| `]b` / `[b`         | Next / previous buffer                       |
+| `:`                 | Enter command mode                           |
+| `Esc`               | Clear selection                              |
+
+### Insert mode
+
+| Key                 | Action                          |
+|---------------------|---------------------------------|
+| `Esc`               | Return to normal mode           |
+| `Ctrl+s`            | Save                            |
+| `Ctrl+Space`        | Trigger completion              |
+| `Tab` / `Shift+Tab` | Next / previous completion item |
+| `Enter`             | Accept completion               |
+
+### Command mode
+
+Type `:` in normal mode, then one of:
+
+| Command                    | Action                     |
+|----------------------------|----------------------------|
+| `:w` `:write` `:s` `:save` | Save                       |
+| `:q` `:quit`               | Quit (fails if unsaved)    |
+| `:q!` `:quit!`             | Quit discarding changes    |
+| `:wq` `:x`                 | Save and quit              |
+| `:qa` `:quit-all`          | Close all buffers and quit |
+| `:qa!` `:quit-all!`        | Force close all and quit   |
+| `:wqa`                     | Save all and quit          |
+| `:e` `:edit`               | Open file picker           |
+| `:fmt` `:format`           | Format current file        |
+| `:<n>`                     | Jump to line number        |
+
+### Mouse
+
+| Action       | Result      |
+|--------------|-------------|
+| Click        | Move cursor |
+| Click + drag | Select text |
+| Double-click | Select word |
+
+## Features
+
+**Syntax highlighting** — 40+ languages via Tree-sitter grammars. See [Language Support](docs/language-support.md).
+
+**LSP integration** — Language servers start automatically when you open a supported file (no config needed if the server is in your PATH). Provides:
+- Inline diagnostics with gutter markers
+- Hover documentation (`K`)
+- Go-to-definition (`gd`) — opens in a new buffer, not a new session
+- Signature help — appears automatically when you type `(`
+- Completions — automatic or on-demand with `Ctrl+Space`
+
+**Auto-formatting** — On `:w` with `format_on_save = true`, indigo runs the appropriate formatter (gofmt, prettier, rustfmt, etc.) automatically. See [Language Support](docs/language-support.md) for the full list.
+
+**Multi-buffer** — Open multiple files in the same session. A tab bar appears when more than one buffer is open. Use `]b` / `[b` or `Ctrl+P` to navigate.
+
+**Crash recovery** — File content is written to a recovery directory every 5 seconds. If indigo exits uncleanly, the next open will offer to restore your unsaved work.
+
+**Shared server** — Opening the same workspace in multiple terminal windows shares one server process. Buffers are synchronized across sessions.
 
 ## Configuration
 
 Config file: `~/.config/indigo/config.toml`
 
 ```toml
-line_numbers = true  # default: true
+line_numbers    = true   # show line numbers in gutter
+hide_tabs       = false  # hide tab bar even when multiple buffers are open
+fuzzy_search    = true   # fuzzy matching in the file picker
+format_on_save  = false  # run formatter automatically on :w
 ```
+
+Full configuration reference, including how to add custom language servers and formatters: [Configuration](docs/configuration.md).

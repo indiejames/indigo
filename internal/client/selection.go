@@ -1,12 +1,47 @@
 package client
 
 import (
+	"strings"
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/indiejames/indigo/internal/document"
 )
+
+// selectedText returns the text covered by the current selection, or "" if none.
+func (m *Model) selectedText() string {
+	if m.sel == nil {
+		return ""
+	}
+	start, end := m.sel.ordered()
+	if m.sel.IsLine {
+		return m.buf.Line(start.Line) + "\n"
+	}
+	if start.Line == end.Line {
+		runes := []rune(m.buf.Line(start.Line))
+		hi := min(end.Col+1, len(runes))
+		lo := min(start.Col, hi)
+		return string(runes[lo:hi])
+	}
+	var sb strings.Builder
+	// First line: from start.Col to end of line.
+	firstRunes := []rune(m.buf.Line(start.Line))
+	if start.Col < len(firstRunes) {
+		sb.WriteString(string(firstRunes[start.Col:]))
+	}
+	sb.WriteByte('\n')
+	// Middle lines (complete).
+	for l := start.Line + 1; l < end.Line; l++ {
+		sb.WriteString(m.buf.Line(l))
+		sb.WriteByte('\n')
+	}
+	// Last line: from 0 to end.Col+1.
+	lastRunes := []rune(m.buf.Line(end.Line))
+	hi := min(end.Col+1, len(lastRunes))
+	sb.WriteString(string(lastRunes[:hi]))
+	return sb.String()
+}
 
 // ordered returns (start, end) in document order (start <= end).
 func (s *Selection) ordered() (start, end document.Pos) {
@@ -109,6 +144,25 @@ func (m Model) deleteSelection() (Model, tea.Cmd) {
 
 func isWordChar(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
+}
+
+// findWholeWordAt returns the inclusive [start, end] of the word that contains col,
+// scanning backward to the word start and forward to the word end.
+// Unlike findWordAt (which only scans forward), this is used for double-click selection.
+func findWholeWordAt(runes []rune, col int) (start, end int, found bool) {
+	n := len(runes)
+	if n == 0 || col >= n || !isWordChar(runes[col]) {
+		return -1, -1, false
+	}
+	start = col
+	for start > 0 && isWordChar(runes[start-1]) {
+		start--
+	}
+	end = col
+	for end+1 < n && isWordChar(runes[end+1]) {
+		end++
+	}
+	return start, end, true
 }
 
 // findWordAt returns the inclusive [start, end] of the word at or ahead of col.

@@ -374,6 +374,16 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m2.mode = ModeInsert
 		return m2, cmd
 
+	case "y":
+		if text := m.selectedText(); text != "" {
+			if err := writeClipboard(text); err != nil {
+				m.status = "clipboard: " + err.Error()
+			} else {
+				m.status = "copied"
+			}
+			m.sel = nil
+		}
+
 	// Movement — clears selection.
 	case "h", "left":
 		m.sel = nil

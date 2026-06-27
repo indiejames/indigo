@@ -2,6 +2,7 @@ package client
 
 import (
 	"testing"
+	"time"
 
 	"github.com/indiejames/indigo/internal/document"
 )
@@ -106,5 +107,42 @@ func TestHandleMouseDragWithoutPress(t *testing.T) {
 	// sel remains nil — no crash
 	if m.sel != nil {
 		t.Error("drag without press should not create selection")
+	}
+}
+
+func TestDoubleClickSelectsWord(t *testing.T) {
+	m := newTestModel("hello world\n")
+	// First click at col 2 (inside "hello")
+	m.handleMousePress(2, 0)
+	// Second click at same position within the double-click window
+	m.lastClickAt = time.Now().Add(-100 * time.Millisecond)
+	m.handleMousePress(2, 0)
+
+	if m.sel == nil {
+		t.Fatal("double-click should set a selection")
+	}
+	if m.dragging {
+		t.Error("dragging should be false after double-click")
+	}
+	start, end := m.sel.ordered()
+	got := []rune(m.buf.Line(0))[start.Col : end.Col+1]
+	if string(got) != "hello" {
+		t.Errorf("selected %q, want %q", string(got), "hello")
+	}
+}
+
+func TestDoubleClickOutsideWindowDoesNotSelect(t *testing.T) {
+	m := newTestModel("hello world\n")
+	m.handleMousePress(2, 0)
+	// Second click after the window has expired
+	m.lastClickAt = time.Now().Add(-(doubleClickWindow + time.Millisecond))
+	m.handleMousePress(2, 0)
+
+	// Should behave like a normal single click: point selection, dragging true
+	if !m.dragging {
+		t.Error("slow second click should still set dragging")
+	}
+	if m.sel != nil && m.sel.Anchor != m.sel.Head {
+		t.Error("slow second click should not expand selection to a word")
 	}
 }

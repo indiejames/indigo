@@ -1,6 +1,12 @@
 package client
 
-import "github.com/indiejames/indigo/internal/document"
+import (
+	"time"
+
+	"github.com/indiejames/indigo/internal/document"
+)
+
+const doubleClickWindow = 400 * time.Millisecond
 
 // clickToPos converts a terminal (x, y) coordinate to a buffer position.
 // Returns ok=false if the click is outside the text area (e.g. on the status bar).
@@ -26,6 +32,25 @@ func (m *Model) clickToPos(x, y int) (document.Pos, bool) {
 func (m *Model) handleMousePress(x, y int) {
 	pos, ok := m.clickToPos(x, y)
 	if !ok {
+		return
+	}
+	now := time.Now()
+	isDoubleClick := now.Sub(m.lastClickAt) <= doubleClickWindow && m.lastClickPos == pos
+	m.lastClickAt = now
+	m.lastClickPos = pos
+
+	if isDoubleClick {
+		m.cursor = pos
+		m.sel = nil
+		runes := []rune(m.buf.Line(pos.Line))
+		if s, e, ok := findWholeWordAt(runes, pos.Col); ok {
+			m.sel = &Selection{
+				Anchor: document.Pos{Line: pos.Line, Col: s},
+				Head:   document.Pos{Line: pos.Line, Col: e},
+			}
+			m.cursor = m.sel.Head
+		}
+		m.dragging = false
 		return
 	}
 	m.cursor = pos

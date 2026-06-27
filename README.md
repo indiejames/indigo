@@ -2,7 +2,9 @@
 
 A terminal text editor with modal editing and built-in language server support. Inspired by Vim and Helix.
 
-**Note:** indigo is in the early days, and while somewhat usable, should not yet be relied on for production environments.
+**Note:** indigo is early-stage software — expect rough edges.
+
+**Caveat:** While indigo currently does not provide support for using AI tools like [GitHub CoPilot](https://github.com/features/copilot) or [Claude.AI](https://claude.ai/new), Claude.AI _was_ used in the development of indigo. If you are opposed to the use of AI tools in software development then you might want to look elsewhere.
 
 ## Who it's for
 
@@ -33,6 +35,23 @@ io +42 file.go      # open a file at line 42
 ```
 
 indigo uses a **client/server model**: the first invocation starts a background server for your workspace (rooted at the nearest `.git` directory); subsequent `io` sessions in the same workspace connect to the existing server. The server exits automatically when all editor sessions close.
+
+### Editing model
+
+indigo follows the **select → operate** model from Kakoune and Helix, rather than the operator → motion model of Vim. You always select text first, then act on it:
+
+```
+w        select the word under the cursor
+d        delete it
+
+x        select the current line
+c        delete it and enter insert mode
+
+w w      advance the selection to the next word
+y        copy it to the clipboard
+```
+
+If you're coming from Vim, the main adjustment is that `d` and `c` act on whatever is currently selected, not on a following motion. If nothing is selected, `d` deletes the character under the cursor.
 
 ## Key bindings
 

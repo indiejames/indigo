@@ -71,9 +71,18 @@ func (fp *filePicker) setQuery(q string) {
 	}
 	if fp.fuzzySearch {
 		matches := fuzzy.Find(q, fp.all)
-		fp.filtered = make([]string, len(matches))
+		type candidate struct {
+			path  string
+			score int
+		}
+		cs := make([]candidate, len(matches))
 		for i, m := range matches {
-			fp.filtered[i] = fp.all[m.Index]
+			cs[i] = candidate{path: fp.all[m.Index], score: pickerScore(q, fp.all[m.Index], m.Score)}
+		}
+		sort.Slice(cs, func(i, j int) bool { return cs[i].score > cs[j].score })
+		fp.filtered = make([]string, len(cs))
+		for i, c := range cs {
+			fp.filtered[i] = c.path
 		}
 	} else {
 		lower := strings.ToLower(q)
@@ -84,6 +93,36 @@ func (fp *filePicker) setQuery(q string) {
 			}
 		}
 	}
+}
+
+// pickerScore returns a ranking score for a fuzzy match.
+// Higher is better. Basename matches are heavily weighted so that typing a
+// filename brings exact or prefix matches to the top regardless of path depth.
+func pickerScore(query, path string, fuzzyLibScore int) int {
+	base := filepath.Base(path)
+	lq := strings.ToLower(query)
+	lb := strings.ToLower(base)
+	lp := strings.ToLower(path)
+
+	score := fuzzyLibScore
+
+	switch {
+	case lb == lq:
+		score += 10000 // exact filename match
+	case strings.HasPrefix(lb, lq):
+		score += 5000 // filename starts with query
+	case strings.HasSuffix(lb, lq):
+		score += 3000 // filename ends with query (e.g. extension match)
+	case strings.Contains(lb, lq):
+		score += 2000 // query is a substring of the filename
+	case strings.HasSuffix(lp, lq):
+		score += 1000 // full query matches the tail of the path
+	}
+
+	// Prefer shallower paths when scores are otherwise equal.
+	score -= strings.Count(path, string(filepath.Separator)) * 10
+
+	return score
 }
 
 func (fp *filePicker) moveUp() {

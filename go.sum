@@ -58,6 +58,8 @@ github.com/alexaandru/go-sitter-forest/kotlin v1.9.4 h1:H2cRqquwV3rbNsUGUvyRZKWw
 github.com/alexaandru/go-sitter-forest/kotlin v1.9.4/go.mod h1:QCAC6OJsnUIRMx1akoZNzKRe+slaQq4sGSLAVwMFTuQ=
 github.com/alexaandru/go-sitter-forest/lua v1.9.3 h1:A3Tas9sLRVc1kgD4Q477xhW+BfZzm2bnX4xO4bTSUNY=
 github.com/alexaandru/go-sitter-forest/lua v1.9.3/go.mod h1:7MFGPolXojnCrVMHI9TIpB1OCLY8n18Cb4XyKr+hmfE=
+github.com/alexaandru/go-sitter-forest/make v1.9.1 h1:RthLvGEwRi7bufPhFqlg1azcVu0hd1OWRWdcAI56LtE=
+github.com/alexaandru/go-sitter-forest/make v1.9.1/go.mod h1:2zuovDw+jvgWnWU/WMRDxtjHOo4ttuNJX+tIq3egxoM=
 github.com/alexaandru/go-sitter-forest/markdown v1.9.5 h1:59eqvaWljYcTZcbSFhx6RcYy9scZxHBuq0+vHhgcXpY=
 github.com/alexaandru/go-sitter-forest/markdown v1.9.5/go.mod h1:qoQhsERwq18jIqWiSgiP6LuCvFK4VqA5lBkCFKaZL44=
 github.com/alexaandru/go-sitter-forest/nim v1.9.1 h1:fYw3LVUSwNZ5dca19S46RyajOZFvOhw6VEqYV1UdHc4=

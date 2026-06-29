@@ -4,8 +4,15 @@ $Go.package("proto");
 $Go.import("github.com/indiejames/indigo/internal/proto");
 
 # EditorService is the capability exposed by the server over a Unix socket.
+interface ClientCallback {
+  showMessage   @0 (text :Text)                                -> ();
+  moveCursor    @1 (bufId :UInt32, line :UInt32, col :UInt32) -> ();
+  openFile      @2 (path :Text, line :UInt32)                  -> ();
+  keyRegistered @3 (trigger :Text)                             -> ();
+}
+
 interface EditorService {
-  connect         @0 ()                                                        -> (clientId :UInt64);
+  connect         @0 (callback :ClientCallback)                                -> (clientId :UInt64);
   disconnect      @1 (clientId :UInt64)                                        -> ();
   openFile        @2 (clientId :UInt64, path :Text)                            -> (bufferId :UInt32, content :Text, version :UInt64, fromRecovery :Bool);
   getUpdates      @3 (clientId :UInt64, bufferId :UInt32, sinceVersion :UInt64) -> (ops :List(EditOp), version :UInt64);
@@ -20,6 +27,39 @@ interface EditorService {
   complete        @12 (bufId :UInt32, line :UInt32, col :UInt32)               -> (items :List(CompletionItem));
   definition      @13 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :DefinitionResult);
   format          @14 (bufId :UInt32)                                           -> (content :Text, changed :Bool, noFormatter :Bool);
+  handlePluginKey      @15 (clientId :UInt64, key :Text, mode :Text)                -> (result :PluginKeyResult);
+  updateViewport       @16 (clientId :UInt64, topLine :UInt32, height :UInt32)      -> ();
+  getPluginDecorations @17 (clientId :UInt64, bufId :UInt32)                        -> (decorations :List(PluginDecoration));
+}
+
+struct PluginEdit {
+  fromLine @0 :UInt32;
+  fromCol  @1 :UInt32;
+  toLine   @2 :UInt32;
+  toCol    @3 :UInt32;
+  newText  @4 :Text;
+}
+
+enum PluginDecorationKind {
+  gutter    @0;
+  overlay   @1;
+  statusBar @2;
+}
+
+struct PluginDecoration {
+  line @0 :UInt32;
+  col  @1 :UInt32;
+  text @2 :Text;
+  kind @3 :PluginDecorationKind;
+}
+
+struct PluginKeyResult {
+  handled     @0 :Bool;
+  edits       @1 :List(PluginEdit);
+  cursorLine  @2 :UInt32;
+  cursorCol   @3 :UInt32;
+  hasCursor   @4 :Bool;
+  captureKeys @5 :UInt32; # >0 = client should send next N keys to the plugin as "capture" mode
 }
 
 struct DefinitionResult {

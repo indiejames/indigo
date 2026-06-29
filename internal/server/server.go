@@ -19,6 +19,7 @@ import (
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/format"
 	"github.com/indiejames/indigo/internal/lsp"
+	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
 
@@ -48,17 +49,25 @@ type bufferEntry struct {
 	clients map[uint64]struct{}
 }
 
+// clientEntry holds connection metadata for a connected client.
+type clientEntry struct {
+	callback proto.ClientCallback
+	topLine  uint32
+	height   uint32
+}
+
 // editorService implements proto.EditorService_Server.
 type editorService struct {
-	mu      sync.Mutex
-	buffers map[uint32]*bufferEntry
-	nextBuf uint32
-	clients map[uint64]struct{}
-	nextClt uint64
-	recDir  string
-	lspMgr  *lsp.Manager
-	fmtMgr  *format.Manager
-	cfg     *config.Config
+	mu        sync.Mutex
+	buffers   map[uint32]*bufferEntry
+	nextBuf   uint32
+	clientMap map[uint64]*clientEntry
+	nextClt   uint64
+	recDir    string
+	lspMgr    *lsp.Manager
+	fmtMgr    *format.Manager
+	pluginMgr *plugin.Manager
+	cfg       *config.Config
 
 	// shutdown is called when the last client disconnects cleanly.
 	shutdown func()
@@ -74,15 +83,17 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 		}
 	}
 	lspMgr := lsp.NewManager(workspaceDir, servers)
-	return &editorService{
-		buffers:  make(map[uint32]*bufferEntry),
-		clients:  make(map[uint64]struct{}),
-		recDir:   recDir,
+	svc := &editorService{
+		buffers:   make(map[uint32]*bufferEntry),
+		clientMap: make(map[uint64]*clientEntry),
+		recDir:    recDir,
 		lspMgr:   lspMgr,
 		fmtMgr:   format.NewManager(lspMgr, cfg, workspaceDir),
 		cfg:      cfg,
 		shutdown: shutdown,
 	}
+	svc.pluginMgr = plugin.NewManager(workspaceDir, svc)
+	return svc
 }
 
 // recoveryFilePath returns the path for the recovery file for a given source file.
@@ -105,14 +116,16 @@ func setupRecoveryDir() (string, error) {
 }
 
 func (s *editorService) Connect(_ context.Context, call proto.EditorService_connect) error {
+	cb := call.Args().Callback()
 	res, err := call.AllocResults()
 	if err != nil {
+		cb.Release()
 		return err
 	}
 	s.mu.Lock()
 	s.nextClt++
 	id := s.nextClt
-	s.clients[id] = struct{}{}
+	s.clientMap[id] = &clientEntry{callback: cb}
 	s.mu.Unlock()
 	res.SetClientId(id)
 	return nil
@@ -121,12 +134,15 @@ func (s *editorService) Connect(_ context.Context, call proto.EditorService_conn
 func (s *editorService) Disconnect(_ context.Context, call proto.EditorService_disconnect) error {
 	clientID := call.Args().ClientId()
 	s.mu.Lock()
-	delete(s.clients, clientID)
+	if entry, ok := s.clientMap[clientID]; ok {
+		entry.callback.Release()
+		delete(s.clientMap, clientID)
+	}
 	// Remove client from any open buffers.
 	for _, e := range s.buffers {
 		delete(e.clients, clientID)
 	}
-	remaining := len(s.clients)
+	remaining := len(s.clientMap)
 	s.mu.Unlock()
 
 	if remaining == 0 {
@@ -191,6 +207,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	res.SetVersion(ver)
 	res.SetFromRecovery(fromRecovery)
 	go s.lspMgr.DidOpen(path, content)
+	go s.pluginMgr.DispatchBufferOpen(context.Background(), bufID, path)
 	return nil
 }
 
@@ -351,6 +368,7 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	path := entry.buf.Path()
 	content := entry.buf.Content()
 	go s.lspMgr.DidChange(path, content)
+	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 
 	return nil
 }
@@ -386,6 +404,7 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 	entry.buf.SetClean()
 	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
 	go s.lspMgr.DidSave(path)
+	go s.pluginMgr.DispatchBufferSave(context.Background(), bufID, path)
 
 	_, err := call.AllocResults()
 	return err
@@ -427,6 +446,7 @@ func (s *editorService) CloseBuffer(_ context.Context, call proto.EditorService_
 	if removedPath != "" {
 		os.Remove(recoveryFilePath(s.recDir, removedPath)) //nolint:errcheck
 		go s.lspMgr.DidClose(removedPath)
+		go s.pluginMgr.DispatchBufferClose(context.Background(), bufID, removedPath)
 	}
 
 	_, err := call.AllocResults()
@@ -635,6 +655,107 @@ func (s *editorService) Definition(_ context.Context, call proto.EditorService_d
 	return nil
 }
 
+func (s *editorService) HandlePluginKey(ctx context.Context, call proto.EditorService_handlePluginKey) error {
+	args := call.Args()
+	key, err := args.Key()
+	if err != nil {
+		return err
+	}
+	mode, err := args.Mode()
+	if err != nil {
+		return err
+	}
+
+	handled, edits, cursorLine, cursorCol, hasCursor, captureKeys, handleErr := s.pluginMgr.HandleKey(ctx, key, mode)
+	if handleErr != nil {
+		return handleErr
+	}
+
+	// Apply edits returned by the plugin to the server buffer.
+	// The plugin may have also called applyEdit directly; these cover the
+	// case where the plugin returns edits atomically via KeyResponse.
+	if handled && len(edits) > 0 {
+		// edits reference a buffer by position but KeyResponse doesn't carry bufID;
+		// we apply them via the bridge using the active buffer is ambiguous here.
+		// For now, skip auto-application — plugins should call applyEdit explicitly.
+		_ = edits
+	}
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	result, err := res.NewResult()
+	if err != nil {
+		return err
+	}
+	result.SetHandled(handled)
+	result.SetHasCursor(hasCursor)
+	if hasCursor {
+		result.SetCursorLine(cursorLine)
+		result.SetCursorCol(cursorCol)
+	}
+	result.SetCaptureKeys(captureKeys)
+	return nil
+}
+
+func (s *editorService) GetPluginDecorations(ctx context.Context, call proto.EditorService_getPluginDecorations) error {
+	args := call.Args()
+	clientID := args.ClientId()
+	bufID := args.BufId()
+
+	s.mu.Lock()
+	ce, ok := s.clientMap[clientID]
+	var topLine, height uint32
+	if ok {
+		topLine = ce.topLine
+		height = ce.height
+	}
+	s.mu.Unlock()
+
+	var endLine uint32
+	if height > 0 {
+		endLine = topLine + height - 1
+	}
+	decorations := s.pluginMgr.GetDecorations(ctx, bufID, topLine, endLine)
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	list, err := res.NewDecorations(int32(len(decorations)))
+	if err != nil {
+		return err
+	}
+	for i, d := range decorations {
+		item := list.At(i)
+		item.SetLine(d.Line)
+		item.SetCol(d.Col)
+		if err := item.SetText(d.Text); err != nil {
+			return err
+		}
+		item.SetKind(proto.PluginDecorationKind(d.Kind))
+	}
+	return nil
+}
+
+func (s *editorService) UpdateViewport(_ context.Context, call proto.EditorService_updateViewport) error {
+	args := call.Args()
+	clientID := args.ClientId()
+	topLine := args.TopLine()
+	height := args.Height()
+
+	s.mu.Lock()
+	if entry, ok := s.clientMap[clientID]; ok {
+		entry.topLine = topLine
+		entry.height = height
+	}
+	s.mu.Unlock()
+
+	_, err := call.AllocResults()
+	return err
+}
+
 func (s *editorService) Format(_ context.Context, call proto.EditorService_format) error {
 	bufID := call.Args().BufId()
 
@@ -734,6 +855,8 @@ func New(dir string) (*Server, error) {
 		close(srv.done)
 	})
 
+	go srv.svc.pluginMgr.Start(context.Background()) //nolint:errcheck
+
 	interval := time.Duration(cfg.RecoveryIntervalSecs) * time.Second
 	srv.startFlushLoop(interval, cfg.RecoveryMaxBytes)
 	go srv.serve()
@@ -820,6 +943,7 @@ func (s *Server) Wait() {
 	s.listener.Close() //nolint:errcheck
 	s.deleteAllRecoveryFiles()
 	s.svc.lspMgr.Shutdown()
+	s.svc.pluginMgr.Shutdown()
 	os.Remove(s.socketPath) //nolint:errcheck
 }
 

@@ -177,6 +177,23 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ---- cleanup done ----
 	case appQuitMsg:
 		return a, tea.Quit
+
+	// ---- server push (plugin effects) ----
+	case client.PluginShowMsgMsg:
+		a.status = msg.Text
+		return a, nil
+
+	case client.PluginMoveCursorMsg:
+		for i, buf := range a.buffers {
+			if buf.BufID() == msg.BufID {
+				a.buffers[i] = buf.AtLine(int(msg.Line))
+				if i == a.active {
+					a.active = i
+				}
+				break
+			}
+		}
+		return a, nil
 	}
 
 	// Picker intercepts all key input when open.

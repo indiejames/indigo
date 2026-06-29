@@ -200,7 +200,54 @@ func (m Model) handleWarnQuit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleCapturedKey forwards a keypress to the plugin that requested capture mode.
+// Esc always cancels capture as a safety valve. Each key decrements the remaining
+// count; when it hits zero, capture mode ends (unless the plugin's response requests more).
+func (m Model) handleCapturedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "esc" {
+		m.captureMode = false
+		m.captureRemaining = 0
+		m.decorations = nil
+		return m, nil
+	}
+	if m.captureRemaining > 0 {
+		m.captureRemaining--
+	}
+	if m.captureRemaining == 0 {
+		m.captureMode = false
+	}
+	key := msg.String()
+	return m, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		result, err := m.rpc.HandlePluginKey(ctx, key, "capture")
+		if err != nil {
+			return errorMsg{err}
+		}
+		return pluginKeyResultMsg{result: result}
+	}
+}
+
+// handlePluginKeyRPC dispatches a keypress to the owning plugin and returns a
+// cmd that will deliver the result as a pluginKeyResultMsg.
+func (m Model) handlePluginKeyRPC(key string) (tea.Model, tea.Cmd) {
+	return m, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		result, err := m.rpc.HandlePluginKey(ctx, key, "normal")
+		if err != nil {
+			return errorMsg{err}
+		}
+		return pluginKeyResultMsg{result: result}
+	}
+}
+
 func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Capture mode: plugin owns keypresses until it signals done.
+	if m.captureMode {
+		return m.handleCapturedKey(msg)
+	}
+
 	// Handle active prefix sequence before the main switch.
 	if len(m.prefixSeq) > 0 {
 		if msg.String() == "esc" {
@@ -222,6 +269,11 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.prefixSeq = nil
 		return m, nil
+	}
+
+	// Let plugins handle keys they registered before built-in commands.
+	if m.rpc != nil && m.rpc.HasPluginKey(msg.String()) {
+		return m.handlePluginKeyRPC(msg.String())
 	}
 
 	switch msg.String() {

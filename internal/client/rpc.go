@@ -4,18 +4,52 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 
+	capnp "capnproto.org/go/capnp/v3"
 	"capnproto.org/go/capnp/v3/rpc"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/indiejames/indigo/internal/document"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
+
+// PluginKeyResult is the client-side view of a plugin key handler response.
+type PluginKeyResult struct {
+	Handled     bool
+	CursorLine  uint32
+	CursorCol   uint32
+	HasCursor   bool
+	CaptureKeys uint32 // >0 = client should capture this many more keypresses in "capture" mode
+}
+
+// ClientDecorationKind mirrors the server-side enum.
+type ClientDecorationKind int
+
+const (
+	ClientDecorationGutter    ClientDecorationKind = 0
+	ClientDecorationOverlay   ClientDecorationKind = 1
+	ClientDecorationStatusBar ClientDecorationKind = 2
+)
+
+// ClientDecoration is one decoration item returned by a plugin provider.
+type ClientDecoration struct {
+	Line uint32
+	Col  uint32
+	Text string
+	Kind ClientDecorationKind
+}
 
 // RPC wraps a Cap'n Proto connection to the editor server.
 type RPC struct {
 	conn     *rpc.Conn
 	svc      proto.EditorService
 	clientID uint64
+	cb       *callbackServer
+
+	pluginKeysMu sync.RWMutex
+	pluginKeys   map[string]bool
 }
 
 // Dial connects to the server at socketPath and registers this client.
@@ -25,12 +59,19 @@ func Dial(socketPath string) (*RPC, error) {
 		return nil, fmt.Errorf("dial %s: %w", socketPath, err)
 	}
 
+	cb := &callbackServer{}
+	cbCap := proto.ClientCallback_ServerToClient(cb)
+
 	transport := rpc.NewStreamTransport(c)
-	conn := rpc.NewConn(transport, nil)
+	conn := rpc.NewConn(transport, &rpc.Options{
+		BootstrapClient: capnp.Client(cbCap),
+	})
 	svc := proto.EditorService(conn.Bootstrap(context.Background()))
 
-	// Register with server.
-	fut, rel := svc.Connect(context.Background(), nil)
+	// Register with server, passing our callback capability.
+	fut, rel := svc.Connect(context.Background(), func(p proto.EditorService_connect_Params) error {
+		return p.SetCallback(proto.ClientCallback(capnp.Client(cbCap).AddRef()))
+	})
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
@@ -38,10 +79,112 @@ func Dial(socketPath string) (*RPC, error) {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
 
-	return &RPC{conn: conn, svc: svc, clientID: res.ClientId()}, nil
+	r := &RPC{
+		conn:       conn,
+		svc:        svc,
+		clientID:   res.ClientId(),
+		cb:         cb,
+		pluginKeys: make(map[string]bool),
+	}
+	cb.rpc = r
+	return r, nil
 }
 
 func (r *RPC) ClientID() uint64 { return r.clientID }
+
+// SetPushSender wires a Bubble Tea send function so that server push
+// notifications (plugin effects) are routed into the running program.
+// Call this after tea.NewProgram is created, before p.Run().
+func (r *RPC) SetPushSender(send func(tea.Msg)) {
+	r.cb.setSend(send)
+}
+
+// addPluginKey records that a plugin owns this key trigger.
+func (r *RPC) addPluginKey(trigger string) {
+	r.pluginKeysMu.Lock()
+	r.pluginKeys[trigger] = true
+	r.pluginKeysMu.Unlock()
+}
+
+// HasPluginKey reports whether any plugin registered this key trigger.
+func (r *RPC) HasPluginKey(key string) bool {
+	r.pluginKeysMu.RLock()
+	defer r.pluginKeysMu.RUnlock()
+	return r.pluginKeys[key]
+}
+
+// HandlePluginKey asks the server to dispatch a keypress to the owning plugin.
+func (r *RPC) HandlePluginKey(ctx context.Context, key, mode string) (PluginKeyResult, error) {
+	fut, rel := r.svc.HandlePluginKey(ctx, func(p proto.EditorService_handlePluginKey_Params) error {
+		p.SetClientId(r.clientID)
+		if err := p.SetKey(key); err != nil {
+			return err
+		}
+		return p.SetMode(mode)
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return PluginKeyResult{}, err
+	}
+	result, err := res.Result()
+	if err != nil {
+		return PluginKeyResult{}, err
+	}
+	return PluginKeyResult{
+		Handled:     result.Handled(),
+		CursorLine:  result.CursorLine(),
+		CursorCol:   result.CursorCol(),
+		HasCursor:   result.HasCursor(),
+		CaptureKeys: result.CaptureKeys(),
+	}, nil
+}
+
+// UpdateViewport informs the server of this client's current scroll position
+// and visible height so plugins can use visibleRange accurately.
+func (r *RPC) UpdateViewport(ctx context.Context, topLine, height uint32) {
+	fut, rel := r.svc.UpdateViewport(ctx, func(p proto.EditorService_updateViewport_Params) error {
+		p.SetClientId(r.clientID)
+		p.SetTopLine(topLine)
+		p.SetHeight(height)
+		return nil
+	})
+	defer rel()
+	fut.Struct() //nolint:errcheck
+}
+
+// GetDecorations fetches plugin decorations for the current client viewport.
+func (r *RPC) GetDecorations(ctx context.Context, bufID uint32) ([]ClientDecoration, error) {
+	fut, rel := r.svc.GetPluginDecorations(ctx, func(p proto.EditorService_getPluginDecorations_Params) error {
+		p.SetClientId(r.clientID)
+		p.SetBufId(bufID)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, err
+	}
+	rawList, err := res.Decorations()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ClientDecoration, rawList.Len())
+	for i := range out {
+		item := rawList.At(i)
+		text, err := item.Text()
+		if err != nil {
+			return nil, err
+		}
+		out[i] = ClientDecoration{
+			Line: item.Line(),
+			Col:  item.Col(),
+			Text: text,
+			Kind: ClientDecorationKind(item.Kind()),
+		}
+	}
+	return out, nil
+}
 
 // OpenFile asks the server to open path and returns (bufferID, content, version, fromRecovery).
 func (r *RPC) OpenFile(ctx context.Context, path string) (uint32, string, uint64, bool, error) {

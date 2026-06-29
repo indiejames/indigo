@@ -98,6 +98,12 @@ type QuitAllMsg struct {
 	SaveAll bool // :wqa — save dirty buffers first
 }
 
+// pluginKeyResultMsg carries the result of a plugin key RPC call.
+type pluginKeyResultMsg struct{ result PluginKeyResult }
+
+// decorationsMsg carries fresh plugin decorations from the server.
+type decorationsMsg struct{ items []ClientDecoration }
+
 // highlightMsg carries freshly computed syntax-highlight spans and parse time.
 type highlightMsg struct {
 	spans    highlight.LineSpans
@@ -211,6 +217,14 @@ type Model struct {
 	metrics        *metricsData
 	recoveryPrompt bool // waiting for user to accept or discard recovery content
 
+	// Plugin decorations
+	decorations []ClientDecoration
+	decorTick   int // poll every 3 ticks (~360ms)
+
+	// Capture mode: plugin owns the next N keypresses.
+	captureMode      bool
+	captureRemaining uint32
+
 	// LSP state
 	diagnostics      []ClientDiag
 	diagTick         int            // counter; fetch every 10 ticks (~1.2s)
@@ -273,13 +287,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		return m, nil
+		return m, m.updateViewportCmd()
 
 	case tickMsg:
 		m.diagTick++
+		m.decorTick++
 		cmds := []tea.Cmd{m.fetchUpdates(), tick()}
 		if m.diagTick%10 == 0 {
 			cmds = append(cmds, m.fetchDiagnostics())
+		}
+		if m.decorTick%3 == 0 {
+			cmds = append(cmds, m.fetchDecorations())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -403,6 +421,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
+		prevTopLine := m.topLine
 		switch {
 		case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
 			m.handleMousePress(msg.X, msg.Y)
@@ -415,13 +434,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sel = nil
 			}
 		}
+		if m.topLine != prevTopLine {
+			return m, m.updateViewportCmd()
+		}
 		return m, nil
+
+	case decorationsMsg:
+		m.decorations = msg.items
+		return m, nil
+
+	case pluginKeyResultMsg:
+		// Update capture mode based on what the plugin requested.
+		if msg.result.CaptureKeys > 0 {
+			m.captureMode = true
+			m.captureRemaining = msg.result.CaptureKeys
+		} else {
+			m.captureMode = false
+			m.captureRemaining = 0
+		}
+		cmds := []tea.Cmd{m.fetchDecorations()}
+		if msg.result.HasCursor {
+			m.cursor = document.Pos{
+				Line: int(msg.result.CursorLine),
+				Col:  int(msg.result.CursorCol),
+			}
+			m.scrollToCursor()
+			cmds = append(cmds, m.updateViewportCmd())
+		}
+		return m, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
 		if m.metrics != nil {
 			m.metrics.lastKeyAt = time.Now()
 		}
-		return m.handleKey(msg)
+		prevTopLine := m.topLine
+		newModel, cmd := m.handleKey(msg)
+		if nm, ok := newModel.(Model); ok && nm.topLine != prevTopLine {
+			return nm, tea.Batch(cmd, nm.updateViewportCmd())
+		}
+		return newModel, cmd
 	}
 	return m, nil
 }
@@ -436,6 +487,39 @@ func (m Model) fetchDiagnostics() tea.Cmd {
 			return nil
 		}
 		return diagnosticsMsg{diags: result.Diags, lspReady: result.LspReady}
+	}
+}
+
+// fetchDecorations polls all plugin DecorationProviders for the current buffer/viewport.
+func (m Model) fetchDecorations() tea.Cmd {
+	if m.rpc == nil {
+		return nil
+	}
+	bufID := m.bufID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		items, err := m.rpc.GetDecorations(ctx, bufID)
+		if err != nil {
+			return nil
+		}
+		return decorationsMsg{items: items}
+	}
+}
+
+// updateViewportCmd fires an UpdateViewport RPC so the server knows where the
+// client is scrolled. Fire-and-forget: no message is returned on completion.
+func (m Model) updateViewportCmd() tea.Cmd {
+	if m.rpc == nil {
+		return nil
+	}
+	topLine := uint32(m.topLine)
+	height := uint32(m.height)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		m.rpc.UpdateViewport(ctx, topLine, height)
+		return nil
 	}
 }
 

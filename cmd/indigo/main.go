@@ -92,6 +92,7 @@ func main() {
 	}
 
 	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	rpc.SetPushSender(p.Send)
 	if _, err := p.Run(); err != nil {
 		fatalf("run: %v", err)
 	}

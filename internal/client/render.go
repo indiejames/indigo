@@ -17,6 +17,25 @@ import (
 
 const tabWidth = 4
 
+// decorOverlayStyle is used to render plugin overlay decorations (e.g. jumpy labels).
+var decorOverlayStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#FFB300")).
+	Background(lipgloss.Color("#1A1A2E")).
+	Bold(true)
+
+// applyOverlay paints styledText at visual column col on mainLine, replacing
+// the characters at those positions while preserving content on both sides.
+func applyOverlay(mainLine, styledText string, col int) string {
+	textW := lipgloss.Width(styledText)
+	left := ansi.Truncate(mainLine, col, "")
+	lw := lipgloss.Width(left)
+	if lw < col {
+		left += strings.Repeat(" ", col-lw)
+	}
+	right := ansi.TruncateLeft(mainLine, col+textW, "")
+	return left + styledText + right
+}
+
 // metricsInnerW is the fixed visible width between the box borders.
 // Layout per row: 1 space + 9 label + 1 space + 8 value (right-aligned) + 1 space = 20.
 const metricsInnerW = 20
@@ -71,17 +90,45 @@ func (m Model) displayLineCount() int {
 	return lc
 }
 
-// gutterWidth returns the number of columns reserved for line numbers (and diag marker).
-func (m Model) gutterWidth() int {
-	if m.cfg == nil || !m.cfg.LineNumbers {
-		if len(m.diagnostics) > 0 {
-			return 2 // just the diag marker column
+// hasGutterDecorations reports whether any plugin decoration uses the gutter kind.
+func (m Model) hasGutterDecorations() bool {
+	for _, d := range m.decorations {
+		if d.Kind == ClientDecorationGutter {
+			return true
 		}
-		return 0
+	}
+	return false
+}
+
+// gutterDecorFor returns the gutter decoration text for lineNum, or "".
+func (m Model) gutterDecorFor(lineNum int) string {
+	for _, d := range m.decorations {
+		if d.Kind == ClientDecorationGutter && int(d.Line) == lineNum {
+			return d.Text
+		}
+	}
+	return ""
+}
+
+// gutterWidth returns the number of columns reserved for line numbers (and diag/plugin markers).
+func (m Model) gutterWidth() int {
+	hasPluginGutter := m.hasGutterDecorations()
+	if m.cfg == nil || !m.cfg.LineNumbers {
+		w := 0
+		if len(m.diagnostics) > 0 {
+			w += 2 // diag marker
+		}
+		if hasPluginGutter {
+			w += 3 // space + up to 2 chars
+		}
+		return w
 	}
 	w := len(fmt.Sprint(m.displayLineCount())) + 1
 	if len(m.diagnostics) > 0 {
 		w += 2 // space + marker
+	}
+	if hasPluginGutter {
+		w += 3 // space + up to 2 chars
 	}
 	return w
 }
@@ -257,18 +304,37 @@ func (m Model) renderLine(i int) string {
 
 	if gutterW > 0 {
 		hasDiags := len(m.diagnostics) > 0
+		hasPluginGutter := m.hasGutterDecorations()
 		numW := gutterW
 		if hasDiags {
 			numW -= 2
 		}
-		numStr := fmt.Sprintf("%*d ", numW-1, lineNum+1)
-		if lineNum == m.cursor.Line {
-			sb.WriteString(gutterCurStyle.Render(numStr))
-		} else {
-			sb.WriteString(gutterStyle.Render(numStr))
+		if hasPluginGutter {
+			numW -= 3
+		}
+		if numW > 0 {
+			numStr := fmt.Sprintf("%*d ", numW-1, lineNum+1)
+			if lineNum == m.cursor.Line {
+				sb.WriteString(gutterCurStyle.Render(numStr))
+			} else {
+				sb.WriteString(gutterStyle.Render(numStr))
+			}
 		}
 		if hasDiags {
 			sb.WriteString(m.diagMarker(lineNum))
+		}
+		if hasPluginGutter {
+			text := m.gutterDecorFor(lineNum)
+			if text == "" {
+				sb.WriteString(gutterStyle.Render("   "))
+			} else {
+				label := text
+				if len([]rune(label)) > 2 {
+					label = string([]rune(label)[:2])
+				}
+				sb.WriteString(" ")
+				sb.WriteString(decorOverlayStyle.Render(fmt.Sprintf("%-2s", label)))
+			}
 		}
 	}
 
@@ -688,6 +754,25 @@ func (m Model) View() string {
 		lines[i] = m.renderLine(i)
 	}
 
+	// Apply plugin overlay decorations (e.g. jumpy jump labels).
+	for _, d := range m.decorations {
+		if d.Kind != ClientDecorationOverlay || d.Text == "" {
+			continue
+		}
+		row := int(d.Line) - m.topLine
+		if row < 0 || row >= vis {
+			continue
+		}
+		lineStr := m.buf.Line(int(d.Line))
+		_, colMap := expandTabsRemap([]rune(lineStr))
+		visCol := int(d.Col)
+		if int(d.Col) < len(colMap) {
+			visCol = colMap[d.Col]
+		}
+		screenCol := m.gutterWidth() + visCol
+		lines[row] = applyOverlay(lines[row], decorOverlayStyle.Render(d.Text), screenCol)
+	}
+
 	// Overlay prefix-command popup in the bottom-right corner.
 	if len(m.prefixSeq) > 0 {
 		if cmd, ok := findCommand(m.prefixSeq); ok && len(cmd.children) > 0 {
@@ -945,8 +1030,18 @@ func (m Model) renderStatusBar() string {
 			centerContent = m.filePath + " [+]   " + m.status
 		}
 	default:
-		// Show most-severe diagnostic on the cursor line, if any.
-		if diags := m.diagsOnLine(m.cursor.Line); len(diags) > 0 {
+		// Plugin status bar decorations take priority over diagnostics.
+		var pluginStatus string
+		for _, d := range m.decorations {
+			if d.Kind == ClientDecorationStatusBar && d.Text != "" {
+				pluginStatus = d.Text
+				break
+			}
+		}
+		if pluginStatus != "" {
+			centerContent = pluginStatus
+		} else if diags := m.diagsOnLine(m.cursor.Line); len(diags) > 0 {
+			// Show most-severe diagnostic on the cursor line.
 			d := diags[0]
 			src := d.Source
 			if src != "" {

@@ -42,8 +42,9 @@ type Info struct {
 
 // KeyContext is the context passed to key and insert handlers.
 type KeyContext struct {
-	BufID uint32
-	Mode  string // "normal", "insert", or "capture"
+	BufID    uint32
+	Mode     string // "normal", "insert", or "capture"
+	ClientID uint64
 }
 
 // KeyResponse is returned by key and insert handlers.
@@ -486,7 +487,7 @@ func (s *keyHandlerServer) Handle(_ context.Context, call pluginproto.KeyHandler
 	kctx, _ := call.Args().Ctx()
 	mode, _ := kctx.Mode()
 
-	resp := s.fn(key, KeyContext{BufID: kctx.BufId(), Mode: mode})
+	resp := s.fn(key, KeyContext{BufID: kctx.BufId(), Mode: mode, ClientID: kctx.ClientId()})
 
 	res, err := call.AllocResults()
 	if err != nil {

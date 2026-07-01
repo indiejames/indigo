@@ -68,6 +68,7 @@ type TextEdit struct {
 type PluginToml struct {
 	Name        string            `toml:"name"`
 	Version     string            `toml:"version"`
+	SdkVersion  string            `toml:"sdk_version"`  // stored but not validated yet
 	Description string            `toml:"description"`
 	Binaries    map[string]string `toml:"binaries"`
 }
@@ -106,10 +107,15 @@ func (p *registeredPlugin) release() {
 // Manager discovers plugins in the user's plugins directory and manages their
 // processes for the lifetime of one workspace session.
 type Manager struct {
-	mu       sync.Mutex
-	plugins  []*registeredPlugin
-	workDir  string
-	bridge   ServerBridge
+	mu      sync.Mutex
+	plugins []*registeredPlugin
+	workDir string
+	bridge  ServerBridge
+
+	// capture state: when a plugin returns captureKeys > 0, subsequent keys
+	// with mode "capture" are routed to this handler instead of looking up by name.
+	captureMu      sync.Mutex
+	captureHandler pluginproto.KeyHandler
 }
 
 // NewManager creates a Manager for the given workspace root.
@@ -145,28 +151,55 @@ func (m *Manager) Start(ctx context.Context) error {
 		pluginDir := filepath.Join(dir, entry.Name())
 		manifest, err := loadManifest(pluginDir)
 		if err != nil {
+			pluginLog("plugin %s: manifest error: %v", entry.Name(), err)
 			continue
 		}
 		binaryPath, err := selectBinary(pluginDir, manifest)
 		if err != nil {
+			pluginLog("plugin %s: binary error: %v", manifest.Name, err)
 			continue
 		}
 		if err := m.startPlugin(ctx, manifest.Name, binaryPath); err != nil {
-			// One bad plugin must not prevent others from loading.
+			pluginLog("plugin %s: start error: %v", manifest.Name, err)
 			continue
 		}
+		pluginLog("plugin %s: started OK (%s)", manifest.Name, binaryPath)
 	}
 	return nil
+}
+
+func pluginLog(format string, args ...any) {
+	path := filepath.Join(os.TempDir(), "indigo-plugins.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close() //nolint:errcheck
+	fmt.Fprintf(f, format+"\n", args...)
+}
+
+func pluginLogFile() *os.File {
+	path := filepath.Join(os.TempDir(), "indigo-plugins.log")
+	f, _ := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	return f
 }
 
 func (m *Manager) startPlugin(ctx context.Context, name, binaryPath string) error {
 	sockPath := m.pluginSocketPath(name)
 	os.Remove(sockPath) //nolint:errcheck
 
+	logFile := pluginLogFile()
+	var errFile *os.File
+	if logFile != nil {
+		errFile = logFile
+	}
 	proc, err := os.StartProcess(binaryPath,
 		[]string{binaryPath, "--socket", sockPath},
-		&os.ProcAttr{Files: []*os.File{nil, nil, nil}},
+		&os.ProcAttr{Files: []*os.File{nil, nil, errFile}},
 	)
+	if logFile != nil {
+		logFile.Close() //nolint:errcheck
+	}
 	if err != nil {
 		return fmt.Errorf("start plugin %s: %w", name, err)
 	}
@@ -192,9 +225,10 @@ func (m *Manager) startPlugin(ctx context.Context, name, binaryPath string) erro
 
 	apiServer := &editorApiServer{reg: reg, bridge: m.bridge}
 	api := pluginproto.EditorApi_ServerToClient(apiServer)
+	defer api.Release()
 
 	rpcConn := rpc.NewConn(rpc.NewStreamTransport(netConn), &rpc.Options{
-		BootstrapClient: capnp.Client(api),
+		BootstrapClient: capnp.Client(api).AddRef(),
 	})
 	reg.rpcConn = rpcConn
 
@@ -216,6 +250,22 @@ func (m *Manager) startPlugin(ctx context.Context, name, binaryPath string) erro
 	m.plugins = append(m.plugins, reg)
 	m.mu.Unlock()
 	return nil
+}
+
+// AllRegisteredKeys returns every key trigger registered across all loaded plugins.
+func (m *Manager) AllRegisteredKeys() []string {
+	m.mu.Lock()
+	plugins := m.plugins
+	m.mu.Unlock()
+	var keys []string
+	for _, p := range plugins {
+		p.mu.RLock()
+		for k := range p.keyBindings {
+			keys = append(keys, k)
+		}
+		p.mu.RUnlock()
+	}
+	return keys
 }
 
 // GetDecorations calls every registered DecorationProvider and aggregates the results.
@@ -257,13 +307,14 @@ func (m *Manager) GetDecorations(ctx context.Context, bufID, startLine, endLine 
 			return nil
 		})
 		res, err := fut.Struct()
-		rel()
 		cancel()
 		if err != nil {
+			rel()
 			continue
 		}
 		rawList, err := res.Decorations()
 		if err != nil {
+			rel()
 			continue
 		}
 		for i := range rawList.Len() {
@@ -279,6 +330,7 @@ func (m *Manager) GetDecorations(ctx context.Context, bufID, startLine, endLine 
 				Kind: PluginDecorationKind(item.Kind()),
 			})
 		}
+		rel()
 	}
 	return all
 }
@@ -306,14 +358,33 @@ func (m *Manager) Shutdown() {
 		p.process.Kill() //nolint:errcheck
 		p.release()
 	}
+	m.clearCaptureHandler()
 }
 
-// HandleKey routes a keypress to the first plugin that registered it.
-// Returns handled=false immediately if no plugin owns the key.
+// HandleKey routes a keypress to the appropriate plugin handler.
+//
+// In "capture" mode the key goes to whichever handler last returned captureKeys>0,
+// regardless of the key name. In all other modes the key is looked up by name in
+// each plugin's registered key bindings.
+//
 // Plugin handlers are called with a 30 ms deadline; timeout → handled=false.
-func (m *Manager) HandleKey(ctx context.Context, key, mode string) (
+func (m *Manager) HandleKey(ctx context.Context, key, mode string, bufID uint32, clientID uint64) (
 	handled bool, edits []TextEdit, cursorLine, cursorCol uint32, hasCursor bool, captureKeys uint32, err error,
 ) {
+	if mode == "capture" {
+		m.captureMu.Lock()
+		h := m.captureHandler
+		m.captureMu.Unlock()
+		if !h.IsValid() {
+			return false, nil, 0, 0, false, 0, nil
+		}
+		handled, edits, cursorLine, cursorCol, hasCursor, captureKeys, err = m.callHandler(ctx, h, key, mode, bufID, clientID)
+		if err == nil && captureKeys == 0 {
+			m.clearCaptureHandler()
+		}
+		return
+	}
+
 	m.mu.Lock()
 	plugins := m.plugins
 	m.mu.Unlock()
@@ -325,58 +396,83 @@ func (m *Manager) HandleKey(ctx context.Context, key, mode string) (
 		if !ok {
 			continue
 		}
-
-		tctx, cancel := context.WithTimeout(ctx, 30*time.Millisecond)
-		defer cancel()
-
-		fut, rel := handler.Handle(tctx, func(ps pluginproto.KeyHandler_handle_Params) error {
-			ps.SetKey(key) //nolint:errcheck
-			kctx, err := ps.NewCtx()
-			if err != nil {
-				return err
-			}
-			return kctx.SetMode(mode)
-		})
-		defer rel()
-
-		res, callErr := fut.Struct()
-		if callErr != nil {
-			// Timeout or error: fall through as if not handled.
-			return false, nil, 0, 0, false, 0, nil
+		handled, edits, cursorLine, cursorCol, hasCursor, captureKeys, err = m.callHandler(ctx, handler, key, mode, bufID, clientID)
+		if err != nil || !handled {
+			return
 		}
-		resp, respErr := res.Response()
-		if respErr != nil {
-			return false, nil, 0, 0, false, 0, respErr
+		if captureKeys > 0 {
+			m.captureMu.Lock()
+			m.captureHandler.Release()
+			m.captureHandler = handler.AddRef()
+			m.captureMu.Unlock()
 		}
-		if !resp.Handled() {
-			return false, nil, 0, 0, false, 0, nil
-		}
-
-		// Collect edits from the response.
-		rawEdits, _ := resp.Edits()
-		edits = make([]TextEdit, rawEdits.Len())
-		for i := range edits {
-			item := rawEdits.At(i)
-			from, _ := item.From()
-			to, _ := item.To()
-			newText, _ := item.NewText()
-			edits[i] = TextEdit{
-				FromLine: from.Line(), FromCol: from.Col(),
-				ToLine:   to.Line(), ToCol: to.Col(),
-				NewText:  newText,
-			}
-		}
-
-		hasCursor = resp.HasCursor()
-		if hasCursor {
-			pos, _ := resp.CursorPos()
-			cursorLine = pos.Line()
-			cursorCol = pos.Col()
-		}
-		captureKeys = resp.CaptureKeys()
-		return true, edits, cursorLine, cursorCol, hasCursor, captureKeys, nil
+		return
 	}
 	return false, nil, 0, 0, false, 0, nil
+}
+
+// callHandler invokes a KeyHandler with a 30 ms deadline and unpacks the response.
+func (m *Manager) callHandler(ctx context.Context, handler pluginproto.KeyHandler, key, mode string, bufID uint32, clientID uint64) (
+	handled bool, edits []TextEdit, cursorLine, cursorCol uint32, hasCursor bool, captureKeys uint32, err error,
+) {
+	tctx, cancel := context.WithTimeout(ctx, 30*time.Millisecond)
+	defer cancel()
+
+	fut, rel := handler.Handle(tctx, func(ps pluginproto.KeyHandler_handle_Params) error {
+		if err := ps.SetKey(key); err != nil {
+			return err
+		}
+		kctx, err := ps.NewCtx()
+		if err != nil {
+			return err
+		}
+		kctx.SetBufId(bufID)
+		kctx.SetClientId(clientID)
+		return kctx.SetMode(mode)
+	})
+	defer rel()
+
+	res, callErr := fut.Struct()
+	if callErr != nil {
+		return false, nil, 0, 0, false, 0, nil
+	}
+	resp, respErr := res.Response()
+	if respErr != nil {
+		return false, nil, 0, 0, false, 0, respErr
+	}
+	if !resp.Handled() {
+		return false, nil, 0, 0, false, 0, nil
+	}
+
+	rawEdits, _ := resp.Edits()
+	edits = make([]TextEdit, rawEdits.Len())
+	for i := range edits {
+		item := rawEdits.At(i)
+		from, _ := item.From()
+		to, _ := item.To()
+		newText, _ := item.NewText()
+		edits[i] = TextEdit{
+			FromLine: from.Line(), FromCol: from.Col(),
+			ToLine:   to.Line(), ToCol: to.Col(),
+			NewText:  newText,
+		}
+	}
+
+	hasCursor = resp.HasCursor()
+	if hasCursor {
+		pos, _ := resp.CursorPos()
+		cursorLine = pos.Line()
+		cursorCol = pos.Col()
+	}
+	captureKeys = resp.CaptureKeys()
+	return true, edits, cursorLine, cursorCol, hasCursor, captureKeys, nil
+}
+
+func (m *Manager) clearCaptureHandler() {
+	m.captureMu.Lock()
+	m.captureHandler.Release()
+	m.captureHandler = pluginproto.KeyHandler{}
+	m.captureMu.Unlock()
 }
 
 // DispatchBufferOpen fires onOpen for all plugins that registered a buffer handler.

@@ -82,8 +82,9 @@ struct TextEdit {
 }
 
 struct KeyContext {
-  bufId @0 :UInt32;
-  mode  @1 :Text;
+  bufId    @0 :UInt32;
+  mode     @1 :Text;
+  clientId @2 :UInt64;
 }
 
 struct KeyResponse {

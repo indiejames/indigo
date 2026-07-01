@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -11,6 +13,16 @@ import (
 	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
+
+func serverLog(format string, args ...any) {
+	path := filepath.Join(os.TempDir(), "indigo-plugins.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close() //nolint:errcheck
+	fmt.Fprintf(f, "[server] "+format+"\n", args...)
+}
 
 // pluginClientID is the client ID used for edits applied by plugins.
 const pluginClientID uint64 = 0
@@ -186,16 +198,23 @@ func (s *editorService) PluginVisibleRange(clientID uint64) (startLine, endLine 
 // Notifies all connected clients that a plugin registered a key binding.
 func (s *editorService) PluginKeyRegistered(trigger string) {
 	s.mu.Lock()
+	mapLen := len(s.clientMap)
+	for id, ce := range s.clientMap {
+		serverLog("PluginKeyRegistered: clientMap[%d].IsValid=%v", id, ce.callback.IsValid())
+	}
 	callbacks := s.allCallbacks()
 	s.mu.Unlock()
 
+	serverLog("PluginKeyRegistered: trigger=%q, clientMapLen=%d, clients=%d", trigger, mapLen, len(callbacks))
+
 	ctx := context.Background()
-	for _, cb := range callbacks {
+	for i, cb := range callbacks {
 		fut, rel := cb.KeyRegistered(ctx, func(p proto.ClientCallback_keyRegistered_Params) error {
 			return p.SetTrigger(trigger)
 		})
-		fut.Struct() //nolint:errcheck
+		_, err := fut.Struct()
 		rel()
+		serverLog("PluginKeyRegistered: KeyRegistered to client %d: err=%v", i, err)
 	}
 }
 
@@ -304,13 +323,16 @@ func (s *editorService) PluginShowMessage(text string) {
 	callbacks := s.allCallbacks()
 	s.mu.Unlock()
 
+	serverLog("PluginShowMessage: text=%q, clients=%d", text, len(callbacks))
+
 	ctx := context.Background()
-	for _, cb := range callbacks {
+	for i, cb := range callbacks {
 		fut, rel := cb.ShowMessage(ctx, func(p proto.ClientCallback_showMessage_Params) error {
 			return p.SetText(text)
 		})
-		fut.Struct() //nolint:errcheck
+		_, err := fut.Struct()
 		rel()
+		serverLog("PluginShowMessage: ShowMessage to client %d: err=%v", i, err)
 	}
 }
 

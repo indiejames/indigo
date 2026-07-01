@@ -229,7 +229,15 @@ func (a App) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		path := a.picker.selected()
 		if path == "" {
-			return a, nil
+			// No filtered match — treat the query as a direct (possibly relative) path.
+			q := strings.TrimSpace(a.picker.query)
+			if q == "" {
+				return a, nil
+			}
+			if !filepath.IsAbs(q) {
+				q = filepath.Join(a.workDir, q)
+			}
+			return a, func() tea.Msg { return pickedMsg{absPath: q} }
 		}
 		return a, func() tea.Msg { return pickedMsg{absPath: path} }
 	case "up", "ctrl+p":

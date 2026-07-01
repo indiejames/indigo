@@ -201,27 +201,34 @@ func (m Model) handleWarnQuit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleCapturedKey forwards a keypress to the plugin that requested capture mode.
-// Esc always cancels capture as a safety valve. Each key decrements the remaining
-// count; when it hits zero, capture mode ends (unless the plugin's response requests more).
+// Esc always exits capture mode locally; it is still forwarded to the plugin so
+// the plugin can clean up its own state. Each non-Esc key decrements the remaining
+// count; when it hits zero, capture mode ends (unless the plugin's response re-enables it).
 func (m Model) handleCapturedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "esc" {
+	key := msg.String()
+	isEsc := key == "esc"
+
+	if isEsc {
 		m.captureMode = false
 		m.captureRemaining = 0
-		m.decorations = nil
-		return m, nil
+	} else {
+		if m.captureRemaining > 0 {
+			m.captureRemaining--
+		}
+		if m.captureRemaining == 0 {
+			m.captureMode = false
+		}
 	}
-	if m.captureRemaining > 0 {
-		m.captureRemaining--
-	}
-	if m.captureRemaining == 0 {
-		m.captureMode = false
-	}
-	key := msg.String()
+
+	bufID := m.bufID
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		result, err := m.rpc.HandlePluginKey(ctx, key, "capture")
+		result, err := m.rpc.HandlePluginKey(ctx, key, "capture", bufID)
 		if err != nil {
+			if isEsc {
+				return nil // suppress error on esc-cancel
+			}
 			return errorMsg{err}
 		}
 		return pluginKeyResultMsg{result: result}
@@ -234,7 +241,7 @@ func (m Model) handlePluginKeyRPC(key string) (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		result, err := m.rpc.HandlePluginKey(ctx, key, "normal")
+		result, err := m.rpc.HandlePluginKey(ctx, key, "normal", m.bufID)
 		if err != nil {
 			return errorMsg{err}
 		}

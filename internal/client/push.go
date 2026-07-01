@@ -83,6 +83,7 @@ func (s *callbackServer) KeyRegistered(_ context.Context, call proto.ClientCallb
 	s.mu.RLock()
 	r := s.rpc
 	s.mu.RUnlock()
+	clientLog("KeyRegistered called: trigger=%q, rpc_set=%v", trigger, r != nil)
 	if r != nil {
 		r.addPluginKey(trigger)
 	}

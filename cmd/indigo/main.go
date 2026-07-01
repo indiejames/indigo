@@ -103,10 +103,15 @@ func startServer(workDir string) {
 	if err != nil {
 		fatalf("locate executable: %v", err)
 	}
+	logPath := filepath.Join(os.TempDir(), "indigo-plugins.log")
+	logFile, _ := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	proc, err := os.StartProcess(exe, []string{exe, "--server", workDir}, &os.ProcAttr{
 		Dir:   workDir,
-		Files: []*os.File{nil, nil, nil},
+		Files: []*os.File{nil, nil, logFile},
 	})
+	if logFile != nil {
+		logFile.Close()
+	}
 	if err != nil {
 		fatalf("start server: %v", err)
 	}

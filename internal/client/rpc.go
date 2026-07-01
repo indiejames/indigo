@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
+	"runtime"
 	"sync"
 
 	capnp "capnproto.org/go/capnp/v3"
@@ -14,6 +17,24 @@ import (
 	"github.com/indiejames/indigo/internal/document"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
+
+// rpcLogger implements rpc.Logger, routing capnproto internal messages to our log file.
+type rpcLogger struct{}
+
+func (l *rpcLogger) Debug(msg string, args ...any) { clientLog("rpc debug: %s %v", msg, args) }
+func (l *rpcLogger) Info(msg string, args ...any)  { clientLog("rpc info: %s %v", msg, args) }
+func (l *rpcLogger) Warn(msg string, args ...any)  { clientLog("rpc warn: %s %v", msg, args) }
+func (l *rpcLogger) Error(msg string, args ...any) { clientLog("rpc error: %s %v", msg, args) }
+
+func clientLog(format string, args ...any) {
+	path := filepath.Join(os.TempDir(), "indigo-plugins.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close() //nolint:errcheck
+	fmt.Fprintf(f, "[client] "+format+"\n", args...)
+}
 
 // PluginKeyResult is the client-side view of a plugin key handler response.
 type PluginKeyResult struct {
@@ -61,10 +82,12 @@ func Dial(socketPath string) (*RPC, error) {
 
 	cb := &callbackServer{}
 	cbCap := proto.ClientCallback_ServerToClient(cb)
+	defer cbCap.Release()
 
 	transport := rpc.NewStreamTransport(c)
 	conn := rpc.NewConn(transport, &rpc.Options{
-		BootstrapClient: capnp.Client(cbCap),
+		BootstrapClient: capnp.Client(cbCap).AddRef(),
+		Logger:          &rpcLogger{},
 	})
 	svc := proto.EditorService(conn.Bootstrap(context.Background()))
 
@@ -87,6 +110,37 @@ func Dial(socketPath string) (*RPC, error) {
 		pluginKeys: make(map[string]bool),
 	}
 	cb.rpc = r
+	clientLog("Dial: connected, clientID=%d", r.clientID)
+
+	// Monitor connection lifecycle.
+	go func() {
+		<-r.conn.Done()
+		buf := make([]byte, 64*1024)
+		n := runtime.Stack(buf, true)
+		clientLog("client conn.Done() fired! goroutines:\n%s", buf[:n])
+	}()
+
+	// Fetch keys that plugins registered before this client connected.
+	// This handles the race where the plugin starts and registers keys before
+	// the first client calls Connect.
+	kfut, krel := svc.GetPluginKeys(context.Background(), func(_ proto.EditorService_getPluginKeys_Params) error {
+		return nil
+	})
+	if kres, err := kfut.Struct(); err != nil {
+		clientLog("GetPluginKeys RPC error: %v", err)
+	} else if keys, err := kres.Keys(); err != nil {
+		clientLog("GetPluginKeys Keys() error: %v", err)
+	} else {
+		clientLog("GetPluginKeys returned %d keys", keys.Len())
+		for i := 0; i < keys.Len(); i++ {
+			if k, err := keys.At(i); err == nil {
+				clientLog("GetPluginKeys: adding key %q", k)
+				r.addPluginKey(k)
+			}
+		}
+	}
+	krel()
+
 	return r, nil
 }
 
@@ -101,6 +155,7 @@ func (r *RPC) SetPushSender(send func(tea.Msg)) {
 
 // addPluginKey records that a plugin owns this key trigger.
 func (r *RPC) addPluginKey(trigger string) {
+	clientLog("addPluginKey: %q", trigger)
 	r.pluginKeysMu.Lock()
 	r.pluginKeys[trigger] = true
 	r.pluginKeysMu.Unlock()
@@ -114,9 +169,16 @@ func (r *RPC) HasPluginKey(key string) bool {
 }
 
 // HandlePluginKey asks the server to dispatch a keypress to the owning plugin.
-func (r *RPC) HandlePluginKey(ctx context.Context, key, mode string) (PluginKeyResult, error) {
+func (r *RPC) HandlePluginKey(ctx context.Context, key, mode string, bufID uint32) (PluginKeyResult, error) {
+	select {
+	case <-r.conn.Done():
+		clientLog("HandlePluginKey: conn already done!")
+	default:
+		clientLog("HandlePluginKey: conn is alive, key=%q", key)
+	}
 	fut, rel := r.svc.HandlePluginKey(ctx, func(p proto.EditorService_handlePluginKey_Params) error {
 		p.SetClientId(r.clientID)
+		p.SetBufId(bufID)
 		if err := p.SetKey(key); err != nil {
 			return err
 		}

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,6 +23,14 @@ import (
 	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
+
+// serverRPCLogger implements rpc.Logger, routing capnproto internal messages to the log file.
+type serverRPCLogger struct{}
+
+func (l *serverRPCLogger) Debug(msg string, args ...any) { serverLog("rpc debug: %s %v", msg, args) }
+func (l *serverRPCLogger) Info(msg string, args ...any)  { serverLog("rpc info: %s %v", msg, args) }
+func (l *serverRPCLogger) Warn(msg string, args ...any)  { serverLog("rpc warn: %s %v", msg, args) }
+func (l *serverRPCLogger) Error(msg string, args ...any) { serverLog("rpc error: %s %v", msg, args) }
 
 // SocketPath returns the Unix socket path for a given working directory.
 func SocketPath(dir string) string {
@@ -69,11 +78,12 @@ type editorService struct {
 	pluginMgr *plugin.Manager
 	cfg       *config.Config
 
-	// shutdown is called when the last client disconnects cleanly.
-	shutdown func()
+	// shutdown is called when the last client disconnects (cleanly or not).
+	shutdown        func()
+	onClientConnect func() // called once per Connect RPC; used to mark that real clients have connected
 }
 
-func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown func()) *editorService {
+func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown func(), onClientConnect func()) *editorService {
 	servers := make([]lsp.ServerConfig, len(cfg.EffectiveLanguageServers()))
 	for i, ls := range cfg.EffectiveLanguageServers() {
 		servers[i] = lsp.ServerConfig{
@@ -84,13 +94,14 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 	}
 	lspMgr := lsp.NewManager(workspaceDir, servers)
 	svc := &editorService{
-		buffers:   make(map[uint32]*bufferEntry),
-		clientMap: make(map[uint64]*clientEntry),
-		recDir:    recDir,
-		lspMgr:   lspMgr,
-		fmtMgr:   format.NewManager(lspMgr, cfg, workspaceDir),
-		cfg:      cfg,
-		shutdown: shutdown,
+		buffers:         make(map[uint32]*bufferEntry),
+		clientMap:       make(map[uint64]*clientEntry),
+		recDir:          recDir,
+		lspMgr:          lspMgr,
+		fmtMgr:          format.NewManager(lspMgr, cfg, workspaceDir),
+		cfg:             cfg,
+		shutdown:        shutdown,
+		onClientConnect: onClientConnect,
 	}
 	svc.pluginMgr = plugin.NewManager(workspaceDir, svc)
 	return svc
@@ -122,17 +133,25 @@ func (s *editorService) Connect(_ context.Context, call proto.EditorService_conn
 		cb.Release()
 		return err
 	}
+	// AddRef the callback so our stored reference survives after the call
+	// finalizes and releases the capability it received from the call args.
+	cbOwned := proto.ClientCallback(capnp.Client(cb).AddRef())
 	s.mu.Lock()
 	s.nextClt++
 	id := s.nextClt
-	s.clientMap[id] = &clientEntry{callback: cb}
+	s.clientMap[id] = &clientEntry{callback: cbOwned}
 	s.mu.Unlock()
+	serverLog("Connect: stored clientID=%d, callback.IsValid=%v", id, cbOwned.IsValid())
 	res.SetClientId(id)
+	if s.onClientConnect != nil {
+		s.onClientConnect()
+	}
 	return nil
 }
 
 func (s *editorService) Disconnect(_ context.Context, call proto.EditorService_disconnect) error {
 	clientID := call.Args().ClientId()
+	serverLog("Disconnect called for clientID=%d", clientID)
 	s.mu.Lock()
 	if entry, ok := s.clientMap[clientID]; ok {
 		entry.callback.Release()
@@ -666,7 +685,9 @@ func (s *editorService) HandlePluginKey(ctx context.Context, call proto.EditorSe
 		return err
 	}
 
-	handled, edits, cursorLine, cursorCol, hasCursor, captureKeys, handleErr := s.pluginMgr.HandleKey(ctx, key, mode)
+	clientID := args.ClientId()
+	bufID := args.BufId()
+	handled, edits, cursorLine, cursorCol, hasCursor, captureKeys, handleErr := s.pluginMgr.HandleKey(ctx, key, mode, bufID, clientID)
 	if handleErr != nil {
 		return handleErr
 	}
@@ -756,6 +777,25 @@ func (s *editorService) UpdateViewport(_ context.Context, call proto.EditorServi
 	return err
 }
 
+func (s *editorService) GetPluginKeys(_ context.Context, call proto.EditorService_getPluginKeys) error {
+	keys := s.pluginMgr.AllRegisteredKeys()
+	serverLog("GetPluginKeys called, returning %d keys: %v", len(keys), keys)
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	list, err := res.NewKeys(int32(len(keys)))
+	if err != nil {
+		return err
+	}
+	for i, k := range keys {
+		if err := list.Set(i, k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *editorService) Format(_ context.Context, call proto.EditorService_format) error {
 	bufID := call.Args().BufId()
 
@@ -815,11 +855,23 @@ func (s *editorService) DirtyBuffers() []string {
 
 // Server wraps the listener and the RPC service.
 type Server struct {
-	socketPath string
-	listener   net.Listener
-	svc        *editorService
-	done       chan struct{}
-	connCount  atomic.Int64
+	socketPath   string
+	listener     net.Listener
+	svc          *editorService
+	done         chan struct{}
+	connCount    atomic.Int64
+	hasHadClient atomic.Bool
+	shutdownOnce sync.Once
+}
+
+// triggerShutdown closes the done channel exactly once, causing Wait() to unblock.
+func (s *Server) triggerShutdown() {
+	s.shutdownOnce.Do(func() {
+		buf := make([]byte, 16*1024)
+		n := runtime.Stack(buf, false)
+		serverLog("triggerShutdown: closing done channel, caller stack:\n%s", buf[:n])
+		close(s.done)
+	})
 }
 
 // New creates and starts a server for the given working directory.
@@ -851,8 +903,8 @@ func New(dir string) (*Server, error) {
 		listener:   ln,
 		done:       make(chan struct{}),
 	}
-	srv.svc = newEditorService(recDir, dir, cfg, func() {
-		close(srv.done)
+	srv.svc = newEditorService(recDir, dir, cfg, srv.triggerShutdown, func() {
+		srv.hasHadClient.Store(true)
 	})
 
 	go srv.svc.pluginMgr.Start(context.Background()) //nolint:errcheck
@@ -920,18 +972,32 @@ func (s *Server) serve() {
 		s.connCount.Add(1)
 		go func(c net.Conn) {
 			defer func() {
+				if r := recover(); r != nil {
+					buf := make([]byte, 64*1024)
+					n := runtime.Stack(buf, true)
+					serverLog("serve: PANIC: %v\n%s", r, buf[:n])
+				}
+				newCount := s.connCount.Add(-1)
+				serverLog("serve: connection closed, connCount now %d, hasHadClient=%v", newCount, s.hasHadClient.Load())
 				c.Close() //nolint:errcheck
-				s.connCount.Add(-1)
+				if newCount == 0 && s.hasHadClient.Load() {
+					s.triggerShutdown()
+				}
 			}()
 			transport := rpc.NewStreamTransport(c)
 			opts := &rpc.Options{
 				BootstrapClient: capnp.Client(proto.EditorService_ServerToClient(s.svc)),
+				Logger:          &serverRPCLogger{},
 			}
 			conn := rpc.NewConn(transport, opts)
 			defer conn.Close() //nolint:errcheck
 			select {
 			case <-conn.Done():
+				buf := make([]byte, 64*1024)
+				n := runtime.Stack(buf, true)
+				serverLog("serve: conn.Done() fired! goroutines:\n%s", buf[:n])
 			case <-s.done:
+				serverLog("serve: s.done fired")
 			}
 		}(conn)
 	}

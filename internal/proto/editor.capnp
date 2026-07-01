@@ -27,9 +27,10 @@ interface EditorService {
   complete        @12 (bufId :UInt32, line :UInt32, col :UInt32)               -> (items :List(CompletionItem));
   definition      @13 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :DefinitionResult);
   format          @14 (bufId :UInt32)                                           -> (content :Text, changed :Bool, noFormatter :Bool);
-  handlePluginKey      @15 (clientId :UInt64, key :Text, mode :Text)                -> (result :PluginKeyResult);
+  handlePluginKey      @15 (clientId :UInt64, bufId :UInt32, key :Text, mode :Text) -> (result :PluginKeyResult);
   updateViewport       @16 (clientId :UInt64, topLine :UInt32, height :UInt32)      -> ();
   getPluginDecorations @17 (clientId :UInt64, bufId :UInt32)                        -> (decorations :List(PluginDecoration));
+  getPluginKeys        @18 ()                                                        -> (keys :List(Text));
 }
 
 struct PluginEdit {

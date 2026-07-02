@@ -762,8 +762,10 @@ func (m Model) handleSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searchQuery = ""
 		m.searchMatches = nil
 		m.searchIdx = -1
+		m.searchErr = ""
 	case "enter":
 		m.mode = ModeNormal
+		m.searchErr = ""
 		if len(m.searchMatches) > 0 && m.searchIdx >= 0 {
 			sm := m.searchMatches[m.searchIdx]
 			m.cursor = document.Pos{Line: sm.line, Col: sm.col}
@@ -773,33 +775,42 @@ func (m Model) handleSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		runes := []rune(m.searchQuery)
 		if len(runes) > 0 {
 			m.searchQuery = string(runes[:len(runes)-1])
-			m.searchMatches = findMatches(m.buf, m.searchQuery)
-			m.searchIdx = matchIdxAtOrAfter(m.searchMatches, m.searchOrigin.Line, m.searchOrigin.Col)
-			if m.searchIdx >= 0 {
-				sm := m.searchMatches[m.searchIdx]
-				m.cursor = document.Pos{Line: sm.line, Col: sm.col}
-				m.scrollToCursor()
-			}
+			m.updateSearch()
 		} else {
 			m.mode = ModeNormal
 			m.cursor = m.searchOrigin
 			m.scrollToCursor()
 			m.searchMatches = nil
 			m.searchIdx = -1
+			m.searchErr = ""
 		}
 	default:
 		if len(msg.Runes) > 0 {
 			m.searchQuery += string(msg.Runes)
-			m.searchMatches = findMatches(m.buf, m.searchQuery)
-			m.searchIdx = matchIdxAtOrAfter(m.searchMatches, m.searchOrigin.Line, m.searchOrigin.Col)
-			if m.searchIdx >= 0 {
-				sm := m.searchMatches[m.searchIdx]
-				m.cursor = document.Pos{Line: sm.line, Col: sm.col}
-				m.scrollToCursor()
-			}
+			m.updateSearch()
 		}
 	}
 	return m, nil
+}
+
+// updateSearch recomputes matches for the current searchQuery and advances the
+// cursor to the first match at or after searchOrigin.
+func (m *Model) updateSearch() {
+	matches, err := findMatches(m.buf, m.searchQuery)
+	if err != nil {
+		m.searchErr = err.Error()
+		m.searchMatches = nil
+		m.searchIdx = -1
+		return
+	}
+	m.searchErr = ""
+	m.searchMatches = matches
+	m.searchIdx = matchIdxAtOrAfter(matches, m.searchOrigin.Line, m.searchOrigin.Col)
+	if m.searchIdx >= 0 {
+		sm := matches[m.searchIdx]
+		m.cursor = document.Pos{Line: sm.line, Col: sm.col}
+		m.scrollToCursor()
+	}
 }
 
 func (m Model) executeCommand() (tea.Model, tea.Cmd) {

@@ -101,6 +101,8 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 | `u` / `U`           | Undo / redo                                  |
 | `K`                 | Show hover documentation (LSP)               |
 | `gd`                | Go to definition (LSP)                       |
+| `/`                 | Enter search mode                            |
+| `n` / `N`           | Next / previous search match                 |
 | `Ctrl+s`            | Save                                         |
 | `Ctrl+p`            | Open file picker                             |
 | `]b` / `[b`         | Next / previous buffer                       |
@@ -116,6 +118,33 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 | `Ctrl+Space`        | Trigger completion              |
 | `Tab` / `Shift+Tab` | Next / previous completion item |
 | `Enter`             | Accept completion               |
+
+### Search mode
+
+Type `/` in normal mode to open the search bar at the bottom of the screen.
+
+| Key         | Action                                         |
+|-------------|------------------------------------------------|
+| _(typing)_  | Incrementally update pattern and jump to match |
+| `Enter`     | Confirm and return to normal mode              |
+| `Esc`       | Cancel and restore cursor to original position |
+| `Backspace` | Delete one character from the pattern          |
+
+**Smart-case:** a lowercase pattern matches case-insensitively; any uppercase letter makes the match case-sensitive.
+
+**Regex search:** prefix the pattern with `\` to use [Go regular expressions](https://pkg.go.dev/regexp/syntax):
+
+```
+/hello          literal, case-insensitive
+/Hello          literal, case-sensitive (uppercase triggers sensitivity)
+/\func \w+      regex: "func " followed by word characters
+/\[0-9]{3}-\d{4}  regex: phone-number fragment
+/\(?i)TODO      regex with explicit case-insensitive flag
+```
+
+The match count `[N/total]` is shown at the right of the search bar. If the regex is invalid, `[invalid]` is shown instead.
+
+After confirming, use `n` / `N` in normal mode to move to the next / previous match.
 
 ### Command mode
 
@@ -143,6 +172,8 @@ Type `:` in normal mode, then one of:
 | Double-click | Select word |
 
 ## Features
+
+**Search** — Press `/` to search within the current buffer. Supports incremental literal search with smart-case and regex search (prefix with `\`). Match count displayed in the status bar; `n` / `N` navigates between matches.
 
 **Syntax highlighting** — 40+ languages via Tree-sitter grammars. See [Language Support](docs/language-support.md).
 

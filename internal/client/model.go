@@ -217,6 +217,7 @@ type Model struct {
 	searchMatches  []searchMatch
 	searchIdx      int
 	searchOrigin   document.Pos
+	searchErr      string // non-empty when regex fails to compile
 	hlr            *highlight.Highlighter
 	hlSpans        highlight.LineSpans
 	metrics        *metricsData

@@ -1091,12 +1091,13 @@ func (m Model) renderStatusBar() string {
 		prompt := "/" + m.searchQuery
 		promptRunes := []rune(prompt)
 		var countStr string
-		if m.searchQuery != "" {
-			if len(m.searchMatches) == 0 {
-				countStr = " [0/0]"
-			} else {
-				countStr = fmt.Sprintf(" [%d/%d]", m.searchIdx+1, len(m.searchMatches))
-			}
+		switch {
+		case m.searchErr != "":
+			countStr = " [invalid]"
+		case m.searchQuery != "" && len(m.searchMatches) == 0:
+			countStr = " [0/0]"
+		case len(m.searchMatches) > 0:
+			countStr = fmt.Sprintf(" [%d/%d]", m.searchIdx+1, len(m.searchMatches))
 		}
 		countW := lipgloss.Width(countStr)
 		maxPromptW := m.width - countW - 1

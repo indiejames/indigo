@@ -24,7 +24,10 @@ func TestIsSmartCaseSensitive(t *testing.T) {
 
 func TestFindMatchesBasic(t *testing.T) {
 	buf := document.New("", "hello world\nhello again\n")
-	matches := findMatches(buf, "hello")
+	matches, err := findMatches(buf, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(matches) != 2 {
 		t.Fatalf("expected 2 matches, got %d", len(matches))
 	}
@@ -38,7 +41,10 @@ func TestFindMatchesBasic(t *testing.T) {
 
 func TestFindMatchesCaseInsensitive(t *testing.T) {
 	buf := document.New("", "Hello World\n")
-	matches := findMatches(buf, "hello")
+	matches, err := findMatches(buf, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(matches) != 1 {
 		t.Fatalf("case-insensitive: expected 1 match, got %d", len(matches))
 	}
@@ -46,7 +52,10 @@ func TestFindMatchesCaseInsensitive(t *testing.T) {
 
 func TestFindMatchesCaseSensitive(t *testing.T) {
 	buf := document.New("", "Hello hello\n")
-	matches := findMatches(buf, "Hello")
+	matches, err := findMatches(buf, "Hello")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(matches) != 1 {
 		t.Fatalf("case-sensitive: expected 1 match, got %d", len(matches))
 	}
@@ -57,15 +66,121 @@ func TestFindMatchesCaseSensitive(t *testing.T) {
 
 func TestFindMatchesEmpty(t *testing.T) {
 	buf := document.New("", "hello\n")
-	if matches := findMatches(buf, ""); matches != nil {
-		t.Errorf("empty pattern: expected nil, got %v", matches)
+	matches, err := findMatches(buf, "")
+	if err != nil || matches != nil {
+		t.Errorf("empty pattern: expected nil,nil, got %v,%v", matches, err)
 	}
 }
 
 func TestFindMatchesNone(t *testing.T) {
 	buf := document.New("", "hello\n")
-	if matches := findMatches(buf, "xyz"); len(matches) != 0 {
+	matches, err := findMatches(buf, "xyz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
 		t.Errorf("no matches: expected 0, got %d", len(matches))
+	}
+}
+
+// --- regex search ---
+
+func TestRegexExpr(t *testing.T) {
+	cases := []struct {
+		input    string
+		wantExpr string
+		wantOK   bool
+	}{
+		{`\d+`, "d+", true},
+		{`\d+\`, "d+", true},
+		{`\foo.*bar\`, "foo.*bar", true},
+		{`hello`, "", false},
+		{``, "", false},
+		{`\`, "", true},
+		{`\\`, "", true},
+	}
+	for _, c := range cases {
+		expr, ok := regexExpr(c.input)
+		if ok != c.wantOK || expr != c.wantExpr {
+			t.Errorf("regexExpr(%q) = (%q, %v), want (%q, %v)", c.input, expr, ok, c.wantExpr, c.wantOK)
+		}
+	}
+}
+
+func TestFindMatchesRegexBasic(t *testing.T) {
+	// \[0-9]+ → leading \ consumed as regex marker, expr=[0-9]+ → digit sequences.
+	buf := document.New("", "foo123 bar456\n")
+	matches, err := findMatches(buf, `\[0-9]+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("regex [0-9]+: expected 2 matches, got %d", len(matches))
+	}
+	if matches[0].col != 3 || matches[0].length != 3 {
+		t.Errorf("match[0]: col=%d length=%d, want col=3 length=3", matches[0].col, matches[0].length)
+	}
+	if matches[1].col != 10 || matches[1].length != 3 {
+		t.Errorf("match[1]: col=%d length=%d, want col=10 length=3", matches[1].col, matches[1].length)
+	}
+}
+
+func TestFindMatchesRegexCaseSensitive(t *testing.T) {
+	buf := document.New("", "Hello hello HELLO\n")
+	// Regex is always case-sensitive.
+	matches, err := findMatches(buf, `\hello`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("regex case-sensitive: expected 1 match, got %d", len(matches))
+	}
+	if matches[0].col != 6 {
+		t.Errorf("regex case-sensitive: col=%d, want 6", matches[0].col)
+	}
+}
+
+func TestFindMatchesRegexCaseInsensitiveFlag(t *testing.T) {
+	buf := document.New("", "Hello HELLO hello\n")
+	matches, err := findMatches(buf, `\(?i)hello`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 3 {
+		t.Fatalf("regex (?i): expected 3 matches, got %d", len(matches))
+	}
+}
+
+func TestFindMatchesRegexWithClosingDelimiter(t *testing.T) {
+	buf := document.New("", "abc123def\n")
+	matches, err := findMatches(buf, `\[a-z]+\`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("regex with closing \\: expected 2, got %d", len(matches))
+	}
+}
+
+func TestFindMatchesRegexInvalid(t *testing.T) {
+	buf := document.New("", "hello\n")
+	_, err := findMatches(buf, `\[unclosed`)
+	if err == nil {
+		t.Error("invalid regex: expected error, got nil")
+	}
+}
+
+func TestFindMatchesRegexMultipleLines(t *testing.T) {
+	buf := document.New("", "func foo() {\n}\nfunc bar() {\n}\n")
+	matches, err := findMatches(buf, `\func \w+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("regex multi-line: expected 2, got %d", len(matches))
+	}
+	if matches[0].line != 0 || matches[1].line != 2 {
+		t.Errorf("regex multi-line: lines %d,%d, want 0,2", matches[0].line, matches[1].line)
 	}
 }
 

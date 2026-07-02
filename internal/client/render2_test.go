@@ -15,7 +15,7 @@ import (
 func TestRenderLineRunesPlain(t *testing.T) {
 	var sb strings.Builder
 	runes := []rune("hello")
-	renderLineRunes(&sb, runes, -1, -1, -1, nil)
+	renderLineRunes(&sb, runes, -1, -1, -1, nil, nil)
 	if got := sb.String(); got != "hello" {
 		t.Errorf("plain = %q, want %q", got, "hello")
 	}
@@ -25,7 +25,7 @@ func TestRenderLineRunesCursorAtEnd(t *testing.T) {
 	var sb strings.Builder
 	runes := []rune("hi")
 	// curCol == len(runes): cursor rendered as trailing space
-	renderLineRunes(&sb, runes, -1, -1, 2, nil)
+	renderLineRunes(&sb, runes, -1, -1, 2, nil, nil)
 	got := sb.String()
 	if got == "" {
 		t.Error("cursor beyond line should append styled space")
@@ -34,7 +34,7 @@ func TestRenderLineRunesCursorAtEnd(t *testing.T) {
 
 func TestRenderLineRunesEmpty(t *testing.T) {
 	var sb strings.Builder
-	renderLineRunes(&sb, []rune{}, -1, -1, -1, nil)
+	renderLineRunes(&sb, []rune{}, -1, -1, -1, nil, nil)
 	if sb.String() != "" {
 		t.Errorf("empty runes: got %q, want empty", sb.String())
 	}
@@ -113,7 +113,7 @@ func TestRenderMetricsBox(t *testing.T) {
 
 func TestRenderLineNormal(t *testing.T) {
 	m := newTestModel("hello\nworld\n")
-	line := m.renderLine(0)
+	line := m.renderLine(0, nil)
 	if lipgloss.Width(line) != m.width {
 		t.Errorf("renderLine width = %d, want %d", lipgloss.Width(line), m.width)
 	}
@@ -126,7 +126,7 @@ func TestRenderLineTildeForEmptyRows(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.height = 24
 	// Row beyond buffer content should show tilde
-	line := m.renderLine(5)
+	line := m.renderLine(5, nil)
 	if !strings.Contains(line, "~") {
 		t.Errorf("out-of-buffer row should contain '~', got: %q", line)
 	}
@@ -134,7 +134,7 @@ func TestRenderLineTildeForEmptyRows(t *testing.T) {
 
 func TestRenderLineWithTabs(t *testing.T) {
 	m := newTestModel("\thello\n")
-	line := m.renderLine(0)
+	line := m.renderLine(0, nil)
 	// Tab should expand to spaces
 	if strings.Contains(line, "\t") {
 		t.Error("renderLine should expand tabs, but raw tab found")

@@ -491,14 +491,19 @@ func (m Model) fetchDiagnostics() tea.Cmd {
 }
 
 // fetchDecorations polls all plugin DecorationProviders for the current buffer/viewport.
+// The current viewport is sent inline before fetching so the server always uses
+// an up-to-date range — sending both from the same goroutine guarantees ordering.
 func (m Model) fetchDecorations() tea.Cmd {
 	if m.rpc == nil {
 		return nil
 	}
 	bufID := m.bufID
+	topLine := uint32(m.topLine)
+	height := uint32(m.height)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
+		m.rpc.UpdateViewport(ctx, topLine, height)
 		items, err := m.rpc.GetDecorations(ctx, bufID)
 		if err != nil {
 			return nil

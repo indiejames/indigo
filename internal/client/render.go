@@ -23,17 +23,13 @@ var decorOverlayStyle = lipgloss.NewStyle().
 	Background(lipgloss.Color("#1A1A2E")).
 	Bold(true)
 
-// applyOverlay paints styledText at visual column col on mainLine, replacing
-// the characters at those positions while preserving content on both sides.
-func applyOverlay(mainLine, styledText string, col int) string {
-	textW := lipgloss.Width(styledText)
-	left := ansi.Truncate(mainLine, col, "")
-	lw := lipgloss.Width(left)
-	if lw < col {
-		left += strings.Repeat(" ", col-lw)
-	}
-	right := ansi.TruncateLeft(mainLine, col+textW, "")
-	return left + styledText + right
+// lineOverlay describes a styled text injection at a visual column in the content area.
+// col is an index into the tab-expanded rune slice for the line; w is how many of those
+// rune positions the text visually occupies (i.e. positions to skip in the underlying content).
+type lineOverlay struct {
+	col  int
+	text string
+	w    int
 }
 
 // metricsInnerW is the fixed visible width between the box borders.
@@ -196,15 +192,16 @@ func expandTabsRemap(runes []rune) (expanded []rune, colMap []int) {
 	return
 }
 
-// renderLineRunes writes runes with selection and cursor highlighting applied.
+// renderLineRunes writes runes with selection, cursor, highlight-span, and overlay
+// label rendering applied in a single pass. overlays must be sorted by col ascending.
 // selA/selB are inclusive selected column bounds (-1,-1 for no selection).
 // curCol is the cursor column (-1 if cursor is not on this line).
-func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, spans []highlight.Span) {
+func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, spans []highlight.Span, overlays []lineOverlay) {
 	n := len(runes)
 	hasCursor := curCol >= 0
 	hasSel := selA >= 0
+	oi := 0 // next overlay to inject
 
-	// spanIdxAt returns the index of the first (highest-priority) span covering col, or -1.
 	spanIdxAt := func(col int) int {
 		for i, s := range spans {
 			if col >= s.StartCol && col < s.EndCol {
@@ -214,8 +211,31 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 		return -1
 	}
 
+	nextOvlCol := func() int {
+		if oi < len(overlays) {
+			return overlays[oi].col
+		}
+		return math.MaxInt
+	}
+
 	i := 0
 	for i < n {
+		// Drain and inject overlays whose column ≤ i (handles skipped positions too).
+		for oi < len(overlays) && overlays[oi].col <= i {
+			if overlays[oi].col == i {
+				sb.WriteString(overlays[oi].text)
+				i += overlays[oi].w
+				if i > n {
+					i = n
+				}
+			}
+			oi++
+		}
+		if i >= n {
+			break
+		}
+
+		noc := nextOvlCol()
 		isCursor := hasCursor && i == curCol
 		inSel := hasSel && i >= selA && i <= selB
 		switch {
@@ -224,16 +244,15 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 			i++
 		case inSel:
 			j := i + 1
-			for j < n && (!hasCursor || j != curCol) && j >= selA && j <= selB {
+			for j < n && j < noc && (!hasCursor || j != curCol) && j >= selA && j <= selB {
 				j++
 			}
 			sb.WriteString(selectionStyle.Render(string(runes[i:j])))
 			i = j
 		default:
-			// Batch consecutive plain chars with the same highlight span.
 			si := spanIdxAt(i)
 			j := i + 1
-			for j < n {
+			for j < n && j < noc {
 				if hasCursor && j == curCol {
 					break
 				}
@@ -256,15 +275,21 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 			i = j
 		}
 	}
+
 	if hasCursor && curCol >= n {
 		sb.WriteString(cursorStyle.Render(" "))
+	}
+	// Write overlays that fall at or past end of content.
+	for ; oi < len(overlays); oi++ {
+		sb.WriteString(overlays[oi].text)
 	}
 }
 
 // renderLine renders screen row i (0-based, relative to topLine) without a trailing newline.
 // Tabs are expanded to spaces so that cellbuf correctly measures visual widths.
 // Each line is padded to m.width so prior content is always fully overwritten.
-func (m Model) renderLine(i int) string {
+// overlays (sorted by col) are injected during the rune pass with no ANSI re-parsing.
+func (m Model) renderLine(i int, overlays []lineOverlay) string {
 	lineNum := m.topLine + i
 	bufLineCount := m.buf.LineCount()
 	dispLineCount := m.displayLineCount()
@@ -384,7 +409,7 @@ func (m Model) renderLine(i int) string {
 		}
 	}
 
-	renderLineRunes(&sb, expandedRunes, selA, selB, curCol, remappedSpans)
+	renderLineRunes(&sb, expandedRunes, selA, selB, curCol, remappedSpans, overlays)
 	return padToWidth(sb.String())
 }
 
@@ -727,6 +752,41 @@ func renderCompletionPopup(items []ClientCompletion, selected, maxW int) []strin
 	return lines
 }
 
+// buildRowOverlays groups overlay decorations by visible row and pre-computes each
+// overlay's visual column and styled text. The returned slice has length vis; rows
+// without any overlay decoration have a nil entry. Overlays within each row are
+// sorted by col so renderLineRunes can inject them in a single left-to-right pass.
+func (m Model) buildRowOverlays(vis int) [][]lineOverlay {
+	rows := make([][]lineOverlay, vis)
+	for _, d := range m.decorations {
+		if d.Kind != ClientDecorationOverlay || d.Text == "" {
+			continue
+		}
+		row := int(d.Line) - m.topLine
+		if row < 0 || row >= vis {
+			continue
+		}
+		lineStr := m.buf.Line(int(d.Line))
+		_, colMap := expandTabsRemap([]rune(lineStr))
+		visCol := int(d.Col)
+		if int(d.Col) < len(colMap) {
+			visCol = colMap[d.Col]
+		}
+		styledText := decorOverlayStyle.Render(d.Text)
+		rows[row] = append(rows[row], lineOverlay{col: visCol, text: styledText, w: lipgloss.Width(styledText)})
+	}
+	// Sort each row's overlays by column (insertion sort; typically 1-4 items).
+	for ri, ovls := range rows {
+		for j := 1; j < len(ovls); j++ {
+			for k := j; k > 0 && ovls[k].col < ovls[k-1].col; k-- {
+				ovls[k], ovls[k-1] = ovls[k-1], ovls[k]
+			}
+		}
+		rows[ri] = ovls
+	}
+	return rows
+}
+
 // ---- View ----
 
 func (m Model) View() string {
@@ -750,27 +810,9 @@ func (m Model) View() string {
 
 	vis := m.visibleLines()
 	lines := make([]string, vis)
+	rowOverlays := m.buildRowOverlays(vis)
 	for i := range vis {
-		lines[i] = m.renderLine(i)
-	}
-
-	// Apply plugin overlay decorations (e.g. jumpy jump labels).
-	for _, d := range m.decorations {
-		if d.Kind != ClientDecorationOverlay || d.Text == "" {
-			continue
-		}
-		row := int(d.Line) - m.topLine
-		if row < 0 || row >= vis {
-			continue
-		}
-		lineStr := m.buf.Line(int(d.Line))
-		_, colMap := expandTabsRemap([]rune(lineStr))
-		visCol := int(d.Col)
-		if int(d.Col) < len(colMap) {
-			visCol = colMap[d.Col]
-		}
-		screenCol := m.gutterWidth() + visCol
-		lines[row] = applyOverlay(lines[row], decorOverlayStyle.Render(d.Text), screenCol)
+		lines[i] = m.renderLine(i, rowOverlays[i])
 	}
 
 	// Overlay prefix-command popup in the bottom-right corner.

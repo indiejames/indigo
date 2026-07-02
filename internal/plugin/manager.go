@@ -284,7 +284,7 @@ func (m *Manager) GetDecorations(ctx context.Context, bufID, startLine, endLine 
 			continue
 		}
 
-		tctx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		tctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 		fut, rel := provider.GetDecorations(tctx, func(ps pluginproto.DecorationProvider_getDecorations_Params) error {
 			ps.SetBufId(bufID)
 			rng, err := ps.NewVisibleRange()
@@ -415,7 +415,7 @@ func (m *Manager) HandleKey(ctx context.Context, key, mode string, bufID uint32,
 func (m *Manager) callHandler(ctx context.Context, handler pluginproto.KeyHandler, key, mode string, bufID uint32, clientID uint64) (
 	handled bool, edits []TextEdit, cursorLine, cursorCol uint32, hasCursor bool, captureKeys uint32, err error,
 ) {
-	tctx, cancel := context.WithTimeout(ctx, 30*time.Millisecond)
+	tctx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
 	defer cancel()
 
 	fut, rel := handler.Handle(tctx, func(ps pluginproto.KeyHandler_handle_Params) error {

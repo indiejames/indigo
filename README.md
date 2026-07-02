@@ -1,6 +1,6 @@
 # indigo
 
-A terminal text editor with modal editing and built-in language server support. Inspired by Vim and Helix.
+A terminal text editor with modal editing and built-in language server support. Inspired by [Vim](https://www.vim.org/), [Kakoune](https://kakoune.org/), and [Helix](https://helix-editor.com/).
 
 **Note:** indigo is early-stage software — expect rough edges.
 
@@ -16,25 +16,39 @@ indigo is for developers who:
 
 If you want an editor that does the right thing for your language automatically (gopls for Go, rust-analyzer for Rust, typescript-language-server for TypeScript, etc.) the moment you open a file, indigo is for you.
 
+## Why another editor?
+
+Mostly I just wanted to try some design ideas I had for an editor. Specifically a terminal based client-server
+architecture with core features that everyone seems to agree on (like syntax highlighting) and
+a fast plugin system for extensibility. None of these ideas are new. Helix provides great core features,
+but doesn't use a client-server model. Kakoune does, but I wanted a different extension system.
+[Visual Studio Code](https://code.visualstudio.com/) is great and it's easy to build extensions for it,
+but it doesn't run in the terminal.
+
+Also, I wanted to build something real in Go, and to use some of the great projects I have read about, like [Cap'n Proto](https://capnproto.org/) and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+
 ## Install
 
 > **Note:** Binary releases are not yet available. For now, build from source:
 
 ```
-go install github.com/indiejames/indigo/cmd/indigo@latest
+make install
 ```
 
-The binary is named `io`. Requires Go 1.21+.
+The binary is named `indigo`. Requires Go 1.21+.
 
 ## Quick start
 
 ```
-io file.go          # open a file
-io .                # open directory (shows file picker)
-io +42 file.go      # open a file at line 42
+indigo file.go          # open a file
+indigo .                # open directory (shows file picker)
+indigo +42 file.go      # open a file at line 42
 ```
 
-indigo uses a **client/server model**: the first invocation starts a background server for your workspace (rooted at the nearest `.git` directory); subsequent `io` sessions in the same workspace connect to the existing server. The server exits automatically when all editor sessions close.
+indigo uses a **client/server model** similar to Kakoune: the first invocation starts a background server for your workspace (rooted at the nearest `.git` directory or the directory of the edited file if not part of a git repository); subsequent `indigo` sessions in the same workspace connect to the existing server. The server exits automatically when all editor sessions close. If two client windows have the same file open,
+changes in one will show up in the other.
+
+The upshot of this is that instead of `indigo` managing editor panes, you can use your current terminal window/pane system to manage layout.
 
 ### Editing model
 
@@ -63,7 +77,7 @@ The client–server protocol is built on **[Cap'n Proto](https://capnproto.org)*
 - **Negligible latency** — Because there is no encode/decode overhead, a round-trip for a keystroke or an LSP hover request adds no measurable latency on top of the Unix socket itself.
 - **Schema-defined interface** — The RPC interface is described in a `.capnp` schema file, giving both sides a typed, versioned contract with built-in support for backwards-compatible evolution.
 
-The practical result is that multiple `io` windows on the same workspace share one server process with no perceptible communication cost — edits, diagnostics, and completions feel as immediate as if everything were running in a single process.
+The practical result is that multiple `indigo` windows on the same workspace share one server process with no perceptible communication cost — edits, diagnostics, and completions feel as immediate as if everything were running in a single process.
 
 ## Key bindings
 

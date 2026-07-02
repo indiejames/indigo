@@ -200,7 +200,61 @@ func (m Model) handleWarnQuit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleCapturedKey forwards a keypress to the plugin that requested capture mode.
+// Esc always exits capture mode locally; it is still forwarded to the plugin so
+// the plugin can clean up its own state. Each non-Esc key decrements the remaining
+// count; when it hits zero, capture mode ends (unless the plugin's response re-enables it).
+func (m Model) handleCapturedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	isEsc := key == "esc"
+
+	if isEsc {
+		m.captureMode = false
+		m.captureRemaining = 0
+	} else {
+		if m.captureRemaining > 0 {
+			m.captureRemaining--
+		}
+		if m.captureRemaining == 0 {
+			m.captureMode = false
+		}
+	}
+
+	bufID := m.bufID
+	return m, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		result, err := m.rpc.HandlePluginKey(ctx, key, "capture", bufID)
+		if err != nil {
+			if isEsc {
+				return nil // suppress error on esc-cancel
+			}
+			return errorMsg{err}
+		}
+		return pluginKeyResultMsg{result: result}
+	}
+}
+
+// handlePluginKeyRPC dispatches a keypress to the owning plugin and returns a
+// cmd that will deliver the result as a pluginKeyResultMsg.
+func (m Model) handlePluginKeyRPC(key string) (tea.Model, tea.Cmd) {
+	return m, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		result, err := m.rpc.HandlePluginKey(ctx, key, "normal", m.bufID)
+		if err != nil {
+			return errorMsg{err}
+		}
+		return pluginKeyResultMsg{result: result}
+	}
+}
+
 func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Capture mode: plugin owns keypresses until it signals done.
+	if m.captureMode {
+		return m.handleCapturedKey(msg)
+	}
+
 	// Handle active prefix sequence before the main switch.
 	if len(m.prefixSeq) > 0 {
 		if msg.String() == "esc" {
@@ -222,6 +276,11 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.prefixSeq = nil
 		return m, nil
+	}
+
+	// Let plugins handle keys they registered before built-in commands.
+	if m.rpc != nil && m.rpc.HasPluginKey(msg.String()) {
+		return m.handlePluginKeyRPC(msg.String())
 	}
 
 	switch msg.String() {

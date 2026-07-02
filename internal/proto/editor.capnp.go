@@ -11,6 +11,922 @@ import (
 	context "context"
 )
 
+type ClientCallback capnp.Client
+
+// ClientCallback_TypeID is the unique identifier for the type ClientCallback.
+const ClientCallback_TypeID = 0xa16aa1ea8b7d14ed
+
+func (c ClientCallback) ShowMessage(ctx context.Context, params func(ClientCallback_showMessage_Params) error) (ClientCallback_showMessage_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xa16aa1ea8b7d14ed,
+			MethodID:      0,
+			InterfaceName: "editor.capnp:ClientCallback",
+			MethodName:    "showMessage",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(ClientCallback_showMessage_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return ClientCallback_showMessage_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c ClientCallback) MoveCursor(ctx context.Context, params func(ClientCallback_moveCursor_Params) error) (ClientCallback_moveCursor_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xa16aa1ea8b7d14ed,
+			MethodID:      1,
+			InterfaceName: "editor.capnp:ClientCallback",
+			MethodName:    "moveCursor",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 16, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(ClientCallback_moveCursor_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return ClientCallback_moveCursor_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c ClientCallback) OpenFile(ctx context.Context, params func(ClientCallback_openFile_Params) error) (ClientCallback_openFile_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xa16aa1ea8b7d14ed,
+			MethodID:      2,
+			InterfaceName: "editor.capnp:ClientCallback",
+			MethodName:    "openFile",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(ClientCallback_openFile_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return ClientCallback_openFile_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c ClientCallback) KeyRegistered(ctx context.Context, params func(ClientCallback_keyRegistered_Params) error) (ClientCallback_keyRegistered_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xa16aa1ea8b7d14ed,
+			MethodID:      3,
+			InterfaceName: "editor.capnp:ClientCallback",
+			MethodName:    "keyRegistered",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(ClientCallback_keyRegistered_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return ClientCallback_keyRegistered_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c ClientCallback) WaitStreaming() error {
+	return capnp.Client(c).WaitStreaming()
+}
+
+// String returns a string that identifies this capability for debugging
+// purposes.  Its format should not be depended on: in particular, it
+// should not be used to compare clients.  Use IsSame to compare clients
+// for equality.
+func (c ClientCallback) String() string {
+	return "ClientCallback(" + capnp.Client(c).String() + ")"
+}
+
+// AddRef creates a new Client that refers to the same capability as c.
+// If c is nil or has resolved to null, then AddRef returns nil.
+func (c ClientCallback) AddRef() ClientCallback {
+	return ClientCallback(capnp.Client(c).AddRef())
+}
+
+// Release releases a capability reference.  If this is the last
+// reference to the capability, then the underlying resources associated
+// with the capability will be released.
+//
+// Release will panic if c has already been released, but not if c is
+// nil or resolved to null.
+func (c ClientCallback) Release() {
+	capnp.Client(c).Release()
+}
+
+// Resolve blocks until the capability is fully resolved or the Context
+// expires.
+func (c ClientCallback) Resolve(ctx context.Context) error {
+	return capnp.Client(c).Resolve(ctx)
+}
+
+func (c ClientCallback) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Client(c).EncodeAsPtr(seg)
+}
+
+func (ClientCallback) DecodeFromPtr(p capnp.Ptr) ClientCallback {
+	return ClientCallback(capnp.Client{}.DecodeFromPtr(p))
+}
+
+// IsValid reports whether c is a valid reference to a capability.
+// A reference is invalid if it is nil, has resolved to null, or has
+// been released.
+func (c ClientCallback) IsValid() bool {
+	return capnp.Client(c).IsValid()
+}
+
+// IsSame reports whether c and other refer to a capability created by the
+// same call to NewClient.  This can return false negatives if c or other
+// are not fully resolved: use Resolve if this is an issue.  If either
+// c or other are released, then IsSame panics.
+func (c ClientCallback) IsSame(other ClientCallback) bool {
+	return capnp.Client(c).IsSame(capnp.Client(other))
+}
+
+// Update the flowcontrol.FlowLimiter used to manage flow control for
+// this client. This affects all future calls, but not calls already
+// waiting to send. Passing nil sets the value to flowcontrol.NopLimiter,
+// which is also the default.
+func (c ClientCallback) SetFlowLimiter(lim fc.FlowLimiter) {
+	capnp.Client(c).SetFlowLimiter(lim)
+}
+
+// Get the current flowcontrol.FlowLimiter used to manage flow control
+// for this client.
+func (c ClientCallback) GetFlowLimiter() fc.FlowLimiter {
+	return capnp.Client(c).GetFlowLimiter()
+}
+
+// A ClientCallback_Server is a ClientCallback with a local implementation.
+type ClientCallback_Server interface {
+	ShowMessage(context.Context, ClientCallback_showMessage) error
+
+	MoveCursor(context.Context, ClientCallback_moveCursor) error
+
+	OpenFile(context.Context, ClientCallback_openFile) error
+
+	KeyRegistered(context.Context, ClientCallback_keyRegistered) error
+}
+
+// ClientCallback_NewServer creates a new Server from an implementation of ClientCallback_Server.
+func ClientCallback_NewServer(s ClientCallback_Server) *server.Server {
+	c, _ := s.(server.Shutdowner)
+	return server.New(ClientCallback_Methods(nil, s), s, c)
+}
+
+// ClientCallback_ServerToClient creates a new Client from an implementation of ClientCallback_Server.
+// The caller is responsible for calling Release on the returned Client.
+func ClientCallback_ServerToClient(s ClientCallback_Server) ClientCallback {
+	return ClientCallback(capnp.NewClient(ClientCallback_NewServer(s)))
+}
+
+// ClientCallback_Methods appends Methods to a slice that invoke the methods on s.
+// This can be used to create a more complicated Server.
+func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []server.Method {
+	if cap(methods) == 0 {
+		methods = make([]server.Method, 0, 4)
+	}
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xa16aa1ea8b7d14ed,
+			MethodID:      0,
+			InterfaceName: "editor.capnp:ClientCallback",
+			MethodName:    "showMessage",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.ShowMessage(ctx, ClientCallback_showMessage{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xa16aa1ea8b7d14ed,
+			MethodID:      1,
+			InterfaceName: "editor.capnp:ClientCallback",
+			MethodName:    "moveCursor",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.MoveCursor(ctx, ClientCallback_moveCursor{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xa16aa1ea8b7d14ed,
+			MethodID:      2,
+			InterfaceName: "editor.capnp:ClientCallback",
+			MethodName:    "openFile",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.OpenFile(ctx, ClientCallback_openFile{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xa16aa1ea8b7d14ed,
+			MethodID:      3,
+			InterfaceName: "editor.capnp:ClientCallback",
+			MethodName:    "keyRegistered",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.KeyRegistered(ctx, ClientCallback_keyRegistered{call})
+		},
+	})
+
+	return methods
+}
+
+// ClientCallback_showMessage holds the state for a server call to ClientCallback.showMessage.
+// See server.Call for documentation.
+type ClientCallback_showMessage struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c ClientCallback_showMessage) Args() ClientCallback_showMessage_Params {
+	return ClientCallback_showMessage_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c ClientCallback_showMessage) AllocResults() (ClientCallback_showMessage_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_showMessage_Results(r), err
+}
+
+// ClientCallback_moveCursor holds the state for a server call to ClientCallback.moveCursor.
+// See server.Call for documentation.
+type ClientCallback_moveCursor struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c ClientCallback_moveCursor) Args() ClientCallback_moveCursor_Params {
+	return ClientCallback_moveCursor_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c ClientCallback_moveCursor) AllocResults() (ClientCallback_moveCursor_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_moveCursor_Results(r), err
+}
+
+// ClientCallback_openFile holds the state for a server call to ClientCallback.openFile.
+// See server.Call for documentation.
+type ClientCallback_openFile struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c ClientCallback_openFile) Args() ClientCallback_openFile_Params {
+	return ClientCallback_openFile_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c ClientCallback_openFile) AllocResults() (ClientCallback_openFile_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_openFile_Results(r), err
+}
+
+// ClientCallback_keyRegistered holds the state for a server call to ClientCallback.keyRegistered.
+// See server.Call for documentation.
+type ClientCallback_keyRegistered struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c ClientCallback_keyRegistered) Args() ClientCallback_keyRegistered_Params {
+	return ClientCallback_keyRegistered_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c ClientCallback_keyRegistered) AllocResults() (ClientCallback_keyRegistered_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_keyRegistered_Results(r), err
+}
+
+// ClientCallback_List is a list of ClientCallback.
+type ClientCallback_List = capnp.CapList[ClientCallback]
+
+// NewClientCallback_List creates a new list of ClientCallback.
+func NewClientCallback_List(s *capnp.Segment, sz int32) (ClientCallback_List, error) {
+	l, err := capnp.NewPointerList(s, sz)
+	return capnp.CapList[ClientCallback](l), err
+}
+
+type ClientCallback_showMessage_Params capnp.Struct
+
+// ClientCallback_showMessage_Params_TypeID is the unique identifier for the type ClientCallback_showMessage_Params.
+const ClientCallback_showMessage_Params_TypeID = 0xeffb609ebf72e4a0
+
+func NewClientCallback_showMessage_Params(s *capnp.Segment) (ClientCallback_showMessage_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return ClientCallback_showMessage_Params(st), err
+}
+
+func NewRootClientCallback_showMessage_Params(s *capnp.Segment) (ClientCallback_showMessage_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return ClientCallback_showMessage_Params(st), err
+}
+
+func ReadRootClientCallback_showMessage_Params(msg *capnp.Message) (ClientCallback_showMessage_Params, error) {
+	root, err := msg.Root()
+	return ClientCallback_showMessage_Params(root.Struct()), err
+}
+
+func (s ClientCallback_showMessage_Params) String() string {
+	str, _ := text.Marshal(0xeffb609ebf72e4a0, capnp.Struct(s))
+	return str
+}
+
+func (s ClientCallback_showMessage_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ClientCallback_showMessage_Params) DecodeFromPtr(p capnp.Ptr) ClientCallback_showMessage_Params {
+	return ClientCallback_showMessage_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ClientCallback_showMessage_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ClientCallback_showMessage_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ClientCallback_showMessage_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ClientCallback_showMessage_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s ClientCallback_showMessage_Params) Text() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s ClientCallback_showMessage_Params) HasText() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s ClientCallback_showMessage_Params) TextBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s ClientCallback_showMessage_Params) SetText(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+// ClientCallback_showMessage_Params_List is a list of ClientCallback_showMessage_Params.
+type ClientCallback_showMessage_Params_List = capnp.StructList[ClientCallback_showMessage_Params]
+
+// NewClientCallback_showMessage_Params creates a new list of ClientCallback_showMessage_Params.
+func NewClientCallback_showMessage_Params_List(s *capnp.Segment, sz int32) (ClientCallback_showMessage_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[ClientCallback_showMessage_Params](l), err
+}
+
+// ClientCallback_showMessage_Params_Future is a wrapper for a ClientCallback_showMessage_Params promised by a client call.
+type ClientCallback_showMessage_Params_Future struct{ *capnp.Future }
+
+func (f ClientCallback_showMessage_Params_Future) Struct() (ClientCallback_showMessage_Params, error) {
+	p, err := f.Future.Ptr()
+	return ClientCallback_showMessage_Params(p.Struct()), err
+}
+
+type ClientCallback_showMessage_Results capnp.Struct
+
+// ClientCallback_showMessage_Results_TypeID is the unique identifier for the type ClientCallback_showMessage_Results.
+const ClientCallback_showMessage_Results_TypeID = 0xdebc648d8a114447
+
+func NewClientCallback_showMessage_Results(s *capnp.Segment) (ClientCallback_showMessage_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_showMessage_Results(st), err
+}
+
+func NewRootClientCallback_showMessage_Results(s *capnp.Segment) (ClientCallback_showMessage_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_showMessage_Results(st), err
+}
+
+func ReadRootClientCallback_showMessage_Results(msg *capnp.Message) (ClientCallback_showMessage_Results, error) {
+	root, err := msg.Root()
+	return ClientCallback_showMessage_Results(root.Struct()), err
+}
+
+func (s ClientCallback_showMessage_Results) String() string {
+	str, _ := text.Marshal(0xdebc648d8a114447, capnp.Struct(s))
+	return str
+}
+
+func (s ClientCallback_showMessage_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ClientCallback_showMessage_Results) DecodeFromPtr(p capnp.Ptr) ClientCallback_showMessage_Results {
+	return ClientCallback_showMessage_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ClientCallback_showMessage_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ClientCallback_showMessage_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ClientCallback_showMessage_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ClientCallback_showMessage_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// ClientCallback_showMessage_Results_List is a list of ClientCallback_showMessage_Results.
+type ClientCallback_showMessage_Results_List = capnp.StructList[ClientCallback_showMessage_Results]
+
+// NewClientCallback_showMessage_Results creates a new list of ClientCallback_showMessage_Results.
+func NewClientCallback_showMessage_Results_List(s *capnp.Segment, sz int32) (ClientCallback_showMessage_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[ClientCallback_showMessage_Results](l), err
+}
+
+// ClientCallback_showMessage_Results_Future is a wrapper for a ClientCallback_showMessage_Results promised by a client call.
+type ClientCallback_showMessage_Results_Future struct{ *capnp.Future }
+
+func (f ClientCallback_showMessage_Results_Future) Struct() (ClientCallback_showMessage_Results, error) {
+	p, err := f.Future.Ptr()
+	return ClientCallback_showMessage_Results(p.Struct()), err
+}
+
+type ClientCallback_moveCursor_Params capnp.Struct
+
+// ClientCallback_moveCursor_Params_TypeID is the unique identifier for the type ClientCallback_moveCursor_Params.
+const ClientCallback_moveCursor_Params_TypeID = 0xefa2850b1c6222f6
+
+func NewClientCallback_moveCursor_Params(s *capnp.Segment) (ClientCallback_moveCursor_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0})
+	return ClientCallback_moveCursor_Params(st), err
+}
+
+func NewRootClientCallback_moveCursor_Params(s *capnp.Segment) (ClientCallback_moveCursor_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0})
+	return ClientCallback_moveCursor_Params(st), err
+}
+
+func ReadRootClientCallback_moveCursor_Params(msg *capnp.Message) (ClientCallback_moveCursor_Params, error) {
+	root, err := msg.Root()
+	return ClientCallback_moveCursor_Params(root.Struct()), err
+}
+
+func (s ClientCallback_moveCursor_Params) String() string {
+	str, _ := text.Marshal(0xefa2850b1c6222f6, capnp.Struct(s))
+	return str
+}
+
+func (s ClientCallback_moveCursor_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ClientCallback_moveCursor_Params) DecodeFromPtr(p capnp.Ptr) ClientCallback_moveCursor_Params {
+	return ClientCallback_moveCursor_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ClientCallback_moveCursor_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ClientCallback_moveCursor_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ClientCallback_moveCursor_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ClientCallback_moveCursor_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s ClientCallback_moveCursor_Params) BufId() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s ClientCallback_moveCursor_Params) SetBufId(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+func (s ClientCallback_moveCursor_Params) Line() uint32 {
+	return capnp.Struct(s).Uint32(4)
+}
+
+func (s ClientCallback_moveCursor_Params) SetLine(v uint32) {
+	capnp.Struct(s).SetUint32(4, v)
+}
+
+func (s ClientCallback_moveCursor_Params) Col() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s ClientCallback_moveCursor_Params) SetCol(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+// ClientCallback_moveCursor_Params_List is a list of ClientCallback_moveCursor_Params.
+type ClientCallback_moveCursor_Params_List = capnp.StructList[ClientCallback_moveCursor_Params]
+
+// NewClientCallback_moveCursor_Params creates a new list of ClientCallback_moveCursor_Params.
+func NewClientCallback_moveCursor_Params_List(s *capnp.Segment, sz int32) (ClientCallback_moveCursor_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0}, sz)
+	return capnp.StructList[ClientCallback_moveCursor_Params](l), err
+}
+
+// ClientCallback_moveCursor_Params_Future is a wrapper for a ClientCallback_moveCursor_Params promised by a client call.
+type ClientCallback_moveCursor_Params_Future struct{ *capnp.Future }
+
+func (f ClientCallback_moveCursor_Params_Future) Struct() (ClientCallback_moveCursor_Params, error) {
+	p, err := f.Future.Ptr()
+	return ClientCallback_moveCursor_Params(p.Struct()), err
+}
+
+type ClientCallback_moveCursor_Results capnp.Struct
+
+// ClientCallback_moveCursor_Results_TypeID is the unique identifier for the type ClientCallback_moveCursor_Results.
+const ClientCallback_moveCursor_Results_TypeID = 0xa8404f3be0b7cd93
+
+func NewClientCallback_moveCursor_Results(s *capnp.Segment) (ClientCallback_moveCursor_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_moveCursor_Results(st), err
+}
+
+func NewRootClientCallback_moveCursor_Results(s *capnp.Segment) (ClientCallback_moveCursor_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_moveCursor_Results(st), err
+}
+
+func ReadRootClientCallback_moveCursor_Results(msg *capnp.Message) (ClientCallback_moveCursor_Results, error) {
+	root, err := msg.Root()
+	return ClientCallback_moveCursor_Results(root.Struct()), err
+}
+
+func (s ClientCallback_moveCursor_Results) String() string {
+	str, _ := text.Marshal(0xa8404f3be0b7cd93, capnp.Struct(s))
+	return str
+}
+
+func (s ClientCallback_moveCursor_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ClientCallback_moveCursor_Results) DecodeFromPtr(p capnp.Ptr) ClientCallback_moveCursor_Results {
+	return ClientCallback_moveCursor_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ClientCallback_moveCursor_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ClientCallback_moveCursor_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ClientCallback_moveCursor_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ClientCallback_moveCursor_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// ClientCallback_moveCursor_Results_List is a list of ClientCallback_moveCursor_Results.
+type ClientCallback_moveCursor_Results_List = capnp.StructList[ClientCallback_moveCursor_Results]
+
+// NewClientCallback_moveCursor_Results creates a new list of ClientCallback_moveCursor_Results.
+func NewClientCallback_moveCursor_Results_List(s *capnp.Segment, sz int32) (ClientCallback_moveCursor_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[ClientCallback_moveCursor_Results](l), err
+}
+
+// ClientCallback_moveCursor_Results_Future is a wrapper for a ClientCallback_moveCursor_Results promised by a client call.
+type ClientCallback_moveCursor_Results_Future struct{ *capnp.Future }
+
+func (f ClientCallback_moveCursor_Results_Future) Struct() (ClientCallback_moveCursor_Results, error) {
+	p, err := f.Future.Ptr()
+	return ClientCallback_moveCursor_Results(p.Struct()), err
+}
+
+type ClientCallback_openFile_Params capnp.Struct
+
+// ClientCallback_openFile_Params_TypeID is the unique identifier for the type ClientCallback_openFile_Params.
+const ClientCallback_openFile_Params_TypeID = 0xede291565db8a4ba
+
+func NewClientCallback_openFile_Params(s *capnp.Segment) (ClientCallback_openFile_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1})
+	return ClientCallback_openFile_Params(st), err
+}
+
+func NewRootClientCallback_openFile_Params(s *capnp.Segment) (ClientCallback_openFile_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1})
+	return ClientCallback_openFile_Params(st), err
+}
+
+func ReadRootClientCallback_openFile_Params(msg *capnp.Message) (ClientCallback_openFile_Params, error) {
+	root, err := msg.Root()
+	return ClientCallback_openFile_Params(root.Struct()), err
+}
+
+func (s ClientCallback_openFile_Params) String() string {
+	str, _ := text.Marshal(0xede291565db8a4ba, capnp.Struct(s))
+	return str
+}
+
+func (s ClientCallback_openFile_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ClientCallback_openFile_Params) DecodeFromPtr(p capnp.Ptr) ClientCallback_openFile_Params {
+	return ClientCallback_openFile_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ClientCallback_openFile_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ClientCallback_openFile_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ClientCallback_openFile_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ClientCallback_openFile_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s ClientCallback_openFile_Params) Path() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s ClientCallback_openFile_Params) HasPath() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s ClientCallback_openFile_Params) PathBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s ClientCallback_openFile_Params) SetPath(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s ClientCallback_openFile_Params) Line() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s ClientCallback_openFile_Params) SetLine(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+// ClientCallback_openFile_Params_List is a list of ClientCallback_openFile_Params.
+type ClientCallback_openFile_Params_List = capnp.StructList[ClientCallback_openFile_Params]
+
+// NewClientCallback_openFile_Params creates a new list of ClientCallback_openFile_Params.
+func NewClientCallback_openFile_Params_List(s *capnp.Segment, sz int32) (ClientCallback_openFile_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1}, sz)
+	return capnp.StructList[ClientCallback_openFile_Params](l), err
+}
+
+// ClientCallback_openFile_Params_Future is a wrapper for a ClientCallback_openFile_Params promised by a client call.
+type ClientCallback_openFile_Params_Future struct{ *capnp.Future }
+
+func (f ClientCallback_openFile_Params_Future) Struct() (ClientCallback_openFile_Params, error) {
+	p, err := f.Future.Ptr()
+	return ClientCallback_openFile_Params(p.Struct()), err
+}
+
+type ClientCallback_openFile_Results capnp.Struct
+
+// ClientCallback_openFile_Results_TypeID is the unique identifier for the type ClientCallback_openFile_Results.
+const ClientCallback_openFile_Results_TypeID = 0xfba63268bee43277
+
+func NewClientCallback_openFile_Results(s *capnp.Segment) (ClientCallback_openFile_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_openFile_Results(st), err
+}
+
+func NewRootClientCallback_openFile_Results(s *capnp.Segment) (ClientCallback_openFile_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_openFile_Results(st), err
+}
+
+func ReadRootClientCallback_openFile_Results(msg *capnp.Message) (ClientCallback_openFile_Results, error) {
+	root, err := msg.Root()
+	return ClientCallback_openFile_Results(root.Struct()), err
+}
+
+func (s ClientCallback_openFile_Results) String() string {
+	str, _ := text.Marshal(0xfba63268bee43277, capnp.Struct(s))
+	return str
+}
+
+func (s ClientCallback_openFile_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ClientCallback_openFile_Results) DecodeFromPtr(p capnp.Ptr) ClientCallback_openFile_Results {
+	return ClientCallback_openFile_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ClientCallback_openFile_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ClientCallback_openFile_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ClientCallback_openFile_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ClientCallback_openFile_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// ClientCallback_openFile_Results_List is a list of ClientCallback_openFile_Results.
+type ClientCallback_openFile_Results_List = capnp.StructList[ClientCallback_openFile_Results]
+
+// NewClientCallback_openFile_Results creates a new list of ClientCallback_openFile_Results.
+func NewClientCallback_openFile_Results_List(s *capnp.Segment, sz int32) (ClientCallback_openFile_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[ClientCallback_openFile_Results](l), err
+}
+
+// ClientCallback_openFile_Results_Future is a wrapper for a ClientCallback_openFile_Results promised by a client call.
+type ClientCallback_openFile_Results_Future struct{ *capnp.Future }
+
+func (f ClientCallback_openFile_Results_Future) Struct() (ClientCallback_openFile_Results, error) {
+	p, err := f.Future.Ptr()
+	return ClientCallback_openFile_Results(p.Struct()), err
+}
+
+type ClientCallback_keyRegistered_Params capnp.Struct
+
+// ClientCallback_keyRegistered_Params_TypeID is the unique identifier for the type ClientCallback_keyRegistered_Params.
+const ClientCallback_keyRegistered_Params_TypeID = 0xbae37fbe21e580a3
+
+func NewClientCallback_keyRegistered_Params(s *capnp.Segment) (ClientCallback_keyRegistered_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return ClientCallback_keyRegistered_Params(st), err
+}
+
+func NewRootClientCallback_keyRegistered_Params(s *capnp.Segment) (ClientCallback_keyRegistered_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return ClientCallback_keyRegistered_Params(st), err
+}
+
+func ReadRootClientCallback_keyRegistered_Params(msg *capnp.Message) (ClientCallback_keyRegistered_Params, error) {
+	root, err := msg.Root()
+	return ClientCallback_keyRegistered_Params(root.Struct()), err
+}
+
+func (s ClientCallback_keyRegistered_Params) String() string {
+	str, _ := text.Marshal(0xbae37fbe21e580a3, capnp.Struct(s))
+	return str
+}
+
+func (s ClientCallback_keyRegistered_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ClientCallback_keyRegistered_Params) DecodeFromPtr(p capnp.Ptr) ClientCallback_keyRegistered_Params {
+	return ClientCallback_keyRegistered_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ClientCallback_keyRegistered_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ClientCallback_keyRegistered_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ClientCallback_keyRegistered_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ClientCallback_keyRegistered_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s ClientCallback_keyRegistered_Params) Trigger() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s ClientCallback_keyRegistered_Params) HasTrigger() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s ClientCallback_keyRegistered_Params) TriggerBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s ClientCallback_keyRegistered_Params) SetTrigger(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+// ClientCallback_keyRegistered_Params_List is a list of ClientCallback_keyRegistered_Params.
+type ClientCallback_keyRegistered_Params_List = capnp.StructList[ClientCallback_keyRegistered_Params]
+
+// NewClientCallback_keyRegistered_Params creates a new list of ClientCallback_keyRegistered_Params.
+func NewClientCallback_keyRegistered_Params_List(s *capnp.Segment, sz int32) (ClientCallback_keyRegistered_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[ClientCallback_keyRegistered_Params](l), err
+}
+
+// ClientCallback_keyRegistered_Params_Future is a wrapper for a ClientCallback_keyRegistered_Params promised by a client call.
+type ClientCallback_keyRegistered_Params_Future struct{ *capnp.Future }
+
+func (f ClientCallback_keyRegistered_Params_Future) Struct() (ClientCallback_keyRegistered_Params, error) {
+	p, err := f.Future.Ptr()
+	return ClientCallback_keyRegistered_Params(p.Struct()), err
+}
+
+type ClientCallback_keyRegistered_Results capnp.Struct
+
+// ClientCallback_keyRegistered_Results_TypeID is the unique identifier for the type ClientCallback_keyRegistered_Results.
+const ClientCallback_keyRegistered_Results_TypeID = 0xbcd186e2b1bdb57f
+
+func NewClientCallback_keyRegistered_Results(s *capnp.Segment) (ClientCallback_keyRegistered_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_keyRegistered_Results(st), err
+}
+
+func NewRootClientCallback_keyRegistered_Results(s *capnp.Segment) (ClientCallback_keyRegistered_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_keyRegistered_Results(st), err
+}
+
+func ReadRootClientCallback_keyRegistered_Results(msg *capnp.Message) (ClientCallback_keyRegistered_Results, error) {
+	root, err := msg.Root()
+	return ClientCallback_keyRegistered_Results(root.Struct()), err
+}
+
+func (s ClientCallback_keyRegistered_Results) String() string {
+	str, _ := text.Marshal(0xbcd186e2b1bdb57f, capnp.Struct(s))
+	return str
+}
+
+func (s ClientCallback_keyRegistered_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ClientCallback_keyRegistered_Results) DecodeFromPtr(p capnp.Ptr) ClientCallback_keyRegistered_Results {
+	return ClientCallback_keyRegistered_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ClientCallback_keyRegistered_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ClientCallback_keyRegistered_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ClientCallback_keyRegistered_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ClientCallback_keyRegistered_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// ClientCallback_keyRegistered_Results_List is a list of ClientCallback_keyRegistered_Results.
+type ClientCallback_keyRegistered_Results_List = capnp.StructList[ClientCallback_keyRegistered_Results]
+
+// NewClientCallback_keyRegistered_Results creates a new list of ClientCallback_keyRegistered_Results.
+func NewClientCallback_keyRegistered_Results_List(s *capnp.Segment, sz int32) (ClientCallback_keyRegistered_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[ClientCallback_keyRegistered_Results](l), err
+}
+
+// ClientCallback_keyRegistered_Results_Future is a wrapper for a ClientCallback_keyRegistered_Results promised by a client call.
+type ClientCallback_keyRegistered_Results_Future struct{ *capnp.Future }
+
+func (f ClientCallback_keyRegistered_Results_Future) Struct() (ClientCallback_keyRegistered_Results, error) {
+	p, err := f.Future.Ptr()
+	return ClientCallback_keyRegistered_Results(p.Struct()), err
+}
+
 type EditorService capnp.Client
 
 // EditorService_TypeID is the unique identifier for the type EditorService.
@@ -22,12 +938,12 @@ func (c EditorService) Connect(ctx context.Context, params func(EditorService_co
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      0,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "connect",
 		},
 	}
 	if params != nil {
-		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 0}
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
 		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_connect_Params(s)) }
 	}
 
@@ -42,7 +958,7 @@ func (c EditorService) Disconnect(ctx context.Context, params func(EditorService
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      1,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "disconnect",
 		},
 	}
@@ -62,7 +978,7 @@ func (c EditorService) OpenFile(ctx context.Context, params func(EditorService_o
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      2,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "openFile",
 		},
 	}
@@ -82,7 +998,7 @@ func (c EditorService) GetUpdates(ctx context.Context, params func(EditorService
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      3,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getUpdates",
 		},
 	}
@@ -102,7 +1018,7 @@ func (c EditorService) ApplyOp(ctx context.Context, params func(EditorService_ap
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      4,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "applyOp",
 		},
 	}
@@ -122,7 +1038,7 @@ func (c EditorService) Save(ctx context.Context, params func(EditorService_save_
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      5,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "save",
 		},
 	}
@@ -142,7 +1058,7 @@ func (c EditorService) CloseBuffer(ctx context.Context, params func(EditorServic
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      6,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "closeBuffer",
 		},
 	}
@@ -162,7 +1078,7 @@ func (c EditorService) BufferClientCount(ctx context.Context, params func(Editor
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      7,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "bufferClientCount",
 		},
 	}
@@ -182,7 +1098,7 @@ func (c EditorService) DiscardRecovery(ctx context.Context, params func(EditorSe
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      8,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "discardRecovery",
 		},
 	}
@@ -202,7 +1118,7 @@ func (c EditorService) GetDiagnostics(ctx context.Context, params func(EditorSer
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      9,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getDiagnostics",
 		},
 	}
@@ -222,7 +1138,7 @@ func (c EditorService) Hover(ctx context.Context, params func(EditorService_hove
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      10,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "hover",
 		},
 	}
@@ -242,7 +1158,7 @@ func (c EditorService) SignatureHelp(ctx context.Context, params func(EditorServ
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      11,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "signatureHelp",
 		},
 	}
@@ -262,7 +1178,7 @@ func (c EditorService) Complete(ctx context.Context, params func(EditorService_c
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      12,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "complete",
 		},
 	}
@@ -282,7 +1198,7 @@ func (c EditorService) Definition(ctx context.Context, params func(EditorService
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      13,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "definition",
 		},
 	}
@@ -302,7 +1218,7 @@ func (c EditorService) Format(ctx context.Context, params func(EditorService_for
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      14,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "format",
 		},
 	}
@@ -313,6 +1229,86 @@ func (c EditorService) Format(ctx context.Context, params func(EditorService_for
 
 	ans, release := capnp.Client(c).SendCall(ctx, s)
 	return EditorService_format_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) HandlePluginKey(ctx context.Context, params func(EditorService_handlePluginKey_Params) error) (EditorService_handlePluginKey_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      15,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "handlePluginKey",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 16, PointerCount: 2}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_handlePluginKey_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_handlePluginKey_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) UpdateViewport(ctx context.Context, params func(EditorService_updateViewport_Params) error) (EditorService_updateViewport_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      16,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "updateViewport",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 16, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_updateViewport_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_updateViewport_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) GetPluginDecorations(ctx context.Context, params func(EditorService_getPluginDecorations_Params) error) (EditorService_getPluginDecorations_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      17,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "getPluginDecorations",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 16, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_getPluginDecorations_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_getPluginDecorations_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) GetPluginKeys(ctx context.Context, params func(EditorService_getPluginKeys_Params) error) (EditorService_getPluginKeys_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      18,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "getPluginKeys",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_getPluginKeys_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_getPluginKeys_Results_Future{Future: ans.Future()}, release
 
 }
 
@@ -418,6 +1414,14 @@ type EditorService_Server interface {
 	Definition(context.Context, EditorService_definition) error
 
 	Format(context.Context, EditorService_format) error
+
+	HandlePluginKey(context.Context, EditorService_handlePluginKey) error
+
+	UpdateViewport(context.Context, EditorService_updateViewport) error
+
+	GetPluginDecorations(context.Context, EditorService_getPluginDecorations) error
+
+	GetPluginKeys(context.Context, EditorService_getPluginKeys) error
 }
 
 // EditorService_NewServer creates a new Server from an implementation of EditorService_Server.
@@ -436,14 +1440,14 @@ func EditorService_ServerToClient(s EditorService_Server) EditorService {
 // This can be used to create a more complicated Server.
 func EditorService_Methods(methods []server.Method, s EditorService_Server) []server.Method {
 	if cap(methods) == 0 {
-		methods = make([]server.Method, 0, 15)
+		methods = make([]server.Method, 0, 19)
 	}
 
 	methods = append(methods, server.Method{
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      0,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "connect",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -455,7 +1459,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      1,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "disconnect",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -467,7 +1471,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      2,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "openFile",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -479,7 +1483,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      3,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getUpdates",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -491,7 +1495,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      4,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "applyOp",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -503,7 +1507,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      5,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "save",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -515,7 +1519,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      6,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "closeBuffer",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -527,7 +1531,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      7,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "bufferClientCount",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -539,7 +1543,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      8,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "discardRecovery",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -551,7 +1555,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      9,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getDiagnostics",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -563,7 +1567,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      10,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "hover",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -575,7 +1579,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      11,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "signatureHelp",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -587,7 +1591,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      12,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "complete",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -599,7 +1603,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      13,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "definition",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -611,11 +1615,59 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      14,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "format",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
 			return s.Format(ctx, EditorService_format{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      15,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "handlePluginKey",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.HandlePluginKey(ctx, EditorService_handlePluginKey{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      16,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "updateViewport",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.UpdateViewport(ctx, EditorService_updateViewport{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      17,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "getPluginDecorations",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.GetPluginDecorations(ctx, EditorService_getPluginDecorations{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      18,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "getPluginKeys",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.GetPluginKeys(ctx, EditorService_getPluginKeys{call})
 		},
 	})
 
@@ -877,6 +1929,74 @@ func (c EditorService_format) AllocResults() (EditorService_format_Results, erro
 	return EditorService_format_Results(r), err
 }
 
+// EditorService_handlePluginKey holds the state for a server call to EditorService.handlePluginKey.
+// See server.Call for documentation.
+type EditorService_handlePluginKey struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_handlePluginKey) Args() EditorService_handlePluginKey_Params {
+	return EditorService_handlePluginKey_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_handlePluginKey) AllocResults() (EditorService_handlePluginKey_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_handlePluginKey_Results(r), err
+}
+
+// EditorService_updateViewport holds the state for a server call to EditorService.updateViewport.
+// See server.Call for documentation.
+type EditorService_updateViewport struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_updateViewport) Args() EditorService_updateViewport_Params {
+	return EditorService_updateViewport_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_updateViewport) AllocResults() (EditorService_updateViewport_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_updateViewport_Results(r), err
+}
+
+// EditorService_getPluginDecorations holds the state for a server call to EditorService.getPluginDecorations.
+// See server.Call for documentation.
+type EditorService_getPluginDecorations struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_getPluginDecorations) Args() EditorService_getPluginDecorations_Params {
+	return EditorService_getPluginDecorations_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_getPluginDecorations) AllocResults() (EditorService_getPluginDecorations_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_getPluginDecorations_Results(r), err
+}
+
+// EditorService_getPluginKeys holds the state for a server call to EditorService.getPluginKeys.
+// See server.Call for documentation.
+type EditorService_getPluginKeys struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_getPluginKeys) Args() EditorService_getPluginKeys_Params {
+	return EditorService_getPluginKeys_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_getPluginKeys) AllocResults() (EditorService_getPluginKeys_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_getPluginKeys_Results(r), err
+}
+
 // EditorService_List is a list of EditorService.
 type EditorService_List = capnp.CapList[EditorService]
 
@@ -892,12 +2012,12 @@ type EditorService_connect_Params capnp.Struct
 const EditorService_connect_Params_TypeID = 0xe4418928851d24b2
 
 func NewEditorService_connect_Params(s *capnp.Segment) (EditorService_connect_Params, error) {
-	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
 	return EditorService_connect_Params(st), err
 }
 
 func NewRootEditorService_connect_Params(s *capnp.Segment) (EditorService_connect_Params, error) {
-	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
 	return EditorService_connect_Params(st), err
 }
 
@@ -933,13 +2053,30 @@ func (s EditorService_connect_Params) Message() *capnp.Message {
 func (s EditorService_connect_Params) Segment() *capnp.Segment {
 	return capnp.Struct(s).Segment()
 }
+func (s EditorService_connect_Params) Callback() ClientCallback {
+	p, _ := capnp.Struct(s).Ptr(0)
+	return ClientCallback(p.Interface().Client())
+}
+
+func (s EditorService_connect_Params) HasCallback() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_connect_Params) SetCallback(v ClientCallback) error {
+	if !v.IsValid() {
+		return capnp.Struct(s).SetPtr(0, capnp.Ptr{})
+	}
+	seg := s.Segment()
+	in := capnp.NewInterface(seg, seg.Message().CapTable().Add(capnp.Client(v)))
+	return capnp.Struct(s).SetPtr(0, in.ToPtr())
+}
 
 // EditorService_connect_Params_List is a list of EditorService_connect_Params.
 type EditorService_connect_Params_List = capnp.StructList[EditorService_connect_Params]
 
 // NewEditorService_connect_Params creates a new list of EditorService_connect_Params.
 func NewEditorService_connect_Params_List(s *capnp.Segment, sz int32) (EditorService_connect_Params_List, error) {
-	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
 	return capnp.StructList[EditorService_connect_Params](l), err
 }
 
@@ -949,6 +2086,9 @@ type EditorService_connect_Params_Future struct{ *capnp.Future }
 func (f EditorService_connect_Params_Future) Struct() (EditorService_connect_Params, error) {
 	p, err := f.Future.Ptr()
 	return EditorService_connect_Params(p.Struct()), err
+}
+func (p EditorService_connect_Params_Future) Callback() ClientCallback {
+	return ClientCallback(p.Future.Field(0, nil).Client())
 }
 
 type EditorService_connect_Results capnp.Struct
@@ -3364,6 +4504,1083 @@ func (f EditorService_format_Results_Future) Struct() (EditorService_format_Resu
 	return EditorService_format_Results(p.Struct()), err
 }
 
+type EditorService_handlePluginKey_Params capnp.Struct
+
+// EditorService_handlePluginKey_Params_TypeID is the unique identifier for the type EditorService_handlePluginKey_Params.
+const EditorService_handlePluginKey_Params_TypeID = 0xc25c96f5ecc2948c
+
+func NewEditorService_handlePluginKey_Params(s *capnp.Segment) (EditorService_handlePluginKey_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 2})
+	return EditorService_handlePluginKey_Params(st), err
+}
+
+func NewRootEditorService_handlePluginKey_Params(s *capnp.Segment) (EditorService_handlePluginKey_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 2})
+	return EditorService_handlePluginKey_Params(st), err
+}
+
+func ReadRootEditorService_handlePluginKey_Params(msg *capnp.Message) (EditorService_handlePluginKey_Params, error) {
+	root, err := msg.Root()
+	return EditorService_handlePluginKey_Params(root.Struct()), err
+}
+
+func (s EditorService_handlePluginKey_Params) String() string {
+	str, _ := text.Marshal(0xc25c96f5ecc2948c, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_handlePluginKey_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_handlePluginKey_Params) DecodeFromPtr(p capnp.Ptr) EditorService_handlePluginKey_Params {
+	return EditorService_handlePluginKey_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_handlePluginKey_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_handlePluginKey_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_handlePluginKey_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_handlePluginKey_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_handlePluginKey_Params) ClientId() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s EditorService_handlePluginKey_Params) SetClientId(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
+func (s EditorService_handlePluginKey_Params) BufId() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s EditorService_handlePluginKey_Params) SetBufId(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+func (s EditorService_handlePluginKey_Params) Key() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s EditorService_handlePluginKey_Params) HasKey() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_handlePluginKey_Params) KeyBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_handlePluginKey_Params) SetKey(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s EditorService_handlePluginKey_Params) Mode() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s EditorService_handlePluginKey_Params) HasMode() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s EditorService_handlePluginKey_Params) ModeBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_handlePluginKey_Params) SetMode(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+// EditorService_handlePluginKey_Params_List is a list of EditorService_handlePluginKey_Params.
+type EditorService_handlePluginKey_Params_List = capnp.StructList[EditorService_handlePluginKey_Params]
+
+// NewEditorService_handlePluginKey_Params creates a new list of EditorService_handlePluginKey_Params.
+func NewEditorService_handlePluginKey_Params_List(s *capnp.Segment, sz int32) (EditorService_handlePluginKey_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 2}, sz)
+	return capnp.StructList[EditorService_handlePluginKey_Params](l), err
+}
+
+// EditorService_handlePluginKey_Params_Future is a wrapper for a EditorService_handlePluginKey_Params promised by a client call.
+type EditorService_handlePluginKey_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_handlePluginKey_Params_Future) Struct() (EditorService_handlePluginKey_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_handlePluginKey_Params(p.Struct()), err
+}
+
+type EditorService_handlePluginKey_Results capnp.Struct
+
+// EditorService_handlePluginKey_Results_TypeID is the unique identifier for the type EditorService_handlePluginKey_Results.
+const EditorService_handlePluginKey_Results_TypeID = 0xe91f5b9cb4dbadc8
+
+func NewEditorService_handlePluginKey_Results(s *capnp.Segment) (EditorService_handlePluginKey_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_handlePluginKey_Results(st), err
+}
+
+func NewRootEditorService_handlePluginKey_Results(s *capnp.Segment) (EditorService_handlePluginKey_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_handlePluginKey_Results(st), err
+}
+
+func ReadRootEditorService_handlePluginKey_Results(msg *capnp.Message) (EditorService_handlePluginKey_Results, error) {
+	root, err := msg.Root()
+	return EditorService_handlePluginKey_Results(root.Struct()), err
+}
+
+func (s EditorService_handlePluginKey_Results) String() string {
+	str, _ := text.Marshal(0xe91f5b9cb4dbadc8, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_handlePluginKey_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_handlePluginKey_Results) DecodeFromPtr(p capnp.Ptr) EditorService_handlePluginKey_Results {
+	return EditorService_handlePluginKey_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_handlePluginKey_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_handlePluginKey_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_handlePluginKey_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_handlePluginKey_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_handlePluginKey_Results) Result() (PluginKeyResult, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return PluginKeyResult(p.Struct()), err
+}
+
+func (s EditorService_handlePluginKey_Results) HasResult() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_handlePluginKey_Results) SetResult(v PluginKeyResult) error {
+	return capnp.Struct(s).SetPtr(0, capnp.Struct(v).ToPtr())
+}
+
+// NewResult sets the result field to a newly
+// allocated PluginKeyResult struct, preferring placement in s's segment.
+func (s EditorService_handlePluginKey_Results) NewResult() (PluginKeyResult, error) {
+	ss, err := NewPluginKeyResult(capnp.Struct(s).Segment())
+	if err != nil {
+		return PluginKeyResult{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, capnp.Struct(ss).ToPtr())
+	return ss, err
+}
+
+// EditorService_handlePluginKey_Results_List is a list of EditorService_handlePluginKey_Results.
+type EditorService_handlePluginKey_Results_List = capnp.StructList[EditorService_handlePluginKey_Results]
+
+// NewEditorService_handlePluginKey_Results creates a new list of EditorService_handlePluginKey_Results.
+func NewEditorService_handlePluginKey_Results_List(s *capnp.Segment, sz int32) (EditorService_handlePluginKey_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_handlePluginKey_Results](l), err
+}
+
+// EditorService_handlePluginKey_Results_Future is a wrapper for a EditorService_handlePluginKey_Results promised by a client call.
+type EditorService_handlePluginKey_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_handlePluginKey_Results_Future) Struct() (EditorService_handlePluginKey_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_handlePluginKey_Results(p.Struct()), err
+}
+func (p EditorService_handlePluginKey_Results_Future) Result() PluginKeyResult_Future {
+	return PluginKeyResult_Future{Future: p.Future.Field(0, nil)}
+}
+
+type EditorService_updateViewport_Params capnp.Struct
+
+// EditorService_updateViewport_Params_TypeID is the unique identifier for the type EditorService_updateViewport_Params.
+const EditorService_updateViewport_Params_TypeID = 0xb1847f3c1327c817
+
+func NewEditorService_updateViewport_Params(s *capnp.Segment) (EditorService_updateViewport_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0})
+	return EditorService_updateViewport_Params(st), err
+}
+
+func NewRootEditorService_updateViewport_Params(s *capnp.Segment) (EditorService_updateViewport_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0})
+	return EditorService_updateViewport_Params(st), err
+}
+
+func ReadRootEditorService_updateViewport_Params(msg *capnp.Message) (EditorService_updateViewport_Params, error) {
+	root, err := msg.Root()
+	return EditorService_updateViewport_Params(root.Struct()), err
+}
+
+func (s EditorService_updateViewport_Params) String() string {
+	str, _ := text.Marshal(0xb1847f3c1327c817, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_updateViewport_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_updateViewport_Params) DecodeFromPtr(p capnp.Ptr) EditorService_updateViewport_Params {
+	return EditorService_updateViewport_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_updateViewport_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_updateViewport_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_updateViewport_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_updateViewport_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_updateViewport_Params) ClientId() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s EditorService_updateViewport_Params) SetClientId(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
+func (s EditorService_updateViewport_Params) TopLine() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s EditorService_updateViewport_Params) SetTopLine(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+func (s EditorService_updateViewport_Params) Height() uint32 {
+	return capnp.Struct(s).Uint32(12)
+}
+
+func (s EditorService_updateViewport_Params) SetHeight(v uint32) {
+	capnp.Struct(s).SetUint32(12, v)
+}
+
+// EditorService_updateViewport_Params_List is a list of EditorService_updateViewport_Params.
+type EditorService_updateViewport_Params_List = capnp.StructList[EditorService_updateViewport_Params]
+
+// NewEditorService_updateViewport_Params creates a new list of EditorService_updateViewport_Params.
+func NewEditorService_updateViewport_Params_List(s *capnp.Segment, sz int32) (EditorService_updateViewport_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_updateViewport_Params](l), err
+}
+
+// EditorService_updateViewport_Params_Future is a wrapper for a EditorService_updateViewport_Params promised by a client call.
+type EditorService_updateViewport_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_updateViewport_Params_Future) Struct() (EditorService_updateViewport_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_updateViewport_Params(p.Struct()), err
+}
+
+type EditorService_updateViewport_Results capnp.Struct
+
+// EditorService_updateViewport_Results_TypeID is the unique identifier for the type EditorService_updateViewport_Results.
+const EditorService_updateViewport_Results_TypeID = 0xb55330a366064aec
+
+func NewEditorService_updateViewport_Results(s *capnp.Segment) (EditorService_updateViewport_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_updateViewport_Results(st), err
+}
+
+func NewRootEditorService_updateViewport_Results(s *capnp.Segment) (EditorService_updateViewport_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_updateViewport_Results(st), err
+}
+
+func ReadRootEditorService_updateViewport_Results(msg *capnp.Message) (EditorService_updateViewport_Results, error) {
+	root, err := msg.Root()
+	return EditorService_updateViewport_Results(root.Struct()), err
+}
+
+func (s EditorService_updateViewport_Results) String() string {
+	str, _ := text.Marshal(0xb55330a366064aec, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_updateViewport_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_updateViewport_Results) DecodeFromPtr(p capnp.Ptr) EditorService_updateViewport_Results {
+	return EditorService_updateViewport_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_updateViewport_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_updateViewport_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_updateViewport_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_updateViewport_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// EditorService_updateViewport_Results_List is a list of EditorService_updateViewport_Results.
+type EditorService_updateViewport_Results_List = capnp.StructList[EditorService_updateViewport_Results]
+
+// NewEditorService_updateViewport_Results creates a new list of EditorService_updateViewport_Results.
+func NewEditorService_updateViewport_Results_List(s *capnp.Segment, sz int32) (EditorService_updateViewport_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_updateViewport_Results](l), err
+}
+
+// EditorService_updateViewport_Results_Future is a wrapper for a EditorService_updateViewport_Results promised by a client call.
+type EditorService_updateViewport_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_updateViewport_Results_Future) Struct() (EditorService_updateViewport_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_updateViewport_Results(p.Struct()), err
+}
+
+type EditorService_getPluginDecorations_Params capnp.Struct
+
+// EditorService_getPluginDecorations_Params_TypeID is the unique identifier for the type EditorService_getPluginDecorations_Params.
+const EditorService_getPluginDecorations_Params_TypeID = 0xa1af5665d8cae011
+
+func NewEditorService_getPluginDecorations_Params(s *capnp.Segment) (EditorService_getPluginDecorations_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0})
+	return EditorService_getPluginDecorations_Params(st), err
+}
+
+func NewRootEditorService_getPluginDecorations_Params(s *capnp.Segment) (EditorService_getPluginDecorations_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0})
+	return EditorService_getPluginDecorations_Params(st), err
+}
+
+func ReadRootEditorService_getPluginDecorations_Params(msg *capnp.Message) (EditorService_getPluginDecorations_Params, error) {
+	root, err := msg.Root()
+	return EditorService_getPluginDecorations_Params(root.Struct()), err
+}
+
+func (s EditorService_getPluginDecorations_Params) String() string {
+	str, _ := text.Marshal(0xa1af5665d8cae011, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_getPluginDecorations_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_getPluginDecorations_Params) DecodeFromPtr(p capnp.Ptr) EditorService_getPluginDecorations_Params {
+	return EditorService_getPluginDecorations_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_getPluginDecorations_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_getPluginDecorations_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_getPluginDecorations_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_getPluginDecorations_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_getPluginDecorations_Params) ClientId() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s EditorService_getPluginDecorations_Params) SetClientId(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
+func (s EditorService_getPluginDecorations_Params) BufId() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s EditorService_getPluginDecorations_Params) SetBufId(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+// EditorService_getPluginDecorations_Params_List is a list of EditorService_getPluginDecorations_Params.
+type EditorService_getPluginDecorations_Params_List = capnp.StructList[EditorService_getPluginDecorations_Params]
+
+// NewEditorService_getPluginDecorations_Params creates a new list of EditorService_getPluginDecorations_Params.
+func NewEditorService_getPluginDecorations_Params_List(s *capnp.Segment, sz int32) (EditorService_getPluginDecorations_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_getPluginDecorations_Params](l), err
+}
+
+// EditorService_getPluginDecorations_Params_Future is a wrapper for a EditorService_getPluginDecorations_Params promised by a client call.
+type EditorService_getPluginDecorations_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_getPluginDecorations_Params_Future) Struct() (EditorService_getPluginDecorations_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_getPluginDecorations_Params(p.Struct()), err
+}
+
+type EditorService_getPluginDecorations_Results capnp.Struct
+
+// EditorService_getPluginDecorations_Results_TypeID is the unique identifier for the type EditorService_getPluginDecorations_Results.
+const EditorService_getPluginDecorations_Results_TypeID = 0xa66856591a4aca44
+
+func NewEditorService_getPluginDecorations_Results(s *capnp.Segment) (EditorService_getPluginDecorations_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_getPluginDecorations_Results(st), err
+}
+
+func NewRootEditorService_getPluginDecorations_Results(s *capnp.Segment) (EditorService_getPluginDecorations_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_getPluginDecorations_Results(st), err
+}
+
+func ReadRootEditorService_getPluginDecorations_Results(msg *capnp.Message) (EditorService_getPluginDecorations_Results, error) {
+	root, err := msg.Root()
+	return EditorService_getPluginDecorations_Results(root.Struct()), err
+}
+
+func (s EditorService_getPluginDecorations_Results) String() string {
+	str, _ := text.Marshal(0xa66856591a4aca44, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_getPluginDecorations_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_getPluginDecorations_Results) DecodeFromPtr(p capnp.Ptr) EditorService_getPluginDecorations_Results {
+	return EditorService_getPluginDecorations_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_getPluginDecorations_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_getPluginDecorations_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_getPluginDecorations_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_getPluginDecorations_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_getPluginDecorations_Results) Decorations() (PluginDecoration_List, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return PluginDecoration_List(p.List()), err
+}
+
+func (s EditorService_getPluginDecorations_Results) HasDecorations() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_getPluginDecorations_Results) SetDecorations(v PluginDecoration_List) error {
+	return capnp.Struct(s).SetPtr(0, v.ToPtr())
+}
+
+// NewDecorations sets the decorations field to a newly
+// allocated PluginDecoration_List, preferring placement in s's segment.
+func (s EditorService_getPluginDecorations_Results) NewDecorations(n int32) (PluginDecoration_List, error) {
+	l, err := NewPluginDecoration_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return PluginDecoration_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, l.ToPtr())
+	return l, err
+}
+
+// EditorService_getPluginDecorations_Results_List is a list of EditorService_getPluginDecorations_Results.
+type EditorService_getPluginDecorations_Results_List = capnp.StructList[EditorService_getPluginDecorations_Results]
+
+// NewEditorService_getPluginDecorations_Results creates a new list of EditorService_getPluginDecorations_Results.
+func NewEditorService_getPluginDecorations_Results_List(s *capnp.Segment, sz int32) (EditorService_getPluginDecorations_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_getPluginDecorations_Results](l), err
+}
+
+// EditorService_getPluginDecorations_Results_Future is a wrapper for a EditorService_getPluginDecorations_Results promised by a client call.
+type EditorService_getPluginDecorations_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_getPluginDecorations_Results_Future) Struct() (EditorService_getPluginDecorations_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_getPluginDecorations_Results(p.Struct()), err
+}
+
+type EditorService_getPluginKeys_Params capnp.Struct
+
+// EditorService_getPluginKeys_Params_TypeID is the unique identifier for the type EditorService_getPluginKeys_Params.
+const EditorService_getPluginKeys_Params_TypeID = 0xa631083fec8ccc7c
+
+func NewEditorService_getPluginKeys_Params(s *capnp.Segment) (EditorService_getPluginKeys_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_getPluginKeys_Params(st), err
+}
+
+func NewRootEditorService_getPluginKeys_Params(s *capnp.Segment) (EditorService_getPluginKeys_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_getPluginKeys_Params(st), err
+}
+
+func ReadRootEditorService_getPluginKeys_Params(msg *capnp.Message) (EditorService_getPluginKeys_Params, error) {
+	root, err := msg.Root()
+	return EditorService_getPluginKeys_Params(root.Struct()), err
+}
+
+func (s EditorService_getPluginKeys_Params) String() string {
+	str, _ := text.Marshal(0xa631083fec8ccc7c, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_getPluginKeys_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_getPluginKeys_Params) DecodeFromPtr(p capnp.Ptr) EditorService_getPluginKeys_Params {
+	return EditorService_getPluginKeys_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_getPluginKeys_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_getPluginKeys_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_getPluginKeys_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_getPluginKeys_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// EditorService_getPluginKeys_Params_List is a list of EditorService_getPluginKeys_Params.
+type EditorService_getPluginKeys_Params_List = capnp.StructList[EditorService_getPluginKeys_Params]
+
+// NewEditorService_getPluginKeys_Params creates a new list of EditorService_getPluginKeys_Params.
+func NewEditorService_getPluginKeys_Params_List(s *capnp.Segment, sz int32) (EditorService_getPluginKeys_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_getPluginKeys_Params](l), err
+}
+
+// EditorService_getPluginKeys_Params_Future is a wrapper for a EditorService_getPluginKeys_Params promised by a client call.
+type EditorService_getPluginKeys_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_getPluginKeys_Params_Future) Struct() (EditorService_getPluginKeys_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_getPluginKeys_Params(p.Struct()), err
+}
+
+type EditorService_getPluginKeys_Results capnp.Struct
+
+// EditorService_getPluginKeys_Results_TypeID is the unique identifier for the type EditorService_getPluginKeys_Results.
+const EditorService_getPluginKeys_Results_TypeID = 0x966a77c3514d0ab6
+
+func NewEditorService_getPluginKeys_Results(s *capnp.Segment) (EditorService_getPluginKeys_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_getPluginKeys_Results(st), err
+}
+
+func NewRootEditorService_getPluginKeys_Results(s *capnp.Segment) (EditorService_getPluginKeys_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_getPluginKeys_Results(st), err
+}
+
+func ReadRootEditorService_getPluginKeys_Results(msg *capnp.Message) (EditorService_getPluginKeys_Results, error) {
+	root, err := msg.Root()
+	return EditorService_getPluginKeys_Results(root.Struct()), err
+}
+
+func (s EditorService_getPluginKeys_Results) String() string {
+	str, _ := text.Marshal(0x966a77c3514d0ab6, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_getPluginKeys_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_getPluginKeys_Results) DecodeFromPtr(p capnp.Ptr) EditorService_getPluginKeys_Results {
+	return EditorService_getPluginKeys_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_getPluginKeys_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_getPluginKeys_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_getPluginKeys_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_getPluginKeys_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_getPluginKeys_Results) Keys() (capnp.TextList, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return capnp.TextList(p.List()), err
+}
+
+func (s EditorService_getPluginKeys_Results) HasKeys() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_getPluginKeys_Results) SetKeys(v capnp.TextList) error {
+	return capnp.Struct(s).SetPtr(0, v.ToPtr())
+}
+
+// NewKeys sets the keys field to a newly
+// allocated capnp.TextList, preferring placement in s's segment.
+func (s EditorService_getPluginKeys_Results) NewKeys(n int32) (capnp.TextList, error) {
+	l, err := capnp.NewTextList(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return capnp.TextList{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, l.ToPtr())
+	return l, err
+}
+
+// EditorService_getPluginKeys_Results_List is a list of EditorService_getPluginKeys_Results.
+type EditorService_getPluginKeys_Results_List = capnp.StructList[EditorService_getPluginKeys_Results]
+
+// NewEditorService_getPluginKeys_Results creates a new list of EditorService_getPluginKeys_Results.
+func NewEditorService_getPluginKeys_Results_List(s *capnp.Segment, sz int32) (EditorService_getPluginKeys_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_getPluginKeys_Results](l), err
+}
+
+// EditorService_getPluginKeys_Results_Future is a wrapper for a EditorService_getPluginKeys_Results promised by a client call.
+type EditorService_getPluginKeys_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_getPluginKeys_Results_Future) Struct() (EditorService_getPluginKeys_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_getPluginKeys_Results(p.Struct()), err
+}
+
+type PluginEdit capnp.Struct
+
+// PluginEdit_TypeID is the unique identifier for the type PluginEdit.
+const PluginEdit_TypeID = 0xbd642a91a28b1110
+
+func NewPluginEdit(s *capnp.Segment) (PluginEdit, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	return PluginEdit(st), err
+}
+
+func NewRootPluginEdit(s *capnp.Segment) (PluginEdit, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	return PluginEdit(st), err
+}
+
+func ReadRootPluginEdit(msg *capnp.Message) (PluginEdit, error) {
+	root, err := msg.Root()
+	return PluginEdit(root.Struct()), err
+}
+
+func (s PluginEdit) String() string {
+	str, _ := text.Marshal(0xbd642a91a28b1110, capnp.Struct(s))
+	return str
+}
+
+func (s PluginEdit) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (PluginEdit) DecodeFromPtr(p capnp.Ptr) PluginEdit {
+	return PluginEdit(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s PluginEdit) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s PluginEdit) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s PluginEdit) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s PluginEdit) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s PluginEdit) FromLine() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s PluginEdit) SetFromLine(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+func (s PluginEdit) FromCol() uint32 {
+	return capnp.Struct(s).Uint32(4)
+}
+
+func (s PluginEdit) SetFromCol(v uint32) {
+	capnp.Struct(s).SetUint32(4, v)
+}
+
+func (s PluginEdit) ToLine() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s PluginEdit) SetToLine(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+func (s PluginEdit) ToCol() uint32 {
+	return capnp.Struct(s).Uint32(12)
+}
+
+func (s PluginEdit) SetToCol(v uint32) {
+	capnp.Struct(s).SetUint32(12, v)
+}
+
+func (s PluginEdit) NewText() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s PluginEdit) HasNewText() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s PluginEdit) NewTextBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s PluginEdit) SetNewText(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+// PluginEdit_List is a list of PluginEdit.
+type PluginEdit_List = capnp.StructList[PluginEdit]
+
+// NewPluginEdit creates a new list of PluginEdit.
+func NewPluginEdit_List(s *capnp.Segment, sz int32) (PluginEdit_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1}, sz)
+	return capnp.StructList[PluginEdit](l), err
+}
+
+// PluginEdit_Future is a wrapper for a PluginEdit promised by a client call.
+type PluginEdit_Future struct{ *capnp.Future }
+
+func (f PluginEdit_Future) Struct() (PluginEdit, error) {
+	p, err := f.Future.Ptr()
+	return PluginEdit(p.Struct()), err
+}
+
+type PluginDecorationKind uint16
+
+// PluginDecorationKind_TypeID is the unique identifier for the type PluginDecorationKind.
+const PluginDecorationKind_TypeID = 0xeda78d81b6beef42
+
+// Values of PluginDecorationKind.
+const (
+	PluginDecorationKind_gutter    PluginDecorationKind = 0
+	PluginDecorationKind_overlay   PluginDecorationKind = 1
+	PluginDecorationKind_statusBar PluginDecorationKind = 2
+)
+
+// String returns the enum's constant name.
+func (c PluginDecorationKind) String() string {
+	switch c {
+	case PluginDecorationKind_gutter:
+		return "gutter"
+	case PluginDecorationKind_overlay:
+		return "overlay"
+	case PluginDecorationKind_statusBar:
+		return "statusBar"
+
+	default:
+		return ""
+	}
+}
+
+// PluginDecorationKindFromString returns the enum value with a name,
+// or the zero value if there's no such value.
+func PluginDecorationKindFromString(c string) PluginDecorationKind {
+	switch c {
+	case "gutter":
+		return PluginDecorationKind_gutter
+	case "overlay":
+		return PluginDecorationKind_overlay
+	case "statusBar":
+		return PluginDecorationKind_statusBar
+
+	default:
+		return 0
+	}
+}
+
+type PluginDecorationKind_List = capnp.EnumList[PluginDecorationKind]
+
+func NewPluginDecorationKind_List(s *capnp.Segment, sz int32) (PluginDecorationKind_List, error) {
+	return capnp.NewEnumList[PluginDecorationKind](s, sz)
+}
+
+type PluginDecoration capnp.Struct
+
+// PluginDecoration_TypeID is the unique identifier for the type PluginDecoration.
+const PluginDecoration_TypeID = 0xb9007f5995ede543
+
+func NewPluginDecoration(s *capnp.Segment) (PluginDecoration, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	return PluginDecoration(st), err
+}
+
+func NewRootPluginDecoration(s *capnp.Segment) (PluginDecoration, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	return PluginDecoration(st), err
+}
+
+func ReadRootPluginDecoration(msg *capnp.Message) (PluginDecoration, error) {
+	root, err := msg.Root()
+	return PluginDecoration(root.Struct()), err
+}
+
+func (s PluginDecoration) String() string {
+	str, _ := text.Marshal(0xb9007f5995ede543, capnp.Struct(s))
+	return str
+}
+
+func (s PluginDecoration) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (PluginDecoration) DecodeFromPtr(p capnp.Ptr) PluginDecoration {
+	return PluginDecoration(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s PluginDecoration) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s PluginDecoration) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s PluginDecoration) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s PluginDecoration) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s PluginDecoration) Line() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s PluginDecoration) SetLine(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+func (s PluginDecoration) Col() uint32 {
+	return capnp.Struct(s).Uint32(4)
+}
+
+func (s PluginDecoration) SetCol(v uint32) {
+	capnp.Struct(s).SetUint32(4, v)
+}
+
+func (s PluginDecoration) Text() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s PluginDecoration) HasText() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s PluginDecoration) TextBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s PluginDecoration) SetText(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s PluginDecoration) Kind() PluginDecorationKind {
+	return PluginDecorationKind(capnp.Struct(s).Uint16(8))
+}
+
+func (s PluginDecoration) SetKind(v PluginDecorationKind) {
+	capnp.Struct(s).SetUint16(8, uint16(v))
+}
+
+// PluginDecoration_List is a list of PluginDecoration.
+type PluginDecoration_List = capnp.StructList[PluginDecoration]
+
+// NewPluginDecoration creates a new list of PluginDecoration.
+func NewPluginDecoration_List(s *capnp.Segment, sz int32) (PluginDecoration_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1}, sz)
+	return capnp.StructList[PluginDecoration](l), err
+}
+
+// PluginDecoration_Future is a wrapper for a PluginDecoration promised by a client call.
+type PluginDecoration_Future struct{ *capnp.Future }
+
+func (f PluginDecoration_Future) Struct() (PluginDecoration, error) {
+	p, err := f.Future.Ptr()
+	return PluginDecoration(p.Struct()), err
+}
+
+type PluginKeyResult capnp.Struct
+
+// PluginKeyResult_TypeID is the unique identifier for the type PluginKeyResult.
+const PluginKeyResult_TypeID = 0xf736ac1719d3a170
+
+func NewPluginKeyResult(s *capnp.Segment) (PluginKeyResult, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	return PluginKeyResult(st), err
+}
+
+func NewRootPluginKeyResult(s *capnp.Segment) (PluginKeyResult, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	return PluginKeyResult(st), err
+}
+
+func ReadRootPluginKeyResult(msg *capnp.Message) (PluginKeyResult, error) {
+	root, err := msg.Root()
+	return PluginKeyResult(root.Struct()), err
+}
+
+func (s PluginKeyResult) String() string {
+	str, _ := text.Marshal(0xf736ac1719d3a170, capnp.Struct(s))
+	return str
+}
+
+func (s PluginKeyResult) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (PluginKeyResult) DecodeFromPtr(p capnp.Ptr) PluginKeyResult {
+	return PluginKeyResult(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s PluginKeyResult) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s PluginKeyResult) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s PluginKeyResult) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s PluginKeyResult) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s PluginKeyResult) Handled() bool {
+	return capnp.Struct(s).Bit(0)
+}
+
+func (s PluginKeyResult) SetHandled(v bool) {
+	capnp.Struct(s).SetBit(0, v)
+}
+
+func (s PluginKeyResult) Edits() (PluginEdit_List, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return PluginEdit_List(p.List()), err
+}
+
+func (s PluginKeyResult) HasEdits() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s PluginKeyResult) SetEdits(v PluginEdit_List) error {
+	return capnp.Struct(s).SetPtr(0, v.ToPtr())
+}
+
+// NewEdits sets the edits field to a newly
+// allocated PluginEdit_List, preferring placement in s's segment.
+func (s PluginKeyResult) NewEdits(n int32) (PluginEdit_List, error) {
+	l, err := NewPluginEdit_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return PluginEdit_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, l.ToPtr())
+	return l, err
+}
+func (s PluginKeyResult) CursorLine() uint32 {
+	return capnp.Struct(s).Uint32(4)
+}
+
+func (s PluginKeyResult) SetCursorLine(v uint32) {
+	capnp.Struct(s).SetUint32(4, v)
+}
+
+func (s PluginKeyResult) CursorCol() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s PluginKeyResult) SetCursorCol(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+func (s PluginKeyResult) HasCursor() bool {
+	return capnp.Struct(s).Bit(1)
+}
+
+func (s PluginKeyResult) SetHasCursor(v bool) {
+	capnp.Struct(s).SetBit(1, v)
+}
+
+func (s PluginKeyResult) CaptureKeys() uint32 {
+	return capnp.Struct(s).Uint32(12)
+}
+
+func (s PluginKeyResult) SetCaptureKeys(v uint32) {
+	capnp.Struct(s).SetUint32(12, v)
+}
+
+// PluginKeyResult_List is a list of PluginKeyResult.
+type PluginKeyResult_List = capnp.StructList[PluginKeyResult]
+
+// NewPluginKeyResult creates a new list of PluginKeyResult.
+func NewPluginKeyResult_List(s *capnp.Segment, sz int32) (PluginKeyResult_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1}, sz)
+	return capnp.StructList[PluginKeyResult](l), err
+}
+
+// PluginKeyResult_Future is a wrapper for a PluginKeyResult promised by a client call.
+type PluginKeyResult_Future struct{ *capnp.Future }
+
+func (f PluginKeyResult_Future) Struct() (PluginKeyResult, error) {
+	p, err := f.Future.Ptr()
+	return PluginKeyResult(p.Struct()), err
+}
+
 type DefinitionResult capnp.Struct
 
 // DefinitionResult_TypeID is the unique identifier for the type DefinitionResult.
@@ -4353,185 +6570,262 @@ func NewEditOp_OpType_List(s *capnp.Segment, sz int32) (EditOp_OpType_List, erro
 	return capnp.NewEnumList[EditOp_OpType](s, sz)
 }
 
-const schema_d75b3b54eb3ed6a2 = "x\xda\xccY\x7fp\x14\xf5\x15\x7fo\xbf\x97\xec%!" +
-	"\\6\x9b4?H&\x02\xe9\x08Q@~8b\x84" +
-	"\xde%\x01\x9b\xd0`\xb2\x09tJ\x0a3.w\xdf\xc0" +
-	"\xe9\xdd\xeeq\xbbIM\x11C\x10\xa6`\xab\xa2c;" +
-	":\x1dD\xac\xb6\x9di\xab\"b\x0b\xa3\x1d\xb4\xa2H" +
-	"\x8b-\xf8\x1bq:V[\xabT\xd4Z\x1cm\x07\xaf" +
-	"\xf3vo\xf76\xc7\xc5\xfc\x98\x8e\xf6\xcf{y\xfb}" +
-	"\x9f\xf7\xde\xe7\xbd\xef\xfb\xbe\\2\xbd \xe4\x9b[|" +
-	"a\x00\x04\xe5\xa1\xbc\xfc\xd4\x96k\x17<t\xf3\xbfv" +
-	"l\x06\xa9\x01\x01|\"\xc0\xfc\x01\xf1 \x82/u\xc3" +
-	"\xbd\xd7\x9c\x99\xfe\xe0\xa7C\xa04\xa0\x00\x90\x87\xf4\xb7" +
-	"\xa8x\x14\x01\xe5M\xe2\x83\x80\xa9:_\xf7\xbe)\xaf" +
-	"\xfd\xeeFPj\x10S\xf7\xbe\xf4\xb5\xd3+\xae\xf8\xf6" +
-	"\xcbi\xcdZ\x7f3\xca\xb3\xfc\"\x80<\xd3\xff\x1d\xc0" +
-	"\xd4\x9b7<_\xda6{\xce\xb6lmF\xda;\xfc" +
-	"](\xef\xb2\xb4\xef\xf2\xbf\x0d\x98R\xee,\xc9\x0b\x1e" +
-	"\xda\xbc-m\xdd\x02\xb6\xa3\xe0\x04\x19\xdfU@\xc6\xbf" +
-	"q\xf0\xb9?\xf7,.\xdc\xeeU\xb8\xb4\xf0\xdf\xa4\xd0" +
-	"VH\x0a\xfbNN\xbd!q\xd5\x95\xdbm\xcflP" +
-	"o\x14\x96\x0a\x80\xf2\xa7\x85A\xc0\xd4\xb2\xef\xbd\xbcw" +
-	"\xc5\x7f\x1ao\x01\xa9\xe6<\xf4UE=(\xcf*\xb2" +
-	"\xd0\x17\x91\xf2\xfd\xfb\x86\x0e\xed\xdc\xe3\xbb\x9d\xd0\xe7g" +
-	"k\xb7\x15U\xa3\xbc\xaa\xa8\x02`\xbeZt\x99\x00\x98" +
-	"\x9a\xf6\xe3\x99\x03k\x1e\x19\xbasX\xf0\xf6\x16\x9f$" +
-	"x\x87\x8b\xc9A\xdf\xb1{_R:\x0f\xddE\x072" +
-	"\xcf\x81\x02i\xee\x99\xdc\x85\xf2\xfe\xc9\xd6G\x93oE" +
-	"\xc0\xd4\x8d\xbbg\x0d\x1d\xcf\x7f\xe1\x01\xaf\xbb\x8bK\x0a" +
-	"\xc9\x9b\x95%\x14\xde\xdb\xa6\x0f\xde\xbc\xeb\x9e#\xfbH" +
-	"\x81\xa5\x15\x0e\x94\xfc\x85\x0c\x1e+\xa1x\xec\xacx\xfa" +
-	"\xf0/\x9b\xb6\x1e$\x83B\xb6\x07\x1b\xa4kP\xde&" +
-	"\x91\xbfC\x12\xc1;\xf2\xc0\xc1\x13\x9f5\xfe\xe81\x0f" +
-	"/V\x96\xfe\x93x\xb1\xff\xe8\xea\xea\x8b>\xfe\xe0\xb7" +
-	"d\xc8\xf9S[\xa9\x95\x995\xa5\x14\xaa\x9f\x9e\xe1g" +
-	"\x9a~\xde|\xd4\x0buS\xe9\xbb\xa4p[)A\x9d" +
-	"u\xf7\xb9\x0f[B\xf1c\xe9\x13l\x04g\xed#\x0a" +
-	"d\xd2P\xef\xf8\x04\xab\xcf\xfd\xe3\x98\xd7FT\x9eF" +
-	"\xde\x0e\xc9d\xa3\xf2\xb5\x83\xe76\xde\xba\xf99\x90\xa6" +
-	"\x0b\x99\xdc\x00\xce\xdf#S\xe4drd\xaf\xdc\x01\x98" +
-	"\xfa~\xe8\xdc[W\x0c\xa9\xc7\xbdh\x0e\xcbV\\^" +
-	"\x95).\xa7\xbf\x9e\xdf\xd1\xf4\xcc\x8c\x139y\xb9\xa1" +
-	"\xac\x07\xe5meV\\\xca(.\xb8[\xdf9\xff\xc3" +
-	"\xa1\x13 \xd5x\xb2\x068\x7fUy\x17\xca\xf1r\x0b" +
-	"i\xf93L~\xafB\x04H\xb5l\xdc}J\x9b\xd6" +
-	"\xf0\xbc\x97\x84/VX\xb1x\xa7\x82\x1c\xb9\xa7\xa2\xf7" +
-	"\xce\xddo?\xfe\x82\x17^A\xe5AR\xa8\xaa$x" +
-	"M\xadw\xecYz\x1a_\xf1\x9e\xb0\xb7\xd2&R%" +
-	"\x9d\xc0\xfez\xf4\xf7\xe5\x8f\xae~-g^\xcfVv" +
-	"\xa1\\PE\xf8\xf3\xaa\x08\xff\xc65\x1b\xdb\x1f<\xf5" +
-	"\x95S\xde\xc8\x9e\xadz\x92\x8e\xcb\xab\xa6\xe3v~f" +
-	"\xbc\xf1\xc4\xb9\xaaS\xc3\x92\xf3\xd5j\x0b\xf2\xe5\xd5\x94" +
-	"\x9c\x8b\xb6/|\xb5\xf4\xa6\x8a\xd7\xbd\x90\xef\xaf~\x98" +
-	"\x14\xf6[\x0a\x8f|\xf6\xfe\xa6\x9b\xf6\xbf\xfe\xe6\xb0#" +
-	"\xaa\xa6X\x9dc\xd6\x14r\xea\xe1\xfa\xdam3v4" +
-	"\xbd\xe5a\xd7\xb3\xf4w_\xea\xbe\xab\xee~vm\xb2" +
-	"\xeeo\xc3\xbe}|\x8aE\xf4\x17\xa7\xd0\xe9\xebO\xde" +
-	"\xf2\xd1\xdb\xbf\xfe\xc5\xdf\xbd\x1e,\xad\xa9&\x8555" +
-	"\xe4ApN\xfb\xdc\xf6\x9f\xbdu\xda\xab0T#\x90" +
-	"\xc2\x0f-\x85g\x9a\xca\xb5\x9fln>\xe3\x0d\xe9~" +
-	"[\xe1YK\xe1\xe3\xbd\xef\x9d\xecX\xfe\xfe\x07^\x85" +
-	"wj\xac }j)\x9cnk\xfa\xe3\xd3\x17m\xfd" +
-	"\xc8\x83\xbf\xaa\xf6]\xc2\x8fO\xdew\xc5\x85o^\xf6" +
-	"\x89\xd7xq\xadE\xed\xa9\xb5\xf4i\xea\xe1\x92[g" +
-	"?\xfa\xc0\xb9a\xf0k->\xae\xaa\x0d\xc2\xacTT" +
-	"3yRScys\x12I\xdd\xd4\xe7\xf0H\xd4\xd4" +
-	"\x93\xb3\xc3jBK4.\xb5~t\xf3d\x7f4\xcc" +
-	"g\x1bj?\xaf\xef\x0ar\xa3/f\x1a\xee\x87\xf9\xa3" +
-	"\x7f\xa8&\x12\xb1\x81\x8eD}\xa7\x9aT\xe3\x06\x802" +
-	"\x89\xf9\x00|\x08 -]\x06\xa0,a\xa8t\x0a(" +
-	"\xa1PF \xa5\xe5$lg\xa8|K@\x92\x09\x00" +
-	"\xd2\xcaj\x00\xa5\x93\xa1\xb2Z\xc0T8\x16\xe5\x9a\xd9" +
-	"\x16\x01\x00,\x00\x01\x0b\x00Sk\xfbz{y\xd2\x96" +
-	"\xf9A@? \xd3\x13X\xe2\xadW,\x01t\x81\xfb" +
-	"r\x01o\xd5\xfby\xb2\xcbr\x11:\x11\x15\xbf\x8bt" +
-	"&\x81\x9a\xc1PY  \xa2\x0dt\xee<\x00\xe5b" +
-	"\x86\xcaB\x02\xa5k&\xd7L\x83\x00L\x02\x01'\x01" +
-	"\xd6\xf5\xea}Z\x04\x11\x04\xc4\xd1,wG\xd7i\xaa" +
-	"\xd9\x97\xe4mZ/\xead\xbb\xc4\xb5\xad\x92\x9d\xd5\x0c" +
-	"\x95\xf5\x14\xa5\xb4q\x9e\x04P\"\x0c\x95\x84\x80\x92\x90" +
-	"\x0eS\xbc\x07@\x891T\xb6\x0b\x88\xac\x8cz\xb3\xb4" +
-	"m\x0b\x80\xb2\x95\xa1\xb2S\xc0\xba\x98\xba\x96\xc7\x1c|" +
-	"\xa9\x88\x1e\xee\x8bs\xcd\x84:\xd5\x8c\xea\x9a+OP" +
-	"\xa6\xb8\xc9\x81%\x0d\x9c\x0c\xd8\xc9\x10K2W\x18 " +
-	"\x09Sj\xd8\x8c\xf6\xf3N\x15m\xe5\xa4\x1b\xf8\xf1\x90" +
-	"#\xac\xc7\x131nr\x9b\x1dhx\xc9An\x87\x18" +
-	"*\xed\x1e\xb7\xdb\x1a<\x8cq\xdc^>\x0d@ie" +
-	"\xa8\xac\x10\xb0nm_o[\xc4\x81\x12\x88E5\xee" +
-	"\xfc\x10\xc3zl\"\x18\x0d'7\xad<\x96\xa8\x0f\xda" +
-	"<\xfe\xc2\x81\x8a\xa3\x03\x8dD\x8d\xb0\x9a\x8ct\xf10" +
-	"\xf1x\xa0\xdef2\x1a\x8a\xcf\xc5Z\xdc\x0c\xa0\xf8\x19" +
-	"*e\x02\x0e\xa69\xeb\xe6}l\x0c\xedT\x93L\x8d" +
-	"\x13E=\xc7\xce\xcb\x1c\x9bE2\xe7P6\x12~\xd6" +
-	"\x91P|\xe8\xbdf\xb11\xd8\x91X1\x90\xe0\xca\x0c" +
-	"\xc7\x82\\\x80\xcb\x00\xba\xfd\xc8\xb0\xbb\x0c3q\x96%" +
-	"l\x06\xe8\x9eD\xf2J\x92\x0b~+\xd4r96\x00" +
-	"t\x97\x90\xbc\x86\xe4,\xcf*\x07\xb9\x0a{\x00\xba+" +
-	"I^Or_~\x19\xfa\x00\xe4\xa9\xd8\x05\xd0}\x01" +
-	"\xc9/F\x011\xaf\x0c\xf3h \xb3\xd4g\x90x\x01" +
-	"\xa9\xe7\x8be\x98\x0f \xcf\xb5\xe0\\B\xf2E$\x17" +
-	"\xfde\xd4\xb9\xe5\xcb-8\x0bH\x1e\"\xb9\xbf\xa0\x0c" +
-	"\xfd\x00\xf2bl\x04\xe8^H\xf2%$/(,\xc3" +
-	"\x02\x00\xb9\x09\xe7\x01t/\"y+\xe6\xeem\x83\xfd" +
-	"<iPy\xa6\x7f\x07\xcc\x81\x04\xc7@&^\x80\x18" +
-	"\xb0\x02m\xf0\xa4\xd9\x1e\x05\x96aRZ\xd8\xa2\x03\xc6" +
-	"\xb2d+8\xb0\xeb2\xb9\xefM\xea\xf1\xf6\xa8\xc6=" +
-	"\x0dt\x90d-\x19*\x06M\xbd\xdd\xc3\xd2:So" +
-	"\x99XA\xe9\x09\xae]\x19\x8dq\x9b\xa0\xcc4\xbc\xcd" +
-	"\x8e\x1a\xed\xd5\x0c\x95X\xa6\xd1F\x9b\xbd\xbd\x0e\xd3\xbd" +
-	"\x8e\x84\xeb\x19*&e\xf7\x02\xbb\xd9m\xb8\x06@I" +
-	"0T\xae\x17r\xde\x09\xd9\x94\xcf\x8e\xad\x15\x06\xaa\x1f" +
-	"\x08P\x05\x8d\xadw\xb7\x1b\x89%Qu\x9d\xa6\x1bf" +
-	"\x14\xc3T\x185\xae;\xfb\xa9\x0d<\xc4Py\xcc\xd3" +
-	"\x1b\x0eP\x1bx\x84\xa1r\xc8\xd3\x1b\x1e'\x7f~\xc3" +
-	"Py\x8a\xfcI7\xef'\x1a\x01\x94\xc7\x18*G\x88" +
-	"\xaa%\x16U\xa5\xc3\x14\xa2\xa7\x18*\x7fry*\x1d" +
-	"\xa3\xaf\x8f0T^ \x92\xa2ER\xe98}\xfd\x07" +
-	"\x86\xca+\xc2\xc8\x0df\x90k\x11oZ\x83\\\x8bx" +
-	"\xf3j\xf0~\x9e\x8c\x9a\x03\x14\xc5|\x100\x1fp0" +
-	"\xce\x0dC]\xc7\x9d(\x06\x0d\xbd/\x19\xe6\xe7\x95\xfc" +
-	"\x04Z\x96;$\xe4\xbez\xdd!a.\x09/a\xa8" +
-	",\x1a\xfb@0\x1e\x8a\xae\xe3\xe6\xcaDD5\xb9A" +
-	"\x90\xc4\xac\x86?\xda\xd8\xe2&u%\xf1q\x05C\xe5" +
-	"\xeaq\xc04\xa2Z\x98\x7f\x93'!0\x8c\x9a\x9f\xcb" +
-	"\xc1%\xbc7\xaaE\xe9\x16\xef\xe2\x01\xea\xfa#\x8f\x10" +
-	"\xee\x04\xd1\x90\xa94\xb7\xaa\xa2\x0d\x9eRc\x82\xcd\xc2" +
-	"\xf8\xb4L\xa9\x0d\x1fj\x02\x09\xd5\\\xef\xe4\xfd\x7fr" +
-	"\xd9\x86c\xba\xc1\x9b\xad\xa8\xd4w\xf1\xba\x09O\x9b\xa3" +
-	"\xdd}\xd9\x85?A\x88\x9dj\xc0\x9a\x06\xbed\xba\xba" +
-	"\x1d\xd5\x19\xa3F\x99\\\x1b\xbc\x93\xeb\xf9p\x86\xa5u" +
-	"<\xe5l\xbb\xd1b\x9d\xd8\xa2\xf7i\xa6\x95\x071f" +
-	"\x1a#\x0d\x0ba\xd2:\xcfe\xdfH\xa6:\x12\xb3\xad" +
-	"\xd1\x009\x11|\x92\xc5\xd9\xda\x06\xba\x02\xa5\xf2F\x00" +
-	"\x14\xa4\xe2F\x80\x80\xa6\xeb\x89\xa0}\xcf\x05#\x9c\x06" +
-	"\xcc\xf1D3\xe2\x16S\xae\xe2\xffB\xa6\xbd\x9c\x01h" +
-	"\xb1\x87\xe5\xa8\xae\xb5\x99\x8c\xc7'Z\xe2\x8d\xb9J\xdc" +
-	"y9\\\x97=\xc0\x05\xae\x8dj\x11\xa7\xf3\x07#\xdc" +
-	"T\xa3\xde\xe1.\xc7(1j\x12\x9dH\xdbI\\\xc4" +
-	"\xf2\x00\xdcW::\x8fZ\xf986\x83 \x1fF\x11" +
-	"3\x0fYt\x1e\xc3\xf2\x01\xec\x01A\xde\x8b\"\x0a\xee" +
-	"\x8e\x07\x9dM\x98|?.\x03A\xde\x85\"2wY" +
-	"\x85\xce\xb6A\xbe\xcd\xfav\x07\x8a\x98\xd9<\xa2\xb3j" +
-	"\x927Yv7\xa0\x88y\xee\xfa\x01\x9d\xd5\xa5\xcc\xb1" +
-	"\x01\x04y\x15\x8a\x98\xef.\x9f\xd0Y`\xc9\xcbq-" +
-	"\x08\xf2R\x14Qtw\x07\xe8,\x98\xe4\xcb\xf1v\x10" +
-	"\xe4KQD\xbf\xbbcCgu(\xcf\xc4- \xc8" +
-	"SQ\xc4\x02w\xad\x80\xce\x8aB.\xc7\xef\x82 \x17" +
-	"\xa3\x88\x85\xee\x1e\x07\x9d\xdd\x81\x8c8\x0f\x04\xe9\xac\x88" +
-	"E\xee\xae\x12\x9d\xcd\x83\xf4N\x12\x04\xe9\x0d\x11'\xb9" +
-	"\x8bNt\x16=\xd2\x8b\xcb@\x90\x8e\x89X\xec\xee\xae" +
-	"\xd0Y#IO\xf4\x80 \x1d\x10q\xb2\xbb\xc8Ag" +
-	"\xdb\"\xfd\xaa\x11\x04i\x8fH\xf3\x94\xc6\xc3f\x08S" +
-	"t\x93\xd3\x0f`\xd6O\xa7#\x01@\x08S\xceu\x0a" +
-	"\x8c\x1b!\x1cL7\xe9\x10\x06\x0c\xb5\x9f\x87\xa8\x07\xd9" +
-	"-\x15\xc4^\x9e\x0c9\xed\xb0%\x86N#A\xc7\x04" +
-	"\x0d\x0b\x98\x9e\x16\xd2'[\xc3\x17\x04i\xfc\x0a\x1b!" +
-	"\xac[O\x7f\x0c\xd1=j\xbfX\xa0\xcez\xb9\x91\x99" +
-	"\xf4k\xd3\x06\xe5\x9490]\x0ba\xb0WO\xc6U" +
-	"3\x84\x9d\x88\x13l\x16]\xdc\x08\xf4e\xf5\xba\xc6L" +
-	"\xaf\x0b&\xed;\xa9$\xb3\x1e\xcdZJ\x8ca\x0dc" +
-	"9\xf7\xa5=B\xc7\xf3\xa2w\x87\xfb\x1c\x9d\xbf^\xc0" +
-	"\xba\xa8\xc9\xe3\x9e\xf5\x82\xbb\x1aM\xaf\x17\xc6\xf6\x18m" +
-	"\xe51Ld5\xc2\x9et\xd3\xbb>\xd3\x08\x07\xb6\x00" +
-	"(\xd71T\xb6z\x1a\xe1\x10\x0973T~@\x8d" +
-	"0d7\xc2\x1d\xf32\xeb\x92\x0c\x83\x18\xf7 u\xff" +
-	"\xb90l\x11\xd2\x1d\xc54\xa6\xcc\x0d>\xe2\x8ad\x84" +
-	"\xd5\xd0\x18\xc2k\xb3\xd4\x99\x93G\xbaU\x87\xa5u\x82" +
-	"s\xaf\xcbf\xcf,A\xd4\xa9g\xa8\x842\xa1]L" +
-	"S\xd5B\x86\xca\x12\x01E=\xe1\x89\x93w\xf56\x19" +
-	"F\x1e\xb9\xc6\xba|\xec\xacS\xff\x1ff\xadt\x06\xec" +
-	"\x013k\x9f\xd9\x9c)B\xb7\x06\x9b\xbd5\x98\xa6\xde" +
-	"\xf2\xb5\x99\xc7\xc2yo\xd2\xf0zU[\xc73\xec\xd0" +
-	"\xf4+-\x93 \x9a<9\x11\xce\xa4\x9b\xb4\xfb\xb8\x1a" +
-	"\xcfD\xe7\xf4W\xbb\xbbz\xbc\xf6da^\x0eVP" +
-	"\x12\x161TZ\xcf\xaft\xf7\xbfQ\xe9\xfa\x89\x19\x89" +
-	".\xaeF\xac\x17f\xb6w\x13\x9a9\xc9O\x16\x1f\xd6" +
-	"x\x96YyB\xa5R\xf8\xfc\xfc\x8f?\"\x13\xaaD" +
-	"q\xbc[G'\xee\xa3^-\xee\x7fh\xb2\xae\x96\xfc" +
-	"\xb1^-c\xb6\xe4\xfeGv\xfc\x96\x9cY!l\xba" +
-	"]f\"|\xce\xf5\xc6\xf3&:W\xf1O\x0c\xa5\xf3" +
-	"\x0c\x18\xbb\xa1\xff\x06\x00\x00\xff\xff\x12\xbc\x1b\xdf"
+const schema_d75b3b54eb3ed6a2 = "x\xda\xccZ}xT\xe5\x95?\xe7\xdeIn\x02\xf9" +
+	"\xba\xdc\x09$\x04\x9e\x90\x90@\x1a\x0b\xe5\xc3\xddj\x84" +
+	"\x9d$\xa0%\x10Jn\x02\xecJ\xe1Yof\xde$" +
+	"\x17&3\xe3\xdc;`T\x0c\xa1\xb0\x0bj*\xb8\xe8" +
+	"\x03\xbb\xeb\x07hm\xedV-\x15l\xe1\x01\x0b\xb4V" +
+	"`\xa5\xbb\xf8\xd1*\xe8n\x17q]\x8bHm\xb7\xdd" +
+	"\xfa\xf8\xe0\xecs\xee\xf7L&\xc9P\x9fg\xbb\xffM" +
+	"\xde\x9cy\xcfy\xcf\xf9\x9d\xef\x99u\xbe\xa0\xd17\xbb" +
+	"\xf0\xaf\xc7\x03\xd7\xe1\xc3\x9c\xdc\xe4\xe6u\xd7\x7fo\xf0" +
+	"\xbf\xb7o\x02\xb1\x02\x01|\x02\xc0\xdc\xd2\xb1\xcd\x08\xbe" +
+	"\xe4=\xfb\xd6~4\xf5\xb9O\x06@\xae@\x0e \x07" +
+	"\xe9\x7fW\xc7\xb4#\xa0\x94?\xf69\xc0d\xa5\xaf\xe3" +
+	"\xf9\x8a\xf3?\xfe:\xc8\x85\x88\xc9}?\xff\x8bK\xcb" +
+	"o\xfa\xda/LJ\xe9\xe9\xb1\xa7\xa5\x83c\xe9\xd3\xfe" +
+	"\xb1\x1b\x00\x93\xef\xde\xf3\xda\xb8\x96\x99_\xda\x9aN\xcc" +
+	"\x13\x89XpN\x9a\\@\x9f\xca\x0b\xde\x07L\xca\xbb" +
+	"Kr\x02\xc76m\xb5x\x1bb\xe5\x17\xae\"\xd6\xa5" +
+	"\x85\xc4z\xc9\xe1\x9f\xfd\xfb\xaa\xf9c\xb6y\x09\x9e)" +
+	"\xdcL\x04\x87\x0c\x82\xe7\xcfU\xdd\x13\xfb\xea-\xdb\xcc" +
+	"w\x99\xc2\xcbE\x7fO\x04JQ\x000\xb9\xf8o\x7f" +
+	"\xb1\x7f\xf9\xa7\x0d\xdf\x00\xb1p\x88\xec\x03E\x17\xa4\xc1" +
+	"\"\xfa\xb4\xdd\xa0\xfd\xe6\xf3\x03\xc7v\xec\xf5=H\xb2" +
+	"\xe7\x0eyh\xd1>i\x7f\xd1\x04\x80\xb9\x87\x8a\xbe\xcc" +
+	"\x01&_\x18\xb3T\xfe\xf1\x86\xb5\x0f{Y\xe7\x8b\xf7" +
+	"\x12\xebr\x91\xae\xab\xfe\x87/\xf4\xad90\xb0;E" +
+	"\xb3-b'Q\xac\x10\xe9\xfd\xbe3\xfb~.\xb7\x1d" +
+	"\xdbC\x0cy\x0fC\x8e\x18\xce\x1ewN\x9a?\x8e\xbe" +
+	"s\xe3\xb8\x07\x100y\xd9\xbf\xf1\xbe_\xed]\xbb\x17" +
+	"\xc4B\x0f1\xa0\xf4\x92tA:+\x11\xe5\x19I@" +
+	"i\xa3_\x00H\x8a\xbf<\xfd&[\xf9\xdc^\xaf\xea" +
+	"\x98\xff01O\xf8\xc9Rw\xbfr\xff\x87\x81\xbc\xd9" +
+	"Oy \xf1\x86\x7f3Ab\xe1\xe9\xc5\x13o]\xd9" +
+	"\xf3\x94\xf7e\xc7\xfd'\xe8\xabg\xfd\xf4\xb2\xbf;\xf3" +
+	"\x83_\xde\xb4\xac\xf1\xdb N\xb2\xbf\x9aSz'}" +
+	"\xf5\xeb\x8f\xcd\x188\x9b\xfb\xfa\xb3^\xae\x1f\xfb\x1f\xa4" +
+	"\xafb)q\x9dpr\xba4\xaf\x7f\xcb\xfe\x14\xb1J" +
+	"\x0d\xad%J\xc9\xa2;\xa7\xf6\x0f>\xf2\xf8\xc9\xe7\x89" +
+	"\x80\xb7\x08\xc4\xf1k\x89`\xf2x\"\xf8pqn\xd7" +
+	"\x13\xb3:\x0ez\xe4>>\xfeA\x04\xdf\x8f\x16\xbcw" +
+	"\xf9\xa1[\xfb\x0f\xc9\x85\xc8\xa5[o\xff\xf8\xdfHG" +
+	"\xc7\xd3\xa7C\xe3I\xf3;&\xfc\xf4\xa5\xef6m9" +
+	"\x0c\x99\x88\x07'\xfcF\xda3\x81>=4\x81\x88\x9f" +
+	"\xd8\xf4^\xd5\x8b\xfd\xef\x1e6\x9fk\xeaC-3d" +
+	"\xee+#}\x9c|\xf6\xf0\xab\x9f5<|\xc4#\xd2" +
+	"\x9e2C\x1f\xfd\x07\x8f\xee\xbf\xf07g\x8fx4\xb5" +
+	"\xb5\x8c\x84M\x96\x88\xf7\xed\xdbY\x1f:\x9aQ\x82D" +
+	"\xd9\x09ic\x19Q\xf7\x95U\x92\xed\x0f\x9e^=\xf1" +
+	"\xba\xdf\xff\xfaE\xd2\x8a}\xd1`\xb9\xe1){\xcaI" +
+	"\x84\xfbw\x9d\xf8\xf0w\x0f\xaf>a\x83\x8d 4\xf7" +
+	"P\xb9\xa1\xf9S\xe5\xf4\x8a\xa7>b\x1f5}\xbb\xf9" +
+	"\xb4W\xf3{'\xc6\x89\xe0\x99\x89d\x9a\x19\x8f^\xfd" +
+	"xAc\xef\x19\x8b\x87\xf9N\xb1\xc2`2\xb9\x82(" +
+	"\x94]\x7f\xc0\x89W?<\xe3\x95bc\xc5w\x88`" +
+	"\xb0\x82\xa4(;\x7f\xf8\xea]\x0fl\xfa\x19\x88~\xce" +
+	"u'\xe2PqN:TAO;X\xb1\x0c0y" +
+	"_\xe3\xd5\x8b7\x0d(g\xbd\xc2\x9c\xaa0\xac\xfcF" +
+	"\x05Y\xf9\xd2Wr\x975\xbd\\\xf7j\xc68\xd2;" +
+	"\xe9\x82\xd47\xc9P\xd4$z\x1a>\x16\xdd1\xf7\xe3" +
+	"\x81W\x87x\xc6\xd2\xc9\xe7\xa4['\xd3\xe5+&\xbf" +
+	"\xec\x93\x06\xa7\x90g,\xb8\xeb\xb1\xb7#\xd5\xf5\xafy" +
+	"\xe1\x9d\x98b(b`\x0a\xbd\xe2\xf1\x09]\xbb\x1f{" +
+	"\xff\xe8\xeb)\x9a\x9a\xd2L\x04OO!\xe1\x9a\x16\xed" +
+	"\xda{\xf3%|\xd3{CS\x95\xe1\xd8K\xab\xe8\x06" +
+	"\xfe\xbd\xd3\xff\\\xfa\xc2\xea\xf3\x19\x8d\xbb\xb1\xea\x9c\xb4" +
+	"\xbd\x8a>m\xad\"\xe9\xefZsW\xebso\x8f\x7f" +
+	"\xdb\xab\xd5D\xf5bC\x9ej\xbam\xc7g\xda\x7f\x1c" +
+	"\xbfZ\xfev\x8aa\xf6V\x9b\xa6\xab&\xc3\\\xb7\xed" +
+	"\x86\xb7\xc6\xdd;\xe1\x1d\xaf\xc4\xe5S\x1b\x88\xa0j*" +
+	"\x11|e\xa1x\xef`\xe8\xc8\xbfyq8\xd5p\xf6" +
+	"\x03\x9f]\xd9x\xef\xc1w\xdeM\xb9\xfc\xf6\xa9F\xfc" +
+	"\xdf8\x95^\xfb\xfd\x9a\xc9[\xeb\xb67]\xf4\xbe\xb6" +
+	"\xbc\xc6 \xa8\xad!\xf9\x9e\xfc\xea\xa3\xa7:\xe3\x95\xff" +
+	"\x99rEK\x8d\x81\xbd[k\x88}\xcf\xb9o\xfc\xf6" +
+	"\xfd\x1f\xfc\xd3\x7fy\x9fx\xaaf\x1f\x11\xbce\\q" +
+	"\xf2\x99\xf3\x07\xfe\xf1k\x95\x1fxy\\\xad1\xe2x" +
+	"a-\x11\x04\xbe\xd4:\xbb\xf5[\x17/yo\x98Q" +
+	"k\xf8\xe0|\x83\xa0\xf9\xca\x8b/\x0c\x0c~\xeb2\x88" +
+	"\x85\x9c\x17\x03s\xd7\xd4\x8eC\xa9\xb7\x96\xf4\xad\xd6\x12" +
+	"\xf6\x0e?\xf9\xc35+w^\xb8\x0c\xf2$W\xdc\x81" +
+	"Z\xc3|\x83\xb5$\xee\xcbM\xa5\x91'65\x7f\xe4" +
+	"\x95\xe6\x03\x93\xd9'\x06\xb3\xdfWwN\x1a\xbbu\xdf" +
+	"\x15\xba\xc2\xd1\xf74\xc3 \xb5\xd3Hg\x8f_\x8c\xff" +
+	"\xe8\xd1\xdb>\xbd\xe2\x0d\x19G\xa7\xddix\xe34\xe3" +
+	"\x86\xfd\x97\xcf-[z\xe5\xd7),\xa6\x19F\xff\x9d" +
+	"Ap\xa9\xa5\xe9_~z\xdd\x96\xdfz3\xf6\xf48" +
+	"Y,\xb6\xf7\xb5\xf2\x09\xdf\xfd\xf3\xff\xc9\x08.\x9c\xfe" +
+	"+\xa9p\xba\x91\x8b\xa6\xff%E\x0e<\xf1\xe4M\xd3" +
+	"\xdf\xfd\xf2\x1fR\xd0Ug8\xf5@\x1d1\xda0\xe7" +
+	"\xe2\x8b=s\x9e\xfa\xd4\x03\x8do\xd6\xad%F\xc9\xef" +
+	"\x97<0\xf3\x85g\xafz\xbf\xba\xb3\xcep\xd2G\xea" +
+	"\x020#\xc9B\xaa\x1e\x8d\xcf\x0c\xe6+\xb1H\xac\xe1" +
+	"f\xe3\xaf\x0e\x16_\xaf\x06\xd9LMY\xcfj\xda\x99" +
+	"\x96\x08\xeb\x1a\xd8\x84\x19\xe8\x94X,\xdc\xb7,V\xd3" +
+	"\xa6\xc4\x95^\xd4\xe4\x02\xde\x07\xe0C\x00\xf1\xe6\xc5\x00" +
+	"\xf2B\x1e\xe56\x0eE\xe4\xfc$\x83\xb8\x94\x0e[y" +
+	"\x94\xff\x8aC:\xe3\x00\xc4\x15\x13\x01\xe46\x1e\xe5\xd5" +
+	"\x1c&\x83a\x95E\xf4\x96\x10\x00`>p\x98\x0f\x98" +
+	"\xecLtu\xb1\xb8y\x96\x07\x1c\xe6\x01\xf2\xd1\x18\x96" +
+	"xC\x14\x96\x00:\x0f\xe2\x0cA\x17E\xd7\xb3\xb8\xf9" +
+	"\x04\x806D9\xcf\x91\xed\x0b$F\x1d\x8f\xf2\xf5\x1c" +
+	"\"\x9a\xa2\xcd\x9e\x03 \x7f\x91G\xf9\x06\x12#\x1a\xd1" +
+	"YD\xd7\x88e\x01pX\x00X\xd9\x15MDB\x88" +
+	"\xc0!\x0e\xe1\xd5\xa1vG\x14=\x11g-\x11\xbe+" +
+	"J\xccJ\x1cf\x0a]\xbc\x9aG\xb9\x87\x14aqc" +
+	"q\x009\xc4\xa3\x1c\xe3P\xe4,M\xf4\xae\x02\x90\xc3" +
+	"<\xca\xdb8D\xdeO\x09T\xdc\xba\x19@\xde\xc2\xa3" +
+	"\xbc\x83\xc3\xca\xb0\xd2\xc9\xc2\xb6@\xc9P4\x98\xe8e" +
+	"\x11\x1d*\x15]\x8dF\x9c\xf3\x18\xd9\x82\xe9\x0c\xf8\xb8" +
+	"\x86E\x80m<b\x89[J\x01\xd2aR\x09\xea\xea" +
+	"z\xd6\xa6\xa0I\x1cwt\xeb<\xcd\x97\xc1\xde\xc1h" +
+	"o,\xcctf\x18\x9c\xefM18\xbd\xb3\x91G\xb9" +
+	"\xd5\xf3\xce\x96z\x0f\x0a\xecw.\xad\x06\x90\x17\xf1(" +
+	"/\xe7\xb0\xb23\xd1\xd5\x12\xb2y\x17\x87\xd5\x08\xb3\xff" +
+	"\x10\x82\xd1\xf0\x10\xa1r2\x81\xd5\xd6\xfe\"\x16\xb6\xa0" +
+	"\xa8\xc1\xff\x0b\xc9B\xaa\x16T\xe2\xa1v\x16$0\xf6" +
+	"\x99\x1e\xc5\xeb\x9a\xecs\x84+l\x06\x90\xf3x\x94\xfd" +
+	"\x1c\xf6[\xb8sL9\x0c\xca\xda\x14!\xae\xf4\x12\xcc" +
+	"<\xf7\xccq\xefI\x03\x8a}\x0b\xda\x12\x0a\xfa\xb2\x98" +
+	"\xecCo\xc6\xc7\x86\xc0\xb2\xd8\xf2\xbe\x18\x93\xeb\xec+" +
+	"\xa5|\\\x0c\xd0\x91\x87<v\xf8\xd1U\x9d$b3" +
+	"@G\x01\x9d\x97\xd19\x97ghO*\xc5z\x80\x8e" +
+	"\x12:\x9fD\xe7|\x8e\x81a\xa9\x1cW\x01t\x94\xd1" +
+	"y\x0d\x9d\xfbr\xfd\xe8\x03\x90\xaa\xb0\x1d\xa0c\x0a\x9d" +
+	"\x7f\x119\xc4\x1c?\xe6\x00H_0\xc8\xeb\xe8\xf8z" +
+	"\"\xcf\x15\xfc\x98K%\xb5!\xce,:\x9fG\xe7B" +
+	"\x9e\xdf\x08\x9a7\x1a\xe2\\O\xe7\x8dt\x9e\x97\xef\xc7" +
+	"<\x00i>6\x00t\xdc@\xe7\x0b\xe9<\x7f\x8c\x1f" +
+	"\xf3\x01\xa4&\x9c\x03\xd01\x8f\xce\x17a\xe6\x98\xd3\xbf" +
+	"\x9e\xc55\xf2)\xeb\xefb\xbd/\xc6\xb0\xd8\xd5\x17 " +
+	"\x16\x03&\xd5\x88\xc6\xe2z\xab\x0a\xbc\x0b\x0e\xebpA" +
+	"\x140\x9cv\xb6\x9c\x01\x7f\x87k\xdd\xaex\xb4\xb7U" +
+	"\x8d0O`\xeb\xa7\xb3\x05.\xba\x02z\xb4\xd5\x03\xbc" +
+	"J=\xba K\xe8u3\xbd-\x9c\xe8V#KX" +
+	"\x9f\xe6\x84r\xf0\"\xa6\xdeBL\x0d\x87\xc5\xebX\x9f" +
+	"\x13,H\xbe\xa2Q\x02A4\xc6\"\xb7\xa8a3I" +
+	"\x08a]\xf3F<\x0a\xaf\xb7\xf1(\x87\xdd\xf0\xaa6" +
+	"{\x03\x1eZ\x01\x8f\x0e{x\x94uB\xcb\x143\xe2" +
+	"\xdd\xbe\x16@\x8e\xf1(\xdf\xcde\x8c\xfd\xe9N\x92n" +
+	"+C\xad\xe4qPL>7L\xc4n\xd5b\x0bU" +
+	"\xa5;\x12\xd5t^\x0d\x92+Mr\xe4?H\x8a\xf9" +
+	"\x1e\x8f\xf2\x11O\xbc8D\xa1\xe1\x00\x8f\xf21O\xbc" +
+	"8J\x0f\xf8!\x8f\xf2O\xe8\x01V\xc8>\xde\x00 " +
+	"\x1f\xe1Q>IX/1\xb0.\xbeD:\xf9\x09\x8f" +
+	"\xf2\xbf:@\x17\xcf\xd0\xb7O\xf2(\xbfN(G\x03" +
+	"\xe5\xe2Y\xfa\xf6+<\xcaor\xc3\x07\x9d~\x16\x09" +
+	"yq\x11`\x91\x90\x17\x18\x1a[\xcf\xe2\xaa\xdeGj" +
+	"\xcb\x05\x0es\x01\xfb{\x99\xa6)\xdd\xccV[@\x8b" +
+	"&\xe2A6L\xa8Y`\xf8\xc4\x02%\x1c\xee\x14\x94" +
+	"\xe0:3\xa3\xe5\x008\xa5\x11\xda5\xa9x{'p" +
+	"\xa2*\xa0[W\xa1\xdda\x8akV\x01'\xae\x10\x90" +
+	"s\xca6\xb4\x0b\x16\xb1e1pb\x93\x80\xbc\xd3\xa1" +
+	"\xa1\xddo\x89\x7f\x16\x07N\x9c!$\xb5\x9e\xe8\x86\xa5" +
+	"L\xd3@P\xbaY#&{\xa3\xeb\xd9\x82D\\\x03" +
+	">\x1ao\xc4\xa4\x0dB\x00h\xc4\xe4:\xd6\xd7\xce\xba" +
+	"U\x0d*u\x16g\xa1Fl\xc3,]d!\x0bF" +
+	"\xe3F\x12\xd5j\x02f\xfe\x18\xa6Zp*\x99\xd4r" +
+	"ah\x04I\xcd\x1e\x8e\x18\x05\xa3z\xaa\x95\xbeF\xa8" +
+	"\xb92\x8am;\xb8\xd7\xbf;\x81\xb2 \xcau\x1c&" +
+	"C\x16-\x08\xd1\x88[\x15\xd8M\xb7U\x13\xa4:\xbc" +
+	"\x07\x03Jp\xddL[\xf7\xd1xM{\xc0\xe4vM" +
+	"\xb9\xcf.\x11GS,\x1d\xce\xe2Q\x9e\x97}98" +
+	"\xa2\x1c\x89XH\xd1\xd9J\x95m\x88E\xe3\xba\xad_" +
+	"\x18\xb5TmvK\x01\x91\xe3M\x7f\x97\x1b\xdc\xfa5" +
+	"c\xde\xd0\xa3\xb1\x14\xbf\xecajw\x8f\x9eUi\xd5" +
+	"\xcd\xf4\x15\x86\xa8\x84\x81b\x03\x83\xd7PM;!i" +
+	"\x05\x85\xcf\xe5<\xca\xb7]\x83\xfe45\x12d+Y" +
+	"\x1c\x8aS\"\xe95\xa8\xd5\xc4\x1fjiq\xc4\x03T" +
+	"\xb3JM\xab\x8d\xeb3\xd5\xc6\xd5\x9e\xf4a\xbdJ\xad" +
+	"\xf7\xa4\x0f\xdeg\x06\xda\xdez7}\x0c\x1b*\x8bu" +
+	"\xe6\xa6\xdc\xe2uj$\x84\xc5n\xbbi\xe5\xf1T\xa1" +
+	"\x17\xb2.5\xa2\x92\xb4\xed\x95\xc6\xb3\x86/\xe8\x1d\x99" +
+	"\xeb]\x99\x9d\xf4\x96*4g\x09]\xed\x0a\x9d\xdaS" +
+	"\x14\xc7\x14\xbd\xc7\x914\xcbz3\xcdI\xed\x18hD" +
+	"@\x17\xeb\xc3\x94\x9bz\\\xed\xeef\xf1!9 c" +
+	"\xe5\x1f\x8ej\xac\xd9\xc0\xcep\xfe?\xa2,#\x02\x84" +
+	"X\x19=\x9a\xdf\x11t#\x81\xfbn\xb3\x19r\xa0\xb1" +
+	"\x95\xa4\xdf\xc4\xa3|\xbf\x07\xf1\xdb\x1b\xdc\x16\xc9I\xc2" +
+	"\x83d\xa4m<\xca\xbb8D\x9f\x99\x83w\xd2\xb7\xef" +
+	"\xe7Q\xde\xcd}\xfe\xe2\xab?\xc26,\xf7@kD" +
+	"\xe5\xd9m\xf2h\xf5\x7fz)3\x92\x03\xf6(\x91P" +
+	"\x989\x99\xc3\x89\xaf\x99\xeb0'h\xa8s\\P\xda" +
+	"\xde\xe5\xc5\xa4\xc8\xa3U\x87\xd5[\xdd\xe8\x1d\xd9d8" +
+	"a\x1d\xebs\xb0\xdb\x1b\x0d\xb1k\x06U[ev\x89" +
+	"\xf7\xf3\xe4\x87\x11+Y\xbb\xa5\x1deNP?r\xe2" +
+	"O\xf1\xe2\x11\x0dh\x0aj9M4\x111\x82h1" +
+	"\xf9\xd5pm]\x90\xa8\x86<\x8as\xee^\x16\x9bI" +
+	"M\x1c\x1fc\xe4K\x05\x86m'\xd7S\x90\x13K\x1b" +
+	"\x00\x90\x13\x0b\x1b\x00\x8a#\xd1h,`v$\x81\x10" +
+	"\xa3v~D\x05\x85\x9cp\x98)1\xfd\x9f\xf4\xd6V" +
+	"Qj\x0e\x1f\xd4h\xa4E\xd0Y\xef\x1f\x1b\x95\x1b2" +
+	"E\xe5U.\xd8S\xbbg3eXEt \xc4t" +
+	"Eu;\xeb\x8cm\xddP\xbbX\xba\xe4\x83\x86]Z" +
+	"\x8dB\xda\x9e\xcb\xa2=\xe2\x93d\xae\x198\xe9f\x8e" +
+	"Ji{x\x87\xf6 Q\xba\x91[\x05\x9c4\x9b\xa3" +
+	"b\xda\x9e\xf5\xa3\xbd\xa4\x92j\xb9\xc5\xc0I\x939*" +
+	"\xa7\xed\x1d\x0c\xda\x93gI4\xbe\x9b\xcf\x09\xe8n\x0c" +
+	"\xd1^JHW\x91\xf8~\x8c\x02\xe68\xa3h\xb4W" +
+	"\x8e\xd2{X\x0f\x9c\xf4\x16\x0a\x98\xeb,!\xd0^\x99" +
+	"Hg\xb0\x138\xe9%\x14Pp\xc6\xc4h/\x1a\xa4" +
+	"C\xf8 p\xd2A\x140\xcf\xd9-\xa1\xbd\xf4\x93\x9e" +
+	"\xc6\xcd\xc0I{Q\xc0|g@\x8c\xf64Zz\x08" +
+	"\xef\x04N\x1aD\x01\xc78#}\xb4\xe7\xae\xd2\x00\xce" +
+	"\x01NJ\xa0\x80c\x9d5#\xda\x83_I\xc58p" +
+	"\x92\x82\x02\x168[J\xb4\xc7\xfe\xd2\x0a$]-E" +
+	"\x01\x0b\x9dM\x06\xdak\x05\xa9\x09IW7\xa2\x80E" +
+	"\xcel\x1f\xed1\xbb4\x03\x1b\x80\x93\xaaP\xc0bg" +
+	"i\x83\xf6\xf8[*5^T\x88\x02\x968\xab2\xb4" +
+	"7^\x12\xd2\x8b\xc4O\x04\x14\x9d\xf5\x1e\xda\xcb:\xf1" +
+	"\xf2w\x80\x13?\x10p\x9c\xb3\xd9C{E)\xbeC" +
+	"\xdd\xd0\x1b\x025\xbe\x11\x16\xd4\x1b1I\xb55\xfd\x01" +
+	"\xbc\xf1gj\x1fd\x17\x92\xc03\xad\x11\xfb\xad\xdc\xd3" +
+	"\x88\xc5\x9a\xb2\x9e\x9a(;\xe8\x82\xd0\xc5\xa8\x8b\xb2\xe3" +
+	"\x10\xda\x81\x08m\x16T\xbe\xa3U\xbf[7\x1bM3" +
+	"\x04\xa2\x9a\xae\x06\xb5F\xac\xec\xa1\x7f6R\x05i\xce" +
+	"\xa6\xa0\xd2\x98\xc2\x11\x1bkTh\x0ae\x07\x11\xe0\xa3" +
+	"\x91F\x0ctE\xe3\xbd\x0a\xb1\xb1\xb3\x18Zi\x8ch" +
+	"\xed\xd2\x12\x02fqir62\x1d\xdaMO1u" +
+	"=\x9e\x7f@\xa5\xd1>\xa56}\xa3D\xb3vV\xa9" +
+	"\xa5\x87\xdb\x067\xdc\x06\xe2f\xc9R\xe2\xee\x1b\xd3\x06" +
+	"\xcd\x99\xee7\x14\xf2'\x1bB\x8e8\xb3uF5\x19" +
+	"\xd2K\x0d\x87\x95\xaa\xcez=\x13cg\x89\x97\xd6\x1d" +
+	"\xa6\x0d#\x171>\x1cK\x8b\xc5\xab\xac\xb8{\xb7\x1b" +
+	"\x8b\xfb6\x03\xc8w\xf0(o\xf1\xc4\xe2\x81\xcd\x9ez" +
+	"\x8eo4c\xf1\xf69n=\xe7\xe2\x8ag\x1e\xd1\x9c" +
+	"\xdf)\xa4\x0c\xb3;T\xb4dr3\xff\xb0c\xeea" +
+	"\xe6\xf9\x99\x14h\x825c5\xed\xcd\xce\x99;\xfeQ" +
+	"Z=\x07\x83\x9e\xaa\x83\xec_\xc3\xa3\xdc\xe8jo>" +
+	"U\x897\xf0(/\xe4P\x88\xc6<\xaa\xf0.A\x8a" +
+	"`\xf8\x12\x92\x1fn\xcb\x93\xed\xc0\xe3\xf3\xd4]c2" +
+	"\xf5\x07\xf6pG\xe9\xcej\xd5dY\xc1\xee#\xbc\xae" +
+	"\xd5\xec\xba\x96\xe3Y\xcd^\xcf\xb2\xe0\xb6\xb4\xd3m\x98" +
+	"\x87\x8c\x11\x83=J\xa4\x9b\xb9\x88\x88Do18\x82" +
+	"\xa0\xb3xV8\xb1\xe2\xb3S\x89{p\xb2\xd8\x1a\xc5" +
+	"\x94\x91\xf2,\x05\x90\xa2D\xf7w!T\xa5\x8d>\xd3" +
+	"\xb5\x87\x96jPsU\xe11\xdd\x9c\x0c\xd8!\xe6\xf3" +
+	"x\x94\x17\x0d\xf5q\xe77,\x96#\x85\xb5X;S" +
+	"B\xc6\xe00\xfd\xc9\xd9\xd5\xb0mJ\\ 8\x0d\xf3" +
+	"\xf8k\x9d\xde\xa4w9\x99:\xa8\x8c1\xdb\xd9\xb3\xa6" +
+	"\xc5\xec,\xf4\xfa\xc79:\x9f>\xf00\xe6\x1dK\xd4" +
+	"\x08\x86<\xd5x\x83Y\x8d7\x9b\xd5x;@\xa0;" +
+	"\xa1\xeb,\xdeOi#\xac\xf4%5]\xd1\x13Z\xb3" +
+	"\x02\x18\x1fy\x1e\xe7\xed[\x844\x07\xae\xb7P0\xcb" +
+	"E\xc1\x8cz\xd7\xa9\x87\x9f4\\\xc3\x9e-\xe3J!" +
+	"\xa3)\x9c\xdfSdL\x9f\xc3\x8f\x19\xed\x8e\xf0O\x93" +
+	"DG\x88Vv\xc8\xcc\xb0K\xf1s\xa9\x13\xa7,j" +
+	"\x85\xec\x15\xe9\xfc\x96/\x8b:\xc4.\x11\x83\xba\x93c" +
+	"2\x8e^\x96\xb0\xbevVlO\xb9\xca\x1c\x09\xf6P" +
+	"\x00\xdd\xc5\xa3\xfc\xb8\x8b\xa1GH\xfd\xbby\x94\x0fx" +
+	"\x82\xea\xfeU\x9em\x89\xddO\x1dj\xf7,F|h" +
+	"\xce_\x8e\xd3\xe11\x1e\xe5W8\x14sxs\x09r" +
+	"\xaa\xd3]\x82\xf4\x9b\xde\xee\xc4\xe0J\x12\xd8\x13\xad\x9c" +
+	"_]Y\xd1*h\xe0$m\xfdf\x1e\xa6\xae\xdfz" +
+	"\x14\xcd\xc0\x14\xa0\x1b\xc9\x83J\x8c\xb0\xbc\x04\x04\xd6\xa7" +
+	"eYH\xd9\xfa\x1c\x1a\x83R\x02|\x86\xec\x98\x9d+" +
+	"\xdb\x03\x80l-k\xf7\xe3\xd9\x0b\xf2\xbf\x01\x00\x00\xff" +
+	"\xffD\x93\xd4\xf1"
 
 func RegisterSchema(reg *schemas.Registry) {
 	reg.Register(&schemas.Schema{
@@ -4546,13 +6840,26 @@ func RegisterSchema(reg *schemas.Registry) {
 			0x88464e707e21dab3,
 			0x8e3afb54b1d7874a,
 			0x9204a190c081b3a5,
+			0x966a77c3514d0ab6,
 			0x9881b45d79299b22,
 			0x99c05051d6a2cd04,
+			0xa16aa1ea8b7d14ed,
+			0xa1af5665d8cae011,
+			0xa631083fec8ccc7c,
+			0xa66856591a4aca44,
+			0xa8404f3be0b7cd93,
 			0xaed406d1812d9f83,
+			0xb1847f3c1327c817,
 			0xb3c8a09d8d7f2391,
+			0xb55330a366064aec,
+			0xb9007f5995ede543,
 			0xba8441acc5c61790,
+			0xbae37fbe21e580a3,
 			0xbc963afed2baaec8,
+			0xbcd186e2b1bdb57f,
+			0xbd642a91a28b1110,
 			0xbef0f62b1a5ccab5,
+			0xc25c96f5ecc2948c,
 			0xca42a841ee65eea6,
 			0xcd6d4043f1fd9e2d,
 			0xcdecfd1a01f89461,
@@ -4567,15 +6874,23 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xdc16dcaf4c7b5d7b,
 			0xdc19fdc1e173fe90,
 			0xdd178a12d938882b,
+			0xdebc648d8a114447,
 			0xe3ddb58a7deffeb4,
 			0xe4418928851d24b2,
 			0xe61f7262c99e4ea4,
 			0xe8abb7e7f38eda68,
+			0xe91f5b9cb4dbadc8,
 			0xebe4a74c314c2f3f,
+			0xeda78d81b6beef42,
+			0xede291565db8a4ba,
 			0xee4280a36e1541c7,
+			0xefa2850b1c6222f6,
+			0xeffb609ebf72e4a0,
 			0xf0ef4d4fdaedb1f6,
 			0xf3842bc6cf4149eb,
+			0xf736ac1719d3a170,
 			0xf837e3273ba4c201,
+			0xfba63268bee43277,
 			0xfdaeb62e8f10b2ff,
 		},
 		Compressed: true,

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,8 +20,17 @@ import (
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/format"
 	"github.com/indiejames/indigo/internal/lsp"
+	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
+
+// serverRPCLogger implements rpc.Logger, routing capnproto internal messages to the log file.
+type serverRPCLogger struct{}
+
+func (l *serverRPCLogger) Debug(msg string, args ...any) { serverLog("rpc debug: %s %v", msg, args) }
+func (l *serverRPCLogger) Info(msg string, args ...any)  { serverLog("rpc info: %s %v", msg, args) }
+func (l *serverRPCLogger) Warn(msg string, args ...any)  { serverLog("rpc warn: %s %v", msg, args) }
+func (l *serverRPCLogger) Error(msg string, args ...any) { serverLog("rpc error: %s %v", msg, args) }
 
 // SocketPath returns the Unix socket path for a given working directory.
 func SocketPath(dir string) string {
@@ -48,23 +58,32 @@ type bufferEntry struct {
 	clients map[uint64]struct{}
 }
 
-// editorService implements proto.EditorService_Server.
-type editorService struct {
-	mu      sync.Mutex
-	buffers map[uint32]*bufferEntry
-	nextBuf uint32
-	clients map[uint64]struct{}
-	nextClt uint64
-	recDir  string
-	lspMgr  *lsp.Manager
-	fmtMgr  *format.Manager
-	cfg     *config.Config
-
-	// shutdown is called when the last client disconnects cleanly.
-	shutdown func()
+// clientEntry holds connection metadata for a connected client.
+type clientEntry struct {
+	callback proto.ClientCallback
+	topLine  uint32
+	height   uint32
 }
 
-func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown func()) *editorService {
+// editorService implements proto.EditorService_Server.
+type editorService struct {
+	mu        sync.Mutex
+	buffers   map[uint32]*bufferEntry
+	nextBuf   uint32
+	clientMap map[uint64]*clientEntry
+	nextClt   uint64
+	recDir    string
+	lspMgr    *lsp.Manager
+	fmtMgr    *format.Manager
+	pluginMgr *plugin.Manager
+	cfg       *config.Config
+
+	// shutdown is called when the last client disconnects (cleanly or not).
+	shutdown        func()
+	onClientConnect func() // called once per Connect RPC; used to mark that real clients have connected
+}
+
+func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown func(), onClientConnect func()) *editorService {
 	servers := make([]lsp.ServerConfig, len(cfg.EffectiveLanguageServers()))
 	for i, ls := range cfg.EffectiveLanguageServers() {
 		servers[i] = lsp.ServerConfig{
@@ -74,15 +93,18 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 		}
 	}
 	lspMgr := lsp.NewManager(workspaceDir, servers)
-	return &editorService{
-		buffers:  make(map[uint32]*bufferEntry),
-		clients:  make(map[uint64]struct{}),
-		recDir:   recDir,
-		lspMgr:   lspMgr,
-		fmtMgr:   format.NewManager(lspMgr, cfg, workspaceDir),
-		cfg:      cfg,
-		shutdown: shutdown,
+	svc := &editorService{
+		buffers:         make(map[uint32]*bufferEntry),
+		clientMap:       make(map[uint64]*clientEntry),
+		recDir:          recDir,
+		lspMgr:          lspMgr,
+		fmtMgr:          format.NewManager(lspMgr, cfg, workspaceDir),
+		cfg:             cfg,
+		shutdown:        shutdown,
+		onClientConnect: onClientConnect,
 	}
+	svc.pluginMgr = plugin.NewManager(workspaceDir, svc)
+	return svc
 }
 
 // recoveryFilePath returns the path for the recovery file for a given source file.
@@ -105,28 +127,41 @@ func setupRecoveryDir() (string, error) {
 }
 
 func (s *editorService) Connect(_ context.Context, call proto.EditorService_connect) error {
+	cb := call.Args().Callback()
 	res, err := call.AllocResults()
 	if err != nil {
+		cb.Release()
 		return err
 	}
+	// AddRef the callback so our stored reference survives after the call
+	// finalizes and releases the capability it received from the call args.
+	cbOwned := proto.ClientCallback(capnp.Client(cb).AddRef())
 	s.mu.Lock()
 	s.nextClt++
 	id := s.nextClt
-	s.clients[id] = struct{}{}
+	s.clientMap[id] = &clientEntry{callback: cbOwned}
 	s.mu.Unlock()
+	serverLog("Connect: stored clientID=%d, callback.IsValid=%v", id, cbOwned.IsValid())
 	res.SetClientId(id)
+	if s.onClientConnect != nil {
+		s.onClientConnect()
+	}
 	return nil
 }
 
 func (s *editorService) Disconnect(_ context.Context, call proto.EditorService_disconnect) error {
 	clientID := call.Args().ClientId()
+	serverLog("Disconnect called for clientID=%d", clientID)
 	s.mu.Lock()
-	delete(s.clients, clientID)
+	if entry, ok := s.clientMap[clientID]; ok {
+		entry.callback.Release()
+		delete(s.clientMap, clientID)
+	}
 	// Remove client from any open buffers.
 	for _, e := range s.buffers {
 		delete(e.clients, clientID)
 	}
-	remaining := len(s.clients)
+	remaining := len(s.clientMap)
 	s.mu.Unlock()
 
 	if remaining == 0 {
@@ -191,6 +226,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	res.SetVersion(ver)
 	res.SetFromRecovery(fromRecovery)
 	go s.lspMgr.DidOpen(path, content)
+	go s.pluginMgr.DispatchBufferOpen(context.Background(), bufID, path)
 	return nil
 }
 
@@ -351,6 +387,7 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	path := entry.buf.Path()
 	content := entry.buf.Content()
 	go s.lspMgr.DidChange(path, content)
+	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 
 	return nil
 }
@@ -386,6 +423,7 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 	entry.buf.SetClean()
 	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
 	go s.lspMgr.DidSave(path)
+	go s.pluginMgr.DispatchBufferSave(context.Background(), bufID, path)
 
 	_, err := call.AllocResults()
 	return err
@@ -427,6 +465,7 @@ func (s *editorService) CloseBuffer(_ context.Context, call proto.EditorService_
 	if removedPath != "" {
 		os.Remove(recoveryFilePath(s.recDir, removedPath)) //nolint:errcheck
 		go s.lspMgr.DidClose(removedPath)
+		go s.pluginMgr.DispatchBufferClose(context.Background(), bufID, removedPath)
 	}
 
 	_, err := call.AllocResults()
@@ -635,6 +674,128 @@ func (s *editorService) Definition(_ context.Context, call proto.EditorService_d
 	return nil
 }
 
+func (s *editorService) HandlePluginKey(ctx context.Context, call proto.EditorService_handlePluginKey) error {
+	args := call.Args()
+	key, err := args.Key()
+	if err != nil {
+		return err
+	}
+	mode, err := args.Mode()
+	if err != nil {
+		return err
+	}
+
+	clientID := args.ClientId()
+	bufID := args.BufId()
+	handled, edits, cursorLine, cursorCol, hasCursor, captureKeys, handleErr := s.pluginMgr.HandleKey(ctx, key, mode, bufID, clientID)
+	if handleErr != nil {
+		return handleErr
+	}
+
+	// Apply edits returned by the plugin to the server buffer.
+	// The plugin may have also called applyEdit directly; these cover the
+	// case where the plugin returns edits atomically via KeyResponse.
+	if handled && len(edits) > 0 {
+		// edits reference a buffer by position but KeyResponse doesn't carry bufID;
+		// we apply them via the bridge using the active buffer is ambiguous here.
+		// For now, skip auto-application — plugins should call applyEdit explicitly.
+		_ = edits
+	}
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	result, err := res.NewResult()
+	if err != nil {
+		return err
+	}
+	result.SetHandled(handled)
+	result.SetHasCursor(hasCursor)
+	if hasCursor {
+		result.SetCursorLine(cursorLine)
+		result.SetCursorCol(cursorCol)
+	}
+	result.SetCaptureKeys(captureKeys)
+	return nil
+}
+
+func (s *editorService) GetPluginDecorations(ctx context.Context, call proto.EditorService_getPluginDecorations) error {
+	args := call.Args()
+	clientID := args.ClientId()
+	bufID := args.BufId()
+
+	s.mu.Lock()
+	ce, ok := s.clientMap[clientID]
+	var topLine, height uint32
+	if ok {
+		topLine = ce.topLine
+		height = ce.height
+	}
+	s.mu.Unlock()
+
+	var endLine uint32
+	if height > 0 {
+		endLine = topLine + height - 1
+	}
+	decorations := s.pluginMgr.GetDecorations(ctx, clientID, bufID, topLine, endLine)
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	list, err := res.NewDecorations(int32(len(decorations)))
+	if err != nil {
+		return err
+	}
+	for i, d := range decorations {
+		item := list.At(i)
+		item.SetLine(d.Line)
+		item.SetCol(d.Col)
+		if err := item.SetText(d.Text); err != nil {
+			return err
+		}
+		item.SetKind(proto.PluginDecorationKind(d.Kind))
+	}
+	return nil
+}
+
+func (s *editorService) UpdateViewport(_ context.Context, call proto.EditorService_updateViewport) error {
+	args := call.Args()
+	clientID := args.ClientId()
+	topLine := args.TopLine()
+	height := args.Height()
+
+	s.mu.Lock()
+	if entry, ok := s.clientMap[clientID]; ok {
+		entry.topLine = topLine
+		entry.height = height
+	}
+	s.mu.Unlock()
+
+	_, err := call.AllocResults()
+	return err
+}
+
+func (s *editorService) GetPluginKeys(_ context.Context, call proto.EditorService_getPluginKeys) error {
+	keys := s.pluginMgr.AllRegisteredKeys()
+	serverLog("GetPluginKeys called, returning %d keys: %v", len(keys), keys)
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	list, err := res.NewKeys(int32(len(keys)))
+	if err != nil {
+		return err
+	}
+	for i, k := range keys {
+		if err := list.Set(i, k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *editorService) Format(_ context.Context, call proto.EditorService_format) error {
 	bufID := call.Args().BufId()
 
@@ -694,11 +855,23 @@ func (s *editorService) DirtyBuffers() []string {
 
 // Server wraps the listener and the RPC service.
 type Server struct {
-	socketPath string
-	listener   net.Listener
-	svc        *editorService
-	done       chan struct{}
-	connCount  atomic.Int64
+	socketPath   string
+	listener     net.Listener
+	svc          *editorService
+	done         chan struct{}
+	connCount    atomic.Int64
+	hasHadClient atomic.Bool
+	shutdownOnce sync.Once
+}
+
+// triggerShutdown closes the done channel exactly once, causing Wait() to unblock.
+func (s *Server) triggerShutdown() {
+	s.shutdownOnce.Do(func() {
+		buf := make([]byte, 16*1024)
+		n := runtime.Stack(buf, false)
+		serverLog("triggerShutdown: closing done channel, caller stack:\n%s", buf[:n])
+		close(s.done)
+	})
 }
 
 // New creates and starts a server for the given working directory.
@@ -730,9 +903,11 @@ func New(dir string) (*Server, error) {
 		listener:   ln,
 		done:       make(chan struct{}),
 	}
-	srv.svc = newEditorService(recDir, dir, cfg, func() {
-		close(srv.done)
+	srv.svc = newEditorService(recDir, dir, cfg, srv.triggerShutdown, func() {
+		srv.hasHadClient.Store(true)
 	})
+
+	go srv.svc.pluginMgr.Start(context.Background()) //nolint:errcheck
 
 	interval := time.Duration(cfg.RecoveryIntervalSecs) * time.Second
 	srv.startFlushLoop(interval, cfg.RecoveryMaxBytes)
@@ -797,18 +972,32 @@ func (s *Server) serve() {
 		s.connCount.Add(1)
 		go func(c net.Conn) {
 			defer func() {
+				if r := recover(); r != nil {
+					buf := make([]byte, 64*1024)
+					n := runtime.Stack(buf, true)
+					serverLog("serve: PANIC: %v\n%s", r, buf[:n])
+				}
+				newCount := s.connCount.Add(-1)
+				serverLog("serve: connection closed, connCount now %d, hasHadClient=%v", newCount, s.hasHadClient.Load())
 				c.Close() //nolint:errcheck
-				s.connCount.Add(-1)
+				if newCount == 0 && s.hasHadClient.Load() {
+					s.triggerShutdown()
+				}
 			}()
 			transport := rpc.NewStreamTransport(c)
 			opts := &rpc.Options{
 				BootstrapClient: capnp.Client(proto.EditorService_ServerToClient(s.svc)),
+				Logger:          &serverRPCLogger{},
 			}
 			conn := rpc.NewConn(transport, opts)
 			defer conn.Close() //nolint:errcheck
 			select {
 			case <-conn.Done():
+				buf := make([]byte, 64*1024)
+				n := runtime.Stack(buf, true)
+				serverLog("serve: conn.Done() fired! goroutines:\n%s", buf[:n])
 			case <-s.done:
+				serverLog("serve: s.done fired")
 			}
 		}(conn)
 	}
@@ -820,6 +1009,7 @@ func (s *Server) Wait() {
 	s.listener.Close() //nolint:errcheck
 	s.deleteAllRecoveryFiles()
 	s.svc.lspMgr.Shutdown()
+	s.svc.pluginMgr.Shutdown()
 	os.Remove(s.socketPath) //nolint:errcheck
 }
 

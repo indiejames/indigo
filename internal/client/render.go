@@ -17,6 +17,21 @@ import (
 
 const tabWidth = 4
 
+// decorOverlayStyle is used to render plugin overlay decorations (e.g. jumpy labels).
+var decorOverlayStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#FFB300")).
+	Background(lipgloss.Color("#1A1A2E")).
+	Bold(true)
+
+// lineOverlay describes a styled text injection at a visual column in the content area.
+// col is an index into the tab-expanded rune slice for the line; w is how many of those
+// rune positions the text visually occupies (i.e. positions to skip in the underlying content).
+type lineOverlay struct {
+	col  int
+	text string
+	w    int
+}
+
 // metricsInnerW is the fixed visible width between the box borders.
 // Layout per row: 1 space + 9 label + 1 space + 8 value (right-aligned) + 1 space = 20.
 const metricsInnerW = 20
@@ -71,17 +86,45 @@ func (m Model) displayLineCount() int {
 	return lc
 }
 
-// gutterWidth returns the number of columns reserved for line numbers (and diag marker).
-func (m Model) gutterWidth() int {
-	if m.cfg == nil || !m.cfg.LineNumbers {
-		if len(m.diagnostics) > 0 {
-			return 2 // just the diag marker column
+// hasGutterDecorations reports whether any plugin decoration uses the gutter kind.
+func (m Model) hasGutterDecorations() bool {
+	for _, d := range m.decorations {
+		if d.Kind == ClientDecorationGutter {
+			return true
 		}
-		return 0
+	}
+	return false
+}
+
+// gutterDecorFor returns the gutter decoration text for lineNum, or "".
+func (m Model) gutterDecorFor(lineNum int) string {
+	for _, d := range m.decorations {
+		if d.Kind == ClientDecorationGutter && int(d.Line) == lineNum {
+			return d.Text
+		}
+	}
+	return ""
+}
+
+// gutterWidth returns the number of columns reserved for line numbers (and diag/plugin markers).
+func (m Model) gutterWidth() int {
+	hasPluginGutter := m.hasGutterDecorations()
+	if m.cfg == nil || !m.cfg.LineNumbers {
+		w := 0
+		if len(m.diagnostics) > 0 {
+			w += 2 // diag marker
+		}
+		if hasPluginGutter {
+			w += 3 // space + up to 2 chars
+		}
+		return w
 	}
 	w := len(fmt.Sprint(m.displayLineCount())) + 1
 	if len(m.diagnostics) > 0 {
 		w += 2 // space + marker
+	}
+	if hasPluginGutter {
+		w += 3 // space + up to 2 chars
 	}
 	return w
 }
@@ -149,15 +192,16 @@ func expandTabsRemap(runes []rune) (expanded []rune, colMap []int) {
 	return
 }
 
-// renderLineRunes writes runes with selection and cursor highlighting applied.
+// renderLineRunes writes runes with selection, cursor, highlight-span, and overlay
+// label rendering applied in a single pass. overlays must be sorted by col ascending.
 // selA/selB are inclusive selected column bounds (-1,-1 for no selection).
 // curCol is the cursor column (-1 if cursor is not on this line).
-func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, spans []highlight.Span) {
+func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, spans []highlight.Span, overlays []lineOverlay) {
 	n := len(runes)
 	hasCursor := curCol >= 0
 	hasSel := selA >= 0
+	oi := 0 // next overlay to inject
 
-	// spanIdxAt returns the index of the first (highest-priority) span covering col, or -1.
 	spanIdxAt := func(col int) int {
 		for i, s := range spans {
 			if col >= s.StartCol && col < s.EndCol {
@@ -167,8 +211,31 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 		return -1
 	}
 
+	nextOvlCol := func() int {
+		if oi < len(overlays) {
+			return overlays[oi].col
+		}
+		return math.MaxInt
+	}
+
 	i := 0
 	for i < n {
+		// Drain and inject overlays whose column ≤ i (handles skipped positions too).
+		for oi < len(overlays) && overlays[oi].col <= i {
+			if overlays[oi].col == i {
+				sb.WriteString(overlays[oi].text)
+				i += overlays[oi].w
+				if i > n {
+					i = n
+				}
+			}
+			oi++
+		}
+		if i >= n {
+			break
+		}
+
+		noc := nextOvlCol()
 		isCursor := hasCursor && i == curCol
 		inSel := hasSel && i >= selA && i <= selB
 		switch {
@@ -177,16 +244,15 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 			i++
 		case inSel:
 			j := i + 1
-			for j < n && (!hasCursor || j != curCol) && j >= selA && j <= selB {
+			for j < n && j < noc && (!hasCursor || j != curCol) && j >= selA && j <= selB {
 				j++
 			}
 			sb.WriteString(selectionStyle.Render(string(runes[i:j])))
 			i = j
 		default:
-			// Batch consecutive plain chars with the same highlight span.
 			si := spanIdxAt(i)
 			j := i + 1
-			for j < n {
+			for j < n && j < noc {
 				if hasCursor && j == curCol {
 					break
 				}
@@ -209,15 +275,21 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 			i = j
 		}
 	}
+
 	if hasCursor && curCol >= n {
 		sb.WriteString(cursorStyle.Render(" "))
+	}
+	// Write overlays that fall at or past end of content.
+	for ; oi < len(overlays); oi++ {
+		sb.WriteString(overlays[oi].text)
 	}
 }
 
 // renderLine renders screen row i (0-based, relative to topLine) without a trailing newline.
 // Tabs are expanded to spaces so that cellbuf correctly measures visual widths.
 // Each line is padded to m.width so prior content is always fully overwritten.
-func (m Model) renderLine(i int) string {
+// overlays (sorted by col) are injected during the rune pass with no ANSI re-parsing.
+func (m Model) renderLine(i int, overlays []lineOverlay) string {
 	lineNum := m.topLine + i
 	bufLineCount := m.buf.LineCount()
 	dispLineCount := m.displayLineCount()
@@ -257,18 +329,37 @@ func (m Model) renderLine(i int) string {
 
 	if gutterW > 0 {
 		hasDiags := len(m.diagnostics) > 0
+		hasPluginGutter := m.hasGutterDecorations()
 		numW := gutterW
 		if hasDiags {
 			numW -= 2
 		}
-		numStr := fmt.Sprintf("%*d ", numW-1, lineNum+1)
-		if lineNum == m.cursor.Line {
-			sb.WriteString(gutterCurStyle.Render(numStr))
-		} else {
-			sb.WriteString(gutterStyle.Render(numStr))
+		if hasPluginGutter {
+			numW -= 3
+		}
+		if numW > 0 {
+			numStr := fmt.Sprintf("%*d ", numW-1, lineNum+1)
+			if lineNum == m.cursor.Line {
+				sb.WriteString(gutterCurStyle.Render(numStr))
+			} else {
+				sb.WriteString(gutterStyle.Render(numStr))
+			}
 		}
 		if hasDiags {
 			sb.WriteString(m.diagMarker(lineNum))
+		}
+		if hasPluginGutter {
+			text := m.gutterDecorFor(lineNum)
+			if text == "" {
+				sb.WriteString(gutterStyle.Render("   "))
+			} else {
+				label := text
+				if len([]rune(label)) > 2 {
+					label = string([]rune(label)[:2])
+				}
+				sb.WriteString(" ")
+				sb.WriteString(decorOverlayStyle.Render(fmt.Sprintf("%-2s", label)))
+			}
 		}
 	}
 
@@ -318,7 +409,7 @@ func (m Model) renderLine(i int) string {
 		}
 	}
 
-	renderLineRunes(&sb, expandedRunes, selA, selB, curCol, remappedSpans)
+	renderLineRunes(&sb, expandedRunes, selA, selB, curCol, remappedSpans, overlays)
 	return padToWidth(sb.String())
 }
 
@@ -661,6 +752,41 @@ func renderCompletionPopup(items []ClientCompletion, selected, maxW int) []strin
 	return lines
 }
 
+// buildRowOverlays groups overlay decorations by visible row and pre-computes each
+// overlay's visual column and styled text. The returned slice has length vis; rows
+// without any overlay decoration have a nil entry. Overlays within each row are
+// sorted by col so renderLineRunes can inject them in a single left-to-right pass.
+func (m Model) buildRowOverlays(vis int) [][]lineOverlay {
+	rows := make([][]lineOverlay, vis)
+	for _, d := range m.decorations {
+		if d.Kind != ClientDecorationOverlay || d.Text == "" {
+			continue
+		}
+		row := int(d.Line) - m.topLine
+		if row < 0 || row >= vis {
+			continue
+		}
+		lineStr := m.buf.Line(int(d.Line))
+		_, colMap := expandTabsRemap([]rune(lineStr))
+		visCol := int(d.Col)
+		if int(d.Col) < len(colMap) {
+			visCol = colMap[d.Col]
+		}
+		styledText := decorOverlayStyle.Render(d.Text)
+		rows[row] = append(rows[row], lineOverlay{col: visCol, text: styledText, w: lipgloss.Width(styledText)})
+	}
+	// Sort each row's overlays by column (insertion sort; typically 1-4 items).
+	for ri, ovls := range rows {
+		for j := 1; j < len(ovls); j++ {
+			for k := j; k > 0 && ovls[k].col < ovls[k-1].col; k-- {
+				ovls[k], ovls[k-1] = ovls[k-1], ovls[k]
+			}
+		}
+		rows[ri] = ovls
+	}
+	return rows
+}
+
 // ---- View ----
 
 func (m Model) View() string {
@@ -684,8 +810,9 @@ func (m Model) View() string {
 
 	vis := m.visibleLines()
 	lines := make([]string, vis)
+	rowOverlays := m.buildRowOverlays(vis)
 	for i := range vis {
-		lines[i] = m.renderLine(i)
+		lines[i] = m.renderLine(i, rowOverlays[i])
 	}
 
 	// Overlay prefix-command popup in the bottom-right corner.
@@ -945,8 +1072,18 @@ func (m Model) renderStatusBar() string {
 			centerContent = m.filePath + " [+]   " + m.status
 		}
 	default:
-		// Show most-severe diagnostic on the cursor line, if any.
-		if diags := m.diagsOnLine(m.cursor.Line); len(diags) > 0 {
+		// Plugin status bar decorations take priority over diagnostics.
+		var pluginStatus string
+		for _, d := range m.decorations {
+			if d.Kind == ClientDecorationStatusBar && d.Text != "" {
+				pluginStatus = d.Text
+				break
+			}
+		}
+		if pluginStatus != "" {
+			centerContent = pluginStatus
+		} else if diags := m.diagsOnLine(m.cursor.Line); len(diags) > 0 {
+			// Show most-severe diagnostic on the cursor line.
 			d := diags[0]
 			src := d.Source
 			if src != "" {

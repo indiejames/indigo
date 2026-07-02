@@ -1,4 +1,4 @@
-BINARY  := io
+BINARY  := indigo
 CMD     := ./cmd/indigo
 OUT     := $(BINARY)
 
@@ -23,6 +23,9 @@ LANGS ?= lang_go lang_python lang_typescript lang_rust
 build-custom:
 	go build -tags "$(LANGS)" -o $(OUT) $(CMD)
 
+install: build-release
+	cp $(OUT) $(shell go env GOPATH)/bin/$(BINARY)
+
 test:
 	go test -tags lang_all ./...
 
@@ -35,4 +38,22 @@ lint:
 clean:
 	rm -f $(BINARY)
 
-.PHONY: build build-release build-minimal build-no-heavy build-custom test vet lint clean
+# --- Plugin targets ---
+
+JUMPY_DIR     := examples/jumpy
+JUMPY_OUT     := $(JUMPY_DIR)/jumpy-$(shell go env GOOS)-$(shell go env GOARCH)
+PLUGIN_INSTALL_DIR := $(HOME)/.config/indigo/plugins/jumpy
+
+build-jumpy:
+	go build -o $(JUMPY_OUT) ./$(JUMPY_DIR)
+
+install-jumpy: build-jumpy
+	mkdir -p $(PLUGIN_INSTALL_DIR)
+	cp $(JUMPY_OUT) $(PLUGIN_INSTALL_DIR)/
+	cp $(JUMPY_DIR)/plugin.toml $(PLUGIN_INSTALL_DIR)/
+
+uninstall-jumpy:
+	rm -rf $(PLUGIN_INSTALL_DIR)
+
+.PHONY: build build-release build-minimal build-no-heavy build-custom install test vet lint clean \
+        build-jumpy install-jumpy uninstall-jumpy

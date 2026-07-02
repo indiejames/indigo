@@ -96,11 +96,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Resize all buffers with the correct height (minus tab bar if shown).
 		bufMsg := tea.WindowSizeMsg{Width: msg.Width, Height: a.bufHeight()}
+		var cmds []tea.Cmd
 		for i, m := range a.buffers {
-			updated, _ := m.Update(bufMsg)
+			updated, cmd := m.Update(bufMsg)
 			a.buffers[i] = updated.(client.Model)
+			cmds = append(cmds, cmd)
 		}
-		return a, nil
+		return a, tea.Batch(cmds...)
 
 	// ---- picker open ----
 	case client.OpenPickerMsg:
@@ -144,8 +146,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.active = len(a.buffers) - 1
 		// Resize ALL buffers — the tab bar may have just become visible,
 		// which changes the available height for every buffer.
-		a.resizeAllBuffers()
-		return a, m.Init()
+		resizeCmd := a.resizeAllBuffers()
+		return a, tea.Batch(m.Init(), resizeCmd)
 
 	case errorOpenMsg:
 		a.status = "E: " + msg.err.Error()
@@ -177,6 +179,23 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ---- cleanup done ----
 	case appQuitMsg:
 		return a, tea.Quit
+
+	// ---- server push (plugin effects) ----
+	case client.PluginShowMsgMsg:
+		a.status = msg.Text
+		return a, nil
+
+	case client.PluginMoveCursorMsg:
+		for i, buf := range a.buffers {
+			if buf.BufID() == msg.BufID {
+				a.buffers[i] = buf.AtLine(int(msg.Line))
+				if i == a.active {
+					a.active = i
+				}
+				break
+			}
+		}
+		return a, nil
 	}
 
 	// Picker intercepts all key input when open.
@@ -212,7 +231,15 @@ func (a App) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		path := a.picker.selected()
 		if path == "" {
-			return a, nil
+			// No filtered match — treat the query as a direct (possibly relative) path.
+			q := strings.TrimSpace(a.picker.query)
+			if q == "" {
+				return a, nil
+			}
+			if !filepath.IsAbs(q) {
+				q = filepath.Join(a.workDir, q)
+			}
+			return a, func() tea.Msg { return pickedMsg{absPath: q} }
 		}
 		return a, func() tea.Msg { return pickedMsg{absPath: path} }
 	case "up", "ctrl+p":
@@ -235,15 +262,18 @@ func (a App) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // resizeAllBuffers sends the current effective height to every buffer.
 // Must be called whenever the tab bar appears or disappears (buffer count
 // crosses the 1↔2 boundary) so no buffer is off by one row.
-func (a *App) resizeAllBuffers() {
+func (a *App) resizeAllBuffers() tea.Cmd {
 	if a.width == 0 {
-		return
+		return nil
 	}
 	bh := a.bufHeight()
+	var cmds []tea.Cmd
 	for i := range a.buffers {
-		updated, _ := a.buffers[i].Update(tea.WindowSizeMsg{Width: a.width, Height: bh})
+		updated, cmd := a.buffers[i].Update(tea.WindowSizeMsg{Width: a.width, Height: bh})
 		a.buffers[i] = updated.(client.Model)
+		cmds = append(cmds, cmd)
 	}
+	return tea.Batch(cmds...)
 }
 
 // handleCloseBuffer closes the active buffer and switches to the next, or quits.
@@ -256,8 +286,7 @@ func (a App) handleCloseBuffer() (tea.Model, tea.Cmd) {
 		a.active = len(a.buffers) - 1
 	}
 	// Resize remaining buffers — tab bar may have just disappeared.
-	a.resizeAllBuffers()
-	return a, nil
+	return a, a.resizeAllBuffers()
 }
 
 // handleQuitAll implements :qa, :qa!, :wqa.

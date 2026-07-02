@@ -1,6 +1,6 @@
 # indigo
 
-A terminal text editor with modal editing and built-in language server support. Inspired by Vim and Helix.
+A terminal text editor with modal editing and built-in language server support. Inspired by [Vim](https://www.vim.org/), [Kakoune](https://kakoune.org/), and [Helix](https://helix-editor.com/).
 
 **Note:** indigo is early-stage software — expect rough edges.
 
@@ -15,6 +15,17 @@ indigo is for developers who:
 - Work across multiple languages and want syntax highlighting and formatting to just work
 
 If you want an editor that does the right thing for your language automatically (gopls for Go, rust-analyzer for Rust, typescript-language-server for TypeScript, etc.) the moment you open a file, indigo is for you.
+
+## Why another editor?
+
+Mostly I just wanted to try some design ideas I had for an editor. Specifically a terminal based client-server
+architecture with core features that everyone seems to agree on (like syntax highlighting) and
+a fast plugin system for extensibility. None of these ideas are new. Helix provides great core features,
+but doesn't use a client-server model. Kakoune does, but I wanted a different extension system.
+[Visual Studio Code](https://code.visualstudio.com/) is great and it's easy to build extensions for it,
+but it doesn't run in the terminal.
+
+Also, I wanted to build something real in Go, and to use some of the great projects I have read about, like [Cap'n Proto](https://capnproto.org/) and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
 ## Install
 
@@ -34,14 +45,14 @@ indigo .                # open directory (shows file picker)
 indigo +42 file.go      # open a file at line 42
 ```
 
-indigo uses a **client/server model** similar to [Kakoune](https://kakoune.org/): the first invocation starts a background server for your workspace (rooted at the nearest `.git` directory or the directory of the edited file if not part of a git repository); subsequent `indigo` sessions in the same workspace connect to the existing server. The server exits automatically when all editor sessions close. If two client windows have the same file open,
+indigo uses a **client/server model** similar to Kakoune: the first invocation starts a background server for your workspace (rooted at the nearest `.git` directory or the directory of the edited file if not part of a git repository); subsequent `indigo` sessions in the same workspace connect to the existing server. The server exits automatically when all editor sessions close. If two client windows have the same file open,
 changes in one will show up in the other.
 
 The upshot of this is that instead of `indigo` managing editor panes, you can use your current terminal window/pane system to manage layout.
 
 ### Editing model
 
-indigo follows the **select → operate** model from Kakoune and [Helix](https://helix-editor.com/), rather than the operator → motion model of Vim. You always select text first, then act on it:
+indigo follows the **select → operate** model from Kakoune and Helix, rather than the operator → motion model of Vim. You always select text first, then act on it:
 
 ```
 w        select the word under the cursor

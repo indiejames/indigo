@@ -175,7 +175,7 @@ func pluginLog(format string, args ...any) {
 		return
 	}
 	defer f.Close() //nolint:errcheck
-	fmt.Fprintf(f, format+"\n", args...)
+	fmt.Fprintf(f, format+"\n", args...) //nolint:errcheck
 }
 
 func pluginLogFile() *os.File {
@@ -241,8 +241,8 @@ func (m *Manager) startPlugin(ctx context.Context, name, binaryPath string) erro
 	defer rel()
 
 	if _, err := fut.Struct(); err != nil {
-		rpcConn.Close()
-		proc.Kill() //nolint:errcheck
+		rpcConn.Close() //nolint:errcheck
+		proc.Kill()     //nolint:errcheck
 		return fmt.Errorf("plugin %s initialize: %w", name, err)
 	}
 
@@ -347,7 +347,7 @@ func (m *Manager) Shutdown() {
 	done := make(chan struct{})
 	go func() {
 		for _, p := range plugins {
-			p.rpcConn.Close()
+			p.rpcConn.Close() //nolint:errcheck
 		}
 		close(done)
 	}()

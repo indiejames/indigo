@@ -33,7 +33,7 @@ func clientLog(format string, args ...any) {
 		return
 	}
 	defer f.Close() //nolint:errcheck
-	fmt.Fprintf(f, "[client] "+format+"\n", args...)
+	fmt.Fprintf(f, "[client] "+format+"\n", args...) //nolint:errcheck
 }
 
 // PluginKeyResult is the client-side view of a plugin key handler response.

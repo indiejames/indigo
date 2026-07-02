@@ -110,7 +110,7 @@ func startServer(workDir string) {
 		Files: []*os.File{nil, nil, logFile},
 	})
 	if logFile != nil {
-		logFile.Close()
+		logFile.Close() //nolint:errcheck
 	}
 	if err != nil {
 		fatalf("start server: %v", err)

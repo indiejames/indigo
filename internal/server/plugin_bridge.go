@@ -21,7 +21,7 @@ func serverLog(format string, args ...any) {
 		return
 	}
 	defer f.Close() //nolint:errcheck
-	fmt.Fprintf(f, "[server] "+format+"\n", args...)
+	fmt.Fprintf(f, "[server] "+format+"\n", args...) //nolint:errcheck
 }
 
 // pluginClientID is the client ID used for edits applied by plugins.

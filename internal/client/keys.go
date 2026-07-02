@@ -163,6 +163,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleInsert(msg)
 	case ModeCommand:
 		return m.handleCommand(msg)
+	case ModeSearch:
+		return m.handleSearch(msg)
 	}
 	return m, nil
 }
@@ -298,6 +300,29 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ":":
 		m.mode = ModeCommand
 		m.cmdBuf = ""
+
+	case "/":
+		m.searchQuery = ""
+		m.searchMatches = nil
+		m.searchIdx = -1
+		m.searchOrigin = m.cursor
+		m.mode = ModeSearch
+
+	case "n":
+		if len(m.searchMatches) > 0 {
+			m.searchIdx = (m.searchIdx + 1) % len(m.searchMatches)
+			sm := m.searchMatches[m.searchIdx]
+			m.cursor = document.Pos{Line: sm.line, Col: sm.col}
+			m.scrollToCursor()
+		}
+
+	case "N":
+		if len(m.searchMatches) > 0 {
+			m.searchIdx = (m.searchIdx - 1 + len(m.searchMatches)) % len(m.searchMatches)
+			sm := m.searchMatches[m.searchIdx]
+			m.cursor = document.Pos{Line: sm.line, Col: sm.col}
+			m.scrollToCursor()
+		}
 
 	case "esc":
 		m.sel = nil
@@ -723,6 +748,55 @@ func (m Model) handleCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		if len(msg.Runes) > 0 {
 			m.cmdBuf += string(msg.Runes)
+		}
+	}
+	return m, nil
+}
+
+func (m Model) handleSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = ModeNormal
+		m.cursor = m.searchOrigin
+		m.scrollToCursor()
+		m.searchQuery = ""
+		m.searchMatches = nil
+		m.searchIdx = -1
+	case "enter":
+		m.mode = ModeNormal
+		if len(m.searchMatches) > 0 && m.searchIdx >= 0 {
+			sm := m.searchMatches[m.searchIdx]
+			m.cursor = document.Pos{Line: sm.line, Col: sm.col}
+			m.scrollToCursor()
+		}
+	case "backspace":
+		runes := []rune(m.searchQuery)
+		if len(runes) > 0 {
+			m.searchQuery = string(runes[:len(runes)-1])
+			m.searchMatches = findMatches(m.buf, m.searchQuery)
+			m.searchIdx = matchIdxAtOrAfter(m.searchMatches, m.searchOrigin.Line, m.searchOrigin.Col)
+			if m.searchIdx >= 0 {
+				sm := m.searchMatches[m.searchIdx]
+				m.cursor = document.Pos{Line: sm.line, Col: sm.col}
+				m.scrollToCursor()
+			}
+		} else {
+			m.mode = ModeNormal
+			m.cursor = m.searchOrigin
+			m.scrollToCursor()
+			m.searchMatches = nil
+			m.searchIdx = -1
+		}
+	default:
+		if len(msg.Runes) > 0 {
+			m.searchQuery += string(msg.Runes)
+			m.searchMatches = findMatches(m.buf, m.searchQuery)
+			m.searchIdx = matchIdxAtOrAfter(m.searchMatches, m.searchOrigin.Line, m.searchOrigin.Col)
+			if m.searchIdx >= 0 {
+				sm := m.searchMatches[m.searchIdx]
+				m.cursor = document.Pos{Line: sm.line, Col: sm.col}
+				m.scrollToCursor()
+			}
 		}
 	}
 	return m, nil

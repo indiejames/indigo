@@ -18,6 +18,7 @@ const (
 	ModeNormal Mode = iota
 	ModeInsert
 	ModeCommand
+	ModeSearch
 )
 
 // tickMsg is sent periodically to poll for remote updates.
@@ -212,6 +213,11 @@ type Model struct {
 	savedUndoDepth int             // len(undoStack) at the time of the last save
 	cmdBuf         string          // text typed after ':' while in ModeCommand
 	prefixSeq      []rune          // keys typed so far for a multi-key Normal-mode command
+	searchQuery    string
+	searchMatches  []searchMatch
+	searchIdx      int
+	searchOrigin   document.Pos
+	searchErr      string // non-empty when regex fails to compile
 	hlr            *highlight.Highlighter
 	hlSpans        highlight.LineSpans
 	metrics        *metricsData

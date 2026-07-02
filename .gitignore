@@ -4,7 +4,7 @@
 *.dll
 *.so
 *.dylib
-io
+indigo
 
 # Common binary output directories
 bin/

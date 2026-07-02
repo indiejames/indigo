@@ -23,6 +23,11 @@ var decorOverlayStyle = lipgloss.NewStyle().
 	Background(lipgloss.Color("#1A1A2E")).
 	Bold(true)
 
+var (
+	searchMatchStyle   = lipgloss.NewStyle().Background(lipgloss.Color("#444400")).Foreground(lipgloss.Color("#FFFF88"))
+	searchCurrentStyle = lipgloss.NewStyle().Background(lipgloss.Color("#AAAA00")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+)
+
 // lineOverlay describes a styled text injection at a visual column in the content area.
 // col is an index into the tab-expanded rune slice for the line; w is how many of those
 // rune positions the text visually occupies (i.e. positions to skip in the underlying content).
@@ -787,6 +792,60 @@ func (m Model) buildRowOverlays(vis int) [][]lineOverlay {
 	return rows
 }
 
+// buildSearchOverlays builds per-row overlays for all search matches. Returns nil
+// when there are no matches.
+func (m Model) buildSearchOverlays(vis int) [][]lineOverlay {
+	if len(m.searchMatches) == 0 {
+		return nil
+	}
+	rows := make([][]lineOverlay, vis)
+	for i, sm := range m.searchMatches {
+		row := sm.line - m.topLine
+		if row < 0 || row >= vis {
+			continue
+		}
+		lineRunes := []rune(m.buf.Line(sm.line))
+		_, colMap := expandTabsRemap(lineRunes)
+		visCol := sm.col
+		if sm.col < len(colMap) {
+			visCol = colMap[sm.col]
+		}
+		end := sm.col + sm.length
+		if end > len(lineRunes) {
+			end = len(lineRunes)
+		}
+		matchText := string(lineRunes[sm.col:end])
+		style := searchMatchStyle
+		if i == m.searchIdx {
+			style = searchCurrentStyle
+		}
+		styledText := style.Render(matchText)
+		rows[row] = append(rows[row], lineOverlay{col: visCol, text: styledText, w: sm.length})
+	}
+	for ri, ovls := range rows {
+		for j := 1; j < len(ovls); j++ {
+			for k := j; k > 0 && ovls[k].col < ovls[k-1].col; k-- {
+				ovls[k], ovls[k-1] = ovls[k-1], ovls[k]
+			}
+		}
+		rows[ri] = ovls
+	}
+	return rows
+}
+
+// mergeOverlays combines two sorted overlay slices into one sorted slice.
+func mergeOverlays(a, b []lineOverlay) []lineOverlay {
+	out := make([]lineOverlay, 0, len(a)+len(b))
+	out = append(out, a...)
+	out = append(out, b...)
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j].col < out[j-1].col; j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out
+}
+
 // ---- View ----
 
 func (m Model) View() string {
@@ -811,6 +870,13 @@ func (m Model) View() string {
 	vis := m.visibleLines()
 	lines := make([]string, vis)
 	rowOverlays := m.buildRowOverlays(vis)
+	if searchOverlays := m.buildSearchOverlays(vis); searchOverlays != nil {
+		for i := range vis {
+			if len(searchOverlays[i]) > 0 {
+				rowOverlays[i] = mergeOverlays(searchOverlays[i], rowOverlays[i])
+			}
+		}
+	}
 	for i := range vis {
 		lines[i] = m.renderLine(i, rowOverlays[i])
 	}
@@ -1019,6 +1085,27 @@ func (m Model) lspServerName() string {
 func (m Model) renderStatusBar() string {
 	if m.width == 0 {
 		return ""
+	}
+
+	if m.mode == ModeSearch {
+		prompt := "/" + m.searchQuery
+		promptRunes := []rune(prompt)
+		var countStr string
+		switch {
+		case m.searchErr != "":
+			countStr = " [invalid]"
+		case m.searchQuery != "" && len(m.searchMatches) == 0:
+			countStr = " [0/0]"
+		case len(m.searchMatches) > 0:
+			countStr = fmt.Sprintf(" [%d/%d]", m.searchIdx+1, len(m.searchMatches))
+		}
+		countW := lipgloss.Width(countStr)
+		maxPromptW := m.width - countW - 1
+		if len(promptRunes) > maxPromptW {
+			promptRunes = promptRunes[len(promptRunes)-maxPromptW:]
+		}
+		padW := max(0, m.width-len(promptRunes)-1-countW)
+		return barStyle.Render(string(promptRunes)) + cursorStyle.Render(" ") + barStyle.Width(padW).Render("") + barStyle.Render(countStr)
 	}
 
 	if m.mode == ModeCommand {

@@ -55,7 +55,7 @@ interface BufferEventHandler {
 }
 
 interface DecorationProvider {
-  getDecorations @0 (bufId :UInt32, visibleRange :PluginRange) -> (decorations :List(Decoration));
+  getDecorations @0 (bufId :UInt32, visibleRange :PluginRange, clientId :UInt64) -> (decorations :List(Decoration));
 }
 
 # -- Supporting structs --

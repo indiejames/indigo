@@ -1,4 +1,4 @@
-BINARY  := io
+BINARY  := indigo
 CMD     := ./cmd/indigo
 OUT     := $(BINARY)
 
@@ -22,6 +22,9 @@ build-no-heavy:
 LANGS ?= lang_go lang_python lang_typescript lang_rust
 build-custom:
 	go build -tags "$(LANGS)" -o $(OUT) $(CMD)
+
+install: build-release
+	cp $(OUT) $(shell go env GOPATH)/bin/$(BINARY)
 
 test:
 	go test -tags lang_all ./...
@@ -52,5 +55,5 @@ install-jumpy: build-jumpy
 uninstall-jumpy:
 	rm -rf $(PLUGIN_INSTALL_DIR)
 
-.PHONY: build build-release build-minimal build-no-heavy build-custom test vet lint clean \
+.PHONY: build build-release build-minimal build-no-heavy build-custom install test vet lint clean \
         build-jumpy install-jumpy uninstall-jumpy

@@ -173,8 +173,10 @@ func (a *Api) HandleBufferEvents(h BufferHandlers) error {
 }
 
 // Decorations registers fn as the decoration provider.
-// fn is called whenever the client polls for decorations for a buffer/viewport.
-func (a *Api) Decorations(fn func(bufID uint32, r Range) []Decoration) error {
+// fn is called whenever a client polls for decorations for a buffer/viewport.
+// clientID identifies which client is requesting decorations; plugins can use
+// this to return decorations only for the client that activated them.
+func (a *Api) Decorations(fn func(bufID uint32, clientID uint64, r Range) []Decoration) error {
 	srv := pluginproto.DecorationProvider_ServerToClient(&decorProviderServer{fn: fn})
 	fut, rel := a.api.RegisterDecorations(context.Background(), func(p pluginproto.EditorApi_registerDecorations_Params) error {
 		return p.SetProvider(srv)
@@ -596,17 +598,18 @@ func (s *bufferHandlerServer) OnClose(_ context.Context, call pluginproto.Buffer
 }
 
 type decorProviderServer struct {
-	fn func(bufID uint32, r Range) []Decoration
+	fn func(bufID uint32, clientID uint64, r Range) []Decoration
 }
 
 func (s *decorProviderServer) GetDecorations(_ context.Context, call pluginproto.DecorationProvider_getDecorations) error {
 	args := call.Args()
 	bufID := args.BufId()
+	clientID := args.ClientId()
 	rng, _ := args.VisibleRange()
 	start, _ := rng.Start()
 	end, _ := rng.End()
 
-	decorations := s.fn(bufID, Range{
+	decorations := s.fn(bufID, clientID, Range{
 		Start: Position{Line: start.Line(), Col: start.Col()},
 		End:   Position{Line: end.Line(), Col: end.Col()},
 	})

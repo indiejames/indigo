@@ -270,7 +270,7 @@ func (m *Manager) AllRegisteredKeys() []string {
 
 // GetDecorations calls every registered DecorationProvider and aggregates the results.
 // startLine and endLine are the inclusive visible range (0-based buffer line numbers).
-func (m *Manager) GetDecorations(ctx context.Context, bufID, startLine, endLine uint32) []PluginDecoration {
+func (m *Manager) GetDecorations(ctx context.Context, clientID uint64, bufID, startLine, endLine uint32) []PluginDecoration {
 	m.mu.Lock()
 	plugins := m.plugins
 	m.mu.Unlock()
@@ -287,6 +287,7 @@ func (m *Manager) GetDecorations(ctx context.Context, bufID, startLine, endLine 
 		tctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 		fut, rel := provider.GetDecorations(tctx, func(ps pluginproto.DecorationProvider_getDecorations_Params) error {
 			ps.SetBufId(bufID)
+			ps.SetClientId(clientID)
 			rng, err := ps.NewVisibleRange()
 			if err != nil {
 				cancel()

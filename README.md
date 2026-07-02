@@ -21,24 +21,27 @@ If you want an editor that does the right thing for your language automatically 
 > **Note:** Binary releases are not yet available. For now, build from source:
 
 ```
-go install github.com/indiejames/indigo/cmd/indigo@latest
+make install
 ```
 
-The binary is named `io`. Requires Go 1.21+.
+The binary is named `indigo`. Requires Go 1.21+.
 
 ## Quick start
 
 ```
-io file.go          # open a file
-io .                # open directory (shows file picker)
-io +42 file.go      # open a file at line 42
+indigo file.go          # open a file
+indigo .                # open directory (shows file picker)
+indigo +42 file.go      # open a file at line 42
 ```
 
-indigo uses a **client/server model**: the first invocation starts a background server for your workspace (rooted at the nearest `.git` directory); subsequent `io` sessions in the same workspace connect to the existing server. The server exits automatically when all editor sessions close.
+indigo uses a **client/server model** similar to [Kakoune](https://kakoune.org/): the first invocation starts a background server for your workspace (rooted at the nearest `.git` directory or the directory of the edited file if not part of a git repository); subsequent `indigo` sessions in the same workspace connect to the existing server. The server exits automatically when all editor sessions close. If two client windows have the same file open,
+changes in one will show up in the other.
+
+The upshot of this is that instead of `indigo` managing editor panes, you can use your current terminal window/pane system to manage layout.
 
 ### Editing model
 
-indigo follows the **select → operate** model from Kakoune and Helix, rather than the operator → motion model of Vim. You always select text first, then act on it:
+indigo follows the **select → operate** model from Kakoune and [Helix](https://helix-editor.com/), rather than the operator → motion model of Vim. You always select text first, then act on it:
 
 ```
 w        select the word under the cursor
@@ -63,7 +66,7 @@ The client–server protocol is built on **[Cap'n Proto](https://capnproto.org)*
 - **Negligible latency** — Because there is no encode/decode overhead, a round-trip for a keystroke or an LSP hover request adds no measurable latency on top of the Unix socket itself.
 - **Schema-defined interface** — The RPC interface is described in a `.capnp` schema file, giving both sides a typed, versioned contract with built-in support for backwards-compatible evolution.
 
-The practical result is that multiple `io` windows on the same workspace share one server process with no perceptible communication cost — edits, diagnostics, and completions feel as immediate as if everything were running in a single process.
+The practical result is that multiple `indigo` windows on the same workspace share one server process with no perceptible communication cost — edits, diagnostics, and completions feel as immediate as if everything were running in a single process.
 
 ## Key bindings
 

@@ -738,7 +738,7 @@ func (s *editorService) GetPluginDecorations(ctx context.Context, call proto.Edi
 	if height > 0 {
 		endLine = topLine + height - 1
 	}
-	decorations := s.pluginMgr.GetDecorations(ctx, bufID, topLine, endLine)
+	decorations := s.pluginMgr.GetDecorations(ctx, clientID, bufID, topLine, endLine)
 
 	res, err := call.AllocResults()
 	if err != nil {

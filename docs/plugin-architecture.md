@@ -88,6 +88,8 @@ For the two interactive cases (key bindings and insert hooks), the server dispat
 
 Decoration updates (gutter annotations, overlays, status bar items) are delivered asynchronously. The editor renders its last cached decoration state every frame; stale decorations are preferable to a frozen editor.
 
+Overlay decorations are rendered in a single pass through each visible line's runes — labels are injected directly at their target column during the normal character-rendering loop, with no ANSI post-processing. Rendering cost is O(visible_lines × line_width) regardless of how many overlay decorations the plugin returns, so a plugin returning 500 overlays costs no more than one returning 5.
+
 ## What plugins can do
 
 ### UI contributions
@@ -264,7 +266,7 @@ The data flow for an overlay plugin like jumpy:
 3. Plugin calls readLines(bufId, 40, 80) → gets text
 4. Plugin computes label map, returns overlay decorations + enters capture mode
 5. Server caches overlay, pushes decoration update to client
-6. Client renders label overlay on top of buffer view
+6. Client renders label overlays: each label is injected inline during the rune-rendering pass at its target column — no separate overlay compositing step
 7. User types "ab" → server routes to jumpy (in capture mode)
 8. Plugin returns moveCursor{line: 52, col: 7} + clears overlay
 ```

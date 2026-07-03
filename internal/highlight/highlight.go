@@ -31,6 +31,7 @@ type LineSpans map[int][]Span
 type Highlighter struct {
 	lang  *sitter.Language
 	query *sitter.Query
+	extra *Highlighter // optional secondary parser (e.g. markdown_inline)
 }
 
 // New returns a Highlighter for filePath, or nil if the language is unsupported.
@@ -43,7 +44,13 @@ func New(filePath string) *Highlighter {
 	if err != nil {
 		return nil
 	}
-	return &Highlighter{lang: lang, query: q}
+	h := &Highlighter{lang: lang, query: q}
+	if elang, eqsrc := extraLanguageForPath(filePath); elang != nil && len(eqsrc) > 0 {
+		if eq, err := sitter.NewQuery(elang, eqsrc); err == nil {
+			h.extra = &Highlighter{lang: elang, query: eq}
+		}
+	}
+	return h
 }
 
 // Highlight parses content and returns highlighted spans for all lines.
@@ -59,7 +66,13 @@ func (h *Highlighter) Highlight(content []byte) LineSpans {
 		return nil
 	}
 	defer tree.Close()
-	return extractSpans(h.query, tree, content)
+	result := extractSpans(h.query, tree, content)
+	if h.extra != nil {
+		for line, spans := range h.extra.Highlight(content) {
+			result[line] = append(result[line], spans...)
+		}
+	}
+	return result
 }
 
 // --- span extraction ---
@@ -148,6 +161,16 @@ func hexToANSI(hex string) string {
 	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b)
 }
 
+// hexToANSIBold returns a bold+color SGR sequence.
+func hexToANSIBold(hex string) string {
+	return "\x1b[1m" + hexToANSI(hex)
+}
+
+// hexToANSIItalic returns an italic+color SGR sequence.
+func hexToANSIItalic(hex string) string {
+	return "\x1b[3m" + hexToANSI(hex)
+}
+
 type captureEntry struct {
 	ansi     string
 	priority int
@@ -180,8 +203,46 @@ var captureTable = map[string]captureEntry{
 	"attribute":             {hexToANSI("#9CDCFE"), 44},
 	"variable.builtin":      {hexToANSI("#569CD6"), 42},
 	"variable":              {hexToANSI("#9CDCFE"), 40},
+	"label":                 {hexToANSI("#9CDCFE"), 38},
 	"punctuation.bracket":   {hexToANSI("#D4D4D4"), 20},
 	"punctuation.delimiter": {hexToANSI("#D4D4D4"), 20},
+	"punctuation.special":   {hexToANSI("#C586C0"), 20},
+
+	// markup.* — used by markdown and other markup grammars (modern nvim-treesitter naming).
+	// captureANSI only prefix-matches on the first dot, so markup.heading.1 falls back to
+	// the "markup" base entry; specific subtype entries override that via exact match.
+	"markup":               {hexToANSI("#D4D4D4"), 28},
+	"markup.heading":       {hexToANSI("#569CD6"), 87},
+	"markup.heading.1":     {hexToANSI("#4FC1FF"), 87},
+	"markup.heading.2":     {hexToANSI("#569CD6"), 86},
+	"markup.heading.3":     {hexToANSI("#4EC9B0"), 85},
+	"markup.heading.4":     {hexToANSI("#9CDCFE"), 84},
+	"markup.heading.5":     {hexToANSI("#9CDCFE"), 84},
+	"markup.heading.6":     {hexToANSI("#9CDCFE"), 84},
+	"markup.strong":        {hexToANSIBold("#E5C07B"), 83},
+	"markup.italic":        {hexToANSIItalic("#D7BA7D"), 83},
+	"markup.strikethrough": {hexToANSI("#808080"), 83},
+	// "markup.raw":           {hexToANSI("#808080"), 82},
+	// "markup.raw.block":     {hexToANSI("#808080"), 82},
+	"markup.raw":       {hexToANSI("#ABC2A1"), 82},
+	"markup.raw.block": {hexToANSI("#ABC2A1"), 82},
+	// "markup.link":           {hexToANSI("#4EC9B0"), 78},
+	// "markup.link.url":       {hexToANSI("#4EC9B0"), 78},
+	"markup.link":       {hexToANSI("#615bd3"), 78},
+	"markup.link.url":   {hexToANSI("#615bd3"), 78},
+	"markup.link.label": {hexToANSI("#9CDCFE"), 76},
+	"markup.list":       {hexToANSI("#C586C0"), 76},
+	"markup.quote":      {hexToANSI("#6A9955"), 74},
+
+	// text.* — old nvim-treesitter naming still used by some grammars.
+	"text":          {hexToANSI("#D4D4D4"), 27},
+	"text.title":    {hexToANSI("#569CD6"), 87},
+	"text.strong":   {hexToANSIBold("#E5C07B"), 83},
+	"text.emphasis": {hexToANSIItalic("#D7BA7D"), 83},
+	// "text.literal":   {hexToANSI("#808080"), 82},
+	"text.literal":   {hexToANSI("#d5890e"), 82},
+	"text.uri":       {hexToANSI("#615bd3"), 78},
+	"text.reference": {hexToANSI("#9CDCFE"), 76},
 }
 
 func captureANSI(name string) (string, int, bool) {

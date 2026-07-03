@@ -53,34 +53,73 @@ func (s *Selection) ordered() (start, end document.Pos) {
 }
 
 // selectWord selects the word at the cursor. If a word is already selected,
-// advances to the next word on the same line.
+// advances to the next word, crossing line boundaries if needed.
 func (m *Model) selectWord() {
-	runes := []rune(m.buf.Line(m.cursor.Line))
-	lineNum := m.cursor.Line
+	totalLines := m.buf.LineCount()
 	if m.sel != nil && !m.sel.IsLine {
-		// Advance: find next word after the current selection head.
 		_, end := m.sel.ordered()
-		if end.Line == lineNum {
-			s, e, ok := findNextWordFrom(runes, end.Col)
+		// Try advancing from end.Col on end.Line, then subsequent lines.
+		for l := end.Line; l < totalLines; l++ {
+			runes := []rune(m.buf.Line(l))
+			var s, e int
+			var ok bool
+			if l == end.Line {
+				s, e, ok = findNextWordFrom(runes, end.Col)
+			} else {
+				s, e, ok = findWordAt(runes, 0)
+			}
 			if ok {
-				m.sel = &Selection{Anchor: document.Pos{Line: lineNum, Col: s}, Head: document.Pos{Line: lineNum, Col: e}}
+				m.sel = &Selection{
+					Anchor: document.Pos{Line: l, Col: s},
+					Head:   document.Pos{Line: l, Col: e},
+				}
 				m.cursor = m.sel.Head
 				m.scrollToCursor()
 				return
 			}
 		}
+		return
 	}
-	// Fresh word select from cursor.
-	s, e, ok := findWordAt(runes, m.cursor.Col)
-	if ok {
-		m.sel = &Selection{Anchor: document.Pos{Line: lineNum, Col: s}, Head: document.Pos{Line: lineNum, Col: e}}
-		m.cursor = m.sel.Head
-		m.scrollToCursor()
+	// Fresh word select from cursor, crossing lines if needed.
+	for l := m.cursor.Line; l < totalLines; l++ {
+		runes := []rune(m.buf.Line(l))
+		col := 0
+		if l == m.cursor.Line {
+			col = m.cursor.Col
+		}
+		s, e, ok := findWordAt(runes, col)
+		if ok {
+			m.sel = &Selection{
+				Anchor: document.Pos{Line: l, Col: s},
+				Head:   document.Pos{Line: l, Col: e},
+			}
+			m.cursor = m.sel.Head
+			m.scrollToCursor()
+			return
+		}
 	}
 }
 
-// selectLine selects the entire current line.
+// selectLine selects the entire current line. If a line selection already
+// exists, it extends the selection forward to the next line.
 func (m *Model) selectLine() {
+	if m.sel != nil && m.sel.IsLine {
+		_, end := m.sel.ordered()
+		next := end.Line + 1
+		if next >= m.buf.LineCount() {
+			return
+		}
+		nextLen := m.buf.LineLen(next)
+		// Extend whichever endpoint is at the forward line.
+		if m.sel.Head.Line >= m.sel.Anchor.Line {
+			m.sel.Head = document.Pos{Line: next, Col: max(0, nextLen-1)}
+		} else {
+			m.sel.Anchor = document.Pos{Line: next, Col: max(0, nextLen-1)}
+		}
+		m.cursor = m.sel.Head
+		m.scrollToCursor()
+		return
+	}
 	line := m.cursor.Line
 	lineLen := m.buf.LineLen(line)
 	m.sel = &Selection{
@@ -89,6 +128,27 @@ func (m *Model) selectLine() {
 		IsLine: true,
 	}
 	m.cursor = m.sel.Head
+}
+
+// extendLineBackward extends a line selection to include the previous line.
+// If there is no line selection, selects the current line then extends up.
+func (m *Model) extendLineBackward() {
+	if m.sel == nil || !m.sel.IsLine {
+		m.selectLine()
+	}
+	start, _ := m.sel.ordered()
+	prev := start.Line - 1
+	if prev < 0 {
+		return
+	}
+	// Move whichever endpoint is at the top backward.
+	if m.sel.Anchor.Line <= m.sel.Head.Line {
+		m.sel.Anchor = document.Pos{Line: prev, Col: 0}
+	} else {
+		m.sel.Head = document.Pos{Line: prev, Col: 0}
+	}
+	m.cursor = m.sel.Head
+	m.scrollToCursor()
 }
 
 // deleteSelection deletes the selected text and returns the updated model + cmd.
@@ -189,6 +249,55 @@ func findWordAt(runes []rune, col int) (start, end int, found bool) {
 	return start, i - 1, true
 }
 
+// findPrevWordStart returns the start column of the word that precedes col.
+// When col is mid-word, returns the start of that word.
+// When col is at a word boundary or on non-word chars, returns the start of the prior word.
+func findPrevWordStart(runes []rune, col int) (int, bool) {
+	n := len(runes)
+	if n == 0 || col <= 0 {
+		return -1, false
+	}
+	i := min(col, n) - 1
+	// Skip non-word chars backward.
+	for i >= 0 && !isWordChar(runes[i]) {
+		i--
+	}
+	if i < 0 {
+		return -1, false
+	}
+	// Step back to start of word.
+	for i > 0 && isWordChar(runes[i-1]) {
+		i--
+	}
+	return i, true
+}
+
+// findWordEnd returns the column of the end (inclusive) of the word at or after col.
+// If col is already at a word end, advances to the end of the next word.
+func findWordEnd(runes []rune, col int) (int, bool) {
+	n := len(runes)
+	if n == 0 {
+		return -1, false
+	}
+	i := min(col, n-1)
+	// If at the end of a word, step past it.
+	if isWordChar(runes[i]) && (i+1 >= n || !isWordChar(runes[i+1])) {
+		i++
+	}
+	// Skip non-word chars.
+	for i < n && !isWordChar(runes[i]) {
+		i++
+	}
+	if i >= n {
+		return -1, false
+	}
+	// Advance to end of word.
+	for i+1 < n && isWordChar(runes[i+1]) {
+		i++
+	}
+	return i, true
+}
+
 // findNextWordFrom returns the inclusive [start, end] of the next word that
 // begins strictly after afterEnd.
 func findNextWordFrom(runes []rune, afterEnd int) (start, end int, found bool) {
@@ -210,4 +319,119 @@ func findNextWordFrom(runes []rune, afterEnd int) (start, end int, found bool) {
 		i++
 	}
 	return start, i - 1, true
+}
+
+// moveToPrevWordStart moves the cursor to the start of the previous word,
+// crossing line boundaries if necessary. Selection is cleared by the caller.
+func (m *Model) moveToPrevWordStart() {
+	for l := m.cursor.Line; l >= 0; l-- {
+		runes := []rune(m.buf.Line(l))
+		col := m.cursor.Col
+		if l < m.cursor.Line {
+			col = len(runes) // search from end of earlier lines
+		}
+		if s, ok := findPrevWordStart(runes, col); ok {
+			m.cursor = document.Pos{Line: l, Col: s}
+			m.scrollToCursor()
+			return
+		}
+	}
+	m.cursor = document.Pos{}
+	m.scrollToCursor()
+}
+
+// moveToWordEnd moves the cursor to the end of the current or next word,
+// crossing line boundaries if necessary. Selection is cleared by the caller.
+func (m *Model) moveToWordEnd() {
+	totalLines := m.buf.LineCount()
+	for l := m.cursor.Line; l < totalLines; l++ {
+		runes := []rune(m.buf.Line(l))
+		col := 0
+		if l == m.cursor.Line {
+			col = m.cursor.Col
+		}
+		if e, ok := findWordEnd(runes, col); ok {
+			m.cursor = document.Pos{Line: l, Col: e}
+			m.scrollToCursor()
+			return
+		}
+	}
+}
+
+// extendWordForward moves the selection head forward to the end of the next
+// word. If there is no selection, starts one at the cursor.
+func (m *Model) extendWordForward() {
+	head := m.cursor
+	if m.sel != nil {
+		head = m.sel.Head
+	}
+	totalLines := m.buf.LineCount()
+	for l := head.Line; l < totalLines; l++ {
+		runes := []rune(m.buf.Line(l))
+		col := 0
+		if l == head.Line {
+			col = head.Col
+		}
+		if e, ok := findWordEnd(runes, col); ok {
+			newHead := document.Pos{Line: l, Col: e}
+			if m.sel == nil {
+				m.sel = &Selection{Anchor: m.cursor, Head: newHead}
+			} else {
+				m.sel.Head = newHead
+			}
+			m.cursor = newHead
+			m.scrollToCursor()
+			return
+		}
+	}
+}
+
+// extendWordBackward moves the selection head backward to the start of the
+// previous word. If there is no selection, starts one at the cursor.
+func (m *Model) extendWordBackward() {
+	head := m.cursor
+	if m.sel != nil {
+		head = m.sel.Head
+	}
+	for l := head.Line; l >= 0; l-- {
+		runes := []rune(m.buf.Line(l))
+		col := head.Col
+		if l < head.Line {
+			col = len(runes)
+		}
+		if s, ok := findPrevWordStart(runes, col); ok {
+			newHead := document.Pos{Line: l, Col: s}
+			if m.sel == nil {
+				m.sel = &Selection{Anchor: m.cursor, Head: newHead}
+			} else {
+				m.sel.Head = newHead
+			}
+			m.cursor = newHead
+			m.scrollToCursor()
+			return
+		}
+	}
+}
+
+// selectAll selects the entire buffer contents.
+func (m *Model) selectAll() {
+	lastLine := max(0, m.buf.LineCount()-1)
+	lastCol := max(0, m.buf.LineLen(lastLine)-1)
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: 0, Col: 0},
+		Head:   document.Pos{Line: lastLine, Col: lastCol},
+	}
+	m.cursor = m.sel.Head
+	m.scrollToCursor()
+}
+
+// flipSelection swaps the anchor and head of the current selection,
+// moving the cursor to the new head.
+func (m *Model) flipSelection() {
+	if m.sel == nil {
+		return
+	}
+	m.sel.Anchor, m.sel.Head = m.sel.Head, m.sel.Anchor
+	m.cursor = m.sel.Head
+	m.scrollToCursor()
 }

@@ -65,15 +65,144 @@ func (m *Model) clampCursor() {
 	m.scrollToCursor()
 }
 
+// contentWidth returns the number of terminal columns available for buffer
+// text after subtracting the gutter. Always at least 1.
+func (m Model) contentWidth() int {
+	return max(1, m.width-m.gutterWidth())
+}
+
+// visualChunks returns the number of screen rows that a tab-expanded line of
+// length expandedLen occupies when soft-wrapped at cw columns. An empty line
+// still counts as one row.
+func visualChunks(expandedLen, cw int) int {
+	if cw <= 0 || expandedLen == 0 {
+		return 1
+	}
+	return (expandedLen + cw - 1) / cw
+}
+
+// layoutEntry describes one screen row in the current frame.
+type layoutEntry struct {
+	bufLine    int // buffer line index
+	chunk      int // 0-based wrap segment within bufLine
+	chunkStart int // visual column where this chunk begins (chunk * cw)
+}
+
+// buildScreenLayout returns a slice mapping each visible screen row to its
+// (bufLine, chunk). Rows beyond the last buffer line use incrementing bufLine
+// values for the tilde-row renderer.
+func (m Model) buildScreenLayout(vis, cw int) []layoutEntry {
+	layout := make([]layoutEntry, 0, vis)
+	bufLine := m.topLine
+	for len(layout) < vis {
+		if bufLine >= m.buf.LineCount() {
+			layout = append(layout, layoutEntry{bufLine: bufLine})
+			bufLine++
+			continue
+		}
+		runes := []rune(m.buf.Line(bufLine))
+		exp, _ := expandTabsRemap(runes)
+		chunks := visualChunks(len(exp), cw)
+		for chunk := 0; chunk < chunks && len(layout) < vis; chunk++ {
+			layout = append(layout, layoutEntry{
+				bufLine:    bufLine,
+				chunk:      chunk,
+				chunkStart: chunk * cw,
+			})
+		}
+		bufLine++
+	}
+	return layout
+}
+
+// screenRowOf returns the screen row index in layout where the given bufLine
+// and visual column visCol fall, or -1 if not currently visible.
+func screenRowOf(layout []layoutEntry, bufLine, visCol, cw int) int {
+	chunk := 0
+	if cw > 0 {
+		chunk = visCol / cw
+	}
+	for i, e := range layout {
+		if e.bufLine == bufLine && e.chunk == chunk {
+			return i
+		}
+	}
+	return -1
+}
+
+// cursorVisualRowFromTop returns how many screen rows below topLine the
+// cursor currently sits (accounting for soft-wrap).
+func (m Model) cursorVisualRowFromTop(cw int) int {
+	row := 0
+	for l := m.topLine; l < m.cursor.Line && l < m.buf.LineCount(); l++ {
+		runes := []rune(m.buf.Line(l))
+		exp, _ := expandTabsRemap(runes)
+		row += visualChunks(len(exp), cw)
+	}
+	if m.cursor.Line < m.buf.LineCount() {
+		runes := []rune(m.buf.Line(m.cursor.Line))
+		_, colMap := expandTabsRemap(runes)
+		curVisCol := 0
+		if m.cursor.Col < len(colMap) {
+			curVisCol = colMap[m.cursor.Col]
+		}
+		if cw > 0 {
+			row += curVisCol / cw
+		}
+	}
+	return row
+}
+
+// findTopLineForCursor returns the buffer line that should be at the top of
+// the viewport so the cursor falls within the last visible row.
+func (m Model) findTopLineForCursor(cw, vis int) int {
+	// Determine which wrap chunk of the cursor's line the cursor is on.
+	cursorChunk := 0
+	if m.cursor.Line < m.buf.LineCount() {
+		runes := []rune(m.buf.Line(m.cursor.Line))
+		_, colMap := expandTabsRemap(runes)
+		curVisCol := 0
+		if m.cursor.Col < len(colMap) {
+			curVisCol = colMap[m.cursor.Col]
+		}
+		if cw > 0 {
+			cursorChunk = curVisCol / cw
+		}
+	}
+	// Number of rows above the cursor's chunk that we can fill.
+	rowsAbove := vis - 1 - cursorChunk
+	if rowsAbove <= 0 {
+		return m.cursor.Line
+	}
+	l := m.cursor.Line - 1
+	for l >= 0 {
+		runes := []rune(m.buf.Line(l))
+		exp, _ := expandTabsRemap(runes)
+		chunks := visualChunks(len(exp), cw)
+		if chunks >= rowsAbove {
+			return l
+		}
+		rowsAbove -= chunks
+		l--
+	}
+	return max(0, l+1)
+}
+
 func (m *Model) scrollToCursor() {
-	vis := m.visibleLines()
 	if m.cursor.Line < m.topLine {
 		m.topLine = m.cursor.Line
+		return
 	}
-	if m.cursor.Line >= m.topLine+vis {
-		m.topLine = m.cursor.Line - vis + 1
+	cw := m.contentWidth()
+	vis := m.visibleLines()
+	curVisRow := m.cursorVisualRowFromTop(cw)
+	if curVisRow < vis {
+		return
 	}
-	m.topLine = max(0, m.topLine)
+	m.topLine = m.findTopLineForCursor(cw, vis)
+	if m.topLine < 0 {
+		m.topLine = 0
+	}
 }
 
 func (m Model) visibleLines() int {
@@ -290,12 +419,13 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 	}
 }
 
-// renderLine renders screen row i (0-based, relative to topLine) without a trailing newline.
-// Tabs are expanded to spaces so that cellbuf correctly measures visual widths.
-// Each line is padded to m.width so prior content is always fully overwritten.
-// overlays (sorted by col) are injected during the rune pass with no ANSI re-parsing.
-func (m Model) renderLine(i int, overlays []lineOverlay) string {
-	lineNum := m.topLine + i
+// renderLineChunk renders one wrap-chunk of a buffer line. overlays must have
+// chunk-relative column indices (i.e. already adjusted by chunkStart). Each
+// row is padded to m.width so prior terminal content is always overwritten.
+func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay) string {
+	lineNum := entry.bufLine
+	chunk := entry.chunk
+	chunkStart := entry.chunkStart
 	bufLineCount := m.buf.LineCount()
 	dispLineCount := m.displayLineCount()
 	gutterW := m.gutterWidth()
@@ -324,7 +454,7 @@ func (m Model) renderLine(i int, overlays []lineOverlay) string {
 		if gutterW > 0 {
 			sb.WriteString(gutterStyle.Render(strings.Repeat(" ", gutterW)))
 		}
-		if lineNum == m.cursor.Line {
+		if lineNum == m.cursor.Line && chunk == 0 {
 			sb.WriteString(cursorStyle.Render(" "))
 		} else {
 			sb.WriteString("~")
@@ -335,36 +465,40 @@ func (m Model) renderLine(i int, overlays []lineOverlay) string {
 	if gutterW > 0 {
 		hasDiags := len(m.diagnostics) > 0
 		hasPluginGutter := m.hasGutterDecorations()
-		numW := gutterW
-		if hasDiags {
-			numW -= 2
-		}
-		if hasPluginGutter {
-			numW -= 3
-		}
-		if numW > 0 {
-			numStr := fmt.Sprintf("%*d ", numW-1, lineNum+1)
-			if lineNum == m.cursor.Line {
-				sb.WriteString(gutterCurStyle.Render(numStr))
-			} else {
-				sb.WriteString(gutterStyle.Render(numStr))
+		if chunk == 0 {
+			numW := gutterW
+			if hasDiags {
+				numW -= 2
 			}
-		}
-		if hasDiags {
-			sb.WriteString(m.diagMarker(lineNum))
-		}
-		if hasPluginGutter {
-			text := m.gutterDecorFor(lineNum)
-			if text == "" {
-				sb.WriteString(gutterStyle.Render("   "))
-			} else {
-				label := text
-				if len([]rune(label)) > 2 {
-					label = string([]rune(label)[:2])
+			if hasPluginGutter {
+				numW -= 3
+			}
+			if numW > 0 {
+				numStr := fmt.Sprintf("%*d ", numW-1, lineNum+1)
+				if lineNum == m.cursor.Line {
+					sb.WriteString(gutterCurStyle.Render(numStr))
+				} else {
+					sb.WriteString(gutterStyle.Render(numStr))
 				}
-				sb.WriteString(" ")
-				sb.WriteString(decorOverlayStyle.Render(fmt.Sprintf("%-2s", label)))
 			}
+			if hasDiags {
+				sb.WriteString(m.diagMarker(lineNum))
+			}
+			if hasPluginGutter {
+				text := m.gutterDecorFor(lineNum)
+				if text == "" {
+					sb.WriteString(gutterStyle.Render("   "))
+				} else {
+					label := text
+					if len([]rune(label)) > 2 {
+						label = string([]rune(label)[:2])
+					}
+					sb.WriteString(" ")
+					sb.WriteString(decorOverlayStyle.Render(fmt.Sprintf("%-2s", label)))
+				}
+			}
+		} else {
+			sb.WriteString(gutterStyle.Render(strings.Repeat(" ", gutterW)))
 		}
 	}
 
@@ -372,7 +506,11 @@ func (m Model) renderLine(i int, overlays []lineOverlay) string {
 	runes := []rune(line)
 	expandedRunes, colMap := expandTabsRemap(runes)
 
-	// Remap selection columns from rune indices to visual columns.
+	// Slice to this chunk's visual column range.
+	chunkEnd := min(chunkStart+cw, len(expandedRunes))
+	chunkRunes := expandedRunes[chunkStart:chunkEnd]
+
+	// Remap selection columns to chunk-relative visual cols.
 	selA, selB := m.selectionCols(lineNum, len(runes))
 	if selA >= 0 {
 		newSelA := colMap[selA]
@@ -384,20 +522,32 @@ func (m Model) renderLine(i int, overlays []lineOverlay) string {
 		}
 		selA = newSelA
 		selB = max(newSelA, newSelB)
+		if selA >= chunkStart+cw || selB < chunkStart {
+			selA, selB = -1, -1
+		} else {
+			selA = max(0, selA-chunkStart)
+			selB = min(cw-1, selB-chunkStart)
+		}
 	}
 
-	// Remap cursor column from rune index to visual column.
+	// Remap cursor column to chunk-relative visual col.
 	curCol := -1
 	if lineNum == m.cursor.Line {
 		c := min(m.cursor.Col, len(runes))
-		curCol = colMap[c]
+		absVisCol := colMap[c]
+		if absVisCol >= chunkStart && absVisCol < chunkStart+cw {
+			curCol = absVisCol - chunkStart
+		}
+		// Show cursor at end of last chunk when cursor is past all content.
+		if chunk > 0 && absVisCol == len(expandedRunes) && chunkStart+cw >= len(expandedRunes) {
+			curCol = absVisCol - chunkStart
+		}
 	}
 
-	// Remap highlight spans from rune indices to visual columns.
+	// Remap highlight spans to chunk-relative visual cols.
 	var remappedSpans []highlight.Span
 	if spans := m.hlSpans[lineNum]; len(spans) > 0 {
-		remappedSpans = make([]highlight.Span, len(spans))
-		for idx, s := range spans {
+		for _, s := range spans {
 			newStart := 0
 			if s.StartCol < len(colMap) {
 				newStart = colMap[s.StartCol]
@@ -410,12 +560,31 @@ func (m Model) renderLine(i int, overlays []lineOverlay) string {
 					newEnd = colMap[len(runes)]
 				}
 			}
-			remappedSpans[idx] = highlight.Span{StartCol: newStart, EndCol: newEnd, ANSI: s.ANSI}
+			if newStart >= chunkStart+cw || newEnd <= chunkStart {
+				continue
+			}
+			remappedSpans = append(remappedSpans, highlight.Span{
+				StartCol: max(0, newStart-chunkStart),
+				EndCol:   min(cw, newEnd-chunkStart),
+				ANSI:     s.ANSI,
+			})
 		}
 	}
 
-	renderLineRunes(&sb, expandedRunes, selA, selB, curCol, remappedSpans, overlays)
+	renderLineRunes(&sb, chunkRunes, selA, selB, curCol, remappedSpans, overlays)
 	return padToWidth(sb.String())
+}
+
+// renderLine renders screen row i for backward compatibility with tests. In
+// production code View() calls renderLineChunk directly via the layout.
+func (m Model) renderLine(i int, overlays []lineOverlay) string {
+	cw := m.contentWidth()
+	vis := m.visibleLines()
+	layout := m.buildScreenLayout(vis, cw)
+	if i < len(layout) {
+		return m.renderLineChunk(layout[i], cw, overlays)
+	}
+	return m.renderLineChunk(layoutEntry{bufLine: m.topLine + i}, cw, overlays)
 }
 
 // renderPopupBox builds the styled lines of a popup menu with rounded borders.
@@ -757,18 +926,14 @@ func renderCompletionPopup(items []ClientCompletion, selected, maxW int) []strin
 	return lines
 }
 
-// buildRowOverlays groups overlay decorations by visible row and pre-computes each
-// overlay's visual column and styled text. The returned slice has length vis; rows
-// without any overlay decoration have a nil entry. Overlays within each row are
-// sorted by col so renderLineRunes can inject them in a single left-to-right pass.
-func (m Model) buildRowOverlays(vis int) [][]lineOverlay {
+// buildRowOverlays groups overlay decorations by visible screen row. Overlay
+// column values are stored chunk-relative so renderLineRunes can consume them
+// directly. The returned slice has length len(layout).
+func (m Model) buildRowOverlays(layout []layoutEntry, cw int) [][]lineOverlay {
+	vis := len(layout)
 	rows := make([][]lineOverlay, vis)
 	for _, d := range m.decorations {
 		if d.Kind != ClientDecorationOverlay || d.Text == "" {
-			continue
-		}
-		row := int(d.Line) - m.topLine
-		if row < 0 || row >= vis {
 			continue
 		}
 		lineStr := m.buf.Line(int(d.Line))
@@ -777,8 +942,13 @@ func (m Model) buildRowOverlays(vis int) [][]lineOverlay {
 		if int(d.Col) < len(colMap) {
 			visCol = colMap[d.Col]
 		}
+		row := screenRowOf(layout, int(d.Line), visCol, cw)
+		if row < 0 || row >= vis {
+			continue
+		}
+		chunkStart := layout[row].chunkStart
 		styledText := decorOverlayStyle.Render(d.Text)
-		rows[row] = append(rows[row], lineOverlay{col: visCol, text: styledText, w: lipgloss.Width(styledText)})
+		rows[row] = append(rows[row], lineOverlay{col: visCol - chunkStart, text: styledText, w: lipgloss.Width(styledText)})
 	}
 	// Sort each row's overlays by column (insertion sort; typically 1-4 items).
 	for ri, ovls := range rows {
@@ -792,24 +962,26 @@ func (m Model) buildRowOverlays(vis int) [][]lineOverlay {
 	return rows
 }
 
-// buildSearchOverlays builds per-row overlays for all search matches. Returns nil
-// when there are no matches.
-func (m Model) buildSearchOverlays(vis int) [][]lineOverlay {
+// buildSearchOverlays builds per-row overlays for all search matches. Overlay
+// column values are chunk-relative. Returns nil when there are no matches.
+func (m Model) buildSearchOverlays(layout []layoutEntry, cw int) [][]lineOverlay {
 	if len(m.searchMatches) == 0 {
 		return nil
 	}
+	vis := len(layout)
 	rows := make([][]lineOverlay, vis)
 	for i, sm := range m.searchMatches {
-		row := sm.line - m.topLine
-		if row < 0 || row >= vis {
-			continue
-		}
 		lineRunes := []rune(m.buf.Line(sm.line))
 		_, colMap := expandTabsRemap(lineRunes)
 		visCol := sm.col
 		if sm.col < len(colMap) {
 			visCol = colMap[sm.col]
 		}
+		row := screenRowOf(layout, sm.line, visCol, cw)
+		if row < 0 || row >= vis {
+			continue
+		}
+		chunkStart := layout[row].chunkStart
 		matchEnd := min(sm.col+sm.length, len(lineRunes))
 		style := searchMatchStyle
 		if i == m.searchIdx {
@@ -824,14 +996,14 @@ func (m Model) buildSearchOverlays(vis int) [][]lineOverlay {
 			if m.cursor.Col >= sm.col && m.cursor.Col < matchEnd {
 				if m.cursor.Col > sm.col {
 					rows[row] = append(rows[row], lineOverlay{
-						col:  visCol,
+						col:  visCol - chunkStart,
 						text: style.Render(string(lineRunes[sm.col:m.cursor.Col])),
 						w:    m.cursor.Col - sm.col,
 					})
 				}
 				if m.cursor.Col+1 < matchEnd {
 					rows[row] = append(rows[row], lineOverlay{
-						col:  cursorVisCol + 1,
+						col:  cursorVisCol + 1 - chunkStart,
 						text: style.Render(string(lineRunes[m.cursor.Col+1 : matchEnd])),
 						w:    matchEnd - (m.cursor.Col + 1),
 					})
@@ -841,7 +1013,7 @@ func (m Model) buildSearchOverlays(vis int) [][]lineOverlay {
 		}
 
 		rows[row] = append(rows[row], lineOverlay{
-			col:  visCol,
+			col:  visCol - chunkStart,
 			text: style.Render(string(lineRunes[sm.col:matchEnd])),
 			w:    sm.length,
 		})
@@ -892,9 +1064,11 @@ func (m Model) View() string {
 	}
 
 	vis := m.visibleLines()
+	cw := m.contentWidth()
+	layout := m.buildScreenLayout(vis, cw)
 	lines := make([]string, vis)
-	rowOverlays := m.buildRowOverlays(vis)
-	if searchOverlays := m.buildSearchOverlays(vis); searchOverlays != nil {
+	rowOverlays := m.buildRowOverlays(layout, cw)
+	if searchOverlays := m.buildSearchOverlays(layout, cw); searchOverlays != nil {
 		for i := range vis {
 			if len(searchOverlays[i]) > 0 {
 				rowOverlays[i] = mergeOverlays(searchOverlays[i], rowOverlays[i])
@@ -902,7 +1076,7 @@ func (m Model) View() string {
 		}
 	}
 	for i := range vis {
-		lines[i] = m.renderLine(i, rowOverlays[i])
+		lines[i] = m.renderLineChunk(layout[i], cw, rowOverlays[i])
 	}
 
 	// Overlay prefix-command popup in the bottom-right corner.
@@ -985,7 +1159,10 @@ func (m Model) View() string {
 		}
 
 		// Vertical: prefer below the cursor, fall back to above.
-		cursorScreenRow := m.cursor.Line - m.topLine
+		cursorScreenRow := screenRowOf(layout, m.cursor.Line, cursorVisCol, cw)
+		if cursorScreenRow < 0 {
+			cursorScreenRow = m.cursorVisualRowFromTop(cw)
+		}
 		startRow := cursorScreenRow + 1
 		if startRow+popH > vis {
 			startRow = cursorScreenRow - popH
@@ -1205,6 +1382,9 @@ func (m Model) renderStatusBar() string {
 			centerContent = m.filePath
 			if m.buf.Dirty() {
 				centerContent += " [+]"
+			}
+			if len(m.searchMatches) > 0 {
+				centerContent += fmt.Sprintf("   [%d/%d]", m.searchIdx+1, len(m.searchMatches))
 			}
 		}
 	}

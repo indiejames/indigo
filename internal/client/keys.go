@@ -32,6 +32,9 @@ var prefixCmds = []command{
 			{key: 'g', label: "Go to top of file", execute: executeGoToTop},
 			{key: 'e', label: "Go to end of file", execute: executeGoToEnd},
 			{key: 'd', label: "Go to definition", execute: executeGoToDefinition},
+			{key: 'h', label: "Go to line start", execute: executeGoToLineStart},
+			{key: 'l', label: "Go to line end", execute: executeGoToLineEnd},
+			{key: 's', label: "Go to first non-whitespace", execute: executeGoToFirstNonWS},
 		},
 	},
 	{
@@ -112,6 +115,29 @@ func executeGoToEnd(m Model) (tea.Model, tea.Cmd) {
 
 func executeGoToDefinition(m Model) (tea.Model, tea.Cmd) {
 	return m, m.fetchDefinition()
+}
+
+func executeGoToLineStart(m Model) (tea.Model, tea.Cmd) {
+	m.sel = nil
+	m.cursor.Col = 0
+	return m, nil
+}
+
+func executeGoToLineEnd(m Model) (tea.Model, tea.Cmd) {
+	m.sel = nil
+	m.cursor.Col = m.buf.LineLen(m.cursor.Line)
+	return m, nil
+}
+
+func executeGoToFirstNonWS(m Model) (tea.Model, tea.Cmd) {
+	m.sel = nil
+	runes := []rune(m.buf.Line(m.cursor.Line))
+	i := 0
+	for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t') {
+		i++
+	}
+	m.cursor.Col = i
+	return m, nil
 }
 
 // executeSelectInsideWord selects the full word enclosing the cursor.
@@ -326,20 +352,31 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "esc":
 		m.sel = nil
+		m = m.withClearedSearch()
 
 	// Enter insert mode — clear any selection and start an undo group.
 	case "i":
+		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
 
+	case "a":
+		m = m.withClearedSearch()
+		m.sel = nil
+		m.currentGroup = []document.Op{}
+		m.mode = ModeInsert
+		m.cursor.Col++
+
 	case "A":
+		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
 		m.cursor.Col = m.buf.LineLen(m.cursor.Line)
 
 	case "o":
+		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
@@ -355,6 +392,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return applyOp(m, op)
 
 	case "O":
+		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
@@ -440,19 +478,36 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Sequence(cmds...)
 		}
 
-	// Selection: w = next word, x = current line.
+	// Selection: create or extend.
 	case "w":
 		m.selectWord()
+
+	case "W":
+		m.extendWordForward()
 
 	case "x":
 		m.selectLine()
 
+	case "X":
+		m.extendLineBackward()
+
+	case "%":
+		m.selectAll()
+
+	case ";":
+		m.sel = nil // collapse to cursor
+
+	case "alt+;":
+		m.flipSelection()
+
 	// Operators: act on selection (no-op if nothing selected).
 	case "d":
+		m = m.withClearedSearch()
 		m2, cmd := m.deleteSelection()
 		return m2, cmd
 
 	case "c":
+		m = m.withClearedSearch()
 		m.currentGroup = []document.Op{}
 		m2, cmd := m.deleteSelection()
 		m2.mode = ModeInsert
@@ -498,6 +553,16 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "$", "end":
 		m.sel = nil
 		m.cursor.Col = m.buf.LineLen(m.cursor.Line)
+
+	// Word/line navigation.
+	case "b":
+		m.sel = nil
+		m.moveToPrevWordStart()
+	case "e":
+		m.sel = nil
+		m.moveToWordEnd()
+	case "B":
+		m.extendWordBackward()
 
 	default:
 		// Check whether this key starts a prefix command sequence.
@@ -883,6 +948,16 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("E: unknown command: %s", cmd)
 	}
 	return m, nil
+}
+
+// withClearedSearch resets all within-buffer search state, removing match
+// highlights and disabling n/N navigation until the next search.
+func (m Model) withClearedSearch() Model {
+	m.searchQuery = ""
+	m.searchMatches = nil
+	m.searchIdx = -1
+	m.searchErr = ""
+	return m
 }
 
 // parseGrepArgs splits a grep command argument into a pattern and an optional

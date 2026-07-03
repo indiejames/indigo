@@ -210,3 +210,128 @@ func TestSelectionColsEmptyLine(t *testing.T) {
 		t.Errorf("empty line: got (%d, %d), want (-1, -1)", a, b)
 	}
 }
+
+// --- soft-wrap helpers ---
+
+func TestVisualChunks(t *testing.T) {
+	cases := []struct {
+		expandedLen, cw, want int
+	}{
+		{0, 80, 1},   // empty line still takes one row
+		{80, 80, 1},  // exact fit
+		{81, 80, 2},  // one char overflow → second chunk
+		{160, 80, 2}, // exactly two chunks
+		{161, 80, 3}, // three chunks
+		{5, 80, 1},   // short line
+	}
+	for _, c := range cases {
+		got := visualChunks(c.expandedLen, c.cw)
+		if got != c.want {
+			t.Errorf("visualChunks(%d, %d) = %d, want %d", c.expandedLen, c.cw, got, c.want)
+		}
+	}
+}
+
+func TestBuildScreenLayoutNoWrap(t *testing.T) {
+	// Five short lines, each fits in one screen row.
+	m := newTestModel("a\nb\nc\nd\ne\n")
+	m.height = 6 // vis = 5
+	m.width = 80
+	cw := m.contentWidth()
+	vis := m.visibleLines()
+	layout := m.buildScreenLayout(vis, cw)
+	if len(layout) != vis {
+		t.Fatalf("layout len = %d, want %d", len(layout), vis)
+	}
+	for i, e := range layout {
+		if e.bufLine != i || e.chunk != 0 || e.chunkStart != 0 {
+			t.Errorf("layout[%d] = %+v, want {bufLine:%d chunk:0 chunkStart:0}", i, e, i)
+		}
+	}
+}
+
+func TestBuildScreenLayoutWraps(t *testing.T) {
+	// One line that is 100 chars wide, viewport is 40 cols → 3 chunks.
+	longLine := make([]byte, 100)
+	for i := range longLine {
+		longLine[i] = 'x'
+	}
+	m := newTestModel(string(longLine) + "\n")
+	m.height = 6 // vis = 5
+	m.width = 40 // cw = 40 (no gutter when LineNumbers disabled)
+	cw := m.contentWidth()
+	vis := m.visibleLines()
+	layout := m.buildScreenLayout(vis, cw)
+	// 100 chars at cw=40 → ceil(100/40)=3 chunks.
+	if layout[0].bufLine != 0 || layout[0].chunk != 0 || layout[0].chunkStart != 0 {
+		t.Errorf("chunk0: %+v", layout[0])
+	}
+	if layout[1].bufLine != 0 || layout[1].chunk != 1 || layout[1].chunkStart != 40 {
+		t.Errorf("chunk1: %+v", layout[1])
+	}
+	if layout[2].bufLine != 0 || layout[2].chunk != 2 || layout[2].chunkStart != 80 {
+		t.Errorf("chunk2: %+v", layout[2])
+	}
+}
+
+func TestScrollToCursorWrappedLine(t *testing.T) {
+	// Line is 100 chars; viewport is 40 cols wide and 4 rows tall (vis=3).
+	// Cursor at col 85 (chunk 2, chunkStart 80) — the third visual row.
+	// With topLine=0 the cursor is at visual row 2, which fits in vis=3. No scroll needed.
+	longLine := make([]byte, 100)
+	for i := range longLine {
+		longLine[i] = 'x'
+	}
+	m := newTestModel(string(longLine) + "\n")
+	m.height = 4
+	m.width = 40
+	m.cursor.Line = 0
+	m.cursor.Col = 85
+	m.topLine = 0
+	m.scrollToCursor()
+	if m.topLine != 0 {
+		t.Errorf("topLine = %d, want 0 (cursor fits in first 3 visual rows)", m.topLine)
+	}
+}
+
+func TestCursorVisualRowFromTop(t *testing.T) {
+	// Short lines: cursor at buffer line 2 is visual row 2 from topLine 0.
+	m := newTestModel("a\nb\nc\nd\n")
+	m.width = 80
+	m.cursor.Line = 2
+	m.topLine = 0
+	got := m.cursorVisualRowFromTop(m.contentWidth())
+	if got != 2 {
+		t.Errorf("short lines: cursorVisualRowFromTop = %d, want 2", got)
+	}
+}
+
+func TestScreenRowOf(t *testing.T) {
+	longLine := make([]byte, 100)
+	for i := range longLine {
+		longLine[i] = 'x'
+	}
+	m := newTestModel(string(longLine) + "\n")
+	m.height = 6
+	m.width = 40
+	cw := m.contentWidth()
+	vis := m.visibleLines()
+	layout := m.buildScreenLayout(vis, cw)
+
+	// visCol=0 → chunk 0 → row 0
+	if r := screenRowOf(layout, 0, 0, cw); r != 0 {
+		t.Errorf("visCol=0: row=%d, want 0", r)
+	}
+	// visCol=40 → chunk 1 → row 1
+	if r := screenRowOf(layout, 0, 40, cw); r != 1 {
+		t.Errorf("visCol=40: row=%d, want 1", r)
+	}
+	// visCol=80 → chunk 2 → row 2
+	if r := screenRowOf(layout, 0, 80, cw); r != 2 {
+		t.Errorf("visCol=80: row=%d, want 2", r)
+	}
+	// bufLine not in layout → -1
+	if r := screenRowOf(layout, 99, 0, cw); r != -1 {
+		t.Errorf("missing bufLine: row=%d, want -1", r)
+	}
+}

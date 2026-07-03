@@ -10,22 +10,56 @@ const doubleClickWindow = 400 * time.Millisecond
 
 // clickToPos converts a terminal (x, y) coordinate to a buffer position.
 // Returns ok=false if the click is outside the text area (e.g. on the status bar).
+//
+// With soft-wrap, multiple screen rows can belong to the same buffer line, so
+// we consult the same layout that View() builds rather than using topLine+y.
 func (m *Model) clickToPos(x, y int) (document.Pos, bool) {
 	if y >= m.height-1 {
 		return document.Pos{}, false
 	}
-	lineNum := m.topLine + y
+	cw := m.contentWidth()
+	vis := m.visibleLines()
+	layout := m.buildScreenLayout(vis, cw)
+	if y >= len(layout) {
+		return document.Pos{}, false
+	}
+
+	entry := layout[y]
+	lineNum := entry.bufLine
+
+	// Clamp to displayable lines (exclude phantom trailing line).
 	disp := m.displayLineCount()
 	if lineNum >= disp {
 		lineNum = max(0, disp-1)
 	}
-	col := max(0, x-m.gutterWidth())
-	lineLen := m.buf.LineLen(lineNum)
-	maxCol := lineLen
+
+	// Convert screen x to a visual column within the full (unwrapped) line.
+	contentX := max(0, x-m.gutterWidth())
+	absVisCol := entry.chunkStart + contentX
+
+	// Map the visual column back to a buffer column via colMap.
+	lineRunes := []rune(m.buf.Line(lineNum))
+	_, colMap := expandTabsRemap(lineRunes)
+
+	col := 0
+	for i := 0; i < len(lineRunes); i++ {
+		if colMap[i] <= absVisCol {
+			col = i
+		} else {
+			break
+		}
+	}
+	// Click past the visual end of the line → end of line.
+	if len(colMap) > 0 && absVisCol >= colMap[len(lineRunes)] {
+		col = len(lineRunes)
+	}
+
+	maxCol := m.buf.LineLen(lineNum)
 	if m.mode == ModeNormal && maxCol > 0 {
 		maxCol--
 	}
 	col = min(col, maxCol)
+
 	return document.Pos{Line: lineNum, Col: col}, true
 }
 

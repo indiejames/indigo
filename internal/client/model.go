@@ -196,6 +196,29 @@ type Selection struct {
 	IsLine bool
 }
 
+// ExtraCursor represents a secondary cursor with an optional selection.
+// Extra cursors are created by Ctrl+D (next occurrence), C (cursor below),
+// and Alt+s (split selection). Esc in Normal mode collapses all extra cursors.
+type ExtraCursor struct {
+	pos document.Pos
+	sel *Selection
+}
+
+// cursorSnapshot captures the full cursor state (primary + selection + extras)
+// at a point in time, used to restore the editing context on undo/redo.
+type cursorSnapshot struct {
+	cursor document.Pos
+	sel    *Selection
+	extras []ExtraCursor
+}
+
+// undoEntry pairs a group of inverse ops with the cursor state from before
+// the edit, so undo can restore both the buffer content and all cursor positions.
+type undoEntry struct {
+	ops    []document.Op
+	before cursorSnapshot
+}
+
 // Model is the Bubble Tea model for a single buffer view.
 type Model struct {
 	rpc            *RPC
@@ -216,10 +239,11 @@ type Model struct {
 	dragging       bool
 	lastClickAt    time.Time
 	lastClickPos   document.Pos
-	undoStack      [][]document.Op // each entry is a group of inverse ops applied in reverse
-	redoStack      [][]document.Op // mirrors undoStack; cleared on any new edit
-	currentGroup   []document.Op   // non-nil while accumulating ops for the current Insert session
-	savedUndoDepth int             // len(undoStack) at the time of the last save
+	undoStack      []undoEntry   // each entry is inverse ops + pre-edit cursor snapshot
+	redoStack      []undoEntry   // mirrors undoStack; cleared on any new edit
+	currentGroup   []document.Op // non-nil while accumulating ops for the current Insert session
+	groupBefore    cursorSnapshot // cursor state when currentGroup was opened
+	savedUndoDepth int           // len(undoStack) at the time of the last save
 	cmdBuf         string          // text typed after ':' while in ModeCommand
 	prefixSeq      []rune          // keys typed so far for a multi-key Normal-mode command
 	searchQuery    string
@@ -240,8 +264,11 @@ type Model struct {
 	captureMode      bool
 	captureRemaining uint32
 
+	// Multi-cursor state
+	extraCursors []ExtraCursor
+
 	// LSP state
-	diagnostics      []ClientDiag
+	diagnostics []ClientDiag
 	diagTick         int            // counter; fetch every 10 ticks (~1.2s)
 	lspActive        bool           // true once first diagnostic poll returns (LSP is running)
 	hoverContent     *string        // non-nil = hover popup visible
@@ -273,6 +300,20 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath string
 
 // Dirty reports whether the buffer has unsaved changes.
 func (m Model) Dirty() bool { return m.buf.Dirty() }
+
+// cursorSnap captures the current cursor, selection, and extra-cursor state.
+func (m Model) cursorSnap() cursorSnapshot {
+	var selCopy *Selection
+	if m.sel != nil {
+		s := *m.sel
+		selCopy = &s
+	}
+	return cursorSnapshot{
+		cursor: m.cursor,
+		sel:    selCopy,
+		extras: append([]ExtraCursor(nil), m.extraCursors...),
+	}
+}
 
 // FilePath returns the absolute path of the file this buffer is editing.
 func (m Model) FilePath() string { return m.filePath }

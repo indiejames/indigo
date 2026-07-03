@@ -142,29 +142,31 @@ func executeGoToFirstNonWS(m Model) (tea.Model, tea.Cmd) {
 
 // executeSelectInsideWord selects the full word enclosing the cursor.
 func executeSelectInsideWord(m Model) (tea.Model, tea.Cmd) {
-	runes := []rune(m.buf.Line(m.cursor.Line))
-	if len(runes) == 0 {
-		return m, nil
-	}
-	col := min(m.cursor.Col, len(runes)-1)
-	if !isWordChar(runes[col]) {
-		return m, nil
-	}
-	start := col
-	for start > 0 && isWordChar(runes[start-1]) {
-		start--
-	}
-	end := col
-	for end+1 < len(runes) && isWordChar(runes[end+1]) {
-		end++
-	}
-	lineNum := m.cursor.Line
-	m.sel = &Selection{
-		Anchor: document.Pos{Line: lineNum, Col: start},
-		Head:   document.Pos{Line: lineNum, Col: end},
-	}
-	m.cursor = m.sel.Head
-	m.scrollToCursor()
+	m.applyToAllCursors(func(m *Model) {
+		runes := []rune(m.buf.Line(m.cursor.Line))
+		if len(runes) == 0 {
+			return
+		}
+		col := min(m.cursor.Col, len(runes)-1)
+		if !isWordChar(runes[col]) {
+			return
+		}
+		start := col
+		for start > 0 && isWordChar(runes[start-1]) {
+			start--
+		}
+		end := col
+		for end+1 < len(runes) && isWordChar(runes[end+1]) {
+			end++
+		}
+		lineNum := m.cursor.Line
+		m.sel = &Selection{
+			Anchor: document.Pos{Line: lineNum, Col: start},
+			Head:   document.Pos{Line: lineNum, Col: end},
+		}
+		m.cursor = m.sel.Head
+		m.scrollToCursor()
+	})
 	return m, nil
 }
 
@@ -351,6 +353,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "esc":
+		m.extraCursors = nil
 		m.sel = nil
 		m = m.withClearedSearch()
 
@@ -359,12 +362,14 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
+		m.groupBefore = m.cursorSnap()
 		m.mode = ModeInsert
 
 	case "a":
 		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
+		m.groupBefore = m.cursorSnap()
 		m.mode = ModeInsert
 		m.cursor.Col++
 
@@ -372,6 +377,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
+		m.groupBefore = m.cursorSnap()
 		m.mode = ModeInsert
 		m.cursor.Col = m.buf.LineLen(m.cursor.Line)
 
@@ -379,6 +385,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
+		m.groupBefore = m.cursorSnap()
 		m.mode = ModeInsert
 		line := m.cursor.Line
 		op := document.Op{
@@ -395,6 +402,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
+		m.groupBefore = m.cursorSnap()
 		m.mode = ModeInsert
 		col := 0
 		if m.cursor.Line > 0 {
@@ -418,29 +426,25 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "u":
 		if len(m.undoStack) > 0 {
-			group := m.undoStack[len(m.undoStack)-1]
+			entry := m.undoStack[len(m.undoStack)-1]
 			m.undoStack = m.undoStack[:len(m.undoStack)-1]
-			m.sel = nil
+			// Snapshot current (post-edit) state so redo can restore it.
+			redoEntry := undoEntry{before: m.cursorSnap()}
 			var cmds []tea.Cmd
-			var redoGroup []document.Op
-			for i := len(group) - 1; i >= 0; i-- {
-				inv := group[i]
+			for i := len(entry.ops) - 1; i >= 0; i-- {
+				inv := entry.ops[i]
 				inv.ClientID = m.rpc.ClientID()
 				reInv := inverseOp(m, inv) // compute re-inverse before applying
 				m.buf.Apply(inv)
 				cmds = append(cmds, m.sendToServer(inv))
-				redoGroup = append(redoGroup, reInv)
+				redoEntry.ops = append(redoEntry.ops, reInv)
 			}
-			m.redoStack = append(m.redoStack, redoGroup)
-			if len(group) > 0 {
-				first := group[0]
-				if first.Type == document.OpDelete {
-					m.cursor = document.Pos{Line: first.FromLine, Col: first.FromCol}
-				} else {
-					m.cursor = document.Pos{Line: first.InsertLine, Col: first.InsertCol}
-				}
-				m.scrollToCursor()
-			}
+			m.redoStack = append(m.redoStack, redoEntry)
+			// Restore pre-edit cursor state (cursor + selection + extra cursors).
+			m.cursor = entry.before.cursor
+			m.sel = entry.before.sel
+			m.extraCursors = entry.before.extras
+			m.scrollToCursor()
 			if len(m.undoStack) == m.savedUndoDepth {
 				m.buf.SetClean()
 			}
@@ -449,66 +453,84 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "U":
 		if len(m.redoStack) > 0 {
-			group := m.redoStack[len(m.redoStack)-1]
+			entry := m.redoStack[len(m.redoStack)-1]
 			m.redoStack = m.redoStack[:len(m.redoStack)-1]
-			m.sel = nil
+			// Snapshot current (pre-edit) state so undo can restore it.
+			newUndoEntry := undoEntry{before: m.cursorSnap()}
 			var cmds []tea.Cmd
-			var newUndoGroup []document.Op
-			for i := len(group) - 1; i >= 0; i-- {
-				op := group[i]
+			for i := len(entry.ops) - 1; i >= 0; i-- {
+				op := entry.ops[i]
 				op.ClientID = m.rpc.ClientID()
 				inv := inverseOp(m, op) // compute inverse before applying
 				m.buf.Apply(op)
 				cmds = append(cmds, m.sendToServer(op))
-				newUndoGroup = append(newUndoGroup, inv)
+				newUndoEntry.ops = append(newUndoEntry.ops, inv)
 			}
-			m.undoStack = append(m.undoStack, newUndoGroup)
-			if len(group) > 0 {
-				first := group[len(group)-1] // first applied during redo
-				if first.Type == document.OpInsert {
-					m.cursor = document.Pos{Line: first.InsertLine, Col: first.InsertCol}
-				} else {
-					m.cursor = document.Pos{Line: first.FromLine, Col: first.FromCol}
-				}
-				m.scrollToCursor()
-			}
+			m.undoStack = append(m.undoStack, newUndoEntry)
+			// Restore post-edit cursor state (cursor + selection + extra cursors).
+			m.cursor = entry.before.cursor
+			m.sel = entry.before.sel
+			m.extraCursors = entry.before.extras
+			m.scrollToCursor()
 			if len(m.undoStack) == m.savedUndoDepth {
 				m.buf.SetClean()
 			}
 			return m, tea.Sequence(cmds...)
 		}
 
-	// Selection: create or extend.
+	// Selection: create or extend. All operations apply to every cursor.
 	case "w":
-		m.selectWord()
+		m.applyToAllCursors(func(m *Model) {
+			m.selectWord()
+		})
 
 	case "W":
-		m.extendWordForward()
+		m.applyToAllCursors(func(m *Model) {
+			m.extendWordForward()
+		})
 
 	case "x":
-		m.selectLine()
+		m.applyToAllCursors(func(m *Model) {
+			m.selectLine()
+		})
 
 	case "X":
-		m.extendLineBackward()
+		m.applyToAllCursors(func(m *Model) {
+			m.extendLineBackward()
+		})
 
 	case "%":
-		m.selectAll()
+		m.selectAll() // selects whole buffer; primary only makes sense here
 
 	case ";":
-		m.sel = nil // collapse to cursor
+		m.sel = nil
+		for i := range m.extraCursors {
+			m.extraCursors[i].sel = nil
+		}
 
 	case "alt+;":
-		m.flipSelection()
+		m.applyToAllCursors(func(m *Model) {
+			m.flipSelection()
+		})
 
 	// Operators: act on selection (no-op if nothing selected).
 	case "d":
 		m = m.withClearedSearch()
+		if len(m.extraCursors) > 0 {
+			return deleteAllCursorSelections(m)
+		}
 		m2, cmd := m.deleteSelection()
 		return m2, cmd
 
 	case "c":
 		m = m.withClearedSearch()
 		m.currentGroup = []document.Op{}
+		m.groupBefore = m.cursorSnap()
+		if len(m.extraCursors) > 0 {
+			m2, cmd := deleteAllCursorSelections(m)
+			m2.mode = ModeInsert
+			return m2, cmd
+		}
 		m2, cmd := m.deleteSelection()
 		m2.mode = ModeInsert
 		return m2, cmd
@@ -523,46 +545,89 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.sel = nil
 		}
 
-	// Movement — clears selection.
+	// Movement — clears selection. All movements apply to every cursor.
 	case "h", "left":
-		m.sel = nil
-		m.moveCursor(0, -1)
+		m.applyToAllCursors(func(m *Model) {
+			m.sel = nil
+			m.moveCursor(0, -1)
+		})
 	case "l", "right":
-		m.sel = nil
-		m.moveCursor(0, 1)
+		m.applyToAllCursors(func(m *Model) {
+			m.sel = nil
+			m.moveCursor(0, 1)
+		})
 	case "j", "down":
-		m.sel = nil
-		m.moveCursor(1, 0)
+		m.applyToAllCursors(func(m *Model) {
+			m.sel = nil
+			m.moveCursor(1, 0)
+		})
 	case "k", "up":
-		m.sel = nil
-		m.moveCursor(-1, 0)
+		m.applyToAllCursors(func(m *Model) {
+			m.sel = nil
+			m.moveCursor(-1, 0)
+		})
 	case "ctrl+f", "pgdown":
-		m.sel = nil
-		m.moveCursor(m.visibleLines(), 0)
+		vis := m.visibleLines()
+		m.applyToAllCursors(func(m *Model) {
+			m.sel = nil
+			m.moveCursor(vis, 0)
+		})
 	case "ctrl+b", "pgup":
-		m.sel = nil
-		m.moveCursor(-m.visibleLines(), 0)
+		vis := m.visibleLines()
+		m.applyToAllCursors(func(m *Model) {
+			m.sel = nil
+			m.moveCursor(-vis, 0)
+		})
 	case "G":
-		m.sel = nil
 		last := max(0, m.buf.LineCount()-1)
-		m.cursor = document.Pos{Line: last, Col: 0}
-		m.scrollToCursor()
+		m.applyToAllCursors(func(m *Model) {
+			m.sel = nil
+			m.cursor = document.Pos{Line: last, Col: 0}
+			m.scrollToCursor()
+		})
 	case "0", "^", "home":
-		m.sel = nil
-		m.cursor.Col = 0
+		m.applyToAllCursors(func(m *Model) {
+			m.sel = nil
+			m.cursor.Col = 0
+		})
 	case "$", "end":
-		m.sel = nil
-		m.cursor.Col = m.buf.LineLen(m.cursor.Line)
+		m.applyToAllCursors(func(m *Model) {
+			m.sel = nil
+			m.cursor.Col = m.buf.LineLen(m.cursor.Line)
+		})
 
 	// Word/line navigation.
 	case "b":
-		m.sel = nil
-		m.moveToPrevWordStart()
+		m.applyToAllCursors(func(m *Model) {
+			m.sel = nil
+			m.moveToPrevWordStart()
+		})
 	case "e":
-		m.sel = nil
-		m.moveToWordEnd()
+		m.applyToAllCursors(func(m *Model) {
+			m.sel = nil
+			m.moveToWordEnd()
+		})
 	case "B":
 		m.extendWordBackward()
+
+	// Multi-cursor.
+	case "ctrl+d":
+		selectNextOccurrence(&m)
+
+	case "C":
+		m = m.withClearedSearch()
+		addCursorBelow(&m)
+
+	case "alt+s":
+		if m.sel == nil {
+			m.status = "alt+s: select multiple lines first (x to select, X to extend)"
+		} else if start, end := m.sel.ordered(); start.Line == end.Line {
+			m.status = "alt+s: selection must span multiple lines"
+		} else {
+			_ = start
+			_ = end
+			splitSelectionIntoCursors(&m)
+		}
 
 	default:
 		// Check whether this key starts a prefix command sequence.
@@ -614,7 +679,7 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		// Commit the undo group accumulated during this Insert session.
 		if len(m.currentGroup) > 0 {
-			m.undoStack = append(m.undoStack, m.currentGroup)
+			m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: m.groupBefore})
 		}
 		m.currentGroup = nil
 		return m, nil
@@ -626,6 +691,9 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.doSave()
 
 	case "backspace":
+		if len(m.extraCursors) > 0 {
+			return applyBackspaceToAllCursors(m)
+		}
 		if m.cursor.Col > 0 {
 			op := document.Op{
 				ClientID: m.rpc.ClientID(),
@@ -676,6 +744,9 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "enter":
+		if len(m.extraCursors) > 0 {
+			return applyInsertToAllCursors(m, "\n")
+		}
 		op := document.Op{
 			ClientID:   m.rpc.ClientID(),
 			Type:       document.OpInsert,
@@ -687,6 +758,9 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return applyOp(m, op)
 
 	case "tab":
+		if len(m.extraCursors) > 0 {
+			return applyInsertToAllCursors(m, "\t")
+		}
 		op := document.Op{
 			ClientID:   m.rpc.ClientID(),
 			Type:       document.OpInsert,
@@ -713,6 +787,17 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		if len(msg.Runes) > 0 {
 			text := string(msg.Runes)
+			if len(m.extraCursors) > 0 {
+				m2, cmd := applyInsertToAllCursors(m, text)
+				r := msg.Runes[0]
+				if r == '(' || r == ',' {
+					return m2, tea.Batch(cmd, m2.fetchSignatureHelp())
+				}
+				if r == ')' {
+					m2.sigHelp = nil
+				}
+				return m2, cmd
+			}
 			op := document.Op{
 				ClientID:   m.rpc.ClientID(),
 				Type:       document.OpInsert,

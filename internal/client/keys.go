@@ -326,26 +326,31 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "esc":
 		m.sel = nil
+		m = m.withClearedSearch()
 
 	// Enter insert mode — clear any selection and start an undo group.
 	case "i":
+		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
 
 	case "a":
+		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
 		m.cursor.Col++
 
 	case "A":
+		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
 		m.cursor.Col = m.buf.LineLen(m.cursor.Line)
 
 	case "o":
+		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
@@ -361,6 +366,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return applyOp(m, op)
 
 	case "O":
+		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
@@ -455,10 +461,12 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Operators: act on selection (no-op if nothing selected).
 	case "d":
+		m = m.withClearedSearch()
 		m2, cmd := m.deleteSelection()
 		return m2, cmd
 
 	case "c":
+		m = m.withClearedSearch()
 		m.currentGroup = []document.Op{}
 		m2, cmd := m.deleteSelection()
 		m2.mode = ModeInsert
@@ -889,6 +897,16 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("E: unknown command: %s", cmd)
 	}
 	return m, nil
+}
+
+// withClearedSearch resets all within-buffer search state, removing match
+// highlights and disabling n/N navigation until the next search.
+func (m Model) withClearedSearch() Model {
+	m.searchQuery = ""
+	m.searchMatches = nil
+	m.searchIdx = -1
+	m.searchErr = ""
+	return m
 }
 
 // parseGrepArgs splits a grep command argument into a pattern and an optional

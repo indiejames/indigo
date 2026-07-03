@@ -698,19 +698,14 @@ var glamourCache struct {
 	width int
 }
 
-// renderHoverPopup renders LSP hover content as markdown inside a rounded border.
-// scroll is the number of content lines to skip from the top.
-// maxH is the maximum number of rendered lines to return (0 = unlimited).
-func renderHoverPopup(content string, maxW, scroll, maxH int) []string {
-	// Leave room for the lipgloss border (2) and 1-char padding each side.
+// hoverBodyLines renders markdown content through glamour and returns the
+// resulting lines. Used both to count total lines (for scroll clamping) and
+// as the source for renderHoverPopup.
+func hoverBodyLines(content string, maxW int) []string {
 	renderW := min(76, maxW-4)
 	if renderW < 20 {
 		renderW = 20
 	}
-
-	// Re-use the cached renderer unless the wrap width changed (terminal resize).
-	// Use WithStandardStyle("dark") — WithAutoStyle() sends ANSI terminal queries
-	// that corrupt bubbletea's input stream.
 	if glamourCache.r == nil || glamourCache.width != renderW {
 		r, err := glamour.NewTermRenderer(
 			glamour.WithStandardStyle("dark"),
@@ -721,7 +716,6 @@ func renderHoverPopup(content string, maxW, scroll, maxH int) []string {
 			glamourCache.width = renderW
 		}
 	}
-
 	body := content
 	if glamourCache.r != nil {
 		if rendered, err := glamourCache.r.Render(content); err == nil {
@@ -730,40 +724,48 @@ func renderHoverPopup(content string, maxW, scroll, maxH int) []string {
 			}
 		}
 	}
+	return strings.Split(body, "\n")
+}
 
-	// Split body into lines, apply scroll offset, then re-join for the border box.
-	bodyLines := strings.Split(body, "\n")
+// renderHoverPopup renders LSP hover content as markdown inside a rounded border.
+// scroll is the number of content lines to skip from the top.
+// maxH is the maximum number of rendered lines to return (0 = unlimited).
+func renderHoverPopup(content string, maxW, scroll, maxH int) []string {
+	bodyLines := hoverBodyLines(content, maxW)
 	totalLines := len(bodyLines)
 
-	// Clamp scroll so we can't scroll past the last line.
-	if scroll > totalLines-1 {
-		scroll = max(0, totalLines-1)
-	}
-	bodyLines = bodyLines[scroll:]
+	// Lines available for content inside the border (border takes top + bottom row).
+	contentH := maxH - 2
+	needsScrolling := maxH > 2 && totalLines > contentH
 
-	// Determine how many lines are available for body content inside the border.
-	// Border takes 2 rows (top + bottom). If maxH is 0 or covers everything, no clipping.
-	truncated := false
-	if maxH > 2 && len(bodyLines) > maxH-2 {
-		bodyLines = bodyLines[:maxH-2]
-		truncated = true
+	if needsScrolling {
+		// Clamp scroll so we never go past the last full window.
+		scroll = min(scroll, max(0, totalLines-contentH))
+		bodyLines = bodyLines[scroll:]
+		// Clip to window height...
+		if len(bodyLines) > contentH {
+			bodyLines = bodyLines[:contentH]
+		}
+		// ...and pad to the same fixed height when near the end, so the popup
+		// doesn't shrink as the user scrolls toward the last lines.
+		for len(bodyLines) < contentH {
+			bodyLines = append(bodyLines, "")
+		}
 	}
-
-	body = strings.Join(bodyLines, "\n")
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#4488CC"))
 
-	lines := strings.Split(boxStyle.Render(body), "\n")
+	lines := strings.Split(boxStyle.Render(strings.Join(bodyLines, "\n")), "\n")
 	// Trim any trailing empty lines that lipgloss may append.
 	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
 		lines = lines[:len(lines)-1]
 	}
 
-	// Append scroll indicator when content is clipped or scrolled.
-	if truncated || scroll > 0 {
-		shown := scroll + len(bodyLines)
+	// Scroll indicator when content doesn't all fit.
+	if needsScrolling {
+		shown := min(scroll+contentH, totalLines)
 		indicator := popupBorderStyle.Render(fmt.Sprintf(" ↑↓ j/k   %d/%d lines ", shown, totalLines))
 		lines = append(lines, indicator)
 	}

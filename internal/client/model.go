@@ -273,6 +273,7 @@ type Model struct {
 	lspActive        bool           // true once first diagnostic poll returns (LSP is running)
 	hoverContent     *string        // non-nil = hover popup visible
 	hoverScroll      int            // scroll offset within the hover popup
+	hoverTotalLines  int            // total rendered body lines; used to clamp scroll
 	sigHelp          *ClientSigHelp // non-nil = signature help popup visible
 	completions      []ClientCompletion
 	completionOn     bool
@@ -434,6 +435,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.result.Found && msg.result.Contents != "" {
 			m.hoverContent = &msg.result.Contents
 			m.hoverScroll = 0
+			m.hoverTotalLines = len(hoverBodyLines(msg.result.Contents, m.width))
 		} else if !msg.result.Found {
 			m.status = "No hover info"
 		}

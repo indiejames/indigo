@@ -179,15 +179,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	// Scroll keys navigate the hover popup; all other keys dismiss it.
 	if m.hoverContent != nil {
+		// contentH mirrors the calculation in renderHoverPopup.
+		maxPopH := max(6, m.height-4)
+		contentH := maxPopH - 2
+		maxScroll := max(0, m.hoverTotalLines-contentH)
 		switch msg.String() {
 		case "j", "down":
-			m.hoverScroll++
+			m.hoverScroll = min(m.hoverScroll+1, maxScroll)
 			return m, nil
 		case "k", "up":
 			m.hoverScroll = max(0, m.hoverScroll-1)
 			return m, nil
 		case "ctrl+f":
-			m.hoverScroll += m.height / 4
+			m.hoverScroll = min(m.hoverScroll+m.height/4, maxScroll)
 			return m, nil
 		case "ctrl+b":
 			m.hoverScroll = max(0, m.hoverScroll-m.height/4)

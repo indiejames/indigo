@@ -472,7 +472,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(m.undoStack) == m.savedUndoDepth {
 				m.buf.SetClean()
 			}
-			return m, tea.Sequence(cmds...)
+			return m, tea.Sequence(append(cmds, m.reparseHighlight())...)
 		}
 
 	case "U":
@@ -499,7 +499,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(m.undoStack) == m.savedUndoDepth {
 				m.buf.SetClean()
 			}
-			return m, tea.Sequence(cmds...)
+			return m, tea.Sequence(append(cmds, m.reparseHighlight())...)
 		}
 
 	// Selection: create or extend. All operations apply to every cursor.

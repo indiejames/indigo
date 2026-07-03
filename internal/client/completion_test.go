@@ -38,7 +38,7 @@ func TestFilteredCmds(t *testing.T) {
 		input string
 		want  []string
 	}{
-		{"", []string{"edit", "fmt", "format", "metrics", "quit", "quit!", "quit-all", "quit-all!", "save", "wqa", "write-quit"}},
+		{"", []string{"edit", "find", "fmt", "format", "grep", "metrics", "quit", "quit!", "quit-all", "quit-all!", "save", "wqa", "write", "write-quit"}},
 		// "q" is a subsequence of quit*, wqa, write-quit
 		{"q", []string{"quit", "quit!", "quit-all", "quit-all!", "wqa", "write-quit"}},
 		{"q!", []string{"quit!", "quit-all!"}},

@@ -16,8 +16,10 @@ type cmdDesc struct {
 
 var allCmds = []cmdDesc{
 	{"edit",       "Open file picker"},
+	{"find",       "Workspace search"},
 	{"fmt",        "Format current buffer"},
 	{"format",     "Format current buffer"},
+	{"grep",       "Workspace search"},
 	{"metrics",    "Toggle metrics overlay"},
 	{"quit",       "Close buffer (fails if unsaved)"},
 	{"quit!",      "Close buffer, discarding changes"},
@@ -25,6 +27,7 @@ var allCmds = []cmdDesc{
 	{"quit-all!",  "Quit all, discarding changes"},
 	{"save",       "Save file"},
 	{"wqa",        "Save all and quit"},
+	{"write",      "Save file"},
 	{"write-quit", "Save and close buffer"},
 }
 

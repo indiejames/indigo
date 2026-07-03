@@ -87,6 +87,11 @@ type OpenFileAtMsg struct {
 // OpenPickerMsg signals the App to open the file picker.
 type OpenPickerMsg struct{}
 
+// GrepMsg signals the App to open the workspace search picker.
+// Pattern uses the same syntax as within-buffer search: plain text for
+// literal (smart-case), or \expr\ for Go regexp.
+type GrepMsg struct{ Pattern string }
+
 // NextBufferMsg signals the App to switch to the next buffer.
 type NextBufferMsg struct{}
 
@@ -276,6 +281,27 @@ func (m Model) AtLine(line int) Model {
 	line = max(0, min(line, m.buf.LineCount()-1))
 	m.cursor = document.Pos{Line: line, Col: 0}
 	m.scrollToCursor()
+	return m
+}
+
+// AtMatch positions the cursor at (line, col), selects matchLen runes, and
+// scrolls so the match line sits ~1/4 down from the top of the visible area.
+func (m Model) AtMatch(line, col, matchLen, bufHeight int) Model {
+	line = max(0, min(line, m.buf.LineCount()-1))
+	lineLen := m.buf.LineLen(line)
+	col = max(0, min(col, lineLen))
+	m.cursor = document.Pos{Line: line, Col: col}
+	quarter := max(1, bufHeight/4)
+	m.topLine = max(0, line-quarter)
+	if matchLen > 0 {
+		endCol := min(col+matchLen-1, max(0, lineLen-1))
+		if endCol >= col {
+			m.sel = &Selection{
+				Anchor: document.Pos{Line: line, Col: col},
+				Head:   document.Pos{Line: line, Col: endCol},
+			}
+		}
+	}
 	return m
 }
 

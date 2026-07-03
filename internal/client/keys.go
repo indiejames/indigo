@@ -818,6 +818,22 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 	m.mode = ModeNormal
 	m.cmdBuf = ""
 
+	// :grep/:find [pattern] — workspace search; falls back to current search query.
+	var searchRest string
+	var doSearch bool
+	if rest, ok := strings.CutPrefix(cmd, "grep"); ok {
+		searchRest, doSearch = rest, true
+	} else if rest, ok := strings.CutPrefix(cmd, "find"); ok {
+		searchRest, doSearch = rest, true
+	}
+	if doSearch {
+		pattern := strings.TrimSpace(searchRest)
+		if pattern == "" {
+			pattern = m.searchQuery
+		}
+		return m, func() tea.Msg { return GrepMsg{Pattern: pattern} }
+	}
+
 	// Bare number → go to line.
 	if n, err := strconv.Atoi(cmd); err == nil {
 		lc := m.displayLineCount()

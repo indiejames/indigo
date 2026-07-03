@@ -1206,6 +1206,9 @@ func (m Model) renderStatusBar() string {
 			if m.buf.Dirty() {
 				centerContent += " [+]"
 			}
+			if len(m.searchMatches) > 0 {
+				centerContent += fmt.Sprintf("   [%d/%d]", m.searchIdx+1, len(m.searchMatches))
+			}
 		}
 	}
 

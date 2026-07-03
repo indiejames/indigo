@@ -333,6 +333,12 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.currentGroup = []document.Op{}
 		m.mode = ModeInsert
 
+	case "a":
+		m.sel = nil
+		m.currentGroup = []document.Op{}
+		m.mode = ModeInsert
+		m.cursor.Col++
+
 	case "A":
 		m.sel = nil
 		m.currentGroup = []document.Op{}

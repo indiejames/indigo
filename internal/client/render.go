@@ -699,7 +699,9 @@ var glamourCache struct {
 }
 
 // renderHoverPopup renders LSP hover content as markdown inside a rounded border.
-func renderHoverPopup(content string, maxW int) []string {
+// scroll is the number of content lines to skip from the top.
+// maxH is the maximum number of rendered lines to return (0 = unlimited).
+func renderHoverPopup(content string, maxW, scroll, maxH int) []string {
 	// Leave room for the lipgloss border (2) and 1-char padding each side.
 	renderW := min(76, maxW-4)
 	if renderW < 20 {
@@ -729,6 +731,26 @@ func renderHoverPopup(content string, maxW int) []string {
 		}
 	}
 
+	// Split body into lines, apply scroll offset, then re-join for the border box.
+	bodyLines := strings.Split(body, "\n")
+	totalLines := len(bodyLines)
+
+	// Clamp scroll so we can't scroll past the last line.
+	if scroll > totalLines-1 {
+		scroll = max(0, totalLines-1)
+	}
+	bodyLines = bodyLines[scroll:]
+
+	// Determine how many lines are available for body content inside the border.
+	// Border takes 2 rows (top + bottom). If maxH is 0 or covers everything, no clipping.
+	truncated := false
+	if maxH > 2 && len(bodyLines) > maxH-2 {
+		bodyLines = bodyLines[:maxH-2]
+		truncated = true
+	}
+
+	body = strings.Join(bodyLines, "\n")
+
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#4488CC"))
@@ -738,6 +760,14 @@ func renderHoverPopup(content string, maxW int) []string {
 	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
 		lines = lines[:len(lines)-1]
 	}
+
+	// Append scroll indicator when content is clipped or scrolled.
+	if truncated || scroll > 0 {
+		shown := scroll + len(bodyLines)
+		indicator := popupBorderStyle.Render(fmt.Sprintf(" ↑↓ j/k   %d/%d lines ", shown, totalLines))
+		lines = append(lines, indicator)
+	}
+
 	return lines
 }
 
@@ -1119,9 +1149,10 @@ func (m Model) View() string {
 		}
 	}
 
-	// Overlay hover popup (centered).
+	// Overlay hover popup (centered, scrollable).
 	if m.hoverContent != nil {
-		popup := renderHoverPopup(*m.hoverContent, m.width)
+		maxPopH := max(6, vis-4) // leave at least 2 rows margin top+bottom
+		popup := renderHoverPopup(*m.hoverContent, m.width, m.hoverScroll, maxPopH)
 		popH := len(popup)
 		popW := lipgloss.Width(popup[0])
 		popCol := (m.width - popW) / 2

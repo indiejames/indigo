@@ -68,9 +68,13 @@ type TextEdit struct {
 type PluginToml struct {
 	Name        string            `toml:"name"`
 	Version     string            `toml:"version"`
-	SdkVersion  string            `toml:"sdk_version"`  // stored but not validated yet
+	SdkVersion  string            `toml:"sdk_version"` // stored but not validated yet
 	Description string            `toml:"description"`
 	Binaries    map[string]string `toml:"binaries"`
+	// TriggerKey overrides the key the plugin registers as its trigger.
+	// Only applies when the plugin registers exactly one key binding.
+	// Example: trigger_key = "r"
+	TriggerKey string `toml:"trigger_key"`
 }
 
 // registeredPlugin holds a running plugin's process, RPC connection, and
@@ -159,7 +163,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			pluginLog("plugin %s: binary error: %v", manifest.Name, err)
 			continue
 		}
-		if err := m.startPlugin(ctx, manifest.Name, binaryPath); err != nil {
+		if err := m.startPlugin(ctx, manifest, binaryPath); err != nil {
 			pluginLog("plugin %s: start error: %v", manifest.Name, err)
 			continue
 		}
@@ -184,7 +188,8 @@ func pluginLogFile() *os.File {
 	return f
 }
 
-func (m *Manager) startPlugin(ctx context.Context, name, binaryPath string) error {
+func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryPath string) error {
+	name := manifest.Name
 	sockPath := m.pluginSocketPath(name)
 	os.Remove(sockPath) //nolint:errcheck
 
@@ -244,6 +249,23 @@ func (m *Manager) startPlugin(ctx context.Context, name, binaryPath string) erro
 		rpcConn.Close() //nolint:errcheck
 		proc.Kill()     //nolint:errcheck
 		return fmt.Errorf("plugin %s initialize: %w", name, err)
+	}
+
+	// If trigger_key is set and the plugin registered exactly one key, remap it.
+	if manifest.TriggerKey != "" {
+		reg.mu.Lock()
+		if len(reg.keyBindings) == 1 {
+			for oldKey, h := range reg.keyBindings {
+				if oldKey != manifest.TriggerKey {
+					delete(reg.keyBindings, oldKey)
+					reg.keyBindings[manifest.TriggerKey] = h
+					if m.bridge != nil {
+						m.bridge.PluginKeyRegistered(manifest.TriggerKey)
+					}
+				}
+			}
+		}
+		reg.mu.Unlock()
 	}
 
 	m.mu.Lock()

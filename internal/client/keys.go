@@ -177,10 +177,30 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.warnQuit {
 		return m.handleWarnQuit(msg)
 	}
-	// Any key dismisses hover popup.
+	// Scroll keys navigate the hover popup; all other keys dismiss it.
 	if m.hoverContent != nil {
-		m.hoverContent = nil
-		// Don't consume: let the key fall through to normal handling.
+		switch msg.String() {
+		case "j", "down":
+			m.hoverScroll++
+			return m, nil
+		case "k", "up":
+			m.hoverScroll = max(0, m.hoverScroll-1)
+			return m, nil
+		case "ctrl+f":
+			m.hoverScroll += m.height / 4
+			return m, nil
+		case "ctrl+b":
+			m.hoverScroll = max(0, m.hoverScroll-m.height/4)
+			return m, nil
+		case "esc":
+			m.hoverContent = nil
+			m.hoverScroll = 0
+			return m, nil
+		default:
+			m.hoverContent = nil
+			m.hoverScroll = 0
+			// Don't consume: let the key fall through to normal handling.
+		}
 	}
 	// Clear transient error on any key.
 	m.status = ""

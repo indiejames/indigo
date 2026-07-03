@@ -131,6 +131,30 @@ func TestDoubleClickSelectsWord(t *testing.T) {
 	}
 }
 
+// TestClickToPosWrappedLine verifies that a click on screen row 1 (the second
+// chunk of a soft-wrapped line) resolves to the correct buffer line, not
+// topLine+1 (which would be the wrong line when the first line wraps).
+func TestClickToPosWrappedLine(t *testing.T) {
+	// Two lines: line 0 wraps, line 1 is short.
+	// With width=10 and no gutter, line 0 occupies rows 0+1, line 1 is row 2.
+	long := "0123456789AB" // 12 chars → 2 chunks at cw=10
+	m := newTestModel(long + "\nhello\n")
+	m.width = 10
+	m.height = 6
+
+	// Click on screen row 2 (which is buffer line 1 "hello"), col 1.
+	pos, ok := m.clickToPos(1, 2)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if pos.Line != 1 {
+		t.Errorf("pos.Line = %d, want 1 (was topLine+y = %d before fix)", pos.Line, m.topLine+2)
+	}
+	if pos.Col != 1 {
+		t.Errorf("pos.Col = %d, want 1", pos.Col)
+	}
+}
+
 func TestDoubleClickOutsideWindowDoesNotSelect(t *testing.T) {
 	m := newTestModel("hello world\n")
 	m.handleMousePress(2, 0)

@@ -1075,6 +1075,13 @@ func (m Model) View() string {
 			}
 		}
 	}
+	if extraOverlays := m.buildExtraCursorOverlays(layout, cw); extraOverlays != nil {
+		for i := range vis {
+			if len(extraOverlays[i]) > 0 {
+				rowOverlays[i] = mergeOverlays(rowOverlays[i], extraOverlays[i])
+			}
+		}
+	}
 	for i := range vis {
 		lines[i] = m.renderLineChunk(layout[i], cw, rowOverlays[i])
 	}
@@ -1385,6 +1392,9 @@ func (m Model) renderStatusBar() string {
 			}
 			if len(m.searchMatches) > 0 {
 				centerContent += fmt.Sprintf("   [%d/%d]", m.searchIdx+1, len(m.searchMatches))
+			}
+			if len(m.extraCursors) > 0 {
+				centerContent += fmt.Sprintf("   %d cursors", 1+len(m.extraCursors))
 			}
 		}
 	}

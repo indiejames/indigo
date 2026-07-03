@@ -42,7 +42,7 @@ func applyOp(m Model, op document.Op) (Model, tea.Cmd) {
 	if m.currentGroup != nil {
 		m.currentGroup = append(m.currentGroup, inv)
 	} else {
-		m.undoStack = append(m.undoStack, []document.Op{inv})
+		m.undoStack = append(m.undoStack, undoEntry{ops: []document.Op{inv}, before: m.cursorSnap()})
 	}
 	m.redoStack = nil // any new edit invalidates the redo history
 	return m, tea.Batch(m.sendOp(op), m.reparseHighlight())

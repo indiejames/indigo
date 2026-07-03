@@ -62,7 +62,11 @@ x        select the current line
 c        delete it and enter insert mode
 
 w w      advance the selection to the next word
+W        extend the selection head forward to the next word end
 y        copy it to the clipboard
+
+x x x    select three lines (repeat extends to the next line)
+X        extend the selection backward to include the previous line
 ```
 
 If you're coming from Vim, the main adjustment is that `d` and `c` act on whatever is currently selected, not on a following motion. If nothing is selected, `d` deletes the character under the cursor.
@@ -83,31 +87,60 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 
 ### Normal mode
 
-| Key                 | Action                                       |
-|---------------------|----------------------------------------------|
-| `i`                 | Enter insert mode                            |
-| `A`                 | Enter insert mode at end of line             |
-| `o` / `O`           | Open new line below / above                  |
-| `h` `j` `k` `l`     | Move left / down / up / right                |
-| `0` `$`             | Start / end of line                          |
-| `G`                 | End of file                                  |
-| `gg`                | Top of file                                  |
-| `Ctrl+f` / `Ctrl+b` | Page down / up                               |
-| `w`                 | Select word (repeat to advance to next word) |
-| `x`                 | Select current line                          |
-| `d`                 | Delete selection (or character under cursor) |
-| `c`                 | Delete selection and enter insert mode       |
-| `y`                 | Copy selection to system clipboard           |
-| `u` / `U`           | Undo / redo                                  |
-| `K`                 | Show hover documentation (LSP)               |
-| `gd`                | Go to definition (LSP)                       |
-| `/`                 | Enter search mode                            |
-| `n` / `N`           | Next / previous search match                 |
-| `Ctrl+s`            | Save                                         |
-| `Ctrl+p`            | Open file picker                             |
-| `]b` / `[b`         | Next / previous buffer                       |
-| `:`                 | Enter command mode                           |
-| `Esc`               | Clear selection                              |
+**Cursor movement** — always clears the selection.
+
+| Key                 | Action                                          |
+|---------------------|-------------------------------------------------|
+| `h` `j` `k` `l`    | Move left / down / up / right                   |
+| `b`                 | Move to previous word start (crosses lines)     |
+| `e`                 | Move to end of current/next word (crosses lines)|
+| `0` `$`             | Start / end of line                             |
+| `gg`                | Top of file                                     |
+| `G`                 | End of file                                     |
+| `Ctrl+f` / `Ctrl+b` | Page down / up                                  |
+| `gh`                | Go to line start                                |
+| `gl`                | Go to line end                                  |
+| `gs`                | Go to first non-whitespace character on line    |
+| `gd`                | Go to definition (LSP)                          |
+
+**Selection** — create or extend a selection; the cursor is always at the head.
+
+| Key      | Action                                                            |
+|----------|-------------------------------------------------------------------|
+| `w`      | Select word at cursor; repeat to advance to the next word        |
+| `W`      | Extend selection head forward to end of next word                |
+| `B`      | Extend selection head backward to start of previous word         |
+| `x`      | Select current line; repeat to extend selection to the next line |
+| `X`      | Extend line selection backward to include the previous line      |
+| `%`      | Select the entire file                                           |
+| `;`      | Collapse selection to cursor (keeps cursor, clears selection)    |
+| `Alt+;`  | Flip selection: swap anchor and head                             |
+
+**Operators** — act on the current selection; clears search highlights.
+
+| Key | Action                                       |
+|-----|----------------------------------------------|
+| `d` | Delete selection (or character under cursor) |
+| `c` | Delete selection and enter insert mode       |
+| `y` | Copy selection to system clipboard           |
+
+**Other**
+
+| Key          | Action                                       |
+|--------------|----------------------------------------------|
+| `i`          | Enter insert mode                            |
+| `a`          | Enter insert mode, cursor after current char |
+| `A`          | Enter insert mode at end of line             |
+| `o` / `O`    | Open new line below / above                  |
+| `u` / `U`    | Undo / redo                                  |
+| `K`          | Show hover documentation (LSP)               |
+| `/`          | Enter search mode                            |
+| `n` / `N`    | Next / previous search match                 |
+| `Esc`        | Clear selection and search highlights        |
+| `Ctrl+s`     | Save                                         |
+| `Ctrl+p`     | Open file picker                             |
+| `]b` / `[b`  | Next / previous buffer                       |
+| `:`          | Enter command mode                           |
 
 ### Insert mode
 
@@ -142,26 +175,38 @@ Type `/` in normal mode to open the search bar at the bottom of the screen.
 /\(?i)TODO      regex with explicit case-insensitive flag
 ```
 
-The match count `[N/total]` is shown at the right of the search bar. If the regex is invalid, `[invalid]` is shown instead.
+The match count `[N/total]` is shown at the right of the search bar while typing, and in the status bar centre while navigating results. If the regex is invalid, `[invalid]` is shown instead.
 
-After confirming, use `n` / `N` in normal mode to move to the next / previous match.
+After confirming, use `n` / `N` in normal mode to move to the next / previous match. Pressing `Esc`, entering insert mode, or performing an edit clears the highlights and stops `n` / `N` navigation.
 
 ### Workspace search
 
-Type `:grep <pattern>` to search across every file in the workspace. The same pattern syntax applies — plain text (smart-case) or `\expr\` for Go regex.
+Type `:grep <pattern>` (or `:find <pattern>`) to search across every file in the workspace. The same pattern syntax applies — plain text (smart-case) or `\expr\` for Go regex.
 
-If you run `:grep` with no argument, it reuses the last within-buffer search pattern.
+```
+:grep TODO               search all files for "TODO"
+:find func.*Handler      regex search (leading \)
+:grep error *.go         restrict to .go files
+:grep TODO src/          restrict to the src/ directory
+:grep TODO **/*.ts       restrict to .ts files anywhere in the tree
+```
+
+The optional trailing token is treated as a file glob when it contains `*`, `?`, `[`, or ends with `/`. The active glob is shown in the picker title as `in:*.go`. If you run `:grep` with no argument, it reuses the last within-buffer search pattern.
 
 A results picker opens immediately showing a "Searching…" indicator while the search runs in the background. Once complete:
 
-| Key              | Action                         |
-|------------------|--------------------------------|
-| `j` / `↓`        | Move to next result            |
-| `k` / `↑`        | Move to previous result        |
-| `Enter`          | Open file at matching line     |
-| `Esc`            | Close picker                   |
+| Key       | Action                     |
+|-----------|----------------------------|
+| `j` / `↓` | Move to next result        |
+| `k` / `↑` | Move to previous result    |
+| `Enter`   | Open file at matching line |
+| `Esc`     | Close picker               |
+
+Selecting a result opens the file with the cursor at the match column and the matched text selected.
 
 Each result is shown as `file:line: content`. Ignored directories (`.git`, `vendor`, `node_modules`, etc.) and binary files are skipped automatically. Results are capped at 500 matches.
+
+When [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) is on your PATH it is used as the search backend — it is significantly faster on large repos and automatically respects `.gitignore`. indigo falls back to a built-in Go walker if `rg` is not available.
 
 ### Command mode
 
@@ -178,7 +223,8 @@ Type `:` in normal mode, then one of:
 | `:wqa`                     | Save all and quit          |
 | `:e` `:edit`               | Open file picker           |
 | `:fmt` `:format`           | Format current file        |
-| `:grep [pattern]`          | Workspace search           |
+| `:grep [pattern] [glob]`   | Workspace search           |
+| `:find [pattern] [glob]`   | Workspace search (alias)   |
 | `:<n>`                     | Jump to line number        |
 
 ### Mouse

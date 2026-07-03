@@ -28,7 +28,7 @@ func TestSearchWorkspaceLiteral(t *testing.T) {
 		"a.go": "package main\nfunc hello() {}\n",
 		"b.go": "package main\nfunc world() {}\n",
 	})
-	results, err := searchWorkspace(dir, "hello")
+	results, err := searchWorkspace(dir, "hello", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestSearchWorkspaceCaseInsensitive(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"a.txt": "Hello World\nhello again\n",
 	})
-	results, err := searchWorkspace(dir, "hello")
+	results, err := searchWorkspace(dir, "hello", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestSearchWorkspaceCaseSensitive(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"a.txt": "Hello World\nhello again\n",
 	})
-	results, err := searchWorkspace(dir, "Hello")
+	results, err := searchWorkspace(dir, "Hello", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestSearchWorkspaceRegex(t *testing.T) {
 		"a.go": "func foo() {}\nfunc bar() {}\nvar x = 1\n",
 	})
 	// \func [a-z]+ → expr: func [a-z]+
-	results, err := searchWorkspace(dir, `\func [a-z]+`)
+	results, err := searchWorkspace(dir, `\func [a-z]+`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestSearchWorkspaceInvalidRegex(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"a.txt": "hello\n",
 	})
-	_, err := searchWorkspace(dir, `\[unclosed`)
+	_, err := searchWorkspace(dir, `\[unclosed`, "")
 	if err == nil {
 		t.Error("expected error for invalid regex, got nil")
 	}
@@ -100,7 +100,7 @@ func TestSearchWorkspaceIgnoresDirs(t *testing.T) {
 		"vendor/lib/lib.go":    "func hello() {}\n",
 		"node_modules/x/x.js": "hello()\n",
 	})
-	results, err := searchWorkspace(dir, "hello")
+	results, err := searchWorkspace(dir, "hello", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestSearchWorkspaceMultipleFiles(t *testing.T) {
 		"x/b.go": "nothing here\n",
 		"y/c.go": "TODO: and this\n",
 	})
-	results, err := searchWorkspace(dir, "TODO")
+	results, err := searchWorkspace(dir, "TODO", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,9 +133,30 @@ func TestSearchWorkspaceEmptyPattern(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"a.txt": "hello\n",
 	})
-	results, err := searchWorkspace(dir, "")
+	results, err := searchWorkspace(dir, "", "")
 	if err != nil || results != nil {
 		t.Errorf("empty pattern: expected nil,nil got %v,%v", results, err)
+	}
+}
+
+func TestSearchWorkspaceGlob(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"main.go":   "func hello() {}\n",
+		"readme.md": "hello world\n",
+		"sub/a.go":  "// hello\n",
+	})
+	// Only .go files — should exclude readme.md.
+	results, err := searchWorkspace(dir, "hello", "*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if filepath.Ext(r.RelPath) != ".go" {
+			t.Errorf("glob *.go returned non-go file: %s", r.RelPath)
+		}
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 results (*.go), got %d", len(results))
 	}
 }
 

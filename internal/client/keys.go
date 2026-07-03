@@ -818,7 +818,8 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 	m.mode = ModeNormal
 	m.cmdBuf = ""
 
-	// :grep/:find [pattern] — workspace search; falls back to current search query.
+	// :grep/:find [pattern] [glob] — workspace search; falls back to current search query.
+	// The optional trailing token is treated as a file glob if it contains *, ?, [ or ends with /.
 	var searchRest string
 	var doSearch bool
 	if rest, ok := strings.CutPrefix(cmd, "grep"); ok {
@@ -827,11 +828,16 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		searchRest, doSearch = rest, true
 	}
 	if doSearch {
-		pattern := strings.TrimSpace(searchRest)
+		pattern, glob := parseGrepArgs(strings.TrimSpace(searchRest))
 		if pattern == "" {
-			pattern = m.searchQuery
+			if m.searchQuery != "" {
+				pattern = m.searchQuery
+			} else {
+				// e.g. ":grep *.go" with no prior query — treat glob as literal pattern.
+				pattern, glob = glob, ""
+			}
 		}
-		return m, func() tea.Msg { return GrepMsg{Pattern: pattern} }
+		return m, func() tea.Msg { return GrepMsg{Pattern: pattern, Glob: glob} }
 	}
 
 	// Bare number → go to line.
@@ -877,4 +883,17 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("E: unknown command: %s", cmd)
 	}
 	return m, nil
+}
+
+// parseGrepArgs splits a grep command argument into a pattern and an optional
+// file glob. The trailing token is treated as a glob when it contains *, ?, [
+// or ends with / (directory filter). Everything else is the search pattern.
+func parseGrepArgs(s string) (pattern, glob string) {
+	if i := strings.LastIndexByte(s, ' '); i >= 0 {
+		last := s[i+1:]
+		if strings.ContainsAny(last, "*?[") || strings.HasSuffix(last, "/") {
+			return strings.TrimSpace(s[:i]), last
+		}
+	}
+	return s, ""
 }

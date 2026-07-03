@@ -137,14 +137,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.grep = &grepPicker{
 			workDir:   a.workDir,
 			pattern:   msg.Pattern,
+			glob:      msg.Glob,
 			width:     a.width,
 			height:    a.height,
 			searching: true,
 		}
 		workDir := a.workDir
 		pattern := msg.Pattern
+		glob := msg.Glob
 		return a, func() tea.Msg {
-			results, err := searchWorkspace(workDir, pattern)
+			results, err := searchWorkspace(workDir, pattern, glob)
 			return grepResultsMsg{results: results, err: err}
 		}
 

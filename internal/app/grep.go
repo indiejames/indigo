@@ -28,12 +28,13 @@ type GrepResult struct {
 
 // searchWorkspace searches the workspace for pattern. It delegates to ripgrep
 // when rg is available on PATH for best performance, and falls back to the
-// built-in Go walker otherwise.
-func searchWorkspace(workDir, pattern string) ([]GrepResult, error) {
+// built-in Go walker otherwise. glob optionally restricts which files are
+// searched (e.g. "*.go", "src/", "**/*.ts"); empty string means all files.
+func searchWorkspace(workDir, pattern, glob string) ([]GrepResult, error) {
 	if rgAvailable() {
-		return searchWithRg(workDir, pattern)
+		return searchWithRg(workDir, pattern, glob)
 	}
-	return searchBuiltin(workDir, pattern)
+	return searchBuiltin(workDir, pattern, glob)
 }
 
 // rgAvailable reports whether rg is on the PATH.
@@ -68,13 +69,16 @@ type rgSubmatch struct {
 
 // searchWithRg runs rg --json and parses its output into GrepResults.
 // rg exit code 1 means "no matches" — not an error.
-func searchWithRg(workDir, pattern string) ([]GrepResult, error) {
+func searchWithRg(workDir, pattern, glob string) ([]GrepResult, error) {
 	if pattern == "" {
 		return nil, nil
 	}
 	args := []string{"--json"}
 	for dir := range ignoredDirs {
 		args = append(args, "--glob", "!"+dir)
+	}
+	if glob != "" {
+		args = append(args, "--glob", glob)
 	}
 	if expr, isRe := grepRegexExpr(pattern); isRe {
 		if expr == "" {
@@ -132,7 +136,7 @@ func searchWithRg(workDir, pattern string) ([]GrepResult, error) {
 // searchBuiltin searches all text files under workDir for pattern.
 // Pattern syntax is the same as within-buffer search: plain text (smart-case)
 // or \expr\ for a Go regexp. Only the first match per line is reported.
-func searchBuiltin(workDir, pattern string) ([]GrepResult, error) {
+func searchBuiltin(workDir, pattern, glob string) ([]GrepResult, error) {
 	if pattern == "" {
 		return nil, nil
 	}
@@ -199,10 +203,42 @@ func searchBuiltin(workDir, pattern string) ([]GrepResult, error) {
 			return nil
 		}
 		rel, _ := filepath.Rel(workDir, path)
+		if glob != "" && !matchGlob(glob, rel) {
+			return nil
+		}
 		grepFile(rel, path, matchLine, &results)
 		return nil
 	})
 	return results, err
+}
+
+// matchGlob reports whether relPath matches the user-supplied file glob.
+// It handles:
+//   - "*.go"        → basename match (no / in glob)
+//   - "src/*.go"    → full relPath match
+//   - "**/foo.go"   → basename match (strips leading **/)
+//   - "src/"        → directory prefix match
+func matchGlob(glob, relPath string) bool {
+	// Directory prefix: "src/" matches anything under src/.
+	if strings.HasSuffix(glob, "/") {
+		return strings.HasPrefix(relPath, glob) || strings.HasPrefix(relPath, strings.TrimSuffix(glob, "/"))
+	}
+	// "**/" prefix: match basename only.
+	if strings.HasPrefix(glob, "**/") {
+		sub := glob[3:]
+		if ok, _ := filepath.Match(sub, filepath.Base(relPath)); ok {
+			return true
+		}
+	}
+	// No path separator in glob: match against basename.
+	if !strings.Contains(glob, "/") {
+		if ok, _ := filepath.Match(glob, filepath.Base(relPath)); ok {
+			return true
+		}
+	}
+	// Full path match.
+	ok, _ := filepath.Match(glob, relPath)
+	return ok
 }
 
 func grepFile(rel, absPath string, matchLine func(string) (int, int, bool), results *[]GrepResult) {
@@ -278,6 +314,7 @@ func grepRunesMatch(line, pat []rune) bool {
 type grepPicker struct {
 	workDir   string
 	pattern   string
+	glob      string // optional file filter (e.g. "*.go", "src/")
 	results   []GrepResult
 	cursor    int
 	width     int
@@ -346,16 +383,20 @@ func (gp *grepPicker) View() string {
 	var sb strings.Builder
 
 	// Title
+	subject := gp.pattern
+	if gp.glob != "" {
+		subject = fmt.Sprintf("%s  in:%s", gp.pattern, gp.glob)
+	}
 	var title string
 	switch {
 	case gp.errMsg != "":
-		title = fmt.Sprintf("  Search: %s  [error]", gp.pattern)
+		title = fmt.Sprintf("  Search: %s  [error]", subject)
 	case gp.searching:
-		title = fmt.Sprintf("  Search: %s  [searching…]", gp.pattern)
+		title = fmt.Sprintf("  Search: %s  [searching…]", subject)
 	case len(gp.results) >= maxGrepResults:
-		title = fmt.Sprintf("  Search: %s  [%d+ results]", gp.pattern, maxGrepResults)
+		title = fmt.Sprintf("  Search: %s  [%d+ results]", subject, maxGrepResults)
 	default:
-		title = fmt.Sprintf("  Search: %s  [%d results]", gp.pattern, len(gp.results))
+		title = fmt.Sprintf("  Search: %s  [%d results]", subject, len(gp.results))
 	}
 	sb.WriteString(pickerTitleStyle.Render(clamp(title)))
 	sb.WriteByte('\n')

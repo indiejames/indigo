@@ -90,7 +90,11 @@ type OpenPickerMsg struct{}
 // GrepMsg signals the App to open the workspace search picker.
 // Pattern uses the same syntax as within-buffer search: plain text for
 // literal (smart-case), or \expr\ for Go regexp.
-type GrepMsg struct{ Pattern string }
+// Glob optionally restricts which files are searched (e.g. "*.go", "src/").
+type GrepMsg struct {
+	Pattern string
+	Glob    string
+}
 
 // NextBufferMsg signals the App to switch to the next buffer.
 type NextBufferMsg struct{}

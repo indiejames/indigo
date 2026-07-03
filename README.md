@@ -146,6 +146,23 @@ The match count `[N/total]` is shown at the right of the search bar. If the rege
 
 After confirming, use `n` / `N` in normal mode to move to the next / previous match.
 
+### Workspace search
+
+Type `:grep <pattern>` to search across every file in the workspace. The same pattern syntax applies — plain text (smart-case) or `\expr\` for Go regex.
+
+If you run `:grep` with no argument, it reuses the last within-buffer search pattern.
+
+A results picker opens immediately showing a "Searching…" indicator while the search runs in the background. Once complete:
+
+| Key              | Action                         |
+|------------------|--------------------------------|
+| `j` / `↓`        | Move to next result            |
+| `k` / `↑`        | Move to previous result        |
+| `Enter`          | Open file at matching line     |
+| `Esc`            | Close picker                   |
+
+Each result is shown as `file:line: content`. Ignored directories (`.git`, `vendor`, `node_modules`, etc.) and binary files are skipped automatically. Results are capped at 500 matches.
+
 ### Command mode
 
 Type `:` in normal mode, then one of:
@@ -161,6 +178,7 @@ Type `:` in normal mode, then one of:
 | `:wqa`                     | Save all and quit          |
 | `:e` `:edit`               | Open file picker           |
 | `:fmt` `:format`           | Format current file        |
+| `:grep [pattern]`          | Workspace search           |
 | `:<n>`                     | Jump to line number        |
 
 ### Mouse
@@ -173,7 +191,7 @@ Type `:` in normal mode, then one of:
 
 ## Features
 
-**Search** — Press `/` to search within the current buffer. Supports incremental literal search with smart-case and regex search (prefix with `\`). Match count displayed in the status bar; `n` / `N` navigates between matches.
+**Search** — Press `/` to search within the current buffer. Supports incremental literal search with smart-case and regex search (prefix with `\`). Match count displayed in the status bar; `n` / `N` navigates between matches. Use `:grep [pattern]` for workspace-wide search across all files.
 
 **Syntax highlighting** — 40+ languages via Tree-sitter grammars. See [Language Support](docs/language-support.md).
 

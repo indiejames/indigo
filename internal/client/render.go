@@ -810,17 +810,41 @@ func (m Model) buildSearchOverlays(vis int) [][]lineOverlay {
 		if sm.col < len(colMap) {
 			visCol = colMap[sm.col]
 		}
-		end := sm.col + sm.length
-		if end > len(lineRunes) {
-			end = len(lineRunes)
-		}
-		matchText := string(lineRunes[sm.col:end])
+		matchEnd := min(sm.col+sm.length, len(lineRunes))
 		style := searchMatchStyle
 		if i == m.searchIdx {
 			style = searchCurrentStyle
 		}
-		styledText := style.Render(matchText)
-		rows[row] = append(rows[row], lineOverlay{col: visCol, text: styledText, w: sm.length})
+
+		// For the current match, leave the cursor column uncovered so the cursor
+		// remains visible on top of the highlight.
+		if i == m.searchIdx && sm.line == m.cursor.Line {
+			c := min(m.cursor.Col, len(lineRunes))
+			cursorVisCol := colMap[c]
+			if m.cursor.Col >= sm.col && m.cursor.Col < matchEnd {
+				if m.cursor.Col > sm.col {
+					rows[row] = append(rows[row], lineOverlay{
+						col:  visCol,
+						text: style.Render(string(lineRunes[sm.col:m.cursor.Col])),
+						w:    m.cursor.Col - sm.col,
+					})
+				}
+				if m.cursor.Col+1 < matchEnd {
+					rows[row] = append(rows[row], lineOverlay{
+						col:  cursorVisCol + 1,
+						text: style.Render(string(lineRunes[m.cursor.Col+1 : matchEnd])),
+						w:    matchEnd - (m.cursor.Col + 1),
+					})
+				}
+				continue
+			}
+		}
+
+		rows[row] = append(rows[row], lineOverlay{
+			col:  visCol,
+			text: style.Render(string(lineRunes[sm.col:matchEnd])),
+			w:    sm.length,
+		})
 	}
 	for ri, ovls := range rows {
 		for j := 1; j < len(ovls); j++ {

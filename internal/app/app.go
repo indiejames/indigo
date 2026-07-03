@@ -22,9 +22,12 @@ type openFileMsg struct{ absPath string }
 
 // switchBufferMsg asks the App to switch to an already-open buffer by index,
 // optionally scrolling to a 0-based line number (-1 = don't scroll).
+// col >= 0 and matchLen > 0 trigger AtMatch instead of AtLine.
 type switchBufferMsg struct {
-	idx  int
-	line int
+	idx      int
+	line     int
+	col      int
+	matchLen int
 }
 
 // App is the top-level Bubble Tea model. It owns a list of editor buffers,
@@ -42,6 +45,7 @@ type App struct {
 	status  string // app-level transient message (e.g. ":qa" error)
 
 	picker *filePicker // non-nil when file picker is open
+	grep   *grepPicker // non-nil when workspace search picker is open
 }
 
 // New creates an App with a single initial buffer already open.
@@ -94,6 +98,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.picker.width = msg.Width
 			a.picker.height = msg.Height
 		}
+		if a.grep != nil {
+			a.grep.width = msg.Width
+			a.grep.height = msg.Height
+		}
 		// Resize all buffers with the correct height (minus tab bar if shown).
 		bufMsg := tea.WindowSizeMsg{Width: msg.Width, Height: a.bufHeight()}
 		var cmds []tea.Cmd
@@ -121,6 +129,46 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	// ---- grep open ----
+	case client.GrepMsg:
+		if msg.Pattern == "" {
+			return a, nil
+		}
+		a.grep = &grepPicker{
+			workDir:   a.workDir,
+			pattern:   msg.Pattern,
+			glob:      msg.Glob,
+			width:     a.width,
+			height:    a.height,
+			searching: true,
+		}
+		workDir := a.workDir
+		pattern := msg.Pattern
+		glob := msg.Glob
+		return a, func() tea.Msg {
+			results, err := searchWorkspace(workDir, pattern, glob)
+			return grepResultsMsg{results: results, err: err}
+		}
+
+	case grepResultsMsg:
+		if a.grep != nil {
+			a.grep.searching = false
+			if msg.err != nil {
+				a.grep.errMsg = msg.err.Error()
+			} else {
+				a.grep.results = msg.results
+			}
+		}
+		return a, nil
+
+	case grepPickedMsg:
+		a.grep = nil
+		return a, a.doOpenFileAtMatch(msg.absPath, msg.line, msg.col, msg.matchLen)
+
+	case grepCancelledMsg:
+		a.grep = nil
+		return a, nil
+
 	case openFileMsg:
 		return a, a.doOpenFile(msg.absPath)
 
@@ -131,7 +179,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.idx >= 0 && msg.idx < len(a.buffers) {
 			a.active = msg.idx
 			if msg.line >= 0 {
-				a.buffers[a.active] = a.buffers[a.active].AtLine(msg.line)
+				if msg.col >= 0 && msg.matchLen > 0 {
+					a.buffers[a.active] = a.buffers[a.active].AtMatch(msg.line, msg.col, msg.matchLen, a.bufHeight())
+				} else {
+					a.buffers[a.active] = a.buffers[a.active].AtLine(msg.line)
+				}
 			}
 		}
 		return a, nil
@@ -140,7 +192,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case bufferOpenedMsg:
 		m := msg.model
 		if msg.line >= 0 {
-			m = m.AtLine(msg.line)
+			if msg.col >= 0 && msg.matchLen > 0 {
+				m = m.AtMatch(msg.line, msg.col, msg.matchLen, a.bufHeight())
+			} else {
+				m = m.AtLine(msg.line)
+			}
 		}
 		a.buffers = append(a.buffers, m)
 		a.active = len(a.buffers) - 1
@@ -206,6 +262,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
+	// Grep picker intercepts all key input when open.
+	if a.grep != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleGrepKey(km)
+		}
+		return a, nil
+	}
+
 	// No buffer open: handle essential keys at the App level.
 	if len(a.buffers) == 0 {
 		if km, ok := msg.(tea.KeyMsg); ok {
@@ -254,6 +318,31 @@ func (a App) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		if len(msg.Runes) > 0 {
 			a.picker.setQuery(a.picker.query + string(msg.Runes))
+		}
+	}
+	return a, nil
+}
+
+// handleGrepKey routes key events to the workspace search picker.
+func (a App) handleGrepKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		return a, func() tea.Msg { return grepCancelledMsg{} }
+	case "enter":
+		if a.grep != nil && len(a.grep.results) > 0 {
+			r := a.grep.results[a.grep.cursor]
+			absPath := filepath.Join(a.grep.workDir, r.RelPath)
+			return a, func() tea.Msg {
+				return grepPickedMsg{absPath: absPath, line: r.Line, col: r.Col, matchLen: r.MatchLen}
+			}
+		}
+	case "up", "ctrl+p", "k":
+		if a.grep != nil {
+			a.grep.moveUp()
+		}
+	case "down", "ctrl+n", "j":
+		if a.grep != nil {
+			a.grep.moveDown()
 		}
 	}
 	return a, nil
@@ -324,8 +413,10 @@ func (a App) showTabBar() bool {
 // ---- async commands ----
 
 type bufferOpenedMsg struct {
-	model client.Model
-	line  int // 0-based target line; -1 = no jump
+	model    client.Model
+	line     int // 0-based target line; -1 = no jump
+	col      int // -1 = use AtLine; >= 0 with matchLen > 0 = use AtMatch
+	matchLen int
 }
 type errorOpenMsg struct{ err error }
 
@@ -338,7 +429,7 @@ func (a App) doOpenFileAt(absPath string, line int) tea.Cmd {
 	for i, m := range a.buffers {
 		if m.FilePath() == absPath {
 			idx := i
-			return func() tea.Msg { return switchBufferMsg{idx: idx, line: line} }
+			return func() tea.Msg { return switchBufferMsg{idx: idx, line: line, col: -1} }
 		}
 	}
 	rpc := a.rpc
@@ -351,7 +442,31 @@ func (a App) doOpenFileAt(absPath string, line int) tea.Cmd {
 			return errorOpenMsg{err}
 		}
 		m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
-		return bufferOpenedMsg{model: m, line: line}
+		return bufferOpenedMsg{model: m, line: line, col: -1}
+	}
+}
+
+func (a App) doOpenFileAtMatch(absPath string, line, col, matchLen int) tea.Cmd {
+	// Check if already open — switch to it instead of opening again.
+	for i, m := range a.buffers {
+		if m.FilePath() == absPath {
+			idx := i
+			return func() tea.Msg {
+				return switchBufferMsg{idx: idx, line: line, col: col, matchLen: matchLen}
+			}
+		}
+	}
+	rpc := a.rpc
+	cfg := a.cfg
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, absPath)
+		if err != nil {
+			return errorOpenMsg{err}
+		}
+		m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
+		return bufferOpenedMsg{model: m, line: line, col: col, matchLen: matchLen}
 	}
 }
 
@@ -414,6 +529,9 @@ var (
 func (a App) View() string {
 	if a.picker != nil {
 		return a.picker.View()
+	}
+	if a.grep != nil {
+		return a.grep.View()
 	}
 	if len(a.buffers) == 0 {
 		return "No buffer open. Press ctrl+p to open a file."

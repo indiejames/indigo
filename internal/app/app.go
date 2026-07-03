@@ -238,7 +238,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ---- server push (plugin effects) ----
 	case client.PluginShowMsgMsg:
-		a.status = msg.Text
+		// Plugins are not allowed to write to the tab bar.
 		return a, nil
 
 	case client.PluginMoveCursorMsg:

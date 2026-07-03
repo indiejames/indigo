@@ -1400,17 +1400,7 @@ func (m Model) renderStatusBar() string {
 			centerContent = m.filePath + " [+]   " + m.status
 		}
 	default:
-		// Plugin status bar decorations take priority over diagnostics.
-		var pluginStatus string
-		for _, d := range m.decorations {
-			if d.Kind == ClientDecorationStatusBar && d.Text != "" {
-				pluginStatus = d.Text
-				break
-			}
-		}
-		if pluginStatus != "" {
-			centerContent = pluginStatus
-		} else if diags := m.diagsOnLine(m.cursor.Line); len(diags) > 0 {
+		if diags := m.diagsOnLine(m.cursor.Line); len(diags) > 0 {
 			// Show most-severe diagnostic on the cursor line.
 			d := diags[0]
 			src := d.Source

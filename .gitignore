@@ -4,9 +4,9 @@
 *.dll
 *.so
 *.dylib
-indigo
-jumpy
-indigo-spell
+/indigo
+/jumpy
+/indigo-spell
 
 # Common binary output directories
 bin/
@@ -30,8 +30,8 @@ go.work.sum
 examples
 
 # Plugin built binaries (source is tracked, binaries are not)
-plugins/*/jumpy-*
-plugins/*/indigo-spell-*
+!plugins/*/jumpy-*
+!plugins/*/indigo-spell-*
 
 # Dependency directories (Optional)
 # Only uncomment if you explicitly want to vendor dependencies

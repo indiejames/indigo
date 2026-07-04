@@ -1,0 +1,10 @@
+name        = "jumpy"
+version     = "0.1.0"
+sdk_version = "0.1.0"
+description = "EasyMotion-style jump-to-token plugin. Press 'f' in normal mode, then type the 2-char label shown over your target."
+
+[binaries]
+"darwin/arm64" = "jumpy-darwin-arm64"
+"darwin/amd64" = "jumpy-darwin-amd64"
+"linux/amd64"  = "jumpy-linux-amd64"
+"linux/arm64"  = "jumpy-linux-arm64"

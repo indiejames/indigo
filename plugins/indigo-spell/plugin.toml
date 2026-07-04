@@ -1,0 +1,10 @@
+name        = "indigo-spell"
+version     = "0.1.0"
+sdk_version = "0.1.0"
+description = "Spell-checking plugin. Underlines misspelled words and offers suggestions via Shift+F. Supports global and workspace custom dictionaries."
+
+[binaries]
+"darwin/arm64" = "indigo-spell-darwin-arm64"
+"darwin/amd64" = "indigo-spell-darwin-amd64"
+"linux/amd64"  = "indigo-spell-linux-amd64"
+"linux/arm64"  = "indigo-spell-linux-arm64"

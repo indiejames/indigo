@@ -4,6 +4,21 @@ Spell-checking plugin for the indigo editor. Misspelled words are underlined
 (undercurl in terminals that support it). Press `Shift+F` over a word to see
 suggestions and dictionary-add options.
 
+## What gets checked
+
+The plugin is file-type aware so it doesn't flag identifiers, type names, or
+other code tokens:
+
+| File type | Extensions | What is checked |
+|-----------|------------|-----------------|
+| Plain text / Markdown | `.md`, `.txt`, `.rst`, `.adoc`, `.org`, (none) | Everything |
+| C-style source | `.go`, `.c`, `.cpp`, `.js`, `.ts`, `.java`, `.rs`, `.swift`, … | `//` and `/* */` comments only |
+| Script / config | `.py`, `.rb`, `.sh`, `.bash`, `.zsh`, `.fish`, `.toml`, `.yaml`, `.yml` | `#` comments only |
+| Data files | `.json`, `.lock`, `.sum` | Nothing (skipped) |
+
+String literals in code files are **not** currently checked. If you want a
+word ignored everywhere, add it with `:spell-add`.
+
 ## Built-in dictionaries
 
 The plugin ships with the following dictionaries compiled in:

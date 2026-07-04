@@ -66,6 +66,89 @@ type fixPayload struct {
 	Col  uint32 `json:"col"`
 }
 
+// fileKind controls which portions of a file are spell-checked.
+type fileKind int
+
+const (
+	kindText   fileKind = iota // check all text (markdown, plain text)
+	kindCStyle                  // check only // and /* */ comments + string literals
+	kindHash                    // check only # comments
+	kindSkip                    // skip entirely (binary-like data files)
+)
+
+// fileKindForPath determines the checking strategy based on file extension.
+func fileKindForPath(path string) fileKind {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".md", ".txt", ".rst", ".adoc", ".org", "":
+		return kindText
+	case ".json", ".lock", ".sum":
+		return kindSkip
+	case ".py", ".rb", ".sh", ".bash", ".zsh", ".fish", ".r",
+		".toml", ".yaml", ".yml", ".ini", ".conf":
+		return kindHash
+	default:
+		// Go, C, C++, JS, TS, Java, Rust, Swift, Kotlin, …
+		return kindCStyle
+	}
+}
+
+// commentSpan returns the checkable portion of a source line and its column
+// offset within the original line. Returns ("", -1) when nothing on the line
+// should be checked.
+func commentSpan(line string, kind fileKind) (text string, col int) {
+	switch kind {
+	case kindText:
+		return line, 0
+	case kindSkip:
+		return "", -1
+	case kindCStyle:
+		return cstyleCommentSpan(line)
+	case kindHash:
+		return hashCommentSpan(line)
+	}
+	return "", -1
+}
+
+func cstyleCommentSpan(line string) (string, int) {
+	trimmed := strings.TrimLeft(line, " \t")
+	leadWS := len(line) - len(trimmed)
+
+	// Full-line comment: // text
+	if strings.HasPrefix(trimmed, "//") {
+		return trimmed[2:], leadWS + 2
+	}
+	// Start of block comment: /* text
+	if strings.HasPrefix(trimmed, "/*") {
+		t := trimmed[2:]
+		if end := strings.Index(t, "*/"); end >= 0 {
+			t = t[:end]
+		}
+		return t, leadWS + 2
+	}
+	// Interior of block comment: * text  (but not */)
+	if strings.HasPrefix(trimmed, "*") && !strings.HasPrefix(trimmed, "*/") {
+		return trimmed[1:], leadWS + 1
+	}
+	// Inline trailing comment: code // text
+	if idx := strings.Index(line, "//"); idx >= 0 {
+		return line[idx+2:], idx + 2
+	}
+	return "", -1
+}
+
+func hashCommentSpan(line string) (string, int) {
+	idx := strings.Index(line, "#")
+	if idx < 0 {
+		return "", -1
+	}
+	// Skip shebangs on the first line.
+	if idx == 0 && strings.HasPrefix(line, "#!") {
+		return "", -1
+	}
+	return line[idx+1:], idx + 1
+}
+
 // Spell holds all plugin state.
 type Spell struct {
 	mu            sync.Mutex
@@ -74,8 +157,9 @@ type Spell struct {
 	extraCheckers []*gospell.GoSpell // additional language dicts from ~/.config/indigo/spell/dicts/
 
 	// per-buffer cache: bufID → list of decorations
-	cache   map[uint32][]sdk.Decoration
-	pending map[uint32]*time.Timer // debounce timers
+	cache    map[uint32][]sdk.Decoration
+	pending  map[uint32]*time.Timer // debounce timers
+	bufPaths map[uint32]string      // bufID → file path (for kind detection)
 
 	// user dictionaries (words added at runtime)
 	globalDictPath    string
@@ -87,6 +171,7 @@ func (s *Spell) Init(api *sdk.Api) sdk.Info {
 	s.api = api
 	s.cache = make(map[uint32][]sdk.Decoration)
 	s.pending = make(map[uint32]*time.Timer)
+	s.bufPaths = make(map[uint32]string)
 	s.userWords = make(map[string]struct{})
 
 	// Load the base en_US dictionary from embedded bytes.
@@ -272,23 +357,37 @@ func (s *Spell) checkBuffer(bufID uint32) []sdk.Decoration {
 		return nil
 	}
 
+	s.mu.Lock()
+	path := s.bufPaths[bufID]
+	s.mu.Unlock()
+
+	kind := fileKindForPath(path)
+	if kind == kindSkip {
+		return nil
+	}
+
 	var out []sdk.Decoration
 	lines := strings.Split(content, "\n")
 	for lineIdx, line := range lines {
-		words := splitIdentifiers(line)
+		text, colOff := commentSpan(line, kind)
+		if text == "" {
+			continue
+		}
+		words := splitIdentifiers(text)
 		for _, w := range words {
+			col := w.col + colOff
 			if s.spell(w.text) {
 				continue
 			}
 			payload, _ := json.Marshal(fixPayload{
 				Word: w.text,
 				Line: uint32(lineIdx),
-				Col:  uint32(w.col),
+				Col:  uint32(col),
 			})
 			out = append(out, sdk.Decoration{
 				Line:           uint32(lineIdx),
-				Col:            uint32(w.col),
-				EndCol:         uint32(w.col + len([]rune(w.text))),
+				Col:            uint32(col),
+				EndCol:         uint32(col + len([]rune(w.text))),
 				Kind:           sdk.DecorationUnderline,
 				UnderlineStyle: underlineStyle,
 				UnderlineColor: "#80c8fb",
@@ -318,7 +417,12 @@ func (s *Spell) scheduleCheck(bufID uint32) {
 
 // --- SDK callbacks ---
 
-func (s *Spell) onBufferChange(bufID uint32, _ string) {
+func (s *Spell) onBufferChange(bufID uint32, path string) {
+	if path != "" {
+		s.mu.Lock()
+		s.bufPaths[bufID] = path
+		s.mu.Unlock()
+	}
 	s.scheduleCheck(bufID)
 }
 
@@ -330,6 +434,7 @@ func (s *Spell) onBufferClose(bufID uint32, _ string) {
 		delete(s.pending, bufID)
 	}
 	delete(s.cache, bufID)
+	delete(s.bufPaths, bufID)
 }
 
 func (s *Spell) getDecorations(bufID uint32, _ uint64, _ sdk.Range) []sdk.Decoration {

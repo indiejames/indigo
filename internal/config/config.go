@@ -211,6 +211,16 @@ const defaultConfigTemplate = `# Indigo editor configuration
 # ---------------------------------------------------------------------------
 `
 
+// Path returns the absolute path of the user config file.
+// The file may not exist yet.
+func Path() (string, error) {
+	dir, err := configDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "indigo", "config.toml"), nil
+}
+
 // Load reads the config file, returning defaults for any missing or
 // unreadable file. A parse error is the only failure that is returned.
 // When the file does not exist, a commented-out template is created so the

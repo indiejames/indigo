@@ -291,6 +291,13 @@ type Model struct {
 	completionPrefix string
 }
 
+// WithConfig returns a copy of the model with a new config applied.
+// Used for hot-reloading preferences at runtime.
+func (m Model) WithConfig(cfg *config.Config) Model {
+	m.cfg = cfg
+	return m
+}
+
 // New creates a Model after the buffer is already open with the server.
 func New(rpc *RPC, bufID uint32, content string, version uint64, filePath string, cfg *config.Config, fromRecovery bool) Model {
 	buf := document.New(filePath, content)

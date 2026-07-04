@@ -1,34 +1,36 @@
 package client
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
-// cmdDesc pairs a full-word command name with a short description.
+// cmdDesc pairs a command name with its description and whether it takes arguments.
 // Must be kept in alphabetical order (filteredCmds relies on it).
 type cmdDesc struct {
-	name string
-	desc string
+	name     string
+	desc     string
+	needsArgs bool // if true, Tab+Enter fills the command line instead of executing immediately
 }
 
 var allCmds = []cmdDesc{
-	{"edit",       "Open file picker"},
-	{"find",       "Workspace search"},
-	{"fmt",        "Format current buffer"},
-	{"format",     "Format current buffer"},
-	{"grep",       "Workspace search"},
-	{"metrics",    "Toggle metrics overlay"},
-	{"quit",       "Close buffer (fails if unsaved)"},
-	{"quit!",      "Close buffer, discarding changes"},
-	{"quit-all",   "Quit all (fails if any unsaved)"},
-	{"quit-all!",  "Quit all, discarding changes"},
-	{"save",       "Save file"},
-	{"wqa",        "Save all and quit"},
-	{"write",      "Save file"},
-	{"write-quit", "Save and close buffer"},
+	{"edit",       "Open file picker",                 false},
+	{"find",       "Workspace search (optional pattern)", true},
+	{"fmt",        "Format current buffer",            false},
+	{"format",     "Format current buffer",            false},
+	{"grep",       "Workspace search (optional pattern)", true},
+	{"metrics",    "Toggle metrics overlay",           false},
+	{"quit",       "Close buffer (fails if unsaved)",  false},
+	{"quit!",      "Close buffer, discarding changes", false},
+	{"quit-all",   "Quit all (fails if any unsaved)",  false},
+	{"quit-all!",  "Quit all, discarding changes",     false},
+	{"save",       "Save file",                        false},
+	{"wqa",        "Save all and quit",                false},
+	{"write",      "Save file",                        false},
+	{"write-quit", "Save and close buffer",            false},
 }
 
 // fuzzyMatch reports whether every rune of pattern appears in s as a subsequence.
@@ -49,81 +51,148 @@ func fuzzyMatch(pattern, s string) bool {
 	return false
 }
 
-// filteredCmds returns full-word command names that fuzzy-match input,
-// in alphabetical order. Returns nil when input looks like a line number.
-func filteredCmds(input string) []string {
+// filteredCmds returns cmdDesc entries that fuzzy-match input, in alphabetical
+// order. Returns nil when input looks like a line number.
+func filteredCmds(input string) []cmdDesc {
 	if len(input) > 0 && input[0] >= '0' && input[0] <= '9' {
 		return nil
 	}
-	var out []string
+	var out []cmdDesc
 	for _, e := range allCmds {
 		if fuzzyMatch(input, e.name) {
-			out = append(out, e.name)
+			out = append(out, e)
 		}
 	}
 	return out
 }
 
+// maxCmdVisible is the maximum number of command items shown at once.
+const maxCmdVisible = 8
+
 // renderCmdCompletionPopup builds styled lines for the command completion popup.
-// Items are arranged in the minimum-bounding-rectangle layout (fewest rows).
-// Each returned line is padded to termW so it replaces the underlying text line.
-func renderCmdCompletionPopup(input string, termW int) []string {
+//
+// selIdx is the 0-based index of the highlighted command (−1 = no selection).
+// When an item is selected, a description box is rendered above the list.
+// Items are presented in a single-column list; Tab/Shift+Tab cycle the selection.
+func renderCmdCompletionPopup(input string, selIdx int, termW int) []string {
 	matches := filteredCmds(input)
 	if len(matches) == 0 {
 		return nil
 	}
 
-	maxName := 0
-	for _, n := range matches {
-		if w := len([]rune(n)); w > maxName {
-			maxName = w
+	// clamp selIdx to valid range
+	if selIdx >= len(matches) {
+		selIdx = len(matches) - 1
+	}
+
+	// Calculate inner width (between the │ borders).
+	// Must accommodate: "Commands" title, "▶ <name> " item rows, " <desc> " desc rows.
+	maxNameW := 0
+	for _, d := range matches {
+		if w := len([]rune(d.name)); w > maxNameW {
+			maxNameW = w
 		}
 	}
-	cellW := maxName + 4 // 2-space padding each side
-
-	// Maximum columns that fit within terminal width (leave 2 for │ borders).
-	maxCols := max(1, (termW-2)/cellW)
-	cols := min(maxCols, len(matches))
-	rows := (len(matches) + cols - 1) / cols
-
-	// Reduce columns to the minimum that still achieves the same row count.
-	for cols > 1 && (cols-1)*rows >= len(matches) {
-		cols--
+	maxDescW := 0
+	for _, d := range matches {
+		if w := len([]rune(d.desc)); w > maxDescW {
+			maxDescW = w
+		}
 	}
-	// Recalculate rows after possible column reduction.
-	rows = (len(matches) + cols - 1) / cols
+	innerW := max(len("Commands"), 2+maxNameW+1, maxDescW+2)
+	innerW = min(innerW, termW-2) // leave room for │ borders
 
-	innerW := cols * cellW
-
-	title := "Commands"
-	dashes := max(0, innerW-len([]rune(title)))
-	top := popupBorderStyle.Render("╭") +
-		popupTextStyle.Render(title) +
-		popupBorderStyle.Render(strings.Repeat("─", dashes)+"╮")
+	// Scroll window: center the selection.
+	visStart := 0
+	visEnd := len(matches)
+	if len(matches) > maxCmdVisible {
+		if selIdx >= 0 {
+			visStart = selIdx - maxCmdVisible/2
+		}
+		visStart = max(0, min(visStart, len(matches)-maxCmdVisible))
+		visEnd = visStart + maxCmdVisible
+	}
 
 	var lines []string
-	lines = append(lines, cmdPopupPad(top, termW))
 
-	for r := 0; r < rows; r++ {
-		var sb strings.Builder
-		sb.WriteString(popupBorderStyle.Render("│"))
-		for c := 0; c < cols; c++ {
-			idx := r*cols + c
-			if idx < len(matches) {
-				name := matches[idx]
-				padR := maxName - len([]rune(name))
-				cell := "  " + name + strings.Repeat(" ", padR) + "  "
-				sb.WriteString(popupTextStyle.Render(cell))
-			} else {
-				sb.WriteString(popupTextStyle.Render(strings.Repeat(" ", cellW)))
-			}
+	// Description box — shown only when an item is selected.
+	if selIdx >= 0 {
+		sel := matches[selIdx]
+
+		hdr := "─ " + sel.name + " "
+		if len([]rune(hdr)) > innerW {
+			hdr = string([]rune(hdr)[:innerW])
 		}
-		sb.WriteString(popupBorderStyle.Render("│"))
-		lines = append(lines, cmdPopupPad(sb.String(), termW))
+		dashes := max(0, innerW-len([]rune(hdr)))
+		descTop := popupBorderStyle.Render("╭" + hdr + strings.Repeat("─", dashes) + "╮")
+		lines = append(lines, cmdPopupPad(descTop, termW))
+
+		descAvail := innerW - 2
+		desc := sel.desc
+		if len([]rune(desc)) > descAvail {
+			desc = string([]rune(desc)[:max(0, descAvail-1)]) + "…"
+		}
+		trail := max(0, descAvail-len([]rune(desc)))
+		descRow := popupBorderStyle.Render("│") +
+			popupTextStyle.Render(" "+desc+strings.Repeat(" ", trail)+" ") +
+			popupBorderStyle.Render("│")
+		lines = append(lines, cmdPopupPad(descRow, termW))
+
+		descBot := popupBorderStyle.Render("╰" + strings.Repeat("─", innerW) + "╯")
+		lines = append(lines, cmdPopupPad(descBot, termW))
 	}
 
+	// Commands box — top border.
+	cmdTitle := "Commands"
+	cmdDashes := max(0, innerW-len(cmdTitle))
+	top := popupBorderStyle.Render("╭") +
+		popupTextStyle.Render(cmdTitle) +
+		popupBorderStyle.Render(strings.Repeat("─", cmdDashes)+"╮")
+	lines = append(lines, cmdPopupPad(top, termW))
+
+	// "more above" indicator.
+	if visStart > 0 {
+		text := fmt.Sprintf("  ↑ %d more", visStart)
+		padW := max(0, innerW-len([]rune(text)))
+		row := popupBorderStyle.Render("│") +
+			popupTextStyle.Render(text+strings.Repeat(" ", padW)) +
+			popupBorderStyle.Render("│")
+		lines = append(lines, cmdPopupPad(row, termW))
+	}
+
+	// Item rows.
+	for i := visStart; i < visEnd; i++ {
+		name := matches[i].name
+		padW := max(0, innerW-2-len([]rune(name)))
+		if i == selIdx {
+			content := "▶ " + name + strings.Repeat(" ", padW)
+			row := popupBorderStyle.Render("│") +
+				selectionStyle.Render(content) +
+				popupBorderStyle.Render("│")
+			lines = append(lines, cmdPopupPad(row, termW))
+		} else {
+			content := "  " + name + strings.Repeat(" ", padW)
+			row := popupBorderStyle.Render("│") +
+				popupTextStyle.Render(content) +
+				popupBorderStyle.Render("│")
+			lines = append(lines, cmdPopupPad(row, termW))
+		}
+	}
+
+	// "more below" indicator.
+	if visEnd < len(matches) {
+		text := fmt.Sprintf("  ↓ %d more", len(matches)-visEnd)
+		padW := max(0, innerW-len([]rune(text)))
+		row := popupBorderStyle.Render("│") +
+			popupTextStyle.Render(text+strings.Repeat(" ", padW)) +
+			popupBorderStyle.Render("│")
+		lines = append(lines, cmdPopupPad(row, termW))
+	}
+
+	// Bottom border.
 	bottom := popupBorderStyle.Render("╰" + strings.Repeat("─", innerW) + "╯")
 	lines = append(lines, cmdPopupPad(bottom, termW))
+
 	return lines
 }
 

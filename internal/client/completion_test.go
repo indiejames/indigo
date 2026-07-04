@@ -33,6 +33,15 @@ func TestFuzzyMatch(t *testing.T) {
 	}
 }
 
+// cmdNames extracts just the name field from a []cmdDesc for easier comparison.
+func cmdNames(descs []cmdDesc) []string {
+	out := make([]string, len(descs))
+	for i, d := range descs {
+		out[i] = d.name
+	}
+	return out
+}
+
 func TestFilteredCmds(t *testing.T) {
 	tests := []struct {
 		input string
@@ -52,7 +61,7 @@ func TestFilteredCmds(t *testing.T) {
 		{"0abc", nil}, // starts with digit
 	}
 	for _, tt := range tests {
-		got := filteredCmds(tt.input)
+		got := cmdNames(filteredCmds(tt.input))
 		if len(got) != len(tt.want) {
 			t.Errorf("filteredCmds(%q) = %v, want %v", tt.input, got, tt.want)
 			continue
@@ -68,21 +77,21 @@ func TestFilteredCmds(t *testing.T) {
 func TestFilteredCmdsAlphabetical(t *testing.T) {
 	all := filteredCmds("")
 	for i := 1; i < len(all); i++ {
-		if all[i] < all[i-1] {
-			t.Errorf("filteredCmds not sorted: %q before %q", all[i-1], all[i])
+		if all[i].name < all[i-1].name {
+			t.Errorf("filteredCmds not sorted: %q before %q", all[i-1].name, all[i].name)
 		}
 	}
 }
 
 func TestRenderCmdCompletionPopupNoMatches(t *testing.T) {
-	lines := renderCmdCompletionPopup("zzzz", 80)
+	lines := renderCmdCompletionPopup("zzzz", -1, 80)
 	if lines != nil {
 		t.Errorf("no matches: want nil, got %v", lines)
 	}
 }
 
 func TestRenderCmdCompletionPopupReturnsLines(t *testing.T) {
-	lines := renderCmdCompletionPopup("", 80)
+	lines := renderCmdCompletionPopup("", -1, 80)
 	if len(lines) == 0 {
 		t.Fatal("empty input should produce popup lines")
 	}
@@ -94,7 +103,7 @@ func TestRenderCmdCompletionPopupReturnsLines(t *testing.T) {
 
 func TestRenderCmdCompletionPopupPaddedToWidth(t *testing.T) {
 	const termW = 60
-	lines := renderCmdCompletionPopup("", termW)
+	lines := renderCmdCompletionPopup("", -1, termW)
 	for i, line := range lines {
 		w := lipgloss.Width(line)
 		if w != termW {
@@ -105,9 +114,65 @@ func TestRenderCmdCompletionPopupPaddedToWidth(t *testing.T) {
 
 func TestRenderCmdCompletionPopupNarrowTerminal(t *testing.T) {
 	// A very narrow terminal should not panic and should produce at least 1 column.
-	lines := renderCmdCompletionPopup("q", 10)
+	lines := renderCmdCompletionPopup("q", -1, 10)
 	if lines == nil {
 		t.Fatal("narrow terminal: expected lines, got nil")
+	}
+}
+
+func TestRenderCmdCompletionPopupWithSelection(t *testing.T) {
+	// With a selection, popup should include a description box above the list.
+	lines := renderCmdCompletionPopup("q", 0, 80)
+	if len(lines) == 0 {
+		t.Fatal("selection: expected lines, got none")
+	}
+	// With selection, the total line count should be > without selection
+	// (description box adds 3 lines).
+	noSel := renderCmdCompletionPopup("q", -1, 80)
+	if len(lines) <= len(noSel) {
+		t.Errorf("with selection: %d lines, without: %d — expected more with selection", len(lines), len(noSel))
+	}
+}
+
+func TestRenderCmdCompletionPopupSelectionHighlighted(t *testing.T) {
+	// The selected item should contain the selection indicator.
+	lines := renderCmdCompletionPopup("q", 0, 80)
+	found := false
+	for _, line := range lines {
+		if strings.Contains(line, "▶") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("selected popup should contain ▶ indicator")
+	}
+}
+
+func TestRenderCmdCompletionPopupDescriptionBox(t *testing.T) {
+	// With selIdx=0 and input "q", first match is "quit".
+	// The description box should contain the command name in its header.
+	lines := renderCmdCompletionPopup("q", 0, 80)
+	found := false
+	for _, line := range lines {
+		if strings.Contains(line, "quit") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("description box should contain selected command name")
+	}
+}
+
+func TestRenderCmdCompletionPopupPaddedToWidthWithSelection(t *testing.T) {
+	const termW = 60
+	lines := renderCmdCompletionPopup("q", 1, termW)
+	for i, line := range lines {
+		w := lipgloss.Width(line)
+		if w != termW {
+			t.Errorf("line %d width = %d, want %d (with selection)", i, w, termW)
+		}
 	}
 }
 

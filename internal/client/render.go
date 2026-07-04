@@ -1272,7 +1272,7 @@ func (m Model) View() string {
 
 	// Overlay command completion popup above the status bar.
 	if m.mode == ModeCommand {
-		popup := renderCmdCompletionPopup(m.cmdBuf, m.width)
+		popup := renderCmdCompletionPopup(m.cmdBuf, m.cmdCompletionIdx, m.width)
 		if len(popup) > 0 {
 			popH := len(popup)
 			startRow := max(0, vis-popH)

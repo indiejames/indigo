@@ -124,8 +124,15 @@ func (m Model) fetchUpdates() tea.Cmd {
 	}
 }
 
+// saveAsPromptMsg triggers the save-as command prompt in Update.
+type saveAsPromptMsg struct{ thenClose bool }
+
 // doSave formats first (when format_on_save is enabled) then saves.
+// For untitled buffers it triggers the save-as prompt instead.
 func (m Model) doSave() tea.Cmd {
+	if m.filePath == "" {
+		return func() tea.Msg { return saveAsPromptMsg{} }
+	}
 	if m.cfg != nil && m.cfg.FormatOnSave {
 		return m.fetchFormat(true)
 	}
@@ -141,6 +148,18 @@ func (m Model) doSaveNow() tea.Cmd {
 			return errorMsg{err}
 		}
 		return savedMsg{}
+	}
+}
+
+// doSaveAsNow writes the buffer to newPath via the server.
+func (m Model) doSaveAsNow(newPath string, thenClose bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := m.rpc.SaveAs(ctx, m.bufID, newPath); err != nil {
+			return errorMsg{err}
+		}
+		return savedAsMsg{newPath: newPath, thenClose: thenClose}
 	}
 }
 
@@ -183,6 +202,9 @@ func (m Model) doCloseBuffer() tea.Cmd {
 
 // doSaveAndClose saves the buffer, then closes it.
 func (m Model) doSaveAndClose() tea.Cmd {
+	if m.filePath == "" {
+		return func() tea.Msg { return saveAsPromptMsg{thenClose: true} }
+	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

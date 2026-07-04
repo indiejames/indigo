@@ -31,6 +31,7 @@ interface EditorService {
   updateViewport       @16 (clientId :UInt64, topLine :UInt32, height :UInt32)      -> ();
   getPluginDecorations @17 (clientId :UInt64, bufId :UInt32)                        -> (decorations :List(PluginDecoration));
   getPluginKeys        @18 ()                                                        -> (keys :List(Text));
+  saveAs               @19 (clientId :UInt64, bufferId :UInt32, path :Text)          -> ();
 }
 
 struct PluginEdit {

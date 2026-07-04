@@ -182,23 +182,25 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	content, fromRecovery := s.loadContent(path)
 
 	s.mu.Lock()
-	// Check if file is already open.
-	for id, e := range s.buffers {
-		if e.buf.Path() == path {
-			e.clients[clientID] = struct{}{}
-			ver := e.buf.Version()
-			s.mu.Unlock()
+	// Check if file is already open (skip dedup for untitled buffers).
+	if path != "" {
+		for id, e := range s.buffers {
+			if e.buf.Path() == path {
+				e.clients[clientID] = struct{}{}
+				ver := e.buf.Version()
+				s.mu.Unlock()
 
-			res, err := call.AllocResults()
-			if err != nil {
-				return err
+				res, err := call.AllocResults()
+				if err != nil {
+					return err
+				}
+				res.SetBufferId(id)
+				if err := res.SetContent(e.buf.Content()); err != nil {
+					return err
+				}
+				res.SetVersion(ver)
+				return nil
 			}
-			res.SetBufferId(id)
-			if err := res.SetContent(e.buf.Content()); err != nil {
-				return err
-			}
-			res.SetVersion(ver)
-			return nil
 		}
 	}
 
@@ -225,8 +227,10 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	}
 	res.SetVersion(ver)
 	res.SetFromRecovery(fromRecovery)
-	go s.lspMgr.DidOpen(path, content)
-	go s.pluginMgr.DispatchBufferOpen(context.Background(), bufID, path)
+	if path != "" {
+		go s.lspMgr.DidOpen(path, content)
+		go s.pluginMgr.DispatchBufferOpen(context.Background(), bufID, path)
+	}
 	return nil
 }
 
@@ -265,6 +269,9 @@ func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorServ
 
 // loadContent reads a file's content, preferring a newer recovery file if one exists.
 func (s *editorService) loadContent(path string) (content string, fromRecovery bool) {
+	if path == "" {
+		return "", false // untitled buffer: no content, no recovery
+	}
 	var origModTime time.Time
 	if info, err := os.Stat(path); err == nil {
 		origModTime = info.ModTime()
@@ -429,6 +436,42 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 	return err
 }
 
+func (s *editorService) SaveAs(_ context.Context, call proto.EditorService_saveAs) error {
+	args := call.Args()
+	bufID := args.BufferId()
+	newPath, err := args.Path()
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+
+	content := entry.buf.Content()
+	if err := os.WriteFile(newPath, []byte(content), 0o644); err != nil {
+		return err
+	}
+	oldPath := entry.buf.Path()
+	entry.buf = document.New(newPath, content)
+	entry.buf.SetClean()
+	s.mu.Lock()
+	s.buffers[bufID] = entry
+	s.mu.Unlock()
+
+	if oldPath != "" {
+		os.Remove(recoveryFilePath(s.recDir, oldPath)) //nolint:errcheck
+	}
+	go s.lspMgr.DidOpen(newPath, content)
+	go s.pluginMgr.DispatchBufferOpen(context.Background(), bufID, newPath)
+
+	_, err = call.AllocResults()
+	return err
+}
+
 func (s *editorService) BufferClientCount(_ context.Context, call proto.EditorService_bufferClientCount) error {
 	bufID := call.Args().BufferId()
 	s.mu.Lock()
@@ -462,8 +505,10 @@ func (s *editorService) CloseBuffer(_ context.Context, call proto.EditorService_
 	}
 	s.mu.Unlock()
 
+	// Always clean up the recovery file; for untitled buffers this removes the
+	// sha256("") recovery entry so it isn't replayed on the next invocation.
+	os.Remove(recoveryFilePath(s.recDir, removedPath)) //nolint:errcheck
 	if removedPath != "" {
-		os.Remove(recoveryFilePath(s.recDir, removedPath)) //nolint:errcheck
 		go s.lspMgr.DidClose(removedPath)
 		go s.pluginMgr.DispatchBufferClose(context.Background(), bufID, removedPath)
 	}
@@ -940,6 +985,9 @@ func (s *Server) flushDirtyBuffers(maxBytes int64) {
 	s.svc.mu.Unlock()
 
 	for _, buf := range bufs {
+		if buf.Path() == "" {
+			continue // untitled buffers have no file to recover to
+		}
 		rp := recoveryFilePath(s.svc.recDir, buf.Path())
 		if !buf.Dirty() {
 			os.Remove(rp) //nolint:errcheck

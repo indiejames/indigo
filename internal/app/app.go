@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,6 +34,13 @@ type switchBufferMsg struct {
 // App is the top-level Bubble Tea model. It owns a list of editor buffers,
 // routes messages to the active one, manages the file picker, and handles
 // multi-buffer commands (:qa, :qa!, :wqa, ]b, [b).
+// configTickMsg is sent every 2 s by the config file watcher.
+type configTickMsg struct {
+	newMod time.Time      // zero = file unchanged or error
+	cfg    *config.Config // non-nil only when the file changed and parsed OK
+}
+
+
 type App struct {
 	rpc     *client.RPC
 	cfg     *config.Config
@@ -46,6 +54,46 @@ type App struct {
 
 	picker *filePicker // non-nil when file picker is open
 	grep   *grepPicker // non-nil when workspace search picker is open
+
+	configPath    string    // path to config.toml; empty means watch is disabled
+	configModTime time.Time // mtime of last observed config file
+}
+
+// configPathAndMtime returns the config file path and its current mtime.
+// Returns "" if the path cannot be determined.
+func configPathAndMtime() (string, time.Time) {
+	p, err := config.Path()
+	if err != nil {
+		return "", time.Time{}
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		return p, time.Time{}
+	}
+	return p, info.ModTime()
+}
+
+// watchConfig fires a configTickMsg after 2 s. The msg carries a new config
+// when the file has changed, or zero values when it has not.
+func watchConfig(path string, lastMod time.Time) tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		if path == "" {
+			return configTickMsg{}
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return configTickMsg{} // file removed or unreadable; keep watching
+		}
+		mod := info.ModTime()
+		if !mod.After(lastMod) {
+			return configTickMsg{} // unchanged
+		}
+		cfg, err := config.Load()
+		if err != nil {
+			return configTickMsg{newMod: mod} // parse error; update mtime to avoid hammering
+		}
+		return configTickMsg{newMod: mod, cfg: cfg}
+	})
 }
 
 // New creates an App with a single initial buffer already open.
@@ -58,34 +106,54 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 	if startLine > 0 {
 		m = m.AtLine(startLine)
 	}
+	cfgPath, cfgMod := configPathAndMtime()
 	return &App{
-		rpc:     rpc,
-		cfg:     cfg,
-		workDir: workDir,
-		buffers: []client.Model{m},
+		rpc:           rpc,
+		cfg:           cfg,
+		workDir:       workDir,
+		buffers:       []client.Model{m},
+		configPath:    cfgPath,
+		configModTime: cfgMod,
 	}
 }
 
 // NewWithPicker creates an App with the file picker open immediately
 // (used when indigo is started with a directory argument).
 func NewWithPicker(rpc *client.RPC, cfg *config.Config, workDir string) *App {
+	cfgPath, cfgMod := configPathAndMtime()
 	return &App{
-		rpc:     rpc,
-		cfg:     cfg,
-		workDir: workDir,
+		rpc:           rpc,
+		cfg:           cfg,
+		workDir:       workDir,
+		configPath:    cfgPath,
+		configModTime: cfgMod,
 	}
 }
 
 func (a App) Init() tea.Cmd {
-	if len(a.buffers) == 0 {
-		// Picker-only start: no buffer yet.
-		return nil
+	cmds := []tea.Cmd{watchConfig(a.configPath, a.configModTime)}
+	if len(a.buffers) > 0 {
+		cmds = append(cmds, a.buffers[0].Init())
 	}
-	return a.buffers[0].Init()
+	return tea.Batch(cmds...)
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+
+	case configTickMsg:
+		if msg.newMod.IsZero() {
+			// File unchanged or unreadable — re-arm with the same mtime.
+			return a, watchConfig(a.configPath, a.configModTime)
+		}
+		a.configModTime = msg.newMod
+		if msg.cfg != nil {
+			a.cfg = msg.cfg
+			for i, m := range a.buffers {
+				a.buffers[i] = m.WithConfig(msg.cfg)
+			}
+		}
+		return a, watchConfig(a.configPath, a.configModTime)
 
 	case tea.WindowSizeMsg:
 		a.width = msg.Width

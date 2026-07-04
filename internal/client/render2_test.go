@@ -15,7 +15,7 @@ import (
 func TestRenderLineRunesPlain(t *testing.T) {
 	var sb strings.Builder
 	runes := []rune("hello")
-	renderLineRunes(&sb, runes, -1, -1, -1, nil, nil)
+	renderLineRunes(&sb, runes, -1, -1, -1, nil, nil, nil)
 	if got := sb.String(); got != "hello" {
 		t.Errorf("plain = %q, want %q", got, "hello")
 	}
@@ -25,7 +25,7 @@ func TestRenderLineRunesCursorAtEnd(t *testing.T) {
 	var sb strings.Builder
 	runes := []rune("hi")
 	// curCol == len(runes): cursor rendered as trailing space
-	renderLineRunes(&sb, runes, -1, -1, 2, nil, nil)
+	renderLineRunes(&sb, runes, -1, -1, 2, nil, nil, nil)
 	got := sb.String()
 	if got == "" {
 		t.Error("cursor beyond line should append styled space")
@@ -34,7 +34,7 @@ func TestRenderLineRunesCursorAtEnd(t *testing.T) {
 
 func TestRenderLineRunesEmpty(t *testing.T) {
 	var sb strings.Builder
-	renderLineRunes(&sb, []rune{}, -1, -1, -1, nil, nil)
+	renderLineRunes(&sb, []rune{}, -1, -1, -1, nil, nil, nil)
 	if sb.String() != "" {
 		t.Errorf("empty runes: got %q, want empty", sb.String())
 	}

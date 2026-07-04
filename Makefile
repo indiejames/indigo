@@ -40,20 +40,42 @@ clean:
 
 # --- Plugin targets ---
 
-JUMPY_DIR     := examples/jumpy
-JUMPY_OUT     := $(JUMPY_DIR)/jumpy-$(shell go env GOOS)-$(shell go env GOARCH)
-PLUGIN_INSTALL_DIR := $(HOME)/.config/indigo/plugins/jumpy
+PLUGINS_DIR := plugins
+GOOS   := $(shell go env GOOS)
+GOARCH := $(shell go env GOARCH)
+
+JUMPY_DIR   := $(PLUGINS_DIR)/jumpy
+JUMPY_OUT   := $(JUMPY_DIR)/jumpy-$(GOOS)-$(GOARCH)
+JUMPY_INSTALL := $(HOME)/.config/indigo/plugins/jumpy
 
 build-jumpy:
 	go build -o $(JUMPY_OUT) ./$(JUMPY_DIR)
 
 install-jumpy: build-jumpy
-	mkdir -p $(PLUGIN_INSTALL_DIR)
-	cp $(JUMPY_OUT) $(PLUGIN_INSTALL_DIR)/
-	cp $(JUMPY_DIR)/plugin.toml $(PLUGIN_INSTALL_DIR)/
+	mkdir -p $(JUMPY_INSTALL)
+	mv $(JUMPY_OUT) $(JUMPY_INSTALL)/
+	cp $(JUMPY_DIR)/plugin.toml $(JUMPY_INSTALL)/
 
 uninstall-jumpy:
-	rm -rf $(PLUGIN_INSTALL_DIR)
+	rm -rf $(JUMPY_INSTALL)
+
+SPELL_DIR   := $(PLUGINS_DIR)/indigo-spell
+SPELL_OUT   := $(SPELL_DIR)/indigo-spell-$(GOOS)-$(GOARCH)
+SPELL_INSTALL := $(HOME)/.config/indigo/plugins/indigo-spell
+
+build-spell:
+	go build -o $(SPELL_OUT) ./$(SPELL_DIR)
+
+install-spell: build-spell
+	mkdir -p $(SPELL_INSTALL)
+	mv $(SPELL_OUT) $(SPELL_INSTALL)/
+	cp $(SPELL_DIR)/plugin.toml $(SPELL_INSTALL)/
+
+uninstall-spell:
+	rm -rf $(SPELL_INSTALL)
+
+build-plugins: build-jumpy build-spell
 
 .PHONY: build build-release build-minimal build-no-heavy build-custom install test vet lint clean \
-        build-jumpy install-jumpy uninstall-jumpy
+        build-jumpy install-jumpy uninstall-jumpy \
+        build-spell install-spell uninstall-spell build-plugins

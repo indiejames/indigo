@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -326,11 +327,20 @@ func expandTabsRemap(runes []rune) (expanded []rune, colMap []int) {
 	return
 }
 
-// renderLineRunes writes runes with selection, cursor, highlight-span, and overlay
-// label rendering applied in a single pass. overlays must be sorted by col ascending.
+// underlineRange is an underline decoration applied additively over syntax highlighting.
+// StartSeq opens the underline (e.g. "\x1b[4m"); the close is always "\x1b[24m".
+type underlineRange struct {
+	StartCol int
+	EndCol   int
+	StartSeq string
+}
+
+// renderLineRunes writes runes with selection, cursor, highlight-span, underline,
+// and overlay label rendering applied in a single pass.
+// overlays must be sorted by col ascending.
 // selA/selB are inclusive selected column bounds (-1,-1 for no selection).
 // curCol is the cursor column (-1 if cursor is not on this line).
-func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, spans []highlight.Span, overlays []lineOverlay) {
+func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, spans []highlight.Span, overlays []lineOverlay, underlines []underlineRange) {
 	n := len(runes)
 	hasCursor := curCol >= 0
 	hasSel := selA >= 0
@@ -339,6 +349,15 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 	spanIdxAt := func(col int) int {
 		for i, s := range spans {
 			if col >= s.StartCol && col < s.EndCol {
+				return i
+			}
+		}
+		return -1
+	}
+
+	underlineIdxAt := func(col int) int {
+		for i, u := range underlines {
+			if col >= u.StartCol && col < u.EndCol {
 				return i
 			}
 		}
@@ -385,6 +404,7 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 			i = j
 		default:
 			si := spanIdxAt(i)
+			ui := underlineIdxAt(i)
 			j := i + 1
 			for j < n && j < noc {
 				if hasCursor && j == curCol {
@@ -396,15 +416,26 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 				if spanIdxAt(j) != si {
 					break
 				}
+				if underlineIdxAt(j) != ui {
+					break
+				}
 				j++
 			}
 			text := string(runes[i:j])
+			// Emit syntax color first, then underline on top (additive).
 			if si >= 0 {
 				sb.WriteString(spans[si].ANSI)
-				sb.WriteString(text)
+			}
+			if ui >= 0 {
+				sb.WriteString(underlines[ui].StartSeq)
+			}
+			sb.WriteString(text)
+			// Close underline first (preserves color), then reset color.
+			if ui >= 0 {
+				sb.WriteString("\x1b[24m") // underline off only
+			}
+			if si >= 0 {
 				sb.WriteString(highlight.ANSIReset)
-			} else {
-				sb.WriteString(text)
 			}
 			i = j
 		}
@@ -571,8 +602,110 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 		}
 	}
 
-	renderLineRunes(&sb, chunkRunes, selA, selB, curCol, remappedSpans, overlays)
+	// Collect underline decoration ranges for this line (separate from syntax spans).
+	var underlines []underlineRange
+	for _, d := range m.decorations {
+		if d.Kind != ClientDecorationUnderline || int(d.Line) != lineNum {
+			continue
+		}
+		ansiSeq := underlineANSI(d.UnderlineStyle, d.UnderlineColor)
+		if ansiSeq == "" {
+			continue
+		}
+		startVis := len(expandedRunes)
+		if int(d.Col) < len(colMap) {
+			startVis = colMap[d.Col]
+		}
+		endVis := len(expandedRunes)
+		if int(d.EndCol) < len(colMap) {
+			endVis = colMap[d.EndCol]
+		}
+		if startVis >= chunkStart+cw || endVis <= chunkStart {
+			continue
+		}
+		underlines = append(underlines, underlineRange{
+			StartCol: max(0, startVis-chunkStart),
+			EndCol:   min(cw, endVis-chunkStart),
+			StartSeq: ansiSeq,
+		})
+	}
+
+	renderLineRunes(&sb, chunkRunes, selA, selB, curCol, remappedSpans, overlays, underlines)
 	return padToWidth(sb.String())
+}
+
+// renderFixPopup builds styled lines for the fix suggestion popup.
+func renderFixPopup(items []ClientFixItem, selected, maxW int) []string {
+	const maxVisible = 10
+
+	labelW := 0
+	for _, it := range items {
+		if w := len([]rune(it.Label)); w > labelW {
+			labelW = w
+		}
+	}
+	labelW = min(labelW, 50)
+	// innerW = 1(lead) + labelW + 1(trail)
+	innerW := 2 + labelW
+	if innerW+2 > maxW {
+		innerW = max(10, maxW-2)
+		labelW = innerW - 2
+	}
+
+	title := "Fix"
+	titleR := []rune(title)
+	dashCount := max(0, innerW-len(titleR))
+	top := popupBorderStyle.Render("╭" + string(titleR) + strings.Repeat("─", dashCount) + "╮")
+	lines := []string{top}
+
+	start := 0
+	if selected >= maxVisible {
+		start = selected - maxVisible + 1
+	}
+	end := min(start+maxVisible, len(items))
+
+	for i := start; i < end; i++ {
+		lr := []rune(items[i].Label)
+		if len(lr) > labelW {
+			lr = lr[:labelW]
+		}
+		trail := max(1, innerW-1-len(lr))
+		if i == selected {
+			content := " " + string(lr) + strings.Repeat(" ", trail)
+			lines = append(lines, popupBorderStyle.Render("│")+selectionStyle.Render(content)+popupBorderStyle.Render("│"))
+		} else {
+			lines = append(lines,
+				popupBorderStyle.Render("│")+
+					popupTextStyle.Render(" "+string(lr)+strings.Repeat(" ", trail))+
+					popupBorderStyle.Render("│"))
+		}
+	}
+	lines = append(lines, popupBorderStyle.Render("╰"+strings.Repeat("─", innerW)+"╯"))
+	return lines
+}
+
+// underlineANSI builds the SGR sequence for an underline decoration.
+// Returns "" for UnderlineNone or unknown styles.
+func underlineANSI(style ClientUnderlineStyle, hexColor string) string {
+	var base string
+	switch style {
+	case ClientUnderlineCurly:
+		base = "\x1b[4:3m"
+	case ClientUnderlineStraight:
+		base = "\x1b[4m"
+	default:
+		return ""
+	}
+	if len(hexColor) != 7 || hexColor[0] != '#' {
+		return base
+	}
+	r, rerr := strconv.ParseUint(hexColor[1:3], 16, 8)
+	g, gerr := strconv.ParseUint(hexColor[3:5], 16, 8)
+	b, berr := strconv.ParseUint(hexColor[5:7], 16, 8)
+	if rerr != nil || gerr != nil || berr != nil {
+		return base
+	}
+	return base + fmt.Sprintf("\x1b[58:2::%d:%d:%dm", r, g, b)
 }
 
 // renderLine renders screen row i for backward compatibility with tests. In
@@ -1206,6 +1339,43 @@ func (m Model) View() string {
 		startRow := cursorScreenRow + 1
 		if startRow+popH > vis {
 			startRow = cursorScreenRow - popH
+		}
+		if startRow < 0 {
+			startRow = 0
+		}
+
+		for pi, popLine := range popup {
+			if row := startRow + pi; row >= 0 && row < vis {
+				lines[row] = overlayRight(lines[row], popLine, popCol)
+			}
+		}
+	}
+
+	// Overlay fix popup near the decorated word.
+	if len(m.fixItems) > 0 && m.fixDecor != nil {
+		popup := renderFixPopup(m.fixItems, m.fixIdx, m.width)
+		popH := len(popup)
+		popW := lipgloss.Width(popup[0])
+
+		gutterW := m.gutterWidth()
+		lineStr := m.buf.Line(int(m.fixDecor.Line))
+		_, colMap := expandTabsRemap([]rune(lineStr))
+		visCol := int(m.fixDecor.Col)
+		if int(m.fixDecor.Col) < len(colMap) {
+			visCol = colMap[m.fixDecor.Col]
+		}
+		popCol := gutterW + visCol
+		if popCol+popW > m.width {
+			popCol = max(0, m.width-popW)
+		}
+
+		decorScreenRow := screenRowOf(layout, int(m.fixDecor.Line), visCol, cw)
+		if decorScreenRow < 0 {
+			decorScreenRow = m.cursorVisualRowFromTop(cw)
+		}
+		startRow := decorScreenRow + 1
+		if startRow+popH > vis {
+			startRow = decorScreenRow - popH
 		}
 		if startRow < 0 {
 			startRow = 0

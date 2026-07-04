@@ -88,14 +88,41 @@ const (
 	DecorationGutter    DecorationKind = 0 // rendered in the line number gutter
 	DecorationOverlay   DecorationKind = 1 // rendered over text at (Line, Col)
 	DecorationStatusBar DecorationKind = 2 // rendered in the status bar center
+	DecorationUnderline DecorationKind = 3 // underlines the span [Col, EndCol) on Line
+)
+
+// UnderlineStyle selects the underline rendering mode.
+type UnderlineStyle int
+
+const (
+	UnderlineNone     UnderlineStyle = 0
+	UnderlineStraight UnderlineStyle = 1
+	UnderlineCurly    UnderlineStyle = 2 // undercurl/wavy; terminals that don't support it fall back to straight
 )
 
 // Decoration is one visual annotation returned by a decoration provider.
 type Decoration struct {
 	Line uint32
-	Col  uint32 // only meaningful for DecorationOverlay
+	Col  uint32 // start column; for DecorationOverlay this is where the text appears
 	Text string
 	Kind DecorationKind
+
+	// Underline fields — only used when Kind == DecorationUnderline.
+	EndCol         uint32         // exclusive end column of the underlined span
+	UnderlineStyle UnderlineStyle // straight or curly
+	UnderlineColor string         // hex color e.g. "#FF8C00"; empty = terminal default
+
+	// Fix fields — when Fixable is true, Shift+F at this decoration calls GetFixes.
+	Fixable bool
+	FixData string // opaque token passed back to GetFixes / ApplyFix
+}
+
+// FixItem is one option presented in the fix popup.
+// If Replace is non-empty the editor applies it as a text replacement directly.
+// If Replace is empty the editor calls ApplyFix with the item's index.
+type FixItem struct {
+	Label   string
+	Replace string
 }
 
 // BufferHandlers groups the four buffer lifecycle callbacks.
@@ -172,12 +199,29 @@ func (a *Api) HandleBufferEvents(h BufferHandlers) error {
 	return err
 }
 
+// DecorationHandlers groups the callbacks for a decoration provider.
+// GetDecorations is required. GetFixes and ApplyFix are optional (nil = not supported).
+type DecorationHandlers struct {
+	// GetDecorations returns decorations for the given buffer and visible range.
+	GetDecorations func(bufID uint32, clientID uint64, r Range) []Decoration
+	// GetFixes returns fix options for the decoration identified by fixData.
+	// Called when the user presses Shift+F on a fixable decoration.
+	GetFixes func(fixData string) []FixItem
+	// ApplyFix handles a FixItem whose Replace field is empty (custom actions).
+	ApplyFix func(fixData string, index uint32)
+}
+
 // Decorations registers fn as the decoration provider.
 // fn is called whenever a client polls for decorations for a buffer/viewport.
 // clientID identifies which client is requesting decorations; plugins can use
 // this to return decorations only for the client that activated them.
 func (a *Api) Decorations(fn func(bufID uint32, clientID uint64, r Range) []Decoration) error {
-	srv := pluginproto.DecorationProvider_ServerToClient(&decorProviderServer{fn: fn})
+	return a.DecorationsFull(DecorationHandlers{GetDecorations: fn})
+}
+
+// DecorationsFull registers a full decoration provider including optional fix support.
+func (a *Api) DecorationsFull(h DecorationHandlers) error {
+	srv := pluginproto.DecorationProvider_ServerToClient(&decorProviderServer{h: h})
 	fut, rel := a.api.RegisterDecorations(context.Background(), func(p pluginproto.EditorApi_registerDecorations_Params) error {
 		return p.SetProvider(srv)
 	})
@@ -598,7 +642,7 @@ func (s *bufferHandlerServer) OnClose(_ context.Context, call pluginproto.Buffer
 }
 
 type decorProviderServer struct {
-	fn func(bufID uint32, clientID uint64, r Range) []Decoration
+	h DecorationHandlers
 }
 
 func (s *decorProviderServer) GetDecorations(_ context.Context, call pluginproto.DecorationProvider_getDecorations) error {
@@ -609,7 +653,7 @@ func (s *decorProviderServer) GetDecorations(_ context.Context, call pluginproto
 	start, _ := rng.Start()
 	end, _ := rng.End()
 
-	decorations := s.fn(bufID, clientID, Range{
+	decorations := s.h.GetDecorations(bufID, clientID, Range{
 		Start: Position{Line: start.Line(), Col: start.Col()},
 		End:   Position{Line: end.Line(), Col: end.Col()},
 	})
@@ -626,10 +670,55 @@ func (s *decorProviderServer) GetDecorations(_ context.Context, call pluginproto
 		item := list.At(i)
 		item.SetLine(d.Line)
 		item.SetCol(d.Col)
+		item.SetEndCol(d.EndCol)
 		if err := item.SetText(d.Text); err != nil {
 			return err
 		}
 		item.SetKind(pluginproto.DecorationKind(d.Kind))
+		item.SetUnderlineStyle(pluginproto.UnderlineStyle(d.UnderlineStyle))
+		if err := item.SetUnderlineColor(d.UnderlineColor); err != nil {
+			return err
+		}
+		item.SetFixable(d.Fixable)
+		if err := item.SetFixData(d.FixData); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func (s *decorProviderServer) GetFixes(_ context.Context, call pluginproto.DecorationProvider_getFixes) error {
+	fixData, _ := call.Args().FixData()
+	var items []FixItem
+	if s.h.GetFixes != nil {
+		items = s.h.GetFixes(fixData)
+	}
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	list, err := res.NewItems(int32(len(items)))
+	if err != nil {
+		return err
+	}
+	for i, it := range items {
+		fi := list.At(i)
+		if err := fi.SetLabel(it.Label); err != nil {
+			return err
+		}
+		if err := fi.SetReplace(it.Replace); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *decorProviderServer) ApplyFix(_ context.Context, call pluginproto.DecorationProvider_applyFix) error {
+	fixData, _ := call.Args().FixData()
+	index := call.Args().Index()
+	if s.h.ApplyFix != nil {
+		s.h.ApplyFix(fixData, index)
+	}
+	_, err := call.AllocResults()
+	return err
 }

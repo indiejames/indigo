@@ -1243,7 +1243,7 @@ func (c EditorService) HandlePluginKey(ctx context.Context, params func(EditorSe
 		},
 	}
 	if params != nil {
-		s.ArgsSize = capnp.ObjectSize{DataSize: 16, PointerCount: 2}
+		s.ArgsSize = capnp.ObjectSize{DataSize: 24, PointerCount: 2}
 		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_handlePluginKey_Params(s)) }
 	}
 
@@ -1329,6 +1329,46 @@ func (c EditorService) SaveAs(ctx context.Context, params func(EditorService_sav
 
 	ans, release := capnp.Client(c).SendCall(ctx, s)
 	return EditorService_saveAs_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) GetPluginFixes(ctx context.Context, params func(EditorService_getPluginFixes_Params) error) (EditorService_getPluginFixes_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      20,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "getPluginFixes",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 2}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_getPluginFixes_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_getPluginFixes_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) ApplyPluginFix(ctx context.Context, params func(EditorService_applyPluginFix_Params) error) (EditorService_applyPluginFix_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      21,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "applyPluginFix",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 2}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_applyPluginFix_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_applyPluginFix_Results_Future{Future: ans.Future()}, release
 
 }
 
@@ -1444,6 +1484,10 @@ type EditorService_Server interface {
 	GetPluginKeys(context.Context, EditorService_getPluginKeys) error
 
 	SaveAs(context.Context, EditorService_saveAs) error
+
+	GetPluginFixes(context.Context, EditorService_getPluginFixes) error
+
+	ApplyPluginFix(context.Context, EditorService_applyPluginFix) error
 }
 
 // EditorService_NewServer creates a new Server from an implementation of EditorService_Server.
@@ -1462,7 +1506,7 @@ func EditorService_ServerToClient(s EditorService_Server) EditorService {
 // This can be used to create a more complicated Server.
 func EditorService_Methods(methods []server.Method, s EditorService_Server) []server.Method {
 	if cap(methods) == 0 {
-		methods = make([]server.Method, 0, 20)
+		methods = make([]server.Method, 0, 22)
 	}
 
 	methods = append(methods, server.Method{
@@ -1702,6 +1746,30 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
 			return s.SaveAs(ctx, EditorService_saveAs{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      20,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "getPluginFixes",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.GetPluginFixes(ctx, EditorService_getPluginFixes{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      21,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "applyPluginFix",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.ApplyPluginFix(ctx, EditorService_applyPluginFix{call})
 		},
 	})
 
@@ -2046,6 +2114,40 @@ func (c EditorService_saveAs) Args() EditorService_saveAs_Params {
 func (c EditorService_saveAs) AllocResults() (EditorService_saveAs_Results, error) {
 	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
 	return EditorService_saveAs_Results(r), err
+}
+
+// EditorService_getPluginFixes holds the state for a server call to EditorService.getPluginFixes.
+// See server.Call for documentation.
+type EditorService_getPluginFixes struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_getPluginFixes) Args() EditorService_getPluginFixes_Params {
+	return EditorService_getPluginFixes_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_getPluginFixes) AllocResults() (EditorService_getPluginFixes_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_getPluginFixes_Results(r), err
+}
+
+// EditorService_applyPluginFix holds the state for a server call to EditorService.applyPluginFix.
+// See server.Call for documentation.
+type EditorService_applyPluginFix struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_applyPluginFix) Args() EditorService_applyPluginFix_Params {
+	return EditorService_applyPluginFix_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_applyPluginFix) AllocResults() (EditorService_applyPluginFix_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_applyPluginFix_Results(r), err
 }
 
 // EditorService_List is a list of EditorService.
@@ -4561,12 +4663,12 @@ type EditorService_handlePluginKey_Params capnp.Struct
 const EditorService_handlePluginKey_Params_TypeID = 0xc25c96f5ecc2948c
 
 func NewEditorService_handlePluginKey_Params(s *capnp.Segment) (EditorService_handlePluginKey_Params, error) {
-	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 2})
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 24, PointerCount: 2})
 	return EditorService_handlePluginKey_Params(st), err
 }
 
 func NewRootEditorService_handlePluginKey_Params(s *capnp.Segment) (EditorService_handlePluginKey_Params, error) {
-	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 2})
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 24, PointerCount: 2})
 	return EditorService_handlePluginKey_Params(st), err
 }
 
@@ -4654,12 +4756,28 @@ func (s EditorService_handlePluginKey_Params) SetMode(v string) error {
 	return capnp.Struct(s).SetText(1, v)
 }
 
+func (s EditorService_handlePluginKey_Params) CursorLine() uint32 {
+	return capnp.Struct(s).Uint32(12)
+}
+
+func (s EditorService_handlePluginKey_Params) SetCursorLine(v uint32) {
+	capnp.Struct(s).SetUint32(12, v)
+}
+
+func (s EditorService_handlePluginKey_Params) CursorCol() uint32 {
+	return capnp.Struct(s).Uint32(16)
+}
+
+func (s EditorService_handlePluginKey_Params) SetCursorCol(v uint32) {
+	capnp.Struct(s).SetUint32(16, v)
+}
+
 // EditorService_handlePluginKey_Params_List is a list of EditorService_handlePluginKey_Params.
 type EditorService_handlePluginKey_Params_List = capnp.StructList[EditorService_handlePluginKey_Params]
 
 // NewEditorService_handlePluginKey_Params creates a new list of EditorService_handlePluginKey_Params.
 func NewEditorService_handlePluginKey_Params_List(s *capnp.Segment, sz int32) (EditorService_handlePluginKey_Params_List, error) {
-	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 2}, sz)
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 24, PointerCount: 2}, sz)
 	return capnp.StructList[EditorService_handlePluginKey_Params](l), err
 }
 
@@ -5399,6 +5517,367 @@ func (f EditorService_saveAs_Results_Future) Struct() (EditorService_saveAs_Resu
 	return EditorService_saveAs_Results(p.Struct()), err
 }
 
+type EditorService_getPluginFixes_Params capnp.Struct
+
+// EditorService_getPluginFixes_Params_TypeID is the unique identifier for the type EditorService_getPluginFixes_Params.
+const EditorService_getPluginFixes_Params_TypeID = 0x9ff59762c1a72972
+
+func NewEditorService_getPluginFixes_Params(s *capnp.Segment) (EditorService_getPluginFixes_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_getPluginFixes_Params(st), err
+}
+
+func NewRootEditorService_getPluginFixes_Params(s *capnp.Segment) (EditorService_getPluginFixes_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_getPluginFixes_Params(st), err
+}
+
+func ReadRootEditorService_getPluginFixes_Params(msg *capnp.Message) (EditorService_getPluginFixes_Params, error) {
+	root, err := msg.Root()
+	return EditorService_getPluginFixes_Params(root.Struct()), err
+}
+
+func (s EditorService_getPluginFixes_Params) String() string {
+	str, _ := text.Marshal(0x9ff59762c1a72972, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_getPluginFixes_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_getPluginFixes_Params) DecodeFromPtr(p capnp.Ptr) EditorService_getPluginFixes_Params {
+	return EditorService_getPluginFixes_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_getPluginFixes_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_getPluginFixes_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_getPluginFixes_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_getPluginFixes_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_getPluginFixes_Params) PluginName() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s EditorService_getPluginFixes_Params) HasPluginName() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_getPluginFixes_Params) PluginNameBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_getPluginFixes_Params) SetPluginName(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s EditorService_getPluginFixes_Params) FixData() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s EditorService_getPluginFixes_Params) HasFixData() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s EditorService_getPluginFixes_Params) FixDataBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_getPluginFixes_Params) SetFixData(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+// EditorService_getPluginFixes_Params_List is a list of EditorService_getPluginFixes_Params.
+type EditorService_getPluginFixes_Params_List = capnp.StructList[EditorService_getPluginFixes_Params]
+
+// NewEditorService_getPluginFixes_Params creates a new list of EditorService_getPluginFixes_Params.
+func NewEditorService_getPluginFixes_Params_List(s *capnp.Segment, sz int32) (EditorService_getPluginFixes_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return capnp.StructList[EditorService_getPluginFixes_Params](l), err
+}
+
+// EditorService_getPluginFixes_Params_Future is a wrapper for a EditorService_getPluginFixes_Params promised by a client call.
+type EditorService_getPluginFixes_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_getPluginFixes_Params_Future) Struct() (EditorService_getPluginFixes_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_getPluginFixes_Params(p.Struct()), err
+}
+
+type EditorService_getPluginFixes_Results capnp.Struct
+
+// EditorService_getPluginFixes_Results_TypeID is the unique identifier for the type EditorService_getPluginFixes_Results.
+const EditorService_getPluginFixes_Results_TypeID = 0xcfc1238454548008
+
+func NewEditorService_getPluginFixes_Results(s *capnp.Segment) (EditorService_getPluginFixes_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_getPluginFixes_Results(st), err
+}
+
+func NewRootEditorService_getPluginFixes_Results(s *capnp.Segment) (EditorService_getPluginFixes_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_getPluginFixes_Results(st), err
+}
+
+func ReadRootEditorService_getPluginFixes_Results(msg *capnp.Message) (EditorService_getPluginFixes_Results, error) {
+	root, err := msg.Root()
+	return EditorService_getPluginFixes_Results(root.Struct()), err
+}
+
+func (s EditorService_getPluginFixes_Results) String() string {
+	str, _ := text.Marshal(0xcfc1238454548008, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_getPluginFixes_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_getPluginFixes_Results) DecodeFromPtr(p capnp.Ptr) EditorService_getPluginFixes_Results {
+	return EditorService_getPluginFixes_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_getPluginFixes_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_getPluginFixes_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_getPluginFixes_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_getPluginFixes_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_getPluginFixes_Results) Items() (PluginFixItem_List, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return PluginFixItem_List(p.List()), err
+}
+
+func (s EditorService_getPluginFixes_Results) HasItems() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_getPluginFixes_Results) SetItems(v PluginFixItem_List) error {
+	return capnp.Struct(s).SetPtr(0, v.ToPtr())
+}
+
+// NewItems sets the items field to a newly
+// allocated PluginFixItem_List, preferring placement in s's segment.
+func (s EditorService_getPluginFixes_Results) NewItems(n int32) (PluginFixItem_List, error) {
+	l, err := NewPluginFixItem_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return PluginFixItem_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, l.ToPtr())
+	return l, err
+}
+
+// EditorService_getPluginFixes_Results_List is a list of EditorService_getPluginFixes_Results.
+type EditorService_getPluginFixes_Results_List = capnp.StructList[EditorService_getPluginFixes_Results]
+
+// NewEditorService_getPluginFixes_Results creates a new list of EditorService_getPluginFixes_Results.
+func NewEditorService_getPluginFixes_Results_List(s *capnp.Segment, sz int32) (EditorService_getPluginFixes_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_getPluginFixes_Results](l), err
+}
+
+// EditorService_getPluginFixes_Results_Future is a wrapper for a EditorService_getPluginFixes_Results promised by a client call.
+type EditorService_getPluginFixes_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_getPluginFixes_Results_Future) Struct() (EditorService_getPluginFixes_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_getPluginFixes_Results(p.Struct()), err
+}
+
+type EditorService_applyPluginFix_Params capnp.Struct
+
+// EditorService_applyPluginFix_Params_TypeID is the unique identifier for the type EditorService_applyPluginFix_Params.
+const EditorService_applyPluginFix_Params_TypeID = 0x82c000e4635865be
+
+func NewEditorService_applyPluginFix_Params(s *capnp.Segment) (EditorService_applyPluginFix_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2})
+	return EditorService_applyPluginFix_Params(st), err
+}
+
+func NewRootEditorService_applyPluginFix_Params(s *capnp.Segment) (EditorService_applyPluginFix_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2})
+	return EditorService_applyPluginFix_Params(st), err
+}
+
+func ReadRootEditorService_applyPluginFix_Params(msg *capnp.Message) (EditorService_applyPluginFix_Params, error) {
+	root, err := msg.Root()
+	return EditorService_applyPluginFix_Params(root.Struct()), err
+}
+
+func (s EditorService_applyPluginFix_Params) String() string {
+	str, _ := text.Marshal(0x82c000e4635865be, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_applyPluginFix_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_applyPluginFix_Params) DecodeFromPtr(p capnp.Ptr) EditorService_applyPluginFix_Params {
+	return EditorService_applyPluginFix_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_applyPluginFix_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_applyPluginFix_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_applyPluginFix_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_applyPluginFix_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_applyPluginFix_Params) PluginName() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s EditorService_applyPluginFix_Params) HasPluginName() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_applyPluginFix_Params) PluginNameBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_applyPluginFix_Params) SetPluginName(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s EditorService_applyPluginFix_Params) FixData() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s EditorService_applyPluginFix_Params) HasFixData() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s EditorService_applyPluginFix_Params) FixDataBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_applyPluginFix_Params) SetFixData(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+func (s EditorService_applyPluginFix_Params) Index() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s EditorService_applyPluginFix_Params) SetIndex(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+// EditorService_applyPluginFix_Params_List is a list of EditorService_applyPluginFix_Params.
+type EditorService_applyPluginFix_Params_List = capnp.StructList[EditorService_applyPluginFix_Params]
+
+// NewEditorService_applyPluginFix_Params creates a new list of EditorService_applyPluginFix_Params.
+func NewEditorService_applyPluginFix_Params_List(s *capnp.Segment, sz int32) (EditorService_applyPluginFix_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2}, sz)
+	return capnp.StructList[EditorService_applyPluginFix_Params](l), err
+}
+
+// EditorService_applyPluginFix_Params_Future is a wrapper for a EditorService_applyPluginFix_Params promised by a client call.
+type EditorService_applyPluginFix_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_applyPluginFix_Params_Future) Struct() (EditorService_applyPluginFix_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_applyPluginFix_Params(p.Struct()), err
+}
+
+type EditorService_applyPluginFix_Results capnp.Struct
+
+// EditorService_applyPluginFix_Results_TypeID is the unique identifier for the type EditorService_applyPluginFix_Results.
+const EditorService_applyPluginFix_Results_TypeID = 0x84a29a3090029468
+
+func NewEditorService_applyPluginFix_Results(s *capnp.Segment) (EditorService_applyPluginFix_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_applyPluginFix_Results(st), err
+}
+
+func NewRootEditorService_applyPluginFix_Results(s *capnp.Segment) (EditorService_applyPluginFix_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_applyPluginFix_Results(st), err
+}
+
+func ReadRootEditorService_applyPluginFix_Results(msg *capnp.Message) (EditorService_applyPluginFix_Results, error) {
+	root, err := msg.Root()
+	return EditorService_applyPluginFix_Results(root.Struct()), err
+}
+
+func (s EditorService_applyPluginFix_Results) String() string {
+	str, _ := text.Marshal(0x84a29a3090029468, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_applyPluginFix_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_applyPluginFix_Results) DecodeFromPtr(p capnp.Ptr) EditorService_applyPluginFix_Results {
+	return EditorService_applyPluginFix_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_applyPluginFix_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_applyPluginFix_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_applyPluginFix_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_applyPluginFix_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// EditorService_applyPluginFix_Results_List is a list of EditorService_applyPluginFix_Results.
+type EditorService_applyPluginFix_Results_List = capnp.StructList[EditorService_applyPluginFix_Results]
+
+// NewEditorService_applyPluginFix_Results creates a new list of EditorService_applyPluginFix_Results.
+func NewEditorService_applyPluginFix_Results_List(s *capnp.Segment, sz int32) (EditorService_applyPluginFix_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_applyPluginFix_Results](l), err
+}
+
+// EditorService_applyPluginFix_Results_Future is a wrapper for a EditorService_applyPluginFix_Results promised by a client call.
+type EditorService_applyPluginFix_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_applyPluginFix_Results_Future) Struct() (EditorService_applyPluginFix_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_applyPluginFix_Results(p.Struct()), err
+}
+
 type PluginEdit capnp.Struct
 
 // PluginEdit_TypeID is the unique identifier for the type PluginEdit.
@@ -5523,6 +6002,7 @@ const (
 	PluginDecorationKind_gutter    PluginDecorationKind = 0
 	PluginDecorationKind_overlay   PluginDecorationKind = 1
 	PluginDecorationKind_statusBar PluginDecorationKind = 2
+	PluginDecorationKind_underline PluginDecorationKind = 3
 )
 
 // String returns the enum's constant name.
@@ -5534,6 +6014,8 @@ func (c PluginDecorationKind) String() string {
 		return "overlay"
 	case PluginDecorationKind_statusBar:
 		return "statusBar"
+	case PluginDecorationKind_underline:
+		return "underline"
 
 	default:
 		return ""
@@ -5550,6 +6032,8 @@ func PluginDecorationKindFromString(c string) PluginDecorationKind {
 		return PluginDecorationKind_overlay
 	case "statusBar":
 		return PluginDecorationKind_statusBar
+	case "underline":
+		return PluginDecorationKind_underline
 
 	default:
 		return 0
@@ -5562,18 +6046,67 @@ func NewPluginDecorationKind_List(s *capnp.Segment, sz int32) (PluginDecorationK
 	return capnp.NewEnumList[PluginDecorationKind](s, sz)
 }
 
+type PluginUnderlineStyle uint16
+
+// PluginUnderlineStyle_TypeID is the unique identifier for the type PluginUnderlineStyle.
+const PluginUnderlineStyle_TypeID = 0xf7582929c5ea82f9
+
+// Values of PluginUnderlineStyle.
+const (
+	PluginUnderlineStyle_none     PluginUnderlineStyle = 0
+	PluginUnderlineStyle_straight PluginUnderlineStyle = 1
+	PluginUnderlineStyle_curly    PluginUnderlineStyle = 2
+)
+
+// String returns the enum's constant name.
+func (c PluginUnderlineStyle) String() string {
+	switch c {
+	case PluginUnderlineStyle_none:
+		return "none"
+	case PluginUnderlineStyle_straight:
+		return "straight"
+	case PluginUnderlineStyle_curly:
+		return "curly"
+
+	default:
+		return ""
+	}
+}
+
+// PluginUnderlineStyleFromString returns the enum value with a name,
+// or the zero value if there's no such value.
+func PluginUnderlineStyleFromString(c string) PluginUnderlineStyle {
+	switch c {
+	case "none":
+		return PluginUnderlineStyle_none
+	case "straight":
+		return PluginUnderlineStyle_straight
+	case "curly":
+		return PluginUnderlineStyle_curly
+
+	default:
+		return 0
+	}
+}
+
+type PluginUnderlineStyle_List = capnp.EnumList[PluginUnderlineStyle]
+
+func NewPluginUnderlineStyle_List(s *capnp.Segment, sz int32) (PluginUnderlineStyle_List, error) {
+	return capnp.NewEnumList[PluginUnderlineStyle](s, sz)
+}
+
 type PluginDecoration capnp.Struct
 
 // PluginDecoration_TypeID is the unique identifier for the type PluginDecoration.
 const PluginDecoration_TypeID = 0xb9007f5995ede543
 
 func NewPluginDecoration(s *capnp.Segment) (PluginDecoration, error) {
-	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 24, PointerCount: 4})
 	return PluginDecoration(st), err
 }
 
 func NewRootPluginDecoration(s *capnp.Segment) (PluginDecoration, error) {
-	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 24, PointerCount: 4})
 	return PluginDecoration(st), err
 }
 
@@ -5651,12 +6184,90 @@ func (s PluginDecoration) SetKind(v PluginDecorationKind) {
 	capnp.Struct(s).SetUint16(8, uint16(v))
 }
 
+func (s PluginDecoration) EndCol() uint32 {
+	return capnp.Struct(s).Uint32(12)
+}
+
+func (s PluginDecoration) SetEndCol(v uint32) {
+	capnp.Struct(s).SetUint32(12, v)
+}
+
+func (s PluginDecoration) UnderlineStyle() PluginUnderlineStyle {
+	return PluginUnderlineStyle(capnp.Struct(s).Uint16(10))
+}
+
+func (s PluginDecoration) SetUnderlineStyle(v PluginUnderlineStyle) {
+	capnp.Struct(s).SetUint16(10, uint16(v))
+}
+
+func (s PluginDecoration) UnderlineColor() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s PluginDecoration) HasUnderlineColor() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s PluginDecoration) UnderlineColorBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s PluginDecoration) SetUnderlineColor(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+func (s PluginDecoration) Fixable() bool {
+	return capnp.Struct(s).Bit(128)
+}
+
+func (s PluginDecoration) SetFixable(v bool) {
+	capnp.Struct(s).SetBit(128, v)
+}
+
+func (s PluginDecoration) FixData() (string, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.Text(), err
+}
+
+func (s PluginDecoration) HasFixData() bool {
+	return capnp.Struct(s).HasPtr(2)
+}
+
+func (s PluginDecoration) FixDataBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.TextBytes(), err
+}
+
+func (s PluginDecoration) SetFixData(v string) error {
+	return capnp.Struct(s).SetText(2, v)
+}
+
+func (s PluginDecoration) PluginName() (string, error) {
+	p, err := capnp.Struct(s).Ptr(3)
+	return p.Text(), err
+}
+
+func (s PluginDecoration) HasPluginName() bool {
+	return capnp.Struct(s).HasPtr(3)
+}
+
+func (s PluginDecoration) PluginNameBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(3)
+	return p.TextBytes(), err
+}
+
+func (s PluginDecoration) SetPluginName(v string) error {
+	return capnp.Struct(s).SetText(3, v)
+}
+
 // PluginDecoration_List is a list of PluginDecoration.
 type PluginDecoration_List = capnp.StructList[PluginDecoration]
 
 // NewPluginDecoration creates a new list of PluginDecoration.
 func NewPluginDecoration_List(s *capnp.Segment, sz int32) (PluginDecoration_List, error) {
-	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1}, sz)
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 24, PointerCount: 4}, sz)
 	return capnp.StructList[PluginDecoration](l), err
 }
 
@@ -5666,6 +6277,106 @@ type PluginDecoration_Future struct{ *capnp.Future }
 func (f PluginDecoration_Future) Struct() (PluginDecoration, error) {
 	p, err := f.Future.Ptr()
 	return PluginDecoration(p.Struct()), err
+}
+
+type PluginFixItem capnp.Struct
+
+// PluginFixItem_TypeID is the unique identifier for the type PluginFixItem.
+const PluginFixItem_TypeID = 0xc9081ee19d5f97ed
+
+func NewPluginFixItem(s *capnp.Segment) (PluginFixItem, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return PluginFixItem(st), err
+}
+
+func NewRootPluginFixItem(s *capnp.Segment) (PluginFixItem, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return PluginFixItem(st), err
+}
+
+func ReadRootPluginFixItem(msg *capnp.Message) (PluginFixItem, error) {
+	root, err := msg.Root()
+	return PluginFixItem(root.Struct()), err
+}
+
+func (s PluginFixItem) String() string {
+	str, _ := text.Marshal(0xc9081ee19d5f97ed, capnp.Struct(s))
+	return str
+}
+
+func (s PluginFixItem) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (PluginFixItem) DecodeFromPtr(p capnp.Ptr) PluginFixItem {
+	return PluginFixItem(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s PluginFixItem) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s PluginFixItem) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s PluginFixItem) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s PluginFixItem) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s PluginFixItem) Label() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s PluginFixItem) HasLabel() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s PluginFixItem) LabelBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s PluginFixItem) SetLabel(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s PluginFixItem) Replace() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s PluginFixItem) HasReplace() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s PluginFixItem) ReplaceBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s PluginFixItem) SetReplace(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+// PluginFixItem_List is a list of PluginFixItem.
+type PluginFixItem_List = capnp.StructList[PluginFixItem]
+
+// NewPluginFixItem creates a new list of PluginFixItem.
+func NewPluginFixItem_List(s *capnp.Segment, sz int32) (PluginFixItem_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return capnp.StructList[PluginFixItem](l), err
+}
+
+// PluginFixItem_Future is a wrapper for a PluginFixItem promised by a client call.
+type PluginFixItem_Future struct{ *capnp.Future }
+
+func (f PluginFixItem_Future) Struct() (PluginFixItem, error) {
+	p, err := f.Future.Ptr()
+	return PluginFixItem(p.Struct()), err
 }
 
 type PluginKeyResult capnp.Struct
@@ -6784,267 +7495,300 @@ func NewEditOp_OpType_List(s *capnp.Segment, sz int32) (EditOp_OpType_List, erro
 	return capnp.NewEnumList[EditOp_OpType](s, sz)
 }
 
-const schema_d75b3b54eb3ed6a2 = "x\xda\xccZ{t\x14\xe7u\xbfwF\xd2H i" +
-	"5\xcc\x0a\x09\x10Q$\x04Hr \x80\xed\xda\x91\xa1" +
-	"\xbb\x12\xe0 \x1eA#\x01\x0d\x04\xce\xf1h\xf7\x93\xb4" +
-	"\xb0/vF`\xf9%D\xa0\x05lbp\xc1\x07\xda" +
-	"b\x1b\xfcH\xec\xc6v\x88\xc1\x09\x1cp\x80\xc4\x09\xa6" +
-	"&-~$66m\x8c\xa1\xae\x83\x818\xa9\xdd\xe4" +
-	"\xf8\xe0\xed\xb9\xf3\xde\xd5JZ\xe2s\x9a\xfe\xb7\xfat" +
-	"\xf7\xbb\xf7\xbb\x8f\xdf}\xed\x94[\x8a\xfc9S\x8b<" +
-	"e\xc0\xb5\x15bn^r\xfd\xaa\x9b~\xb0\xf5\xbf7" +
-	"\xaf\x03q\x0c\x02\xe4\x08\x007F\x867!\xe4$\xef" +
-	"\xdb\xb7\xf2\xca\xb8\xe7\xff\xd4\x07\xf2\x18\xe4\x00r\x91\xfe" +
-	"\xb7xx+\x02J\xca\xf0\xe7\x01\x93\x959m/\x8c" +
-	"y\xe7\xa7\xdf\x06\xb9\x081\xb9\xefW\x7f}i\xd1m" +
-	"\xdf\xfa\xb5A)a\xe1)\xa9\xa8\x90>\x15\x14\xae\x05" +
-	"L\xbe\x7f\xdf\xeb#\x9a'\x7fuc:1O$\xa1" +
-	"\xc2\xb3R\xb7N\xbc\xba\xf0\x03\xc0\xa4\xbc\xab$\xd7w" +
-	"l\xddF\x93\xb7.\x96R\xb4\x8cXG\x8a\x88\xf5\xbc" +
-	"\xc3\xbf\xfc\x8fe3\x86mr\x13\xe4\x16\xaf'\x02\xb1" +
-	"\x98\x08^8[u_\xfc\x1b\xb7o2\xdee\x08\xff" +
-	"t\xf1?\x10\xc1\xa1b\x1f`r\xee\xdf\xfdz\xff\xa2" +
-	"\xcf\x1a\xbe\x03bQ?\xd9\xdf.>/],\xa6O" +
-	"\xef\xe9\xb4O\xbe\xd0wl\xdb\xde\x9c\x87H\xf6\xbc~" +
-	"\x0f\xf5\xec\x93\x0a<e\x007\x8a\x9e[8\xc0\xe4\x8b" +
-	"\xc3\x16\xc8?]\xbb\xf2a7kE\xdcB\xacW\x8b" +
-	"t]\xf5?\xd6\xf5\xac8\xd0\xb7+E\xb3{\xc5v" +
-	"\xa2xV\xa4\xf7\xe7\x9c\xde\xf7+\xb9\xe5\xd8nb\xc8" +
-	"\xbb\x18r\xc4p\xf3\x88\xb3\xd2\xce\x11\xf4\x9d\xed#\x1e" +
-	"D\xc0\xe4e\xef\xbd\xf7\xffv\xef\xca\xbd \x16\xb9\x88" +
-	"\x01\xa5\xb1\xde\xf3R\x9d\x97(\xc7{\x05\x94\xde\xa4\x8f" +
-	"I\xf17\xa7\xdebK\x9e\xdf\xebV\xddQ\xefab" +
-	"~\xdaK\x96\xba\xe7\xd5\x07>\xf2\xe5O}\xca\xe5\x12" +
-	"\x93J\xd7\x93K\xcc:5w\xf4\xd2%]O\xb9_" +
-	"6\xaa\xf4\x04}\xb5\xae\x94^\xf6\xf7\xa7\x7f\xf4\x9b\xdb" +
-	"\x16\xfa\xbf\x07b\x85\xf5\xd5\x15\xa5w\xd1W\xa5+\xf3" +
-	">\xff\xe6\xda\xeeg\\\x976\x97\xb6\xd2\x7f\xbe\xfd\xe8" +
-	"\xa4\xbe3yo<\xe7\x96\xe7\xe6\xd2\x87\xe8\xd2\xd9\xa5" +
-	"$O\xd9\xc9\x89\xd2\xf4\xde\x0d\xfb\xdd\x04O\x97\xea\xfa" +
-	"<TJ\xb6\xde>\xaew\xeb\x9e\xc7N\xbe@\x04\xbc" +
-	"I\xb0x\xe4J\xddQG\x12\xc1Gs\xf3:\x1e\x9f" +
-	"\xd2v\xd0\xc5<\xb7\xec!\x84\x9c\x9f\xcc\xbcxy\xe7" +
-	"\xd2\xdeCr\x11r\xe9v\xfdd\xe4\xef%,\xa3O" +
-	"\xd7F\x92M\xb6\x95\xfd\xfc\xe5\xef7n8\x0c\x99\x88" +
-	"\xcf\x94\xfd^:\xa7\x13\xbf]F\xc4\x8f\xaf\xbbX\xf5" +
-	"R\xef\xfb\x87\x0dE\x18\x9az\xb6\\\x97\xf9h9i" +
-	"\xea\xe4s\x87_\xfb\xbc\xe1\xe1#.\x91\xce\x95\xeb\x9a" +
-	"\xea=xt\xff\xf9\xbf=s\xc4\xa5\xc3W\xcaI\xd8" +
-	"d\x89x\xff\xbe\xed\xf5\xc1\xa3\x19%8T~B:" +
-	"^\xae\x1b\xb3\xbc\x92\xbc\xe2\xe0\xa9\xe5\xa3o\xf8\xf4w" +
-	"/\x91V\xac\x8b\xce\x8c\xd2c\xe8\xdc(\x12\xe1\x93-" +
-	"#?\xfc\xf4\xf1\xda\xe3)nxm\xd4\\\xa2(\x18" +
-	"Mz{`\xc7\x89\x8f>yx\xf9\x09\x8b\x82\xd3U" +
-	"?Z\xb7\xcd\xa1\xd1\xf4\xce\xa7\xae\xb0+\x8d\xdfk:" +
-	"\xe5\xb6\xcd\xf61\x09\"\xd83\x86\x8c7\xe9\x91k\x1f" +
-	"\xcf\xf4GN\x9bR\x18L\xb0B\x17\xa3\xa8\x82(\x94" +
-	"\x1d\x7f\xc4\xd1\xd7>:\xed\x963R\xf1\x0c\x11\xdc[" +
-	"Ar\x96\xbfs\xf8\xda\xdd\x0f\xae\xfb%\x88^\xce\x09" +
-	"E\xe2PqVz\xba\x82\x1e\xffd\xc5B\xc0\xe4\xfd" +
-	"\xfek\x17n\xebS\xce\xb8\x859T\xa1\xfb\xc1\xcb\x15" +
-	"\xf4\x9eK_\xcf[\xd8\xf8\x8b\xda\xd72b\xd0\x8a\xb1" +
-	"\xe7\xa5\xd0X\xfa\xc4\xc6\xd2\xd3\xf0\xd1\xd8\xb6\x1b?\xee" +
-	"{\xad_T\xcd\xf8\xd2Y\xa9\xf9Kt\xf9\xec/\x09" +
-	"\xb9\xd2\x93U\x14U3\xef~\xf4\xddhu\xfd\xeb\xee" +
-	"\xd0\xd8Z\xa5+bw\x15\xbd\xe2\xb1\xb2\x8e]\x8f~" +
-	"p\xf4\x8d\x14\xe1\xaa\x9a\x88\xe0x\x15\x09\xd78g\xc7" +
-	"\xde\xd9\x97\xf0-\xf7\x0dK\xabuP`\xd5t\x03\x7f" +
-	"\xf1\xd4\xbf\x94\xbe\xb8\xfc\x9d\x8c\xe6\xdfY}V\xda[" +
-	"M\x9f\xf6T\x93\xf4w\xaf\xb8{\xfe\xf3\xef\x8e|\xd7" +
-	"\xad\xd5\xad\xe3t\xdb\xee\x1eG\xb7m\xfb\\}\xef\xf8" +
-	"\xb5Q\xef\xa6\x18\xe6\xd08]\xe2\x97\xc7\x91an\xd8" +
-	"t\xeb\xdb#\xb6\x94\x9dsK<\xb5\xa6\x81\x08\xbeV" +
-	"C\x04_\x9f%n\xd9\x1a<\xf2\xef.O\xddS\xa3" +
-	"\x03\xc5\x81\xcf\xaf\xde\xbb\xe5\xe0\xb9\xf7S.\xdf\\\xa3" +
-	"\xe7\x8e\x9d5\xf4\xda\x1f\xd6\x8c\xddX\xbb\xb9\xf1\x82\xfb" +
-	"\xb5S\xc7\xeb\x043\xc6\x93|O|\xe3\x91W\xda\x13" +
-	"\x95\xff\x99r\x852^\xf7\xbd\xd5\xe3\x89}\xd7\xd9\xef" +
-	"\xfc\xe1\x83\x1f\xfd\xf3\x7f\xb9\x9f\xf8\xde\xf8}D\xf0\xb1" +
-	"~\xc5\xc9g\xdf9\xf0O\xdf\xaa\xfc\xd0\xcd\xa3t\x82" +
-	"\x9e\x03\xc6O \x02\xdfW\xe7O\x9d\xff\xdd\x0b\x97\xdc" +
-	"7\xcc\x9e\xa0G\xe9b\x9d\xa0\xe9\xeaK/\xf6m\xfd" +
-	"\xeee\x10\x8b8\xb7\x0f\xdc\xd8=a\x04J\x1b'\x90" +
-	"\xbe\xfb&\x90\xef\x1d~\xe2\xc7+\x96l?\x7f\x19\xe4" +
-	"\x0aG\xdc\xdd\x13t\xf3=9\x81\xc4\xfdEci\xf4" +
-	"\xf1uMW\xdc\xd2\xe0D\x9d\x998\x91\x98}Z\xdd" +
-	"^1|\xe3\xbe\xabt\x85\xad\xef\x89\xbaAfL$" +
-	"\x9d=v!\xf1\x93G\xee\xf8\xec\xaa\x1bT\xde\x9cx" +
-	"\x17\x11\xbcg\xdc\xb0\xff\xf2\xd9\x85\x0b\xae\xfe.\x85E" +
-	"\xadn\xf4\xa2Z\"\xb8\xd4\xdc\xf8\xaf?\xbfa\xc3\x1f" +
-	"\xdc\xd0^\x9b \x8b\xc5\xf7\xbe>\xaa\xec\xfb\x7f\xf5?" +
-	"\x19\x9dkT\xedo\xa5\xf1\xb5D]U\xfb7\x84-" +
-	"x\xe2\x89\xdb&\xbe\x7f\xcb\x1fS\xbc\xabN\x0f\xea\xdd" +
-	"u\xc4h\xed\xb4\x0b/uM{\xea3\x97k\x1c\xad" +
-	"[I\x8c\x92?,yp\xf2\x8b\xcf]s\x7f\xf5\xe9" +
-	":=H\x0f\xd6\xf9`R\x92\x05CZ,19P" +
-	"\xa0\xc4\xa3\xf1\x86\xd9\xfa_m,\xb1&\x14`\x93U" +
-	"e\x0d\xabiejwXS\xc1\"\xcc@\xa7\xc4\xe3" +
-	"\xe1\x9e\x85\xf1\x9a\x16%\xa1DP\x95\x0b\xf9\x1c\x80\x1c" +
-	"\x04\x10g\xcf\x05\x90g\xf1(\xb7p(\"\xe7%\x19" +
-	"\xc4\x05t8\x9fG\xf9\x9b\x1c\xd2\x19\x07 .\x1e\x0d" +
-	" \xb7\xf0(/\xe70\x19\x08\x87XTk\x0e\x02\x00" +
-	"\x16\x00\x87\x05\x80\xc9\xf6\xee\x8e\x0e\x960\xce\xf2\x81\xc3" +
-	"|@>\x16\xc7\x127Da\x09\xa0\xfd N\x17t" +
-	"Nl\x0dK\x18O\x00hA\x94\xf3m\xd9\xeaH\x8c" +
-	"Z\x1e\xe5\x9b8D4D\x9b:\x0d@\xfe\x0a\x8f\xf2" +
-	"\xad$F,\xaa\xb1\xa8\xa6\x12\xcbB\xe0\xb0\x10\xb0\xb2" +
-	"#\xd6\x1d\x0d\"\x02\x87\xd8\x8fW[\xa83\xaah\xdd" +
-	"\x09\xd6\x1c\xe5;b\xc4\xac\xc4f\xa6\xd0\xc5\xcby\x94" +
-	"\xbbH\x11&7\x96\x00\x90\x83<\xcaq\x0eE\xce\xd4" +
-	"Dd\x19\x80\x1c\xe6Q\xde\xc4!\xf2^J\xb1\xe2\xc6" +
-	"\xf5\x00\xf2\x06\x1e\xe5m\x1cV\x86\x95v\x16\xb6\x04J" +
-	"\x06c\x81\xee\x08\x8bjP\xa9h\xa1X\xd4>\x8f\x93" +
-	"-\x98\xc6\x80O\xa8X\x0c\xd8\xc2#\x968e\x18 " +
-	"\x1d&\x95\x80\x16Z\xc3Z\x144\x88\x13\xb6n\xed\xa7" +
-	"\xe5d\xb0w \x16\x89\x87\x99\xc6t\x83\xf3\x91\x14\x83" +
-	"\xd3;\xfd<\xca\xf3]\xefl\xaewy\x81\xf5\xce\x05" +
-	"\xd5\x00\xf2\x1c\x1e\xe5E\x1cV\xb6ww4\x07-\xde" +
-	"\x9ep(\xca\xac?\x84@,\xdcO\xa8\xdcL\xcej" +
-	"i\x7f\x0e\x0b\x9b\xae\xa8\xc2\xff\x0b\xc9\x82!5\xa0$" +
-	"\x82\xad,@\xce\xd8cD\x14\xaf\xa9r\x8e-\\Q" +
-	"\x13\x80\x9c\xcf\xa3\xec\xe5\xb0\xd7\xf4;\xdb\x94\x03xY" +
-	"\x8b\"$\x94\x08\xb9\x99\xeb\x9ei\xce=i\x8eb\xdd" +
-	"\x82\x96\x84\x82\xb60.\xe7\xa0;\xe3c\x83oa|" +
-	"QO\x9c\xc9\xb5\xd6\x95R\x01\xce\x05h\xcbG\x1e\xdb" +
-	"\xbc\xe8\xa8N\x12\xb1\x09\xa0\xad\x90\xce\xcb\xe9\x9c\xcb\xd7" +
-	"\xb5'\x95b=@[\x09\x9dW\xd09\x9f\xab\xfb\xb0" +
-	"4\x0a\x97\x01\xb4\x95\xd3y\x0d\x9d\xe7\xe4y1\x07@" +
-	"\xaa\xc2V\x80\xb6/\xd3\xf9W\x90C\xcc\xf5b.\x80" +
-	"T\xa7\x93\xd7\xd2\xf1MD\x9e'x1\x0f@\x9a\xaa" +
-	"\x8b3\x85\xce\xa7\xd3\xb9\x90\xef\xd5A\xf3k\xba87" +
-	"\xd1\xb9\x9f\xce\xf3\x0b\xbc\x98\x0f \xcd\xc0\x06\x80\xb6[" +
-	"\xe9|\x16\x9d\x17\x0c\xf3b\x01\x80\xd4\x88\xd3\x00\xda\xa6" +
-	"\xd3\xf9\x1c\xcc\x8c9\xbdkXB\xa5\x982\xff\xf6h" +
-	"=q\x86\x1eG_\x80\xe8\x01L\x86\xa2*Kh\xf3" +
-	"C\xc0;\xcea\x1e\xce\x8c\x01\x86\xd3\xce\x161\xe0\xef" +
-	"t\xac\xdb\x91\x88E\xe6\x87\xa2\xcc\x05l\xbdt6\xd3" +
-	"\xf1.\x9f\x16\x9b\xefr\xbcJ-63K\xd7\xebd" +
-	"ZK\xb8\xbb3\x14\x9d\xc7zT\x1b\xca\xc1\xed1\xf5" +
-	"\xa6\xc7\xd4p\xe8Y\xc5zl\xb0 \xf9\x8a\x87\x00\x82" +
-	"X\x9cEo\x0f\x85\x8d$!\x845\xd5\x8dx\x04\xaf" +
-	"w\xf0(\x87\x1dx\x0d5\xb9\x01\x0fM\xc0\xa3\xc3." +
-	"\x1ee\x8d\xbc\xe5\xcb\x06\xe2\xad^\x09 \xc7y\x94\xef" +
-	"\xe12b\x7fz\x90\xa4\xdbJW+E\x1cx(\xe6" +
-	"\x06@\xec\xf9j|VH\xe9\x8c\xc6T\x8d\x0f\x05(" +
-	"\x94*l\xf9\x0f\x92b~\xc0\xa3|\xc4\x85\x17\x87\x08" +
-	"\x1a\x0e\xf0(\x1fs\xe1\xc5Qz\xc0\x8fy\x94\x7fF" +
-	"\x0f0!\xfbx\x03\x80|\x84G\xf9$\xf9z\x89\xee" +
-	"\xeb\xe2\xcb\xa4\x93\x9f\xf1(\xff\x9b\xed\xe8\xe2i\xfa\xf6" +
-	"I\x1e\xe57\xc8\xcbQ\xf7r\xf1\x0c}\xfbU\x1e\xe5" +
-	"\xb7\xb8\x81A\xa7\x97E\x83n\xbf\xf0\xb1h\xd0\xed\x18" +
-	"*[\xc3\x12!\xad\x87\xd4\x96\x07\x1c\xe6\x01\xf6F\x98" +
-	"\xaa*\x9d\xccR\x9bO\x8du'\x02l\x00\xa8\x99\xa9" +
-	"\xc7\xc4L%\x1cn\x17\x94\xc0*#\xa3\xe5\x02\xd8\xa5" +
-	"\x11Z5\xa9\xb8\xba\x1d81$\xa0SW\xa1\xd5\x9d" +
-	"\x8a+\x96\x01'.\x16\x90\xb3\xcb6\xb4\x0a\x16\xb1y" +
-	".pb\xa3\x80\xbc\xdd\xc3\xa1\xd5\x91\x897'\x80\x13" +
-	"'\x09I\xb5+\xb6v\x01SU\x10\x94N\xe6\xc7d" +
-	"$\xb6\x86\xcd\xecN\xa8\xc0\xc7\x12~LZN\x08\x00" +
-	"~L\xaeb=\xad\xac3\xa4B\xa5\xc6\x12,\xe8\xc7" +
-	"\x16\xcc2Df\xb1@,\xa1'Q\xb5\xc6g\xe4\x8f" +
-	"\x01\xaa\x05\xbb\x92I-\x17\xfa#Hj\xf6\xb0\xc5(" +
-	"\x1c2R\xcd\xf45H\xcd\x95Ql+\xc0\xdd\xf1\xdd" +
-	"\x0e\x94\x05Q\xae\xe50\x194iA\x88E\x9d\xaa\xc0" +
-	"j\xcb\xcd\x9a 5\xe0]>\xa0\x04VM\xb6t\x1f" +
-	"K\xd4\xb4\xfa\x0cn\x83\"\x04\x95\x90\x8d\x96`\xa8^" +
-	"W\x9e\xb4\xca\xc9\xa1\x8c@\x87Sx\x94\xa7g_:" +
-	"\x0e*Gw<\xa8hlI\x88\xad\x8d\xc7\x12\x9ae" +
-	"\x0b\x18\xb2\xacmr\xca\x06\x91\xe3\x0dl\x90\x1b\x9cZ" +
-	"7c\x8e\xd1b\xf1\x94\x18\xeeb\xa1\xce.-\xab2" +
-	"\xac\x93i\x8buQ\xc9_<\xba\xbf^G\xe5m\xc3" +
-	"\xd7b\x82\xdaE<\xcaw\\\x87\xfe\xd4P4\xc0\x96" +
-	"\xb0\x04xRP\xf7:\xd4\xda\xcf%\x0c\xccq9\xb5" +
-	"Q\xd1\xa6\xd5\xd1\xf5\x99\xea\xe8jW\xaa1_\x15\xaa" +
-	"w\xa5\x1a>\xc7\x00\xe5H\xbd\x93j\x06\x84U\x8f\xc6" +
-	"\x9c\xf4\xecY\x15\x8a\x06\xd1\xe3\xb4\xa6f\xceO\x15z" +
-	"\x16\xeb\x08EC$mk\xa5\xfe\xac\x81\x8b\x7f[\xe6" +
-	"zGf;\x15\xa6\x0a\xcd\x99BW;B\xa7\xf6\x1f" +
-	"\x9e\xb8\xa2u\xd9\x92fY\x9b\xa6\x05\xb4\x85\x97:Z" +
-	":\xbe>@i\xaa%B\x9d\x9d,\xd1/_d\xec" +
-	"\x12\xc21\x955\xe9\xbe\xd3\x1f+\xb2\x90eP\x07!" +
-	"Vz?\xe7\xb5\x05\xbd\x97\x9c\xfb\x1e\xa3q\xb2]c" +
-	"#I\xbf\x8eG\xf9\x01\x97\xc7onp\xda);a" +
-	"o%#m\xe2Q\xde\xc1!\xe6\x18\xf9z;}\xfb" +
-	"\x01\x1e\xe5]\xdc\x17/\xd4z\xa3l\xed\"\x97k\x0d" +
-	"\xaa<\xab\xa5\x1e\xaaWH/{\xb2\xc0\xe2\xac\xf1," +
-	"S\x9b^\x7f\xfdmz\x8a\x97\x0e\x8a\x10]J4\x18" +
-	"fv\x1a\xb4\x13@\xe6\xa2\xd2\x1644\xcd\x89\x1aK" +
-	"Pw\xd0\x88<\x9aEe\xbd\xd9Z\xdf\x99M\xba\x16" +
-	"V\xb1\x1e;\xb8\"\xb1 \xbbn\xafo\xa9\xcc\xae\x8a" +
-	"\xf8\"\x09l\xd0\xb2\xdc\xea\xcf\x87\x18z\xd4\x0f^\xc5" +
-	"do@CP3\xaac\xddQ\x1d\xe5=\x14\xf8\x03" +
-	"\xf5\xa8\x01\xa2\xea\xf7(\xce\xbe{a|2u\xa4|" +
-	"\x9cQ\xb0\x17\xea\xb6\x1d[O(,\x966\x00 '" +
-	"\x165\x00x\xa2\xb1X\xdcg\xb4W\xbe \x0b3\x8d" +
-	"\x0d\xaa\xa0\xa0\x8d\xd7\x992\xe7\xff\xc9\xa0\xc0\xac\xb0\x8d" +
-	"IJ(\x16m\x164\x16\xf9s\xd3FC\xa6\xb4\xb1" +
-	"\xccq\xf6\xd4Q\x80\x91\xd3\xcc\x8e\xc0\x17d\x9a\x12r" +
-	"\xc6\x04\x19{\xd4\xfev1u\xc9\x07t\xbb\xb4\xe8]" +
-	"\x815dFk^)\xad\xe6\x9a\x80\x93\x18G}\x81" +
-	"5\x89Dk**-\xe5\x96\x01'\xc9\x1cu\x06\xd6" +
-	"\xe2\x02\xadm\x9d4\x9b\x9b\x0b\x9c4\x83\xa3\xde\xc0Z" +
-	"9\xa15F\x97\xa6\xea\xdf\xad\xe3\x04tV\xa7h\xed" +
-	"`\xa4\xb1:_\x91\x130\xd7\x9e\xab\xa3\xb5{\x95r" +
-	"\xb9z\xe0\xa4?\xa1\x80y\xf6F\x05\xad\x0d\x91t\x19" +
-	"\xdb\x81\x93.\xa2\x80\x82=\xf3Fkk\"\xbd\x8d\x0f" +
-	"\x01'\xbd\x89\x02\xe6\xdb\xab4\xb4\xb6\x9f\xd2+\xb8\x1e" +
-	"8\xe98\x0aX`O\xbb\xd1\x1a\xadK\x07\xf1.\xe0" +
-	"\xa4gQ\xc0a\xf6~\x02\xad!\xb2\xb4\x17\xa7\x01'" +
-	"\xedD\x01\x87\xdb\xfbV\xb4\xa6\xd8\xd2fL\x00'\xf5" +
-	"\xa1\x80\x85\xf6\xba\x16\xad\x1d\x86\xd4\x8d\xa4\xab\x08\x0aX" +
-	"d\xafe\xd0\xda\x91H\x0a\x92\xae\x96\xa2\x80\xc5\xf6\xa2" +
-	"\x02\xad\x9d\x81\xb4\x00\x1b\x80\x93\x1aQ@\x8f\xbd\x81B" +
-	"k\x96/\xdd\xac\xbfh\x12\x0aXbo\x06\xd1Z\xf0" +
-	"IU\xfa\x8bF\xa1\x80\xa2\xbd\xe8Dkm)\x15\xe1" +
-	"3\xc0I\x05(\xe0\x08{\xcb\x89\xd6\xbaV\xbcF\xdd" +
-	"\xdd'\x02J\xf6f\x0c\xad\xad\xa5\xf8a\x03p\xe29" +
-	"\x81\x9a\xfc(\x0bh~LRo@\x7f\x00\xaf\xff\x99" +
-	"\xda\xf3Y\x850\xf0L\xf5c\xaf\x99;\xfd\xe8\xa1\x8c" +
-	"\xe7'L30\x19\x84\x0eF\x1d\xa3\x05Sh\xe1\x14" +
-	"Z,\xa8\xfd@\xb3\xff0o\xd6\x07\x04\xe0\x8b\xa9Z" +
-	"(\xa0\xfa\xb1\xb2\x8b\xfe\xe9\xa7\x0a\xd8\x98\xc3A\xa5>" +
-	"q$6\xe6X\xd4\x10\xca\xc2\x18\xe0cQ?\xfa:" +
-	"b\x89\x88Bl\xac$\x87f\x96#Z\xab4\x06\x9f" +
-	"Q\x1c\x1b\x9c\xf5D\x88V\x83\xe7\xa1\x0e\xcf\xf5\x0f\xa8" +
-	"\xd4[E?\xfa\x8c\xbc\x9e\xda\xe9\x0e\x81z\xad\xacR" +
-	"M\x87\xe5\x06\x07\x96}\x09\xa3\xf6*q\xd6\xb0i\xd3" +
-	"\xf5L\xf7\xeb\x9a\xf9\x8bM^\x07\x1dT\xdb\xf3\xa9\x0c" +
-	"i\xa8\x86\xc3\xca\x90\xc6\"\xae1\xb9\xbd\xb9Lk\x89" +
-	"\xd3&\xb0s\x18\x1f\x8e\xa7a\xf62\x13\x9f\xefq0" +
-	"\xbbg=\x80|'\x8f\xf2\x06\x17f\xf7\xadw\x15\xa6" +
-	"\xbc\xdf\xc0\xec\xcd\xd3\x9c\xc2\xd4q0\x9e\xb9D\xb3\x7f" +
-	"\xd8\x912\xc1o\x0b\xa1)\x93S!\x0c8\xdb\x1f`" +
-	"\x89\x91I\x81\x86\xd7fl\x0b\xdcY<\xf3\x98c\x88" +
-	"\x9e\xd5\xf6AWuB\xf6\xaf\xe1Q\xf6;\xda\x9bA" +
-	"\xe5\xee\xad<\xca\xb38\x14bq\x97*\xdc\x9b\x9fb" +
-	"\x18\xb8\x16\xe6\x07Zme;\xe5\xf9\"\xf5\xd9\xb0L" +
-	"\x8d\x8e5\xd1R:\xb3\xda\xaf\x99V\xb0\x1a\"wh" +
-	"59\xa1eGV\x93;\xb2Lw[\xd0\xee\x14\xf3" +
-	"\xfdf\xa7\x81.%\xda\xc9\x1c\x8f\x88\xc6n\xd79\x82" +
-	"\xa0\xb1DV~b\x02\xb5]\xb1\xbb\xfcd\xae9\x7f" +
-	"*'\xe5\x99\x0a E\x89\xce\x0fi\xa8\x9a\x1bz\x90" +
-	"mMjC\x01g\x9e\xe46\xdd\xb4\x0c\xbeC\xcc\xa7" +
-	"\xf3(\xcf\xe9\x1f\xe3\xf6\x8f~\xcc@\x0a\xab\xf1V\xa6" +
-	"\x04\xf5ii\xfa\x93\xb3\xabu[\x94\x84@\xee4\xc0" +
-	"\xe3\xafw\x0c\x95\xde\x0dej\x053b\xb6\xbd\\N" +
-	"\xc3\xec,\xf4\xfa\xe7\x05:\x9f>\xb9\xd1\x077\xf3B" +
-	"Q\x0c\xba\xaa\xf6\x06\xa3jo2\xaa\xf6V\x00_g" +
-	"\xb7\xa6\xb1D/\xa5\x8d\xb0\xd2\x93T5E\xebV\x9b" +
-	"\x14\xc0\xc4\xe0CHw\x7f#\xa4\x05p\xbd\xe9\x05S" +
-	"\x1c/\x98T\xef\x04\xf5\xc0#\x93\xebX.f\xdc\xa3" +
-	"d4\x85\xfd#\x92\x8c\xe9s\xe0\xd9\xaa\xd59\xfee" +
-	"\x92\xe8 heAf\x86\x05\x92\x97K\x1d\x9deQ" +
-	"+d\xafH\xfb\xc7\x8fY\xd4!V\xad\x18\xd0\xec\x1c" +
-	"\x93q\x864\x8f\xf5\xb42\x8f5\xae+\xb7%\xd8M" +
-	"\x00\xba\x83G\xf91\xc7\x87\xf6\x90\xfaw\xf1(\x1fp" +
-	"\x81\xea\xfee\xae\x15\x91\xd5w\x1djum\x83r\xd0" +
-	"\x18$\x1d\xa7\xc3c<\xca\xafr(\xe6\xf2\xc6\xe6\xe7" +
-	"\x95vg\xf3\xd3kD\xbb\x8d\xc1\x95$\xb0\x0b\xad\xec" +
-	"\x1f\xa3\x99h\x15\xd0\xfd$m\xe7h\x1c\xa6\xee\x1c\xbb" +
-	"\x14U\xf7)@\x07\xc9\x03J\x9c|y\x1e\x08\xacG" +
-	"\xcd\xb2\x90\xb2\xf4\xd9\x1f\x83R\x00>Cv\xcc.\x94" +
-	"\xadAA\xb6\x96\xb5\xfa\xf6\xec\x05\xf9\xdf\x00\x00\x00\xff" +
-	"\xff\x19,\"\x9e"
+const schema_d75b3b54eb3ed6a2 = "x\xda\xccZ{xT\xe5\x99\xff\xdes\x92\x9c\xc4\x12" +
+	"\x92\xe3I\x08\x91\xd0!1J.$\xe5\"[\x8d\xb2" +
+	"3I\x80\x12.\x92\x93\x80+T\x9e\xf5d\xe6Kr" +
+	"`23\x9es\x02\xc4[\x80\xc2VT*\xb8\xac\x95" +
+	"n\xbd\x80\xe2m\xbdQ\x8dU\x1e\xb1`k\x0b\xac\xb4" +
+	"\x8b\xda\xd6\xa2\xddV\xc5u\xbd \xb5]l}|p" +
+	"\xf6y\xbfs\xfbf2\x09C}\x9e\xed\xfe7\xf3\xcd" +
+	";\xdf\xf7~\xef\xf5\xf7\xbe\xef7\xf5\xe0\xd8P\xce\xb4" +
+	"\xc2@9\x11:\xab!7/\xb9a\xd5EOn\xf9" +
+	"\x9f\xcd\xeb\x88<\x01\x08\xc9\x91\x08\x99\xd1?\xa6\x05H" +
+	"N\xf2\xc6]+?>\xff\x89\xcf\xd6\x13u\x02\x08\x84" +
+	"\xe4\x02\xfe\xb6bL\x07\x10P\xf41O\x10\xf8\xdd\x0b" +
+	"\xf4\xca\xf0\xf1\xfd\x1b\xd4\x09\x00\x84\xe4\x0a\xf8{A\xe1" +
+	"\xcd\xf8{y\xe1\x13\x04\x92\x81\x9c\xce\xa7&\xbc\xf1\xe3" +
+	"o\x11\xb5\x10 \xb9\xebW\x7f\xff\xe1\x92K\xbf\xf9k" +
+	"{'e\xa8\xf0\xb0r\xa0\x10?\xed+\\C \xd9" +
+	"\xbb]\xd8:\xf5{\xbb6r\x8cL\x1c{;2\xf2" +
+	"\xce\x8d\xaf\x9e\xdb\xd6\xf8\xb5M\xe9\xdb\x88\xf8\xe7\xc2\xb1" +
+	"\xc7\x94\xf2\xb1\xf8\xa9t\xec{\x04\x92\xea\x9d\xc5\xb9\xc1" +
+	"\xfd\xeb69\\\xb3}r\x8b\x96#Sr\x112\xb5" +
+	"`\xef\xcf\x7f\xb7|\xd697\xf1\x04\x0f\x17m@\x82" +
+	"!F\xf0\xd4\xb1\xca\x1b\x13\x97\xcf\xbd\xc9f\xc4\xbe\xf6" +
+	"\xa2\xe2\xef!\xc1\x8a\xe2 \x81\xe4\xfco\xffz\xcf\x92" +
+	"\xcf\x9b\xbeC\xe4\xc2a\xb7\xba\xa1\xf8mes1~" +
+	"\xda\xc4hw?\xb5~\xff\xd6\x9d9\xb7#\xefy\xe9" +
+	"\xc4\xbb\x8bw)\x8f\x15\x97\x112c\xa8\xf8\xeb\x02\x81" +
+	"\xe43\xe7,R\x7f\xbcf\xe5\x1d\xfc\xd1\xb9\x0a\x93h" +
+	"\xa9\x82\xdbU\xfdk\xed\xc0\x8a\xa7\xd7\xdf\x99\xa2\x939" +
+	"J\x17R\xa8\x0a\xde?\xe7\xc8\xae_\xa9\xed\xfbw\xe0" +
+	"\x81\"w jGi(9\xa6\\R\x82\xff\x99Y" +
+	"r\x1b\x10H\x1a\xb5\x0f\x1e\xe8\xfa\xee\xa9{\x9c\x03\x99" +
+	"\x0a\x0f\x94\xb2\x03\x8f\x96\xa2VN\x94\xdcp\xcb\x07;" +
+	"W\xee$r!\xb7\x1b\x01e\xda\xb8\xb7\x95Y\xe3\x90" +
+	"\xfe\x92q\x12(\xef\xe3\xc7\xa4\xfc\xfb\xc3\xaf\xd3+\x9e" +
+	"\xd8\xc9\xcb\xf6\xe8\xb8\xbd\xb8\xdd[\xe3p\xbb\xeb_\xbe" +
+	"\xf5\xa3`\xfe\xb4\x078%7\x97m@%\xcf><" +
+	"\xff\xbceW\xf4>\xc0_\xbd\xa1\xecE\xfc\xeb\xac2" +
+	"\xbc\xfa?\x1f\xf9\xe1\xef/]\x1cz\x88\xc8\x15\xee_" +
+	"\xaf)\xbb\x16\xff\xaa|\xbc\xe0\x8b+\xd7\xf4?\xc2m" +
+	"\xba\xa2\xac\x03\x7f\xf9\xd6=\x0d\xeb\x8f\xe6\xbd\xf68\xcf" +
+	"O[\xd9\xed\xb8\xe9\xb22\xe4\xa7\xec\xe0d\xe5\xb2\xc1" +
+	"\x8d{x\x82}e\xec\xfeG\xca\xd0\x18\xb6\x9d?\xb8" +
+	"\xe5\xae{\x0f>\x85\x04\xa2C\xa0\x8f_\x89\x04\xfd\xe3" +
+	"\x91\xe0\xa3\xf9y\xdd\xf7M\xed\x1c\xe2\x0e//G\xb3" +
+	"\xfdQ\xeb\xbb'\xfee\xd9\xe0siz@\x0a\xa5\xa0" +
+	"\xfc\x8fJi9\xd2\xca\xe5L\xf1[\xcb~\xfa\xd2\xa3" +
+	"\xcd\x1b\xf7\xa2\xd6\x84t3Y6\xe1\x8f\x0a\x9d\x80\x9f" +
+	"\xb4\x09\xa8\xe2\xfb\xd6\xbd[\xf9\xc2\xe0;{mI\xd8" +
+	"\xa2\x9aY\xc1\x98\x9eS\x81\xa2:\xf8\xf8\xdeW\xbeh" +
+	"\xba\xe3y\x8e'Z\xc1D58\xb4o\xcf\xdb\xfft" +
+	"\xf4yN\x88j\x05s\xb2b\xf9\x96]\xdb\xea\"\xfb" +
+	"2r\xd0\\\xf1\xa2\xd2V\xc1l\xad\"\x80v3t" +
+	"\xf8\xaa\xf3\xea?\xfd\xc3\x0b\xc4\xf6}\xb6\xd1\xb2\x89\xcc" +
+	"\xcb\xe8Dd\xe1\xd4\xcd\xe3\xde\xff\xf4\xbe\x9a\x03)\x86" +
+	"\xbai\xe2|\xa4\xd86\x11\x05w\xeb\xf6\x17?:u" +
+	"\xc7U/:\x92\xb5mo\xdaWQ93\x9a\xbf\xfa" +
+	"\x0fx\xca\x89\xef\xfe\xe3]o}5\xffP\x9a\xa31" +
+	"S\xde\x118\xa6\xec\x0e\xe0\xa7\x9d\x01\xd4\xe4\x03\x1f\xd3" +
+	"\x8f\x9b\x1fj9\xcck\xf2t\xc0\xc0\xf3\x0a&!A" +
+	"\xc3\xdd\xa7?i\x0d\xf5\x1dqX\xb69\xea\x9b\xc4x" +
+	"\x1e`\x14\xda\xf6\xbf\xc0y\xa7?:\xc2_\xea7\x93" +
+	"\x1eA\x82\xf7'\xe1\xa5\xc6\xbf\xb1\xf7\xf4u\xb7\xad\xfb" +
+	"9\x91K\x04\xdf\xb3\xf1\x84\xcacJi%2#W" +
+	".&\x90\xcc_\xb7d\xc9\xc6\xf3\x0f\xfc\x827\xe6\x0b" +
+	"*\x99\xdd\xcd\xac\xc4\x9dn\x09\x9d>~\xe9z\xed(" +
+	"\xcf-\xaddfuM%J\xe7\xc3o\xe4-n\xfe" +
+	"Y\xcd+\x19c^A\xd5\xdbJi\x15;\xae\x0a\x0d" +
+	"\x02\xee\x89o\x9d\xf1\xc9\xfaW\x869\xe9\xfbU\xc7\x94" +
+	"SH8\xe3\x93\xaao\xe7*\x0f_\x88N\xdaz\xdd" +
+	"=o\xc6\xaa\xea^\xe5\x99\xdbv!\x93\xd4]\x17\"" +
+	"s\xf7\x96u\xdfy\xcf{\xfb^Kq\x8a\x0b[\x90" +
+	"\xe0\xa5\x0b\x91\xb9\xe6y\xdbw\xce\xf9\x10^\xe7wX" +
+	"1\x99\x05!}2\xee \xbe{\xf8\xdfK\x9f\xb9\xea" +
+	"\x8d\x8c\xc6\xb4c\xf21e\xf7d\xa6\xb9\xc9\xc8\xfdu" +
+	"+\xae[\xf8\xc4\x9b\xe3\xde\xe4\xc5\xbe\xad\x86Y\xca]" +
+	"5\xb8\xdb\xd6/\xcc\xb7\x0e\x9c.\x7f3Es\xfbj" +
+	"\x18\xc7\x87jPs\xf57]\xfc\x9bso.\xfb-" +
+	"\xcf\xf1\xcc\xda&\x16<j\x91\xe0\x1b\xb3\xe5\x9b\xb7D" +
+	"\x9e\xffO\xce\xeew\xd6\xb2\xb8\xf3\xf4\x17'o\xb8y" +
+	"\xe8\xb7\xef\xa4l\xbe\xa5\x96e\xb9\x1d\xb5x\xdb\x1fT" +
+	"O\xdcT\xb3\xb9\xf98\x7f\xdb\x99u\x8c\xa0\xb9\x0e\xf9" +
+	"\xbb\xff\xf2\xbb\x0fu\x19\x81\xffJ\xd9\x82\xd61u\xf7" +
+	"\xd7\xb1\xdcv\xec;\x7fz\xef\x87\xff\xf6\xdf\xfc\x15\xdf" +
+	"\xad\xdb\x85\x04\xa7\xd8\x16\x07\x1f{\xe3\xe9\xef\x7f3\xf0" +
+	">\x7fFy=\xcb9\xb5\xf5H\x10\xfc\xda\xc2i\x0b" +
+	"\x1f<\xfe!\xbfC[=\xf3\xf9e\x8c\xa0\xe5\xe4\x0b" +
+	"\xcf\xac\xdf\xf2\xe0\x09\"\x17\x0a\xbc\x0d\xcc\x18\xa8?\x17" +
+	"\x94\xcd\xf5,%\xd5\xf7\x10H\xee\xbd\xff\xd9\x15Wl" +
+	"{\xfb\x04Q+|v\xf7\xd43\xf5\xed\xabGv\x7f" +
+	"\xd6\\\x1a\xbbo]\xcb\xc7)\xdcLa\x87\xd5N\xc1" +
+	"\xc3>\xad\xea\xaa\xf8\xca\xa6]'q\x0b/\xaeNa" +
+	"\x0aY:\x05ev\xefq\xe3Gw_\xfd\xf9I>" +
+	"D\x9d\x98r-\x12|f\xef\xb0\xe7\xc4\xb1\xc5\x8bN" +
+	"\xfe!\xe5\x88\x06\xa6\xf4\x0b\x1a\x90\xe0\xc3\xb6\xe6_\xfc" +
+	"\xb4~\xe3\x9f\xb8\x186\xa7\xc1@\x8d%v\xbeZ^" +
+	"\xf6\xe8\xdf\xfd9\xa3qMk\xf8@\x99\xd5\xc0\xd2R" +
+	"\x03\x8b!\x9fm\xf8\xe0\xa5\xda\xda+\xff<L.\xbb" +
+	"\x1b\xcf\x05e\xa8\x11\xff\xb4\xa7\x11\x9d\x16^\xbc\xff\xd2" +
+	"\xc9\xef|\xfd/\xbc\x88\x0f5\xb2\xf8\xf0\xcbFdi" +
+	"\xcd\xf4\xe3/\xf4N\x7f\xe0s\xce\x88>k\\\x89," +
+	"%\x7fP|[\xe33\x8f\x9fN\xd1o#s\xe7O" +
+	"\x1a\x83\xa4!I#\xba\x157\x1a\xc3\x05Z\"\x96h" +
+	"\x9a\xc3\xbeuRc\xb5\x1e\xa6\x8d\xa6\xb6\x9aVwP" +
+	"\xb3?j\x99\xc4%\xcc@\xa7%\x12\xd1\x81\xc5\x89\xea" +
+	"v\xcd\xd0\xfa\xc0T\xc7\x889\x84\xe4\x00!\xf2\x9c\xf9" +
+	"\x84\xa8\xb3EP\xdb\x05\x90A(A\x1e\xe4E\xb8\xb8" +
+	"P\x04\xf5J\x01pM D^z\x1e!j\xbb\x08" +
+	"\xeaU\x02$\xc3Q\x9d\xc6\xac\xb6\x08!\x04\x0a\x88\x00" +
+	"\x05\x04\x92]\xfd\xdd\xdd\xd4\xb0\xd7\xf2\x89\x00\xf9\x04\xc4" +
+	"x\x02\x8a\xf9h\x07\xc5\x04\xbc\x0b\xe5\x8e\xc4h{\xb4" +
+	"\xbfG\x8f\xcd\xd5\xd7\xda\xfc\x9a\x84\xf0\x0c/\xe7\x19\x06" +
+	"\x87\xe1\x16B\xd4y\"\xa8K|\x86\xd5\xe9\xfe%\x92" +
+	"\x09\xb6\xe5\xe5\x1a\x11\xfb(\x8c!\x02\x8c!0\xd8\xad" +
+	"\xaf\x9d\xadY\x9a\xfb=\xa0\xc7\"t\xad\xcb\xbb\xc7\xa6" +
+	"\xc0\xd8\x9c\x17_M\x0d[\xd2\x84\xb4\x03\xa8\xf9\x1eG" +
+	"\xb5(\xad\x1a\x11\xd4\x8b\x04p\x19\x9a\x86\x87O\x11A" +
+	"\xbd\x18\xa5\x15\x8fY4f\x99(\x19\xf7\xac\xeex\x7f" +
+	",\x02@\x04\x80\xb3\x13\x89\xcd\x03\x98i\xfcu\xea=" +
+	"1\xcd\xea7h[L\xec\x8e#\x83\xc5\x1e\x83\x1a2" +
+	"s\x95\x08j/'2j\x10\xa2FDP\x13\x02\xc8" +
+	"\x82#\xb3>\x14nT\x04\xf5&\x01@,\xc1\xe4*" +
+	"o\xda@\x88\xbaQ\x04u\xab\x00\x81\xa8\xd6E\xa3\xee" +
+	"%\x92\x91x\xb8\xbf\x8f\xc6,\x12\xd0,=\x1e\xf3\xd6" +
+	"\x13\xa86jQ\"\x1a&\x8c%\xd0.\x02\x14\xfb\xd8" +
+	"\x97\x00.&\xb5\xb0\xa5\xaf\xa6\xed\x1a\xd8\xc4\x06\x19&" +
+	"\xfa\x9c\x0c\xe2\x08\xc7\xfb\x12QjQf\x1bb_\x8a" +
+	"-\xe3=C\"\xa8\x0b\xb9{\xb6\xd5q\xf6\xe2\xdes" +
+	"Q\x95o/\x81\xae\xfe\xee\xb6\x88{vQT\x8fQ" +
+	"\xf7\x8b\x14\x8eG\x871\x95IG\xa6+\xfdy4\x9a" +
+	"p\xad\xf6\xff\x05g\x11\xdd\x0ckF\xa4\x83\x86\xd1\x80" +
+	"\x07l\xf3\x11-S\xcd\xf1\x98+D\xe7\xc9\x17A-" +
+	"\x11`\xd0\xb1UO\x95#XY\xbb&\x19Z\x1f\x9a" +
+	"\x19\xb7\xcft\x7f\x9f4Cqw\x01\x97C\xc9Z\x9c" +
+	"Ps\x80\xc7E\xd0\x14\\\x9cX2\x90\xa0j\x8d\xbb" +
+	"\xa5R\x00\xf3\x09\xe9\xcc\x07\x11:K\xc0\x17\x9d\"C" +
+	"\x0b!\x9dcp}<\xae\x0b\xf9LzJ)\xd4\x11" +
+	"\xd2Y\x8c\xeb\x15\xb8.\xe62\x1bV\xcaa9!\x9d" +
+	"\xe3q\xbd\x1a\xd7s\xf2J \x87\x10\xa5\x12:\x08\xe9" +
+	"\x9c\x84\xebS@\x00\xc8-\x81\\B\x94ZF^\x83" +
+	"\xcb\x17!y\x9eT\x02y\x98!\x18;Sq\xfd2" +
+	"\\\x97\xf2KX\xe6\xb8\x84\xb1s\x11\xae\x87p=\xbf" +
+	"\xa0\x04\xf2\x09QfA\x13!\x9d\x17\xe3\xfal\\/" +
+	"8\xa7\x04\x0a\x10\x13\xc3tB:/\xc3\xf5y\x909" +
+	"\x9c\x0e\xae\xa6\x86\x89>\xe5|/\xb2\x06\x12\x14\x8a|" +
+	"y\x11\x80\"\x02I=fR\xc3Z\xa8\x13\xd17\x0e" +
+	"g\xb15N \x9a\xb6\xb6\x84\x12q\xad\xaf\xddn#" +
+	"\xde\xb7P\x8fQ.f\x0f\xe2Z\xabo]A+\xbe" +
+	"\x903\xbc\x80\x15o\xcd\xd2\xf4z\xa8e\x87\xad\x05t" +
+	"\xc0\xf4\xb2\x14\xe1-\xa6\xce\xb1\x98j\x01\x8aV\xd1\x01" +
+	"/X \x7fc\xcf\x10\x08\xe2\x09\x1a\x9b\xabG\xed\xfc" +
+	"'E-\x93\x8fx\x18\x92\xaf\x16A\x8d\xfa!Yo" +
+	"\xe1\x03\x1e8\x01\x0f\x17{EP-\xb4\x96Iv\xc4" +
+	"\xbbf%!jB\x04\xf5z!cZKw\x92t" +
+	"]1\xb1\xa2\xc7\x91\"\xf4\xb9aQ\xde\xf6\xa5\x85f" +
+	"b\xb6\xae\xf5\xc4\xe2\xa6%\xeaat\xa5\x0a\x8f\xff!" +
+	"\x14\xcc\x93\"\xa8\xcfs\xf1\xe29\x0c\x0dO\x8b\xa0\xee" +
+	"\xe7\xe2\xc5>\xbc\xc0\xb3\"\xa8?\xc1\x0b8!\xfb@" +
+	"\x13!\xea\xf3\"\xa8\x07\xd1\xd6\x8b\x99\xad\xcb/\xa1L" +
+	"~\"\x82\xfa\x1f\x9e\xa1\xcbG\xf0\xdf\x07EP_C" +
+	"+\x07f\xe5\xf2Q\xfc\xf7\xcb\"\xa8\xaf\x0b#\x07\x9d" +
+	"A\x1a\x8b\xf0v\x11\xa4\xb1\x08o\x18&]M\x0d\xdd" +
+	"\x1a@\xb1\xe5\x11\x01\xf2\x08\x0c\xf6Q\xd3\xd4z\xbc\xfc" +
+	"\x1b4\xe3\xfdF\x98\x0e\x0b\x12\xa3\xda\xd2\\}-5" +
+	"}\\\xc0e\xe1\xe5~\x16\xf6D6\xad\x85K\xc3\xd9" +
+	"`\x804\x1d\xb52\xc7l\xd5\xa2\xd1.I\x0b\xaf\xb2" +
+	"\xd3j.!\x1eH\x05\xb7:\x90\xaf\xe9\"\x82\xacK" +
+	"\xe0#\\p\xdb\x0e\xf2\x8a\xe5D\x90\x97J x\x00" +
+	"\x1a\\@(\xb7\xcd'\x82\xdc,\x81\xe8\xd5\xe6\xe0V" +
+	"\xda\xf2L\x83\x08r\x83\x944{\xe3k\x16Q\xd3$" +
+	"\x92\xd6CC\x90\xec\x8b\xaf\xa6\xad\xfd\x86I\xc4\xb8\x11" +
+	"\x82\xa4\xeb\x09\x84\x90\x10$W\xd1\x81\x0e\xda\xa3\x9b$" +
+	"`Q\x83FB\xd0\x0eY\xcav6\x0d\xc7\x0d\x96\xc9" +
+	"\xcd\xea\xa0-\xe2\x11`\x8e\x87\x14Sq\xce\xf00\x96" +
+	"\x9a\xc2<6\xc6\x9c1\\8\x1a\x1e\x05\xd3fd\xdb" +
+	"\x8d2|\x90\xe9b\xf8\x11\xd4\x1a\x01\x92\x11\x87\x96H" +
+	"\xf1\x98\x0fM\xdc~\x8b\x03LR\xa3\x0eg\x03Zx" +
+	"U\xa3+\xfb\xb8Q\xdd\x11\xb4O\x1b5L!Do" +
+	"6\x87\xc3\xb6l\x92\xb5\x0b\xd7\xcf\xa4\x04\\\x9c*\x82" +
+	"zY\xf6\xd0|T>\xfa\x13\x11\xcd\xa2W\xe8tM" +
+	"\"nX\x19Qx\xc6\xb2\x81C\xe1\xb2 :0\xbc" +
+	"\x89\x83\xe1\x99\x12\x9d\x15O\xa4\x04\x92^\xaa\xf7\xf4Z" +
+	"Ya\xc1\x1ej-e\xac\xa2\xbd\x141{=\x8b\xca" +
+	"\xc6\x8b\xa1K1\xde/\x11A\xbd\xfa,\xe4g\xea\xb1" +
+	"0\xbd\x82\x1a\xa4(%\xf4\x9f\x85XG@\xf2\x9cQ" +
+	"\xdb\xb0\x1a\xa3\x0e\x0f\x89\x10\xe2\xe4 v(\xe6!Q" +
+	"!T\xf1P\xc9\xa9\x82\x14\x99\x91\xfbHI\xcc\xb1\x11" +
+	"Q:R\xca\x11mDT\xce K\x09\xaeO\xc2\xf5" +
+	"\\\x07\x12M\x84k\x09\xe9\xac\xc0\xf5\x1a\xf0\x93\x85r" +
+	"\x01[\xaf\xc6\xf5\xa9\x0c\x12\xad\xb3!Q\x03\x83D>" +
+	"\x84\xca\x17lH4\x8d\xadO\xc1\xf5\x8b\x19$\x12m" +
+	"H4\x93A.\x0fB\x8d\x98w\x8a,\xea\xe3\x97\xa2" +
+	"Uz,\x02E~\x03\xc3\x06E\xe9\xb9\xa8?\x16\xa1" +
+	"FT\x8f\x91 \xed\xb4\x06\xa2\x08\xa3\xbc\xd2\xde\x81Q" +
+	"\x1cIk<\x1a7\xf8\xfc\xa0uE\xa9\x9b\xc3\x87\xe5" +
+	"\x8bLI%M\xa1\xb3i\xb7\x1e\xd3Q\x93\x1d\x01\xa6" +
+	"\xf2\x91\xab3\xaf8\xab\xf3\xf1\x8b\x87U\xf4:\x0e\xc0" +
+	"\x88\x82\x9d\xea\xfb\xaa|\x00\x93ZT\x16%4\xab\xd7" +
+	"\x93T\x96\xc5CZ\xb0ss\x09\xcb$~\x1c\x18\xa1" +
+	"v\xb0\x0c\xbd\xa7\x87\x1a\xc3\xc4\x90\xb1\x8c\x8b\xc6M\xda" +
+	"\xc2\xfcjx\x1c\xcd\x82\x97Q\x9d\x07\x8fbEz\x89" +
+	"\xc7\xe8\x0d\xe8\xf8\xd7\xdb\x95\xad\x07\x0f6!\xf7\xebD" +
+	"Po\xe5\xa2\xc1\xe6&\xbf\xde\xf5\x10\xd5\x16T\xd2M" +
+	"\"\xa8\xdb\x05\x80\x1c\x1bPm\xc3\x7f\xdf*\x82z\xa7" +
+	"\xf0\xe5\x91\xf4`\x8c\xaeY\xc2\x99\xf6\xa8\xc2s\xdb9" +
+	"g*\xe6\xd2qi\x16y*\xebX\x9f\xa9ETw" +
+	"\xf6-\xa2\x14+\x1d5z\xf6j\xb1H\x94z\x10\xc1" +
+	"K\x8e\xe3=Fw Ow\x8a\xa0\xde\xcf1\xba\x13" +
+	"5\xf7}\x11\xd4\x87|Fw\xa3\xd3\xdc+\x82\xfa(" +
+	"\xaa\x18l\x15?\x8c\xdc\xdf/\x82\xfa\xa4\x1f\x0e\xe5\xc7" +
+	"\x10U>*\x82\xfa,\xc6\xc2\x1c\x1b5\x0fu\xf8@" +
+	"\xfc\xcc\xa0GZE\x07<7\xec\x8bG\xfc0\x11f" +
+	"0\"\xadv\xb3\x17Sk\xb7L6>W_\xdbf" +
+	"\x89\xb4/\xad\x17\x85\xb7\xad\x16A\x9d\xca\x99yC\x8b" +
+	"\x0f\x1aR\x0b\xf3A\x83&\xa2Z\x06\x0c~&\x97m" +
+	"\x0fd\x07\x0f\xbf\x0c2\x19\xb5\xe8s\xbb?gh\xc3" +
+	"\xd5\x8d\x0eO\xb3\xb7>\x9bQ'$\xc5\xfbc,}" +
+	"\x17a\xd4\x1a\xa9\x03\x12F\xaa\x11T\x88{/N4" +
+	".N,\x19\x10\x13\x14U8\x86\x19\xe6\xc4:LH" +
+	"ri\x13! \xc8\x85M\x84\x14\xc5\xe2\xf1D\xd0." +
+	"\xde\x83\x11\x1a\xa5\x16=\x9bB\xc9\x0d\x93\x99\x98\xac\x16" +
+	" \xa0[\xb4\x8fk\xd1yS\xb3\x8cH8\x0d\xacz" +
+	"i-\x13\xf8\xfa?ix9E\x9a\xdd\x11\xd4\xe3\xb1" +
+	"6\xc9\xb2\x1d\xe2\xaf\xc9\xaeM\x99\xb2\xab\xdb\x0f]\x9b" +
+	"\xee96\xf4p*\xdb`\x84Z\x9a\xee\xb7\xbb2\xf6" +
+	"Z\x86[\x80#K1\xcc,\xe0JVX\xba\x13#" +
+	"pG\x0a\xca\x1e\xa1\x85\x08\xcan\x01KKwX\x00" +
+	"\xee\x88C\xd9!,'\x82\xb2M\xc0\xe2\xd2\x1dS\x82" +
+	";\xeaW6\x09\xf3\x89\xa0\xdc `y\xe9\x8e\xa3\xc1" +
+	"\x9d\x89)\xd7\xb0\xff\xea\x82\x04\xfe\x8b\x0dp\xc7\xb3\xca" +
+	"\x0av\xae*H\x90\xeb\x0d\xc9\xc0}\xf2\xa1\xcc\x11\xea" +
+	"\x88\xa0\\\"H\x90\xe7\xcdO\xc1\x1d\x1e+\x0dB\x17" +
+	"\x11\x94\x0b\x04\x09$o\x80\x05\xee\x8cT)\x17n'" +
+	"\x82R*H\x90\xef\x8d\xd9\xc1}:\xa1\x14\x08\x1b\x88" +
+	"\xa0\x80 A\x817\xba\x02wN\xa6\x9c\x82k\x89\xa0" +
+	"\x9c\x00\x09\xce\xf1\x86\x8d\xe0N\x84\x94\xb7`:\x11\x94" +
+	"_\x82\x04_\xf1\x1ek\x80;\x92R\x0e\x81A\x04\xe5" +
+	"\x00H0\xc6{\xeb\x01\xee@R\x19\x02\x94\xd5c " +
+	"A\xa17c\x05w\xe0\xa9\xec\x04\x94\xd5\x0e\x90`\xac" +
+	"7u\x04w\x00\xa8l\x81&\"(\xebA\x82\"o" +
+	"8\x0d\xee`N\xe9\x07\xbcQ\x1fHP\xec\xbd\x1a\x00" +
+	"w\xf8\xafh\xecF\xcb@\x02\xd9{\x04\x01\xee\x93\x06" +
+	"e\x11<B\x04\xa5\x0d$8\xd7{\x01\x01\xee[\x0f" +
+	"e\x16\xbb\xd1L\x90@\xf1\xc6\xe6\xe0\xbeiPj\x19" +
+	"W\x13A\x82\x12\xef\xb5\x06\xb8\xf3eEf\xe7\x16\x80" +
+	"\x04\xa5\xeek\x1c\xee!\xcd\xe9k\x89 \x9f\x92\x06\xc3" +
+	"\xf1X\x8c\x86\xad\x10$\xb18\xc5/Dd_S\x9b" +
+	"\x0en%FDj\x86`\xd0\x01(!(BX\x11" +
+	"\xc2\xd8k\xe7\x0e\"uS#\xe4\xc6\xfd\xd6(\xb8\xf1" +
+	"\x14\xdc#\xb0\xfe\x05\xa7\x00vvfm2\x12\x8c\x9b" +
+	"\x96\x1e6C\x10\xe8\xc5\x1fCX\x82\xd9\xddh\x12`" +
+	"}w<\xc6\x19\x0e\xd8L\xb9\x11\x8a\x88\xf1X\x08\x82" +
+	"\xddq\xa3O\xc3c\\$\x01\x0e\x94@Z\xb76#" +
+	"A\xbb:\xb3Of\xa1\x14\xdc\x0eC\x91\x1e\x8f\x99\xdc" +
+	"\x0f$\xc0z\x15!\x08\xda\xe0\x89\xff)h\x07\xe0\x10" +
+	"$\xdd\xf9\x0d\x09\xdaQ9\xb5!s\x86\xc8\xdaA\x03" +
+	"fz\x92i\xf2\x93L\xd0\xb0\xe3{\xb1\xff\x0a$m" +
+	"\xc8\x96i\x7f&\xbf\xbf\xd9\x94b\xd4\xa1\x8e\xd7\xcb\xcd" +
+	"._yO\x1d\xd2\xf2U\xda\xb4b\x1e\x15\xa3\x89\xb4" +
+	"\xbc\xb0\xdc\xc9\x01\xd7\xfbya`\x03!\xeaZ\x11\xd4" +
+	"\x8d\\^X\xbf\x81\xab\x11\xc4\x90\x9d\x176O\xf7k" +
+	"\x04\xdf\x0cE\xca\xb1\xe6\xbd<K\x99vu\xea\xe0\xf0" +
+	"\xe4\xe3\x9d\x11\xe7`#\x0c\x093\x09\xd0\xb6\xed\x8c\x15" +
+	"\x1a\x8fI2w\xe3\xce\xd0Z\xf1l\x90\xc3ZU\x0e" +
+	"\xcc\x0c\xf9\xd2\x9b\x85(\xf3b\x11\xd4\xd9\x02H\xf1\x04" +
+	"'\x0a~\x00<\x96\x8c\\\x96\x88#M\xb8\xb3mF" +
+	"~\x19\xb4yN\xa6\x9a\xd3m\xbcj=Y\x8d\xd9\x1d" +
+	"-x\xa0\x8bs\xad\x16\xdf\xb5<\xcfj\xe1=\xcb1" +
+	"\xb7E]~]5l\xce\x10\xee\xd5b=\xd4\xb7\x88" +
+	"X|.;\x91H\x165\xb2\xb2\x13'\x9c{\xc5\x13" +
+	"g'\xf3\x9d6\xe9x\x14\x9e#\x00\x14\x94\xec?\xe4" +
+	"Clz\xe6F\xbd;\xd5\xd0\xc3\x1c\xfe\xccP\xa2\xf0" +
+	"\xb6\x83\x87_&\x82:o\xb8\x8f{\xaf\x12\x1dG\x8a" +
+	"\x9a\x89\x0e\xaaE\xd8d!\x9b\xf9\xf9p\xe4\xde\xae\x19" +
+	"\x12\x9a\xd3\x08\x97?\xdbniza\x9a\xa9*\xcf\x18" +
+	"\xb3\xbd\xd7(Y<\x8cH\x93\xeb_\xe7\xe8bz\x83" +
+	"\x91\xf5\x17\x17\xe81\x88\xb0\xe8\xc8,\xb0\xb6\x89\xe9\xb9" +
+	"\xb2\x85\xd5 \xe5\x1d\x84\x80(\x97v\x10\x12\xec\xe9\xb7" +
+	",j\x0cb\xf6\x88j\x03I\xd3\xd2\xac~\xb3E#" +
+	"`\xf8\xfd3\xa0\xa3\xb7\xcf\xf9\x02NJ\xf3\xe9:\xbf" +
+	"v\xf5J\xd7:\xdf\xcfGnh\x9d\xc5l>\xe3\x18" +
+	"2\xa3v\xbc\x87h\x193\xea\xc8S\x01\xb74\xfe\xdb" +
+	"\xe4\xd5Q\x02\x98\x1bE3\xcc_K\x84\xd4\xc6j\x16" +
+	"\xf0!{AzO\xb9\xb3\x80&.\xc8\x0c[^\xda" +
+	"\xc9\xd8\xfdX@\x07:h\x91\xdbL\xe5Z@\x18S" +
+	"\xb7\x8b\xa0\xde\xeb\xdb\xd0]\xd3\x9d\xb6\xd0\xd3\\\x9c\xdd" +
+	"\xb3\x9c\x9b\xb0\xba\xe5\xdes\x1d\xdc05\x07\xec\x16\xd0" +
+	"\x01\\\xdc/\x82\xfa\xb2\x00r\xaeh\xb7\x80\x0eu\xf9" +
+	"\x83\xd3A;\x00xa9\x80\x0cs\x01\xcc{\x1e\xeb" +
+	"\x04\xb0\xac\xdb>\xbd\x9a\xc9l\x8a\x80\x1f\xdc\xc3Z\x02" +
+	"my\x01\x91\xe8\x809\xaa\x83/u\\\x92\xf5\xbc!" +
+	"C\x93a>spy:k2\xc4h\xd2\xb4\x0cM" +
+	"\xef\xe9\xb5\x08!\x81p\xbf\x11\x1d\xc8*\x93d\x8av" +
+	")\xa9$C\x1e\xce.B\xb8\x0d\x96l\x0d\xc6\xedB" +
+	"d\xcf\xc8\xff\x06\x00\x00\xff\xff\xb2(d\x10"
 
 func RegisterSchema(reg *schemas.Registry) {
 	reg.Register(&schemas.Schema{
@@ -7052,7 +7796,9 @@ func RegisterSchema(reg *schemas.Registry) {
 		Nodes: []uint64{
 			0x8089f48db0346b82,
 			0x81f9af23ee6aa27e,
+			0x82c000e4635865be,
 			0x83c3db1bb353041f,
+			0x84a29a3090029468,
 			0x852f2e4912d37ee3,
 			0x8580c03f05109851,
 			0x880a3d5adfceba4b,
@@ -7062,6 +7808,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0x966a77c3514d0ab6,
 			0x9881b45d79299b22,
 			0x99c05051d6a2cd04,
+			0x9ff59762c1a72972,
 			0xa16aa1ea8b7d14ed,
 			0xa1af5665d8cae011,
 			0xa631083fec8ccc7c,
@@ -7081,10 +7828,12 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xbef0f62b1a5ccab5,
 			0xc128a3f6e9168af5,
 			0xc25c96f5ecc2948c,
+			0xc9081ee19d5f97ed,
 			0xca42a841ee65eea6,
 			0xcd6d4043f1fd9e2d,
 			0xcdecfd1a01f89461,
 			0xce808f7bfdbadb18,
+			0xcfc1238454548008,
 			0xd161813be4fd408b,
 			0xd228c7414f0647eb,
 			0xd281f133906f9f01,
@@ -7110,6 +7859,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xf0ef4d4fdaedb1f6,
 			0xf3842bc6cf4149eb,
 			0xf736ac1719d3a170,
+			0xf7582929c5ea82f9,
 			0xf837e3273ba4c201,
 			0xfba63268bee43277,
 			0xfdaeb62e8f10b2ff,

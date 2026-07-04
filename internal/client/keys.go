@@ -315,10 +315,12 @@ func (m Model) handleCapturedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	bufID := m.bufID
+	curLine := uint32(m.cursor.Line)
+	curCol := uint32(m.cursor.Col)
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		result, err := m.rpc.HandlePluginKey(ctx, key, "capture", bufID)
+		result, err := m.rpc.HandlePluginKey(ctx, key, "capture", bufID, curLine, curCol)
 		if err != nil {
 			if isEsc {
 				return nil // suppress error on esc-cancel
@@ -332,10 +334,13 @@ func (m Model) handleCapturedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // handlePluginKeyRPC dispatches a keypress to the owning plugin and returns a
 // cmd that will deliver the result as a pluginKeyResultMsg.
 func (m Model) handlePluginKeyRPC(key string) (tea.Model, tea.Cmd) {
+	bufID := m.bufID
+	curLine := uint32(m.cursor.Line)
+	curCol := uint32(m.cursor.Col)
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		result, err := m.rpc.HandlePluginKey(ctx, key, "normal", m.bufID)
+		result, err := m.rpc.HandlePluginKey(ctx, key, "normal", bufID, curLine, curCol)
 		if err != nil {
 			return errorMsg{err}
 		}
@@ -343,7 +348,39 @@ func (m Model) handlePluginKeyRPC(key string) (tea.Model, tea.Cmd) {
 	}
 }
 
+// handleFixPopup handles keyboard input while the fix popup is visible.
+func (m Model) handleFixPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.fixItems = nil
+		m.fixDecor = nil
+		return m, nil
+	case "j", "down":
+		if m.fixIdx < len(m.fixItems)-1 {
+			m.fixIdx++
+		}
+		return m, nil
+	case "k", "up":
+		if m.fixIdx > 0 {
+			m.fixIdx--
+		}
+		return m, nil
+	case "enter":
+		idx := m.fixIdx
+		cmd := m.applyFixCmd(idx)
+		m.fixItems = nil
+		m.fixDecor = nil
+		return m, cmd
+	}
+	return m, nil
+}
+
 func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Fix popup navigation takes priority.
+	if len(m.fixItems) > 0 {
+		return m.handleFixPopup(msg)
+	}
+
 	// Capture mode: plugin owns keypresses until it signals done.
 	if m.captureMode {
 		return m.handleCapturedKey(msg)
@@ -487,6 +524,9 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "K":
 		return m, m.fetchHover()
+
+	case "F":
+		return m, m.fetchFixes()
 
 	case "u":
 		if len(m.undoStack) > 0 {

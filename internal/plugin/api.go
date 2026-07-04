@@ -88,7 +88,31 @@ func (s *editorApiServer) RegisterBufferHandler(_ context.Context, call pluginpr
 	s.reg.mu.Lock()
 	s.reg.bufHandler.Release()
 	s.reg.bufHandler = handler.AddRef()
+	h := s.reg.bufHandler
 	s.reg.mu.Unlock()
+
+	// Fire OnOpen for any buffers that were opened before this plugin started.
+	if s.bridge != nil {
+		refs := s.bridge.PluginOpenBuffers()
+		for _, ref := range refs {
+			bufID := ref.BufID
+			path := ref.Path
+			go func(h pluginproto.BufferEventHandler) {
+				ctx := context.Background()
+				fut, rel := h.OnOpen(ctx, func(ps pluginproto.BufferEventHandler_onOpen_Params) error {
+					ev, err := ps.NewEvent()
+					if err != nil {
+						return err
+					}
+					ev.SetBufId(bufID)
+					return ev.SetPath(path)
+				})
+				defer rel()
+				fut.Struct() //nolint:errcheck
+			}(h.AddRef())
+		}
+	}
+
 	_, err := call.AllocResults()
 	return err
 }

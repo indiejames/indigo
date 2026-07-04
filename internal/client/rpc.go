@@ -52,7 +52,23 @@ const (
 	ClientDecorationGutter    ClientDecorationKind = 0
 	ClientDecorationOverlay   ClientDecorationKind = 1
 	ClientDecorationStatusBar ClientDecorationKind = 2
+	ClientDecorationUnderline ClientDecorationKind = 3
 )
+
+// ClientUnderlineStyle mirrors the server-side enum.
+type ClientUnderlineStyle int
+
+const (
+	ClientUnderlineNone     ClientUnderlineStyle = 0
+	ClientUnderlineStraight ClientUnderlineStyle = 1
+	ClientUnderlineCurly    ClientUnderlineStyle = 2
+)
+
+// ClientFixItem is one fix option returned by GetPluginFixes.
+type ClientFixItem struct {
+	Label   string
+	Replace string // non-empty = direct replacement; empty = call ApplyPluginFix
+}
 
 // ClientDecoration is one decoration item returned by a plugin provider.
 type ClientDecoration struct {
@@ -60,6 +76,16 @@ type ClientDecoration struct {
 	Col  uint32
 	Text string
 	Kind ClientDecorationKind
+
+	// Underline fields (Kind == ClientDecorationUnderline)
+	EndCol         uint32
+	UnderlineStyle ClientUnderlineStyle
+	UnderlineColor string
+
+	// Fix fields
+	Fixable    bool
+	FixData    string
+	PluginName string
 }
 
 // RPC wraps a Cap'n Proto connection to the editor server.
@@ -169,7 +195,7 @@ func (r *RPC) HasPluginKey(key string) bool {
 }
 
 // HandlePluginKey asks the server to dispatch a keypress to the owning plugin.
-func (r *RPC) HandlePluginKey(ctx context.Context, key, mode string, bufID uint32) (PluginKeyResult, error) {
+func (r *RPC) HandlePluginKey(ctx context.Context, key, mode string, bufID uint32, cursorLine, cursorCol uint32) (PluginKeyResult, error) {
 	select {
 	case <-r.conn.Done():
 		clientLog("HandlePluginKey: conn already done!")
@@ -179,6 +205,8 @@ func (r *RPC) HandlePluginKey(ctx context.Context, key, mode string, bufID uint3
 	fut, rel := r.svc.HandlePluginKey(ctx, func(p proto.EditorService_handlePluginKey_Params) error {
 		p.SetClientId(r.clientID)
 		p.SetBufId(bufID)
+		p.SetCursorLine(cursorLine)
+		p.SetCursorCol(cursorCol)
 		if err := p.SetKey(key); err != nil {
 			return err
 		}
@@ -238,14 +266,82 @@ func (r *RPC) GetDecorations(ctx context.Context, bufID uint32) ([]ClientDecorat
 		if err != nil {
 			return nil, err
 		}
+		ulColor, err := item.UnderlineColor()
+		if err != nil {
+			return nil, err
+		}
+		fixData, err := item.FixData()
+		if err != nil {
+			return nil, err
+		}
+		pluginName, err := item.PluginName()
+		if err != nil {
+			return nil, err
+		}
 		out[i] = ClientDecoration{
-			Line: item.Line(),
-			Col:  item.Col(),
-			Text: text,
-			Kind: ClientDecorationKind(item.Kind()),
+			Line:           item.Line(),
+			Col:            item.Col(),
+			Text:           text,
+			Kind:           ClientDecorationKind(item.Kind()),
+			EndCol:         item.EndCol(),
+			UnderlineStyle: ClientUnderlineStyle(item.UnderlineStyle()),
+			UnderlineColor: ulColor,
+			Fixable:        item.Fixable(),
+			FixData:        fixData,
+			PluginName:     pluginName,
 		}
 	}
 	return out, nil
+}
+
+// GetPluginFixes fetches fix suggestions for a fixable decoration.
+func (r *RPC) GetPluginFixes(ctx context.Context, pluginName, fixData string) ([]ClientFixItem, error) {
+	fut, rel := r.svc.GetPluginFixes(ctx, func(p proto.EditorService_getPluginFixes_Params) error {
+		if err := p.SetPluginName(pluginName); err != nil {
+			return err
+		}
+		return p.SetFixData(fixData)
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, err
+	}
+	rawList, err := res.Items()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ClientFixItem, rawList.Len())
+	for i := range out {
+		item := rawList.At(i)
+		label, err := item.Label()
+		if err != nil {
+			return nil, err
+		}
+		replace, err := item.Replace()
+		if err != nil {
+			return nil, err
+		}
+		out[i] = ClientFixItem{Label: label, Replace: replace}
+	}
+	return out, nil
+}
+
+// ApplyPluginFix asks the plugin to apply a fix by index.
+func (r *RPC) ApplyPluginFix(ctx context.Context, pluginName, fixData string, index uint32) error {
+	fut, rel := r.svc.ApplyPluginFix(ctx, func(p proto.EditorService_applyPluginFix_Params) error {
+		if err := p.SetPluginName(pluginName); err != nil {
+			return err
+		}
+		if err := p.SetFixData(fixData); err != nil {
+			return err
+		}
+		p.SetIndex(index)
+		return nil
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
 }
 
 // OpenFile asks the server to open path and returns (bufferID, content, version, fromRecovery).

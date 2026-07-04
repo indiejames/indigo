@@ -360,6 +360,17 @@ func (s *editorService) allCallbacks() []proto.ClientCallback {
 	return out
 }
 
+// PluginOpenBuffers implements plugin.ServerBridge.
+func (s *editorService) PluginOpenBuffers() []plugin.PluginBufferRef {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	refs := make([]plugin.PluginBufferRef, 0, len(s.buffers))
+	for id, entry := range s.buffers {
+		refs = append(refs, plugin.PluginBufferRef{BufID: id, Path: entry.buf.Path()})
+	}
+	return refs
+}
+
 // PluginRunProcess implements plugin.ServerBridge.
 func (s *editorService) PluginRunProcess(cmdStr string, args []string) (stdout, stderr string, exitCode int32, err error) {
 	cmd := exec.Command(cmdStr, args...)

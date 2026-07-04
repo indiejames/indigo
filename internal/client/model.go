@@ -60,6 +60,12 @@ type hoverMsg struct{ result ClientHoverResult }
 // sigHelpMsg carries a signature-help result (nil Signatures = dismiss).
 type sigHelpMsg struct{ help *ClientSigHelp }
 
+// fixItemsMsg carries fix suggestions for a decoration.
+type fixItemsMsg struct {
+	items []ClientFixItem
+	decor ClientDecoration
+}
+
 // completionsMsg carries fresh completion items.
 type completionsMsg struct{ items []ClientCompletion }
 
@@ -289,6 +295,11 @@ type Model struct {
 	completionOn     bool
 	completionIdx    int
 	completionPrefix string
+
+	// Fix popup state (Shift+F)
+	fixItems []ClientFixItem   // non-empty = popup visible
+	fixDecor *ClientDecoration // decoration being fixed
+	fixIdx   int
 }
 
 // WithConfig returns a copy of the model with a new config applied.
@@ -487,6 +498,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.completions = msg.items
 			m.completionOn = true
 			m.completionIdx = 0
+		}
+		return m, nil
+
+	case fixItemsMsg:
+		if len(msg.items) > 0 {
+			m.fixItems = msg.items
+			d := msg.decor
+			m.fixDecor = &d
+			m.fixIdx = 0
 		}
 		return m, nil
 
@@ -709,6 +729,87 @@ func (m Model) fetchFormat(thenSave bool) tea.Cmd {
 			return errorMsg{err}
 		}
 		return formatResultMsg{content: content, changed: changed, thenSave: thenSave, noFormatter: noFormatter}
+	}
+}
+
+// fixableDecorationAtCursor returns the first fixable underline decoration covering the cursor, or nil.
+func (m Model) fixableDecorationAtCursor() *ClientDecoration {
+	for i := range m.decorations {
+		d := &m.decorations[i]
+		if !d.Fixable || d.Kind != ClientDecorationUnderline {
+			continue
+		}
+		if int(d.Line) == m.cursor.Line && m.cursor.Col >= int(d.Col) && m.cursor.Col < int(d.EndCol) {
+			return d
+		}
+	}
+	return nil
+}
+
+// fetchFixes finds the fixable decoration at the cursor and fetches fix items.
+func (m Model) fetchFixes() tea.Cmd {
+	d := m.fixableDecorationAtCursor()
+	if d == nil {
+		return nil
+	}
+	decor := *d
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		items, err := m.rpc.GetPluginFixes(ctx, decor.PluginName, decor.FixData)
+		if err != nil || len(items) == 0 {
+			return nil
+		}
+		return fixItemsMsg{items: items, decor: decor}
+	}
+}
+
+// applyFixCmd applies the selected fix: either a direct text replacement or a plugin callback.
+func (m Model) applyFixCmd(idx int) tea.Cmd {
+	if m.fixDecor == nil || idx < 0 || idx >= len(m.fixItems) {
+		return nil
+	}
+	item := m.fixItems[idx]
+	decor := *m.fixDecor
+	if item.Replace != "" {
+		// Direct replacement: delete the decorated range and insert the replacement.
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			delOp := document.Op{
+				Type:     document.OpDelete,
+				FromLine: int(decor.Line),
+				FromCol:  int(decor.Col),
+				ToLine:   int(decor.Line),
+				ToCol:    int(decor.EndCol),
+				ClientID: m.rpc.ClientID(),
+			}
+			if _, err := m.rpc.ApplyOp(ctx, m.bufID, delOp); err != nil {
+				return errorMsg{err}
+			}
+			insOp := document.Op{
+				Type:       document.OpInsert,
+				InsertLine: int(decor.Line),
+				InsertCol:  int(decor.Col),
+				InsertText: item.Replace,
+				ClientID:   m.rpc.ClientID(),
+			}
+			if _, err := m.rpc.ApplyOp(ctx, m.bufID, insOp); err != nil {
+				return errorMsg{err}
+			}
+			return nil
+		}
+	}
+	// Plugin-driven fix.
+	pluginName := decor.PluginName
+	fixData := decor.FixData
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := m.rpc.ApplyPluginFix(ctx, pluginName, fixData, uint32(idx)); err != nil {
+			return errorMsg{err}
+		}
+		return nil
 	}
 }
 

@@ -5686,6 +5686,46 @@ func (c DecorationProvider) GetDecorations(ctx context.Context, params func(Deco
 
 }
 
+func (c DecorationProvider) GetFixes(ctx context.Context, params func(DecorationProvider_getFixes_Params) error) (DecorationProvider_getFixes_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xdecae373f862956c,
+			MethodID:      1,
+			InterfaceName: "plugin.capnp:DecorationProvider",
+			MethodName:    "getFixes",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(DecorationProvider_getFixes_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return DecorationProvider_getFixes_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c DecorationProvider) ApplyFix(ctx context.Context, params func(DecorationProvider_applyFix_Params) error) (DecorationProvider_applyFix_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xdecae373f862956c,
+			MethodID:      2,
+			InterfaceName: "plugin.capnp:DecorationProvider",
+			MethodName:    "applyFix",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(DecorationProvider_applyFix_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return DecorationProvider_applyFix_Results_Future{Future: ans.Future()}, release
+
+}
+
 func (c DecorationProvider) WaitStreaming() error {
 	return capnp.Client(c).WaitStreaming()
 }
@@ -5760,6 +5800,10 @@ func (c DecorationProvider) GetFlowLimiter() fc.FlowLimiter {
 // A DecorationProvider_Server is a DecorationProvider with a local implementation.
 type DecorationProvider_Server interface {
 	GetDecorations(context.Context, DecorationProvider_getDecorations) error
+
+	GetFixes(context.Context, DecorationProvider_getFixes) error
+
+	ApplyFix(context.Context, DecorationProvider_applyFix) error
 }
 
 // DecorationProvider_NewServer creates a new Server from an implementation of DecorationProvider_Server.
@@ -5778,7 +5822,7 @@ func DecorationProvider_ServerToClient(s DecorationProvider_Server) DecorationPr
 // This can be used to create a more complicated Server.
 func DecorationProvider_Methods(methods []server.Method, s DecorationProvider_Server) []server.Method {
 	if cap(methods) == 0 {
-		methods = make([]server.Method, 0, 1)
+		methods = make([]server.Method, 0, 3)
 	}
 
 	methods = append(methods, server.Method{
@@ -5790,6 +5834,30 @@ func DecorationProvider_Methods(methods []server.Method, s DecorationProvider_Se
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
 			return s.GetDecorations(ctx, DecorationProvider_getDecorations{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xdecae373f862956c,
+			MethodID:      1,
+			InterfaceName: "plugin.capnp:DecorationProvider",
+			MethodName:    "getFixes",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.GetFixes(ctx, DecorationProvider_getFixes{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xdecae373f862956c,
+			MethodID:      2,
+			InterfaceName: "plugin.capnp:DecorationProvider",
+			MethodName:    "applyFix",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.ApplyFix(ctx, DecorationProvider_applyFix{call})
 		},
 	})
 
@@ -5811,6 +5879,40 @@ func (c DecorationProvider_getDecorations) Args() DecorationProvider_getDecorati
 func (c DecorationProvider_getDecorations) AllocResults() (DecorationProvider_getDecorations_Results, error) {
 	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
 	return DecorationProvider_getDecorations_Results(r), err
+}
+
+// DecorationProvider_getFixes holds the state for a server call to DecorationProvider.getFixes.
+// See server.Call for documentation.
+type DecorationProvider_getFixes struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c DecorationProvider_getFixes) Args() DecorationProvider_getFixes_Params {
+	return DecorationProvider_getFixes_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c DecorationProvider_getFixes) AllocResults() (DecorationProvider_getFixes_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return DecorationProvider_getFixes_Results(r), err
+}
+
+// DecorationProvider_applyFix holds the state for a server call to DecorationProvider.applyFix.
+// See server.Call for documentation.
+type DecorationProvider_applyFix struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c DecorationProvider_applyFix) Args() DecorationProvider_applyFix_Params {
+	return DecorationProvider_applyFix_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c DecorationProvider_applyFix) AllocResults() (DecorationProvider_applyFix_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return DecorationProvider_applyFix_Results(r), err
 }
 
 // DecorationProvider_List is a list of DecorationProvider.
@@ -6015,6 +6117,331 @@ type DecorationProvider_getDecorations_Results_Future struct{ *capnp.Future }
 func (f DecorationProvider_getDecorations_Results_Future) Struct() (DecorationProvider_getDecorations_Results, error) {
 	p, err := f.Future.Ptr()
 	return DecorationProvider_getDecorations_Results(p.Struct()), err
+}
+
+type DecorationProvider_getFixes_Params capnp.Struct
+
+// DecorationProvider_getFixes_Params_TypeID is the unique identifier for the type DecorationProvider_getFixes_Params.
+const DecorationProvider_getFixes_Params_TypeID = 0xd0e26a13ebfecb67
+
+func NewDecorationProvider_getFixes_Params(s *capnp.Segment) (DecorationProvider_getFixes_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return DecorationProvider_getFixes_Params(st), err
+}
+
+func NewRootDecorationProvider_getFixes_Params(s *capnp.Segment) (DecorationProvider_getFixes_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return DecorationProvider_getFixes_Params(st), err
+}
+
+func ReadRootDecorationProvider_getFixes_Params(msg *capnp.Message) (DecorationProvider_getFixes_Params, error) {
+	root, err := msg.Root()
+	return DecorationProvider_getFixes_Params(root.Struct()), err
+}
+
+func (s DecorationProvider_getFixes_Params) String() string {
+	str, _ := text.Marshal(0xd0e26a13ebfecb67, capnp.Struct(s))
+	return str
+}
+
+func (s DecorationProvider_getFixes_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (DecorationProvider_getFixes_Params) DecodeFromPtr(p capnp.Ptr) DecorationProvider_getFixes_Params {
+	return DecorationProvider_getFixes_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s DecorationProvider_getFixes_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s DecorationProvider_getFixes_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s DecorationProvider_getFixes_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s DecorationProvider_getFixes_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s DecorationProvider_getFixes_Params) FixData() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s DecorationProvider_getFixes_Params) HasFixData() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s DecorationProvider_getFixes_Params) FixDataBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s DecorationProvider_getFixes_Params) SetFixData(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+// DecorationProvider_getFixes_Params_List is a list of DecorationProvider_getFixes_Params.
+type DecorationProvider_getFixes_Params_List = capnp.StructList[DecorationProvider_getFixes_Params]
+
+// NewDecorationProvider_getFixes_Params creates a new list of DecorationProvider_getFixes_Params.
+func NewDecorationProvider_getFixes_Params_List(s *capnp.Segment, sz int32) (DecorationProvider_getFixes_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[DecorationProvider_getFixes_Params](l), err
+}
+
+// DecorationProvider_getFixes_Params_Future is a wrapper for a DecorationProvider_getFixes_Params promised by a client call.
+type DecorationProvider_getFixes_Params_Future struct{ *capnp.Future }
+
+func (f DecorationProvider_getFixes_Params_Future) Struct() (DecorationProvider_getFixes_Params, error) {
+	p, err := f.Future.Ptr()
+	return DecorationProvider_getFixes_Params(p.Struct()), err
+}
+
+type DecorationProvider_getFixes_Results capnp.Struct
+
+// DecorationProvider_getFixes_Results_TypeID is the unique identifier for the type DecorationProvider_getFixes_Results.
+const DecorationProvider_getFixes_Results_TypeID = 0xa99e1e5d8a1d316e
+
+func NewDecorationProvider_getFixes_Results(s *capnp.Segment) (DecorationProvider_getFixes_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return DecorationProvider_getFixes_Results(st), err
+}
+
+func NewRootDecorationProvider_getFixes_Results(s *capnp.Segment) (DecorationProvider_getFixes_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return DecorationProvider_getFixes_Results(st), err
+}
+
+func ReadRootDecorationProvider_getFixes_Results(msg *capnp.Message) (DecorationProvider_getFixes_Results, error) {
+	root, err := msg.Root()
+	return DecorationProvider_getFixes_Results(root.Struct()), err
+}
+
+func (s DecorationProvider_getFixes_Results) String() string {
+	str, _ := text.Marshal(0xa99e1e5d8a1d316e, capnp.Struct(s))
+	return str
+}
+
+func (s DecorationProvider_getFixes_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (DecorationProvider_getFixes_Results) DecodeFromPtr(p capnp.Ptr) DecorationProvider_getFixes_Results {
+	return DecorationProvider_getFixes_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s DecorationProvider_getFixes_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s DecorationProvider_getFixes_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s DecorationProvider_getFixes_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s DecorationProvider_getFixes_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s DecorationProvider_getFixes_Results) Items() (FixItem_List, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return FixItem_List(p.List()), err
+}
+
+func (s DecorationProvider_getFixes_Results) HasItems() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s DecorationProvider_getFixes_Results) SetItems(v FixItem_List) error {
+	return capnp.Struct(s).SetPtr(0, v.ToPtr())
+}
+
+// NewItems sets the items field to a newly
+// allocated FixItem_List, preferring placement in s's segment.
+func (s DecorationProvider_getFixes_Results) NewItems(n int32) (FixItem_List, error) {
+	l, err := NewFixItem_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return FixItem_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, l.ToPtr())
+	return l, err
+}
+
+// DecorationProvider_getFixes_Results_List is a list of DecorationProvider_getFixes_Results.
+type DecorationProvider_getFixes_Results_List = capnp.StructList[DecorationProvider_getFixes_Results]
+
+// NewDecorationProvider_getFixes_Results creates a new list of DecorationProvider_getFixes_Results.
+func NewDecorationProvider_getFixes_Results_List(s *capnp.Segment, sz int32) (DecorationProvider_getFixes_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[DecorationProvider_getFixes_Results](l), err
+}
+
+// DecorationProvider_getFixes_Results_Future is a wrapper for a DecorationProvider_getFixes_Results promised by a client call.
+type DecorationProvider_getFixes_Results_Future struct{ *capnp.Future }
+
+func (f DecorationProvider_getFixes_Results_Future) Struct() (DecorationProvider_getFixes_Results, error) {
+	p, err := f.Future.Ptr()
+	return DecorationProvider_getFixes_Results(p.Struct()), err
+}
+
+type DecorationProvider_applyFix_Params capnp.Struct
+
+// DecorationProvider_applyFix_Params_TypeID is the unique identifier for the type DecorationProvider_applyFix_Params.
+const DecorationProvider_applyFix_Params_TypeID = 0xdd82ec205f710247
+
+func NewDecorationProvider_applyFix_Params(s *capnp.Segment) (DecorationProvider_applyFix_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1})
+	return DecorationProvider_applyFix_Params(st), err
+}
+
+func NewRootDecorationProvider_applyFix_Params(s *capnp.Segment) (DecorationProvider_applyFix_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1})
+	return DecorationProvider_applyFix_Params(st), err
+}
+
+func ReadRootDecorationProvider_applyFix_Params(msg *capnp.Message) (DecorationProvider_applyFix_Params, error) {
+	root, err := msg.Root()
+	return DecorationProvider_applyFix_Params(root.Struct()), err
+}
+
+func (s DecorationProvider_applyFix_Params) String() string {
+	str, _ := text.Marshal(0xdd82ec205f710247, capnp.Struct(s))
+	return str
+}
+
+func (s DecorationProvider_applyFix_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (DecorationProvider_applyFix_Params) DecodeFromPtr(p capnp.Ptr) DecorationProvider_applyFix_Params {
+	return DecorationProvider_applyFix_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s DecorationProvider_applyFix_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s DecorationProvider_applyFix_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s DecorationProvider_applyFix_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s DecorationProvider_applyFix_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s DecorationProvider_applyFix_Params) FixData() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s DecorationProvider_applyFix_Params) HasFixData() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s DecorationProvider_applyFix_Params) FixDataBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s DecorationProvider_applyFix_Params) SetFixData(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s DecorationProvider_applyFix_Params) Index() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s DecorationProvider_applyFix_Params) SetIndex(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+// DecorationProvider_applyFix_Params_List is a list of DecorationProvider_applyFix_Params.
+type DecorationProvider_applyFix_Params_List = capnp.StructList[DecorationProvider_applyFix_Params]
+
+// NewDecorationProvider_applyFix_Params creates a new list of DecorationProvider_applyFix_Params.
+func NewDecorationProvider_applyFix_Params_List(s *capnp.Segment, sz int32) (DecorationProvider_applyFix_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1}, sz)
+	return capnp.StructList[DecorationProvider_applyFix_Params](l), err
+}
+
+// DecorationProvider_applyFix_Params_Future is a wrapper for a DecorationProvider_applyFix_Params promised by a client call.
+type DecorationProvider_applyFix_Params_Future struct{ *capnp.Future }
+
+func (f DecorationProvider_applyFix_Params_Future) Struct() (DecorationProvider_applyFix_Params, error) {
+	p, err := f.Future.Ptr()
+	return DecorationProvider_applyFix_Params(p.Struct()), err
+}
+
+type DecorationProvider_applyFix_Results capnp.Struct
+
+// DecorationProvider_applyFix_Results_TypeID is the unique identifier for the type DecorationProvider_applyFix_Results.
+const DecorationProvider_applyFix_Results_TypeID = 0xd7095263a26185f3
+
+func NewDecorationProvider_applyFix_Results(s *capnp.Segment) (DecorationProvider_applyFix_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return DecorationProvider_applyFix_Results(st), err
+}
+
+func NewRootDecorationProvider_applyFix_Results(s *capnp.Segment) (DecorationProvider_applyFix_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return DecorationProvider_applyFix_Results(st), err
+}
+
+func ReadRootDecorationProvider_applyFix_Results(msg *capnp.Message) (DecorationProvider_applyFix_Results, error) {
+	root, err := msg.Root()
+	return DecorationProvider_applyFix_Results(root.Struct()), err
+}
+
+func (s DecorationProvider_applyFix_Results) String() string {
+	str, _ := text.Marshal(0xd7095263a26185f3, capnp.Struct(s))
+	return str
+}
+
+func (s DecorationProvider_applyFix_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (DecorationProvider_applyFix_Results) DecodeFromPtr(p capnp.Ptr) DecorationProvider_applyFix_Results {
+	return DecorationProvider_applyFix_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s DecorationProvider_applyFix_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s DecorationProvider_applyFix_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s DecorationProvider_applyFix_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s DecorationProvider_applyFix_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// DecorationProvider_applyFix_Results_List is a list of DecorationProvider_applyFix_Results.
+type DecorationProvider_applyFix_Results_List = capnp.StructList[DecorationProvider_applyFix_Results]
+
+// NewDecorationProvider_applyFix_Results creates a new list of DecorationProvider_applyFix_Results.
+func NewDecorationProvider_applyFix_Results_List(s *capnp.Segment, sz int32) (DecorationProvider_applyFix_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[DecorationProvider_applyFix_Results](l), err
+}
+
+// DecorationProvider_applyFix_Results_Future is a wrapper for a DecorationProvider_applyFix_Results promised by a client call.
+type DecorationProvider_applyFix_Results_Future struct{ *capnp.Future }
+
+func (f DecorationProvider_applyFix_Results_Future) Struct() (DecorationProvider_applyFix_Results, error) {
+	p, err := f.Future.Ptr()
+	return DecorationProvider_applyFix_Results(p.Struct()), err
 }
 
 type PluginInfo capnp.Struct
@@ -6457,12 +6884,12 @@ type KeyContext capnp.Struct
 const KeyContext_TypeID = 0xca464b4d1b27efca
 
 func NewKeyContext(s *capnp.Segment) (KeyContext, error) {
-	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 24, PointerCount: 1})
 	return KeyContext(st), err
 }
 
 func NewRootKeyContext(s *capnp.Segment) (KeyContext, error) {
-	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 24, PointerCount: 1})
 	return KeyContext(st), err
 }
 
@@ -6532,12 +6959,28 @@ func (s KeyContext) SetClientId(v uint64) {
 	capnp.Struct(s).SetUint64(8, v)
 }
 
+func (s KeyContext) CursorLine() uint32 {
+	return capnp.Struct(s).Uint32(4)
+}
+
+func (s KeyContext) SetCursorLine(v uint32) {
+	capnp.Struct(s).SetUint32(4, v)
+}
+
+func (s KeyContext) CursorCol() uint32 {
+	return capnp.Struct(s).Uint32(16)
+}
+
+func (s KeyContext) SetCursorCol(v uint32) {
+	capnp.Struct(s).SetUint32(16, v)
+}
+
 // KeyContext_List is a list of KeyContext.
 type KeyContext_List = capnp.StructList[KeyContext]
 
 // NewKeyContext creates a new list of KeyContext.
 func NewKeyContext_List(s *capnp.Segment, sz int32) (KeyContext_List, error) {
-	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1}, sz)
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 24, PointerCount: 1}, sz)
 	return capnp.StructList[KeyContext](l), err
 }
 
@@ -6855,12 +7298,12 @@ type Decoration capnp.Struct
 const Decoration_TypeID = 0xb19967be6bc4c3c1
 
 func NewDecoration(s *capnp.Segment) (Decoration, error) {
-	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 24, PointerCount: 3})
 	return Decoration(st), err
 }
 
 func NewRootDecoration(s *capnp.Segment) (Decoration, error) {
-	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 24, PointerCount: 3})
 	return Decoration(st), err
 }
 
@@ -6938,12 +7381,72 @@ func (s Decoration) SetKind(v DecorationKind) {
 	capnp.Struct(s).SetUint16(8, uint16(v))
 }
 
+func (s Decoration) EndCol() uint32 {
+	return capnp.Struct(s).Uint32(12)
+}
+
+func (s Decoration) SetEndCol(v uint32) {
+	capnp.Struct(s).SetUint32(12, v)
+}
+
+func (s Decoration) UnderlineStyle() UnderlineStyle {
+	return UnderlineStyle(capnp.Struct(s).Uint16(10))
+}
+
+func (s Decoration) SetUnderlineStyle(v UnderlineStyle) {
+	capnp.Struct(s).SetUint16(10, uint16(v))
+}
+
+func (s Decoration) UnderlineColor() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s Decoration) HasUnderlineColor() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s Decoration) UnderlineColorBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s Decoration) SetUnderlineColor(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+func (s Decoration) Fixable() bool {
+	return capnp.Struct(s).Bit(128)
+}
+
+func (s Decoration) SetFixable(v bool) {
+	capnp.Struct(s).SetBit(128, v)
+}
+
+func (s Decoration) FixData() (string, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.Text(), err
+}
+
+func (s Decoration) HasFixData() bool {
+	return capnp.Struct(s).HasPtr(2)
+}
+
+func (s Decoration) FixDataBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.TextBytes(), err
+}
+
+func (s Decoration) SetFixData(v string) error {
+	return capnp.Struct(s).SetText(2, v)
+}
+
 // Decoration_List is a list of Decoration.
 type Decoration_List = capnp.StructList[Decoration]
 
 // NewDecoration creates a new list of Decoration.
 func NewDecoration_List(s *capnp.Segment, sz int32) (Decoration_List, error) {
-	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1}, sz)
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 24, PointerCount: 3}, sz)
 	return capnp.StructList[Decoration](l), err
 }
 
@@ -6953,6 +7456,106 @@ type Decoration_Future struct{ *capnp.Future }
 func (f Decoration_Future) Struct() (Decoration, error) {
 	p, err := f.Future.Ptr()
 	return Decoration(p.Struct()), err
+}
+
+type FixItem capnp.Struct
+
+// FixItem_TypeID is the unique identifier for the type FixItem.
+const FixItem_TypeID = 0x8c9417c0d7660ce1
+
+func NewFixItem(s *capnp.Segment) (FixItem, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return FixItem(st), err
+}
+
+func NewRootFixItem(s *capnp.Segment) (FixItem, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return FixItem(st), err
+}
+
+func ReadRootFixItem(msg *capnp.Message) (FixItem, error) {
+	root, err := msg.Root()
+	return FixItem(root.Struct()), err
+}
+
+func (s FixItem) String() string {
+	str, _ := text.Marshal(0x8c9417c0d7660ce1, capnp.Struct(s))
+	return str
+}
+
+func (s FixItem) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (FixItem) DecodeFromPtr(p capnp.Ptr) FixItem {
+	return FixItem(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s FixItem) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s FixItem) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s FixItem) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s FixItem) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s FixItem) Label() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s FixItem) HasLabel() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s FixItem) LabelBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s FixItem) SetLabel(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s FixItem) Replace() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s FixItem) HasReplace() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s FixItem) ReplaceBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s FixItem) SetReplace(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+// FixItem_List is a list of FixItem.
+type FixItem_List = capnp.StructList[FixItem]
+
+// NewFixItem creates a new list of FixItem.
+func NewFixItem_List(s *capnp.Segment, sz int32) (FixItem_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return capnp.StructList[FixItem](l), err
+}
+
+// FixItem_Future is a wrapper for a FixItem promised by a client call.
+type FixItem_Future struct{ *capnp.Future }
+
+func (f FixItem_Future) Struct() (FixItem, error) {
+	p, err := f.Future.Ptr()
+	return FixItem(p.Struct()), err
 }
 
 type DecorationKind uint16
@@ -6965,6 +7568,7 @@ const (
 	DecorationKind_gutter    DecorationKind = 0
 	DecorationKind_overlay   DecorationKind = 1
 	DecorationKind_statusBar DecorationKind = 2
+	DecorationKind_underline DecorationKind = 3
 )
 
 // String returns the enum's constant name.
@@ -6976,6 +7580,8 @@ func (c DecorationKind) String() string {
 		return "overlay"
 	case DecorationKind_statusBar:
 		return "statusBar"
+	case DecorationKind_underline:
+		return "underline"
 
 	default:
 		return ""
@@ -6992,6 +7598,8 @@ func DecorationKindFromString(c string) DecorationKind {
 		return DecorationKind_overlay
 	case "statusBar":
 		return DecorationKind_statusBar
+	case "underline":
+		return DecorationKind_underline
 
 	default:
 		return 0
@@ -7004,228 +7612,309 @@ func NewDecorationKind_List(s *capnp.Segment, sz int32) (DecorationKind_List, er
 	return capnp.NewEnumList[DecorationKind](s, sz)
 }
 
-const schema_a3f8c1e2d4b07659 = "x\xda\xb4Z}p\x14\xe7y\x7f\x9f\xddS\xd6\x0a\x92" +
-	"\xee\xb6{\x12\xfaD\x0e\x85\xd8Vm\x02\"M\x81\x1a" +
-	"$$\x14\x90\x80\xa0=\x93\x19C\xa1d\xa5[\x9d\x16" +
-	"\xeev\x8f\xdb=\x81\xb0\x1d\x0c\x94\xce\xc0\x84\x09\xc2\x01" +
-	"\x17c\x0f\x86\xf0=\xc5 \xa6\xe0B\xc0X\x14HQ" +
-	"BZ5\x86\xa4\x13\x08\x03\xc4uqJ(\x8cq\xa1" +
-	"\x89{\x9d\xf7\xdd{w\xf7\xee\xf6tR\xed\xfe\xb7\xba" +
-	"}\xee\xf9\xfe\xf8=\xcfi\xfc\x8e/\xd7{&\x14\x86" +
-	"F\"\xe6\x05\x1f\xe4})Q)\xbe\xae\xed\x1b\xf1\xd2" +
-	"\x1a\xc4\x8f\x04\x84\xf2\x18\x0e\xa1\x89\xdbGl\x04\x04\xc2" +
-	"\xc1\x11+\x10$\x96\x9f\x7f|\xe3\xafGD\xd7:\x09" +
-	"\xf2\x0aZ0\x01_\x80\x09vL\xfb\xd6\xdak\xef^" +
-	"\xdb\x84\xc4B\x80\xc4\x82\xae\xa3\x1f\xdc\xea{\xf4C\x93" +
-	"Rx\xa5\xa0_\xd8P\x80\xbf\xb3\xbe\xa0\x1a\x10$\xda" +
-	"\xdb}\xaf\xee\x1c\xfb\xce\xf7\x11_\xc8\xda\xc4\x08&\xf6" +
-	"\x162 \x9c)\xc4\xa4'\x0b9\x10\x16\x17q\x08%" +
-	"\xfe\xeb\x0f/\x8c\x1d\xdf\xd2\xb0\xd9\x94\xee\xc1o\x9b\x8a" +
-	"\xb6\x00\xf2$fD:~\xd3s\xf6F\x0f\x12G\x82" +
-	"\xa5\xd8\x9f\x165`\xc5\xa6\x16\x1dA\xf0Y\xf7\xce\x8e" +
-	"\xd3\xcd?{\x8d\xaf\xb4^_)\x0a\xe0\xd77\x8bV" +
-	" \xf8l\xcf\x92\xbeu\xa7\x7f\xb0\xd54\x0b\xf0\xeb\xb9" +
-	"^b\xd6\x02o\x1d\x82D\xd3\x9aJ\xdf\xcc\xf2-\xdb" +
-	"R\xf8o\xf0\x12\x06[\xbdG\x10$\x98k\x03\x93\x0a" +
-	"\x7f\xd7\xbf\x0d\xf1OR\xdd&\xf8Va\xddv\x8bG" +
-	"\x7f>B\xfdt[\x9aK0\x89P\xe5\xbb%<\xe3" +
-	"\xc3Oc}\xd8}W\xb7\xb6\x14\xb1a\xf6u\xe4P" +
-	"d\x8do7\x16\xd3\xe3\xc3\x8a\x8c\xdb\xbc\xe1\xc6Sm" +
-	"\x1f\xbf\x81\x15a\x92rz}\xc4\xce\x93>\xac\xc7\xae" +
-	"M\x8b\xd6n\xf9\xca\xaa]\x88/d\x9c.\x15\xbe\xcd" +
-	"\xdf\x12$\x1e\x8bZ\xcc\xcfC\x90\xd82\xf9\xdc\x9f\x9c" +
-	"\xe8)\xd8\xe3\x14\x15\xe7\xb7`N\xeby,\xea\xa7\x7f" +
-	"q\xb4\xadoc\xff\x1e\xc4\x97Z\x04\x07\xf9)\x98\xa0" +
-	"\x97\x10\xbc\xf7b\xf1\xa7\x07\xea\x1f\xecC\xc4\xa9D\x95" +
-	"+\xfcBl\xf2Ei\xd3o/\xfe\xd1\xf8\xfd\xe9q" +
-	"\x15\xfa\xf8S\xc2%\xac\xc4\xc4\x0b<\xe7\x11z\xfc8" +
-	"\xac\xbf\x9d\xd3tr\xf2\xbc\xc5\x07\xa8s\x89\xa4n?" +
-	"q\xffz?v\xcb\xe9\x07;'\x1c\xfa\xf7\xfd\x07L" +
-	"\xe7\x9a\x047\xfd\xab0\xc1]?Vec\xcd\xf6\xda" +
-	"\x09\xf3\x1e\x1dtdFaq\x00\xab\xa2\xdch\x9e\xf7" +
-	"\xf6\x92\xab\x7f\xebx\xf3\xd8\x7f\x08\xbf\xb9\xdb|\xa2\xeb" +
-	"\x9f\x8f\xbdz\xd8\xc9\xf4\x8e?\x86\x99>$LO\x9c" +
-	"X\xf7\xcei\xe1\xcf\xde\xc9\xb0\xa2\xb8\xf8\x9cPU\x8c" +
-	"]YV<S\x98\x8e\x9f\xce\xe6}\xed\xf6\x1f>\x1c" +
-	"u\xc4\xc1\xeb\x99\xe2S\x98\xd7\xe4b\xcc\xab\xef\x1f\xce" +
-	"/{/\xb4\xbd\x17'\x81#.\x84R\x88\x14\x9f\x13" +
-	"\xe2\x84\xdf\xf2\xe2\x8f\x10$\x9e\x09\xe4\x07\x96\xec\xb8\xd8" +
-	"\xeb\x0cMS\x09I6\xb1\x04s{Y[\xf3l\xcd" +
-	"\xf1\xf3\xc734[^\xb2[\xe8.\xc1\x9c\xe2%3" +
-	"\x85]\xf8)\xf1fi\xd3:\xed\xf0\xcc\x93\x0e\x0fl" +
-	"(i\xc0\x1e\xe8\x9b\xf7\xf7\xfb>9\xf6\xe6)\x176" +
-	"\xb7\x84W\x08\x9bn\x8b\xcd\xcd\xe7w\x0c\xdc\xfb\xe4\x7f" +
-	"\xdes\xbakC\xc9ZR\x01D\xa9\xdb\xfc\xcck\x7f" +
-	"\xfe\xd5\x15\xef'\xc3H\x04\x1d/!Q\xec#\x04\xfd" +
-	"/\xdd]\xfd\xfc\x92_\xbc\x9fRD7M\xbb\xee\x96" +
-	"`\xc3giO\x8f\xb9\x1f\xfa\xea\x05\xc4\x17f4\x8f" +
-	"K#\xcf\x09\x03#\xf1\xd3\xe5\x918'\xbc?\xf9\xfe" +
-	"\xaag\xa7\xbe\xfec\xc4\xfbm\x97\x97\x92\xf4\x9cP\x8a" +
-	"\xc5\xfd\xdd\x80\x7foGh\xe2?:*R,%\x15" +
-	"\xd9\x7f\xef\xa9\x8a\xb9\xb3\xbf\xd9\xef\x1a\x8c\xa9\xa5\xe7\x84" +
-	"\xa6R\xfc4\xbd\x14\x17\xd4\x93\x9e\xae\xa5s\xbf{\xef" +
-	"\xa7\xce`\\/%J\xdf!r\x1e\xc6\xcf-\xb8\xb7" +
-	"\xe8\xcce7\xa5\xf3\xcb\xfa\x85\xe22\xfc\xc4\x97a\xa5" +
-	"\x7f\x7f\xf1X\xf1\xd8\xbc\xe0\xcf\x1c\xb1\x88\x94\xb5\x00\xf2" +
-	"\xfc\xfeT\xdd\x07\xe1\xfe\xb3\xff\xe2p\xee\x822\x92\x8b" +
-	"r\x19\x162vZ\xc5\xb6\xb3\xc6\xe6\x9f;\xad]_" +
-	"V\x8b\x096\x11\x82\xd1c\xef\xec?\xeb\x9b\xfc\x01\x12" +
-	"\x9f\xc4\x8d\xc1\xa48\\v\x0cS\x9c)\xc3\x864\xee" +
-	"d{\x0e.\x1cu\xc5\xad\x0f-.\xbf%(\xe5\xf8" +
-	"I.\xc7\xdc\x9e\xfaF\\\xecZ7\xfaJJI\xae" +
-	"/\xaf!\xf2\xca\xb1%\xef~k\xdb\xb9\xff\xd8?\xe9" +
-	"j\x0a\xc5\x9dr\xe2\xff\xfb\x84\xe2_\x9f\xdf~\xfe\xf6" +
-	"\xa5\x97~\x91B1\xb7\x82\xf4\xaaoW`\x8a\xf0\xd6" +
-	"\xb6G\xfa\xed\xfe_g\xb4\xff\xbe\x0a\x06\x84\xcb\x15$" +
-	"\xec\x153\x85\x87\xf8)1mK\xdf_\xee\xea\xee\xb9" +
-	"\xe1\x88\xe7\xf5\x8a\xb58\x9e\xf7_{\xf7G\xbf\xbc\xaa" +
-	"\xddJ\x8b\x00k~\xff\x980@8]\xae\xc0^\xf8" +
-	"\xd5\xbe\x1fMY\xb4\xfb{\xb7\x1d\x11\x90+I\xd3\x0a" +
-	"E7K?\xf9\xb7\xef}\x94>\xbaHV\x88\x95\xfd" +
-	"\xc2\xe2J\xfc\xb4\xa0\x12\xab\xde\x1b\xbaPw\xf1\x8f\xa7" +
-	"\xdfq(s\xbcr#f#\xbf\xfd~\xc1\xc3\x1f\xae" +
-	"\xbf\xe3\xcc\x97\xbd\x95\xa4\x0cz+\xb1o{~\xf9\xb5" +
-	"I\xbbF\xfa?vh0P\xf9\x06\xfe\xeaw\xfe\xe9" +
-	"\xd8\x8f_\xdc\xf2\xab\xdf9\xa7k_%\x19\xbf\x03D" +
-	"j\xd9\x03\xfd\xd0\xf1Wg\xdfs\x96\xd8sUm\xa4" +
-	"\xcdTa\x82\x15\x1f\xcf\xdf\xd0\xfca\xef=\x07\xef\xed" +
-	"UdB\x86\xf6\xf0\x1f\x9d\xca\xbf\xf9\x9f\xc9nn\x0e" +
-	"\xb0*\x92@=\xe4\xab;\xbe\x1b~\xed\xad\x93S\x1f" +
-	"8y\xdf\xad\"z?\xae\"=v\xda\xd2\x07\xbf>" +
-	"t\xfd\x13\x07\xef\xb2Q\xa4\x9ez\xbc\xdf\xb8u\xe87" +
-	"\xfd\x9f\xa6\x14v\xde(\xc2\xbcp\xd4\x11\x047Z\x1e" +
-	"]\x08omy\xec\xb0k\xef(\x92\xdd\xbd\xa3\xb0\xec" +
-	"\x8a\xbb\xbe\x9a\xcbE\xf5\xff\xed\x94]X\xbd\x10\x13\x94" +
-	"U\xd7\xa1\xe7\x12\xd1p<\xa4\xa8\xe3\xda\xf3\xa4\xa8\x1a" +
-	"\x9d\xd2\x14T\x0c-6=\xaa\x8c\x8b\xc9!E7\xe4" +
-	"\xd8l\xb9\xbbAQ\x83\x8a\x1a\x1a\xd3*\xc5\xa4\x88\x8e" +
-	"\x90\xf8\x04\xebA\xc8\x03\x08\xf1\xcf4 $\x8eaA" +
-	"\x1c\xcf\x00\x0f\xe0\xc72\xf8\xe7\xf0\x87O\xb3 ~\x9d" +
-	"\x81\xd5FL\x09\x85\xe4\x18\x14 \x06\x0a\x10\xac\xee\x94" +
-	"\xd4`X\x8e\x01o\x0f\x01\x04\xc0#\xb04\xf1\xa4k" +
-	"\x12W[cZ\xbb\xac\xeb\xae\x1a\x8cv\xd3\xa0&\xa9" +
-	"\xc1\x0c\x06\xb8\xf6H\x90J\xf7J\xb1\x90\x0eE\x08Z" +
-	"Y \x9f\x159\xe42D\xeel\xb9; \xebQM" +
-	"\xd5e\x84Z\x01D\xbf%\xea\x15l\xd7J\x16\xc4\xbf" +
-	"b\x80JZS\x8b\x90\xf82\x0b\xe2\xdf0\xc03\xe0" +
-	"\xc7\x1d\x82\xdf\x1a@H\xfc\x01\x0b\xe2\xdb\x0c\xf0,\xf8" +
-	"\x81E\x88\x7f\x0b\x7f\xf8&\x0b\xe2\x01\x06x\x0f\xf8\xc1" +
-	"\x83\x10\xbf\xb7\x0d!q\x0f\x0b\xe2Q\x86\xba&\x08\x80" +
-	"\x18\x00\x04\xd5rP1,m}v-\" z\xb7" +
-	"\xc7c\xba\x16k\xd5\x10\xe8\xe0\xb3\xb1\x10\x02\xf0!H" +
-	"tJz#&@\x10\xa3\x0c\x13\xedR\xd4\x88\xc7\xe4" +
-	"\xd9\x88\x93\xbbux\x021\xf0\x84\xc3~\x96\xd8\xdf\x10" +
-	"\xef\xe8\x90cM]\xb2j\xcc2CE\xbc\xe0c\xf3" +
-	"\x10\xa2\xad\xd41\x00\x96OA\x0c/s\x00\xd6\x14\x03" +
-	"Z\xc0\xfc\x82\x16\xc4\xf0\"\x07\x8c\x05\x08\x80b9\xbe" +
-	"\x09\x7fo2\x07\xac\x85@\x80v!\x9c?\x0c\xff\x15" +
-	"\xaeNS\xe7Ee\xb5\x1e\x12\x9a\xda\xd8)\xa9!\x19" +
-	"!T\x0fu\x9a\xfa\x82\xd4%\xd7\xc3jMm\x0ck" +
-	"\xba\\\x0f\xad\x00\xc3\xc9\xe3\x80\xac\xc7\xc3\x06\xe8\xd93" +
-	"N\x96\x82\x01,\x90&\x9cX`%A\x13\x0ex=" +
-	"\x0b\xe2\x1c;\x09\x9aq\xba\xcd`Alu$\xc1\xdc" +
-	"r\x84\xc4Y,\x88\xf3\x19\xa8n\x8bw4\x07\xa9\xc7" +
-	"\xbd\x1d1-\x92\x192\xd6\xd0\\\xe2\x98\xaac\xa3\x16" +
-	"\x89Hj0\x19\x99qf\xc6\x98Z\x82\xee\xac\x8a\x9a" +
-	"dU\xd4;\xaab*.\x95IfU\xb8U\x02\xd7" +
-	"n\xac\x04\x9f=\xcd\\5H\xf5\xd2\x1cE\x95\xf5\xa4" +
-	"Cq]z,\x0d\x0akI\x99\x828\x86\x81\xea0" +
-	"&\xcbVw\x83\xd4;\x8d\x94\xd3\xffSl\xff[\x96" +
-	"5O\xb1\x03\x00L\xd2\xff-\x08\x89sX\x10_d" +
-	"\xa0N7\x82Z\xdc\xa0m\x00\xff)\xc7\xac\x9e\x94\x90" +
-	"W*F\xa3\x16\xc4\xf9\x05\x1e\xc4\x80'C\xbb\xcc\xaa" +
-	"\x18g\xa6\xe1\x98@\x9di|Z\x1bi%\x7f\xb5j" +
-	"\xbabp\x8a\xa6\xe2\x12r\x89NJ\xcf\x1amwM" +
-	"/v\x18M\x17\xae]\x0bg\x14k\xb647\x15M" +
-	"\xea\x88\x13\x83\x93\"\xba3,\x0d\xc9\xb0\xf8\x19g/" +
-	"\xb6\xd6\xc5\\\xbd\xd8\x8a\xf9\xe0\x95aG&`W\x01" +
-	"\xcf$C#6\xd8\xa1I-\x8d\x84nH1c\x8e" +
-	"\xa2\"\xb0\xec_-\xabDf\x86\x0fLO\xcf\x90\xdb" +
-	"\xb5\x98d(\x9a:\x9bS\xd4 \xf6t\x01\x91R5" +
-	"\x85XS\xdc\x80\x100|a\x00\xa1\xbaP\xdc0\xe4" +
-	"\xd8j\xadK\x8e\x85\xa5n,\xcc\x88\xeb\x0d\x12\x82X" +
-	"N\xc7\xdabt\xab\xde\x1cn\xc5\xc9V\xc0\x82X\xca" +
-	"@\"\x1a\xd3\xba\x94\xa0\x1c\xc3\xe9\xc4\xdbP,\xcd\xb5" +
-	",\x1d7i\xc5L\x13*\x1b\xf7\x985\x9d\x10\xf8\xec" +
-	"\xab\xc00\xda\x05\xa9*\xd6\x91\xb2@m\xae3\x8d\xc6" +
-	">\xac\xc7\x0d\xdf:[\x00=\x10\x08\xf7\xe1\x0d\xc4\x08" +
-	"w\x01\xb7|\x8a\xaa\x80\x82#\xe1&y{\x1d8`" +
-	"(2\xb1\xd1\x8d0\x00k\x11#\\\x02\xdc\xf6\xe9>" +
-	"\x0et\x8d\x14\xce\xc01\xc4\x08'\x81\x03\x8f\xb5B\x03" +
-	"\x85t\xc2a\xd8\x8d\x18\xe1 p\x90g\xe1_\xa0\xa0" +
-	"_x\x0b\x02\x88\x11\xb6\x02\x07_\xb2\x96^\xa0\xab\xab" +
-	"\xb0\x01\x16\"FX\x03\x1cp\x16\xba\x06\xba\xbc\x09q" +
-	"hA\x8c\x10\x01\x0e\x9e\xb0\xf6C\xa0`V\x90\xa0\x0d" +
-	"1\xc2\x02\xe0 \xdf\xba\xd1\x00=Z\x08s\x09\xe7&" +
-	"\xe0\xe0\xcb\x16\xcc\x03\xba\xd7\x08\x93\xc9\xdb\x09\xc0\xc1\x08" +
-	"\xeb\xbc\x00{\x90y\x10\x11\xc6\x12\x9d\xab\x80\x83\x02\xeb" +
-	"\xca\x02\x14\xe3\x0a<y\x9b\x0f\x1c\x14Z;\x03P8" +
-	"\xc8\x7f\x86\xc7\xe7}\x0e\x8a\xac\xdd\x10\xe8\x0e\xc8\x7f\xb8" +
-	"\x101\xfcu\x0e\xbc\x16\xf8\x03\x8an\xf9\x81\xa5\x88\xe1" +
-	"/q\x09\x9a\xd5@\xc7\"\xab\x86\xea\xc1\xfe\xb8Y\xd5" +
-	"\xe5\x981Kc\xb5e\xce\x8f\x93\xf9\x84\x9c\x9f\xd1\x8e" +
-	"SMr\xcc\xf9\x86\x96\x0c\xa7\xa9z=$\xa4h4" +
-	"\xdc\xdd\x14T\x10\x18\xf5\x90\x88h]2\x06(\x88\xd5" +
-	"\xf0\x97\xb4\xa8\xac~S\x09\x9b#>\xa1wj+\xe6" +
-	"\xca\xba\x8e8)$c\x96\xc9\x91\x80X]'\x12\xa4" +
-	" \x16\x8b\xd8\xa4@\xb3)!\xa0/\xf1\xf0F \xd7" +
-	"C\xdd\x0a-\x16\x9c\x8e\xe5\xb5\x115\x9bU\xc4vh" +
-	"\xf5\x90\xe8Rt\xa5-,\x07\x90\x17\xcf\xf9T\x08\x91" +
-	"\xde\xf4\xa8\xaaZ\xcc\x15\x80\xd6\xda\xcd\xdc\xad\x97\xa76" +
-	"8.\xaa\xe99\xa7\xbc\xeb\xb4!XgL\x9d\xa9\x81" +
-	"\xdb\xa0\xf53P-\xe3\xef\x80\xcf\xde\xb8r\xccp\x87" +
-	"i\x19\xa8hh#& \xeb\xde\x94\xf9\x97k`\xb6" +
-	"V\x7f.\x0b\x98\xb4\xb6I\xd0\xa9\x874+\xba\x88\x01" +
-	"\xbd\xaf\xf1<.\x93<\xae\xcel|n@\xd1n\xeb" +
-	"\xad\xc9\xae=.$\x1b\xcef\xef\xd6\x8f\xdb\x92\xfd\xf8" +
-	"i\x06\x12\xc1$-\xc2in\xa3u\xeb,\x95D\xeb" +
-	"\xd9\x86V\x12]S\xd6\x12\x86\x06\x8bX\x10;\x1dC" +
-	"T\xc6\xe9\xf4\x1d\x16\xc4\xb0\x0do\x14L\x18dA\x8c" +
-	"\xe2\x1d\xc3c\xee\x18\x11\xfca'\x0b\xa21\x08\x86\xf0" +
-	"\x1a\xf2J\x0b\x0ay\x97)j\x10\xbc\xf6q\x13\x01x" +
-	"\x07I\x18Z\x99RHv\x1b\x835v$S\xc4\xa4" +
-	"\x8d\x9a\xd6p\x9c\xc3\xf0\xc8\x0a\x1d=\xc2\x00\xbd=\xf1" +
-	"<\xeeb\xf9\\BQ\x15C\x91\xc2\x0abW\xa5\x05" +
-	"\x90KS\x8d\xb6\x10\x0b\x8eR\xc2\xf4Q\xc8\x85\xe5\x98" +
-	"%\x9a\x9e\xaf\x1d7\xd7\xdcY\xe3^\xa0\x9d)+\xc3" +
-	"\x17T\xa1\xb4ouhv\xf3\xc9\xc2:\x15I\x0d\x81" +
-	"\xa1\x05\xafs\xe5\xdfB;\xd7h\xfeE0\xb0\x0b\xb3" +
-	" \xae\xc4\xf9\xf7\xa4\x99\x7fq\x0c\xec\xa2,\x88/3" +
-	"\xe0\x8dJF\xa7\x15\xff\xb0\xa4\x86\xe2RHFls" +
-	"\xd0\xfePQ\xe5F-\xae\"0,\xb0\xa7\xe83\x94" +
-	"\x98\xd1m\xed\xacn\xb0\x1a+\x8f\x86\x02\xa9\x1d\x87\x08" +
-	"\xaf*Ed\xeb\x0a\xd1%\xc7tES3\xd2\x93u" +
-	"H\x19GSo\x95;(s\xe6\xba\xa2v\xe0\xe5\xcd" +
-	"\xba\xb2\x0e\xbd\xad\xe3\x157\xdb\x121[\xeen\xd4T" +
-	"\\G\xc4\xda\xff\xcb\x12\xda\x92\x0di{#Z\xd0\xf2" +
-	"G\xa2=\xac\xc8\xaa\xd1\x1c\xc4\xa02\x1f1\x90\x9fc" +
-	"\x070M\xb1\x13(\xcb\x82\xd1\x8e\xb5W3\xbb\x803" +
-	"\x98\x01s\xb3O\x0bgm\x8e\x0d\xa9\x9a,\x0a\x99\x93" +
-	"\x94\x93\xd5`\xce\xf9j\xdbB1\x89a\xef\xb0C\x0e" +
-	"\xda\xe7\x1cd\xd9R\xcd\x85\xedh\x9b-'E\x15\xe0" +
-	"\xed\x9f\x81\xd2\x96\x8a\xa1\x0e5*$GJ-u." +
-	"o\xc9\x94\x12qJ\xb5\xb2 .\xcah9\xa9\xa0\x0a" +
-	"|\xf6\x01?i\xfb`i\xc68\xdb4N{N^" +
-	"i\x98mz\x18\xdd\x8eM\x0b\xb0\x89\xff\xc6\xb4J^" +
-	"b\xef\xff\x13lc\xb3\x8d\"\x0a\xd7\xdc\x1bU\xc6\xb9" +
-	"\xf2\xebim3e\x86\x0f!\x89\xe9\xec\xc9af\xad" +
-	"}\x1dM53\xd7\xc91\xd5\xde\xcc4s\x801\xfa" +
-	"\xab\x09\x98?\xdf\xa1#<\xbf\xca\x9c\xe84\x15Q\x9d" +
-	"\x99\x8cnS}\x10\x04\xec:\xdd\xe7\xcb+\xab\x0d\xec" +
-	"\x82\xb4>Y\xe3v\x92(w6Jz-j\xb0S" +
-	"}8\xf7\xb9\xd5\xaa\xbcb\xbe\x1b\xd0\x19\x0c8e," +
-	"\xe0L\xba\xd1\x83\xf5C\xb7\xacI\xeb\xed)\xa3w\xe8" +
-	"\xd0%[\x0ft\xbb\x8c\xba\xde\xfcr\xc2\xbf\xa1\\W" +
-	"2\xbc\x93\xedKtI\xd5\x96\xb9\xeee9\x11A{" +
-	"\xa7\xf4y~\x97\xa0\xdd\xcer\x07\x87\x01\x82C\x81\x80" +
-	"-\xcbR`\x02V\xe0Y\x16\xc4I\xcc\xf0\x8e]C" +
-	"pB\xc6\x06\x97\xed\xc4D\xbb\x7f\xae_Q\x1c\xed\x90" +
-	"[&wS_%\xef\xc4\xd6o\xbdC\xb8\x13'\xf1" +
-	"\xc2\x17\x83`\xa9\xe9\xc9Y\x91\x89\x9e\xb2\x0c\x81\x80\\" +
-	"m\x82\xb8\\7\xcb\xd1.\xd7\xe4Z\xc75\x7fX\xd8" +
-	"\xa3\xbaC\x8b\xab\xc1\x0c<\x9b\xcb(\x97\x18\x0d\x0f\xe2" +
-	"\xda\x09m\xfd3\xc2p\x12\x1a\x87\x8a\x8dd\xbdB\xba" +
-	"L\xf2\xff\x0d\x00\x00\xff\xff\xe9\xf1)T"
+type UnderlineStyle uint16
+
+// UnderlineStyle_TypeID is the unique identifier for the type UnderlineStyle.
+const UnderlineStyle_TypeID = 0xf82befbc532cc6bc
+
+// Values of UnderlineStyle.
+const (
+	UnderlineStyle_none     UnderlineStyle = 0
+	UnderlineStyle_straight UnderlineStyle = 1
+	UnderlineStyle_curly    UnderlineStyle = 2
+)
+
+// String returns the enum's constant name.
+func (c UnderlineStyle) String() string {
+	switch c {
+	case UnderlineStyle_none:
+		return "none"
+	case UnderlineStyle_straight:
+		return "straight"
+	case UnderlineStyle_curly:
+		return "curly"
+
+	default:
+		return ""
+	}
+}
+
+// UnderlineStyleFromString returns the enum value with a name,
+// or the zero value if there's no such value.
+func UnderlineStyleFromString(c string) UnderlineStyle {
+	switch c {
+	case "none":
+		return UnderlineStyle_none
+	case "straight":
+		return UnderlineStyle_straight
+	case "curly":
+		return UnderlineStyle_curly
+
+	default:
+		return 0
+	}
+}
+
+type UnderlineStyle_List = capnp.EnumList[UnderlineStyle]
+
+func NewUnderlineStyle_List(s *capnp.Segment, sz int32) (UnderlineStyle_List, error) {
+	return capnp.NewEnumList[UnderlineStyle](s, sz)
+}
+
+const schema_a3f8c1e2d4b07659 = "x\xda\xb4Z}t\x14U\x96\x7f\xb7\xaac\xc1\x9a\xd0" +
+	"]T\x08\x06\xf2\x0d\x8c\x92\x11FPg\x81\x15\x13\x12" +
+	"\x02&\xc0\x90\xea\xb8\xe7\x08\x8b\xcbV\xd2/MA\xa7" +
+	"\xaa\xed\xaa\x0e\x09\xba\x83\xe0\xb0g\xe1\xc8\x19@\xc1E" +
+	"e\x15\x06T8\xeb\x07\x9cE\x17\x06EX\xc1%\xce" +
+	"\xcc\x0e;\xa2\xe3\x19\x19\x0e0\xac\x83\xca0\xb0\xe0\xc2" +
+	"\x8eL\xef\xb9\xaf\xba>\xba\xbbB\x92u\xe7\xbf\xce\xab" +
+	"[\xf7\xdew?\x7f\xf7V\xee\xbavkm`B\xc1" +
+	"\xd2b\xc2\xb5\xdc\x01y\xb7\xa4J\xe4g\xf4\x97n}" +
+	"t\x05\x11\x87\x03!y\x9c@\xc8\xdd[\xf3\xd7\x00\x01" +
+	"iw\xfeR\x02\xa9G\xde\xbb~\xea\xefn\x8d\xaf\xf4" +
+	"\x12\x14\x144!Aq\x01\x12\x9c\xceo\xff\xf8\xdd\xe1" +
+	"O?I\xc4\x02H\xcd\xeb|\xe3\xc33\x87\xae\xfd\xc8" +
+	"\"\x94V\x15\xec\x92\xd6\x16\xe0\xaf\xd5\x8c\xf6\xb9\xfb\xbf" +
+	"\xb7\xf2\xd3\xb7>]K\xe4\x02\xc8!>W\xd0#]" +
+	"B\xe2\xbb/\x14\x94\x03\x81T[[\xe8\xf1\x17\xc6\xbc" +
+	"\xf6C\"\x16\xf0.1\x81\xbb\x8b\x83\x1cHc\x82H" +
+	"Z\x19\x14@:\x82?S\xff\xfdu\xcb\x98\xbb\x9a\xea" +
+	"\xd6Y\x9a\x06\xf0\xe9\xab\xc1\x0d@\x02\xa9\xe9\x1d\xed\xbf" +
+	"Y\x7f\xf0\xd4z\"\x0f\x07\xe7\x12[\x82ux\x89\x1d" +
+	"\xc1\xd7\x09\xdc\xe8~\xa1\xfd@\xe3\xcf\x9e\x12K\x9c\xc7" +
+	"SCa|\xdc\x18ZJ\xe0\xc6\xf6\x85\x87\x9e8\xf0" +
+	"\xf4F\xcb\x04\x80\x8f\xf7\x86\x98\x09\x0e\x85j\x08\xa4\x1a" +
+	"V\x94\x84f\x8e\xd8\xb0)\x83\xff%\x8b\xc1\x8d\xd0\xeb" +
+	"\x04R\xdc\xa7\xc7'\x15\xfc\xaeg\x13\x11+l\xdd6" +
+	"\x8b\xcbP\xb7m\xf2\x1b\xbf\xb8U\xfbjS\x96I\x02" +
+	"\xcc|\xe2\x19i\xbd\x88\xbf\xd6\x8ah\xbe\x8f66\x0d" +
+	"\xe1c\xfc3\xc4\xa3\xc8yq\x1b\x8a\xb9.\xa2\"\xe3" +
+	"\xd7\xad>u{\xeb\xe7\xcf\xa2\"\\ZN\xf1Pv" +
+	"\xcf\xca\xa1\xa8\xc7\xd6\xb5\x0bVn\xa8\\\xb6\x95\x88\x05" +
+	"\x9c\xd7\xa4\xd2\xdbC\xcfH\xc7\x86\xa2\xa8#C\xa3\x04" +
+	"R\x1b&\x1f\xfe\xf6\x9b\xeb\xf3\xb7{E]\x1a\xba\x01" +
+	"9\x81\x84\xa2~\xf2Wo\xb4\x1eZ\xd3\xb3\x9d\x88\xb7" +
+	"9\x04c\xa4)H0\x8e\x11\xbc\xf3\xd0\xb0\xaf^\xa9" +
+	"\xbd\xfc\x12aFe\xaa\xc8\xd2|\xbc\xf2Qe\xed\x17" +
+	"G\x87\xde\xf5r\xb6_\xa5\xa9\xd2~\xa9AB\xcai" +
+	"\x92\x10\x90\x0a\x8a\xd0\xad_\xccn\xd87y\xee\xc3\xaf" +
+	"\xd8\xc6e\x92\xae\x0ec\xe6\x87\"4\xcb\x81\xcb/L" +
+	"\xd8\xf5\xdb\x97_\xb1\x8ck\x11<\\\xb4\x0c\x09\xd4\"" +
+	"TE\x9bP\xba\xe6\xe1\xb2\x7f\xdc\xe9%X]\xc4\x82" +
+	"|3#XS\xbdy\xe2\x84\xb9\xd7vzB\xe7X" +
+	"Q\x18uUO5\xce}q\xe1G\xff\xe4y\xb2\xb7" +
+	"h\x17>\xb9\xd0\xf8f\xe7\xcf\xf7<\xfe\xaa\x97\xe9\x8e" +
+	"\xa2\x04\xcb\x1c\xc6\xf4\xcd7\x9fx\xed\x80\xf4\xe7\xaf\xe5" +
+	"\\\xf3x\xd1a\xe9\x13\xbc\x9bt\xa2h\xa6t\x03\x7f" +
+	"\x1d\xcc\xfb\xce\xd9\xaf\xcf\x95\xbd\xee\xe1u\xaeh?\xf2" +
+	"\xba\xcax\x1d\xfa\xd7\xf7\x96\xbc\x13\xdd\xbc\x1b\xa3\xc4\xc3" +
+	",\x8fG.c\x87\x1f\x96&\x0c\xc7w\xc6\x0dOa" +
+	"\xe2\x8c\x0d\x0f\x0e/|\xee\xe8n\xaf\xf3\xee-f\xe1" +
+	"8\xad\x18\xd9=\xa6\xaf\xb8\xb3z\xef{{sTS" +
+	"\x8a\xb7Ij12\xa5\xc53\xa5\xf5\xf8+\xf5\xfcm" +
+	"\x0dO\xe8\xaf\xce\xdc\xe71Awq\x1d\x9a\xe0\xd0\xdc" +
+	"\x7fy\xe9\xca\x9e\xe7\xf7\xfb\xb09#u06\xaa\xc3" +
+	"\xe6\xf4}\xcf\x1d\xbfx\xe5\x8f\xefx\xed\xd5]\xbc\x12" +
+	"\x95Z\xc5\x94:+\xce\xfc\xf4/\xbe\xb5\xf4\xdd\xb4\xa3" +
+	"\x99\xa0\x1d\xc5\xcc\xcf\xbb\x19A\xcf\xa3\x17\x96\xdf\xb7\xf0" +
+	"\xe3w3\xd2\xec\xb8u\xaf\x93\xc5\x9f\x11H=\xa0\xdf" +
+	"1\xfaR\xf4[G\xfcj\xd1\xbe\x11\x87\xa5C#\xf0" +
+	"\xd7\xdb#0j\x82\x1f\xfcp\xd9\x9dS\x9fy\x9f\x88" +
+	"\x85\x8e>\xc5#Y\x00W\x8eDq\xff|\xbcpG" +
+	"{\xf4\xee\x7f\xf3\xe4\xec\xb4\x91,g{.\xde>r" +
+	"\xce\xac\x19=\xd9\xde@\x1e\xd2\xb8\x91\x87\xa5{G\"" +
+	"\xf5\x84\x91\xac\x8cU\x04:\x17\xcf\xf9\xfe\xc5\x9fx\xbd" +
+	"1\xa7\x84i=\xaf\x04\x05]M\x1e\x9ewq\xc1\xdb" +
+	"?\xf5\xd3\xba\xbb\xa4GZU\x82\xbfV\x94\xa0\xd6\x7f" +
+	"8\xbag\xd8\x98\xbc\xc8\xcf<\xce8Y\xd2\x84JE" +
+	"?\xf8\xe3\x17\xd2\xe23?\xf7\xda\xf7X\x09\xb3\xef\x09" +
+	"\x14\xf3\x87\xfd5\x1f\xc6z\x0e\xfe\x87\xe7\xf1\xd5\x12\x16" +
+	"\xaeP\x8aZ\x8c\xb9\x7f\xe4\xa6\x83\xe6\xba_x\xedQ" +
+	"Y:\x11\x09\xc62\x82\xaa1\xe7_>\x18\x9a\xfc!" +
+	"\x91+\xb0\xb8X\x14\x8d\xa5{\xd8EJ\xb1\xba\xd4\xbf" +
+	"\xc0\xaf\xdf9\xbf\xec\x84_-\xbb^zF\xca+\xc3" +
+	"_P\x86\xdcn\xffnR\xee|\xa2\xeaDFZW" +
+	"\x96U3yex\xd5\xb7\xbe\xb7\xe9\xf0\x97/O\xfa" +
+	"(\x83bU\x19\xf3\xd0ZF\xf1_\xab\x94mm\xe1" +
+	"\xc1\x1f{<t\xbel\x0d\x1a\xe3\x93\xfb6\xbfw\xf6" +
+	"\xd8\xa3\x1fg\xbc\xfbI\x19\xab\x84\xa7\xd9\xbb3\xb9G" +
+	"\x16V|\xb9\xf2$\xde\xc6uK9\xb3\xd7\xbcr\xa4" +
+	"\x88ml\xbdf\x9c\xed\xf9uN\xfb\xd9[\xce\x81t" +
+	"\xa8\x9c\x85R\xf9\xfb\xd2\xb4\x0a\x0c\xef\xfb7\x1c\xfa\xeb" +
+	"\xad\xdd\xebOyt\x19[\xb1\x12u\xb9\xf4\xd4[?" +
+	"\xfe\xe5G\xfa\x99,\xf7\xb2\xd4\x1dV\xb1G*\xc5\xf7" +
+	"\xa5\xe2\x0a\xb4\xe0\xaf^\xfa\xf1\x94\x05\xdb\x9e<\xebq" +
+	"\xef\xee\x0aV4\xa3\xf1u\xca\x07\xff\xf9\xe4g\xd9\xad" +
+	"\x93\xc5\xdc\x96\x8a\x1ei'c\xb3\xa3\x02U\xdf\x1d=" +
+	"Rst\xd4\xb4\xf3\x1ee\xa0\x92\x19\x86\xbe\xf8n\xfe" +
+	"\xd5\x1f\xad:\x9fQ\xd7+X\x92\xdd\xa8@\xbf\xac\xff" +
+	"\xe5w&m\x1d^\xf8\xb9G\x83\xd2\xcag\xf1\xd5\xbf" +
+	"\xf9\xf7=\xef?\xb4\xe1W\xbf\xcb@\x02\x95\xac\x8a\x96" +
+	"V\xa2\xd4\xe2\xcb\xc6\xae\xbd\x8f\xcf\xba\xe8M\xe0\xee\xca" +
+	"V\x96\xe1\x8c`\xe9\xe7\x0f\xaen<\xb7\xfb\xa2\x87\xf7" +
+	"\xb9J\xd6\xa1\xa3\xdb\xc5\xcf\xf6\x0f>\xfd\xfbt7a" +
+	"\xbcOT\xb2\xe0;\xc9^}\xee\xfb\xb1\xa7\xb6\xec\x9b" +
+	"z\xd9\xcb{r\x15\xd3\xbb\xa1\x8a\x95\xf0\xfb\x17_\xfe" +
+	"\xf5\xae\x93W<\xbci\x15\xcb\xd6\xf5\xc1\xef\x9e\xd9\xf5" +
+	"\x9b\x9e\xaf2\xca\x86\\\xc5\x98\xcf\xabB\xab\x1f8z" +
+	"g\xcb\x81\x8b\xdf\xbe\x96\xd3\x15/U\x9d\x91nT\xb1" +
+	"\xf0\xad\x9aK\xe0T\xd3\xb5#\xb1\x8dM\xd7=\x06\x10" +
+	"G\xb1\x14*\x1d\x85J\x8e\xbc\x10\xaa\xfe\xe9\x90\xda\xff" +
+	"\xc90\xc0\xa8\xf9\xcc\x00\xa3j\xc8\xb8T<\x96\x8c\xaa" +
+	"\xda\xf8\xb6<%\xae\xc5\xa74DTSOL\x8b\xab" +
+	"\xe3\x134\xaa\x1a&M\xcc\xa2\xddu\xaa\x16Q\xb5\xe8" +
+	"\xe8f%\xa1t\x18\x84\xc8\x83\xf8\x00!\x01 D\x1c" +
+	"[G\x88<\x9a\x07\xf9.\x0eD\x80B\x94!\x8e\xc3" +
+	"\xc3;x\x90\xef\xe1`\xb9\x99P\xa3Q\x9a\x80|\xc2" +
+	"A>\x81\xe5\x8b\x14-\x12\xa3\x09\x10\xddfD\x00D" +
+	"\x02\x8e&\x81lM\x92ZsBo\xa3\x86\xe1\xabA" +
+	"\x95\x9f\x06\xd5i\x0d\xa6s \xb4uDl\xe9A%" +
+	"\x115`\x08\x81f\x1e\xd8\xd9\x10\x8f\\`rg\xa8" +
+	"]\xc1F\x93v4\x03x\xa5L\xec\xe3\x9e\xe51\xa5" +
+	"\x95\xc6\x9c[&h<\xa6\xb4Q\xfboG\x06\xc7d" +
+	"\xcc\xa2\xddaj\xc4u\xcd\xa0\x84\xa0\xa0BG\xd0\xdf" +
+	"\"\xcf.\x1e\xe4\x1fp`\xcbY\x81\xc2\x1f\xe3A\xfe" +
+	"\x07\x0eD\x0e\x0a\xb1\xd4\x89\x1b\xc3\x84\xc8O\xf3 \xbf" +
+	"\xc8\x81\xc8C!\xf0\x84\x88[\xf0\xf0y\x1e\xe4W8" +
+	"\x10\x03P\x08\x01B\xc4\x1d\xad\x84\xc8\xdby\x90\xdf\xe0" +
+	"l\xf3G\x00\x08\x07@\xa0\x9cFT\xd3\xb1H\xc8-" +
+	"\x0c\x04\x98m\xda\x92\x09CO4\xeb\x04\x0c\x08\xb9\xc0" +
+	"\x90\x00\x84\x08\xa4\x16)F=\x12\x10H\xd8\x0cSm" +
+	"J\xdcL&\xe8,\"\xd0n\x03\x06\x11\x0e\x06y\xee" +
+	"\xcf\xb3\xfb\xd7%\xdb\xdbi\xa2\xa1\x93j\xe6\x03V8" +
+	"0+\x84\xf8<B\xec\x9e\xe0\xe9u\x8fL!\x9cH" +
+	"\x05\x00\xa7a\x83]M\xc4yM\x84\x13e\x018\x07" +
+	"\xfc\x80\x0dl\xc5\x06|o\xb2\x00\xbc\x03\xc7\xc0.\x89" +
+	"\xe8;N\xac\x14jtmn\x9cj\xb5\x90\xd2\xb5\xfa" +
+	"E\x8a\x16\xa5\x84\x90Z\xa8\xd1\xb5\x16\xa5\x93\xd6\xc2r" +
+	"]\xab\x8f\xe9\x06\xad\x85f\x80\x81\xe4J\x98\x1a\xc9\x98" +
+	"\x09F\xefQM\x95H\x18\x05\xdaA-\xe7;A\xd0" +
+	"\x80\x0e\xaf\xe5A\x9e\xed\x06A#\x86\xf4t\x1e\xe4f" +
+	"O\x10\xcc\x19A\x88\xfc\x00\x0f\xf2\x83\x1c\x94\xb7&\xdb" +
+	"\x1b#\xb6\xc5\x83\xed\x09\xbd#\xd7e\xbc\xa9\xfb\xf81" +
+	"S\xc7z\xbd\xa3C\xd1\"i\xcf\x8c\xb7\"\xc6\xd2\x12" +
+	"\x0coNT\xa7s\xa2\xd6\x93\x13S1\x1d'Y\x99" +
+	"\xe7\x97mB\x9b\xd9\x05!\xb7-\xfbj\x90i\xa5\xd9" +
+	"\xaaF\x8d\xb4A1\xf7\x03\x8e\x06\x05\x13Y)\x00y" +
+	"4& \x92\xf5\x96\xdb7\xa9)\xb6\xa7\xbc\xf6\x9f\xe2" +
+	"\xda\xdf\xb9Y\xe3\x14\xd7\x01\xc0\xa5\xed\xdfD\x88<\x9b" +
+	"\x07\xf9!\x0ej\x0c3\xa2'M;\xe5\xf1O\x9ap" +
+	"\xea^\x8av\xa9f\xbd\x1e\xc1\xf8\x82\x00\xe1 \x90\xa3" +
+	"]nV\x8c\xb7\xc2pt\xb8\xc6\xba|V\x19if" +
+	"\x7f5\xeb\x86j\x0a\xaa\xaeeU\xacj\xbf\x8aU\xe5" +
+	"V\xac \x1a\xcc\x0e\x17\xa1M\x8f\xe5$koan" +
+	")\x9a\xd6\x11\x03CP:\x0c\xaf[\xea\xd2n)\xe4" +
+	"\xbc\xf5\xde\x99\x9d\xfb\xaa\xf7\x8e\xcfo\x9e\x19\xaeg\xc2" +
+	"n\x16\x88\\\xda5r\x9d\xeb\x9a\xcc\xd4H\x19\xa6\x92" +
+	"0g\xab\x1a\x01\xe7\xfe\xcb\xa9\xc6d\xe6\xd8\xc0\xb2\xf4" +
+	"t\xda\xa6'\x14S\xd5\xb5Y\x82\xaaEX\xb1bR" +
+	"\xc6Na\xb7\xa9\xac#\x048\xb18L\x08\xf0\xe2\xb0" +
+	"0!5\xd1\xa4i\xd2\xc4r\xbd\x93&bJ7\xca" +
+	"4\x93F\x9dB \x91Jj\x11\x9a\x881\xf9}\xda" +
+	"\xda\x95l8)\xe8\xb14\xc6_>\x0f\xf2m\x1c\xa4" +
+	"\xe2\x09\xbdS\x8d\xd0\x04F\x98\xe8B\xc5,k\xf3v" +
+	"\x07\xca\xcao;\xc6z\xe3\x9ep\x1a\x16\x81\x90\xbb5" +
+	"\x19@\x05a\x89\xc6{\xa2\x18\xec;\xd7X\x97F\xb3" +
+	"\xd6b\x0fpV@`/P\xa4K\xf0,\xe1\xa4\x0b" +
+	"\x80]\xc0F}`\x837\xe94{z\x12\x04\xe0l" +
+	"@\xe4\xa2/\xe98\xac$\x9ct\x0c\xb0\x13\xd8\xfb\x0a" +
+	"\xb0\xa7h\xe9m\xd8C8i\x1f\x08\x10pV\x0c`" +
+	"CN\xe9U\xd8F8i'\x08\x90\xe7 x\xb0'" +
+	"\x1ei\x0b\x84\x09'm\x04\x01nq\x96\x02`O\xee" +
+	"\xd2j\x98O8i\x05\x08 8\x93\x03\xd8\xa3\xab\x94" +
+	"\x84&\xc2I\x1d \xc0 g:\x06\x1blK\x0a\xb4" +
+	"\x12N\x9a\x07\x02\x0cv\xf6]`/u\xa49\x8cs" +
+	"\x03\x08\xf0g\x0e\x0c\x05{\xa8\x93&\xb3\xa7\x13@\x80" +
+	"[\x9d\xf5\x0bl'\xd6\xc2H\x1a\xc3t.\x05\x01\xf2" +
+	"\x9d-\x14\xd8\x18\\\x12\xd9\xd3\xc1 @\x813\x0f\x81" +
+	"\x0dW\xc5\x1b\xd8Q/\x090\xc4\x99\x8c\xc1\x9e\x80\xc5" +
+	"s\xf3\x09'\x9e\x14 \xe8`N\xb0\xd1\xb7x|1" +
+	"\xe1\xc4cB\xca\x8ej\xb0;%\xafEk\xc1=n" +
+	"\xd4\x0c\x9a0\x1f\xd0y}\x89\xf78\x1dO\xc4{f" +
+	"\x17\xa1r\x16c\xde'v\xca\x08\xbaf\xd4BJ\x89" +
+	"\xc7c\xdd\x0d\x11\x95\x80Y\x0b\xa9\x0e\xbd\x93\"f!" +
+	"\xbc\x8e/\xe9q\xaa\xcdPcV\xd7O\x19\x8b\xf4\xa5" +
+	"s\xa8a\x10A\x89Rd\x99\xee\x12\x847\x0c&A" +
+	"\x89\xa0X\xc2\xa7\x05Zu\x8a\x80\xfd\x10\xfb9\x01Z" +
+	"\x0b5K\xf5Dd\x1a\xcakej6j\x84o\xd7" +
+	"k!\xd5\xa9\x1ajk\x8c\x86I\x10[\x7f&\xaa\xc8" +
+	"\xae\x83\xb6\xaaz\xc2\x17\xf7z\x10\xa9_y\xcf\xacy" +
+	"B\\7\xfal\xfc\xbe\x0d\x88\xc1\x9f\xd15\x96\x06~" +
+	"\xbd\xb7\x90\x83r\x8a\xef@\xc8\x9d\x08\xb3\xf8\xe7eU" +
+	"\xd1\xe6t\xa9\x1a\x1f\xa5\xe6\x0c\xb5\xab?\xed]5i" +
+	"\x87\x07\xa8:+\xde4P\xed\x87\x11s Y\xff\xfa" +
+	"[\x98\x1a\xc1\x8c\xe6\xdbW\xb7n.\xffF\xb6\xe2\xb2" +
+	"\x0a4\x83\xc6\x01V\x16\xed\x91\x14\xecM\xa7(bB" +
+	"\xe6\x095V\x89\xf5C\xa9\xfeF\xf7\xb6\x15\xbf\xca\xdf" +
+	"\x9a\xae\xfcwp\x90\x8a\xa4i\x09&\x94\xeb\x01g\xff" +
+	"\x97\xe5\x81\xec\x8e\xc9\xf4\x1f\xed\xb0\xbe\x80\xb8\xe4\xb7<" +
+	"\xc8W<\x1d\xfc\x12\x06\xee\x97<\xc8\xd7\\lu\x15" +
+	"\x09\x7f\xcf\x83\xfc5\x0e8\x01k\xc0\xb9\x8e\x87Wx" +
+	"\x08\x03\x0e8\xbc5\xe0\xdc@dv\x8d\x87\x96\x00\x9e" +
+	"\xe6\xe5\x15B\x1e!\x12\xc02B\xc2\xc0CK>\x1e" +
+	"\xdf\x02\x85p\x0b!\xd2`<n\x19\x84\xe7\x85x." +
+	"<^\xc8\xf6\x15\"\xd4\x11\xd2\x92\x8f\xe7\xb7\xe1\xf9 " +
+	"\xae\x10\x06\x11\"\x0dc\xe7!</\x81\x9b\xa0\xa6\xa0" +
+	"I\xbb\x1c\xf0\x17\\\xa2j\x11\x08\xba\xbbm\x02\x10$" +
+	"PC\xb5H\xbd\x07h9@\xa0\x86\xb6\x98\xdd1\x0a" +
+	"Aw\xee\xb7\xde\xf0\x92\xd4\xeb1\xdd\x9d\xa3\xdb\xd5." +
+	"\xa55F\xed\xb9\x0b\xff\x9e\xae\x98J\xce\xc4\x99\x9d\x10" +
+	"v\x8dS\xa2\xd4\x0fPT\xbb\x91\x9aq\xa3\xac\xa6\xdd" +
+	"\x1cK\x0a\x88=\x9d\xd0\xb4Wu`\xef0E\x11\xfb" +
+	"\xc1`!\xa5j\xaa\xa9*1\x95\xf0\xcb\xb2\x02T\xc8" +
+	"R\xcd.\xc6N1\xb0\x09\xb3A\x85\x10\xa3\x09G\xb4" +
+	"\xfd\xa1\xc4\xb3\xdd\xef;+\xfcK\xdd\xa2\x8cy\xec\xff" +
+	"\x98\xbf\xd9\x06\xb7;@\xbb\xee\x96\xf1^Xg\xc2\xd4" +
+	"~0tf\x97\x90\xc3PA\x0f.\xe0A^\xe4\xc9" +
+	"/:\x9f\x109\xc2\x83\x1cw\xf3\xab\x03Qs\x8c\x07" +
+	"\xb9\x0b\xf3\xab\xc2\xca\xaf$\xa2\xe68\x0f\xf2c\x1c\x04" +
+	"\xe3\x8a\xb9\xc8\xf1\x7fL\xd1\xa2I%J\x09\xdf\x18q" +
+	"\x0fU\x8d\xd6\xebI\x8d\x80\xe9 i\xd5\x98\xae&\xcc" +
+	"ng!\xe07\xb3\xa0\xf2\xa4?\xf3\x8ag\xc3\x12\xd4" +
+	"\x94\x0eg\xa1\xb2\xbc\x93&\x0cU\xd7r\xc2\x93\xf7H" +
+	"\x19o\x87\xde2\x7fx\xeb\x8duUk\xc7\xc9\xd8\xd9" +
+	"\xd6\xf7\xbfA\xce\x8dS\xad\xb7\x09m\x16\xed\xae\xd75" +
+	"\xcc\xa3\xec5\xcfD\x9f5Ouz\xcd\xf3\xf7\x9e\x09" +
+	"\x7f\x15b\xf0\x1f\xf0 \xaf\xf3\xacy\xd6\xa2;\x9fL" +
+	"/\x84\x02\x01\xab\x0az\x17BY\xbb\x80\x0e=\xe2\xae" +
+	"\xa2\xdab*\xd5\xcc\xc6\x08\x02\xf9\xc1\x84\x83\xc1\xce\x9a" +
+	"g\xb6Jx\xcf\x08d\x1d\xd6\xeb\x04b}\xc6\xa4\x0d" +
+	"\x8d\xa8\xdbf{\x1b\x08\xdb\xd0 \x9a\xd9\xcbj\xcc\xf2" +
+	"\\\xd8\xda\xc4\xf4g\x07\xe7\x85<l\xb0\xcb\x859\x02" +
+	"\xd5\"}\x82\x1f\xf7.6`4]P2\x00 \xe3" +
+	"S=\xbc\xb7\xbfy\x99\xee=\xc0\xbe!\xa8\xe8--" +
+	"|\xd8V\xb9l\x05%\xae\x82\xe8~\x1c\xcd\x1a%\xfb" +
+	"\x0b0l!},\xb8\x16{\xa7\xf8t\xf8\xcb\x18\xfe" +
+	"\xcd<\xc8\x0br\xcac&\x94\x86\x90\xfb\xcd*}w" +
+	"\xbf@\xcf\x0c\xb6tK\xc1\x14\x15h\x97i\xb5\x94\x01" +
+	"Tf>+r,\xd4?\xbaY\x09\xb2\xfb\xfe\x89\xc0" +
+	":\xdf[\xdb\xb4A\xba\x7fQ\xcd\xd9\x8d\xdf\x93U\xe2" +
+	"3\xa0M\xdfNfi2C\xed\xf2\xc9\x92\xde3\xca" +
+	"\xce\x8e>L3\xd1]\xdfg\x9a\xa6\xaf}u\xff\xb5" +
+	"\xf6\xd1\xa4\xee&\x9a\xdc\x93\x9b\xbb\xe5\xaa\x16\xa1]\xbd" +
+	"\x04E\xaehV\xcd\xf2\x19X\xb2?[\x82\xf5\x89\x9d" +
+	"\xbc.\xca\xcb\x08'6\x0a\x00\xce7S\xb0\xffC@" +
+	"\x9c\xdaD8\xf1^\x018\xe7\x03!\xd8_\x19\xc5\xb1" +
+	"Ml\x8d\x9d\xb23\x8e\xd4X9W\x0b)\xbb\"Y" +
+	"\xa3\xad}o\xf6W.\x08\xbb\xc9\xe8\xe7\x0b\xc6\x1e\xa4" +
+	"]\xe5&z\xd4\xba\x94\x93\xd7\xd5~\xeb\xb9\x11\xde\xcd" +
+	"\xb5\xbd9\xads\xb3} \xbb\xea\xe5\x1a]\xfa\xa0\x1f" +
+	".\xbd\x19\xce\xcd\xd9<q\xd9\x97\xbeY\xaf\xf1K\x9c" +
+	"\xac\x06\x9b\x81\x94\xfa\x8f4\xfb\xce\x1c\xf7+\x81\xef\x80" +
+	"\xdc'Z\xef\xcfZ1\xc7:\xbd\xbddog\xf4%" +
+	"\xbe\x0b\x89>\x01\\\xdb\"\xe5\x9b|\x07\xb4\x0b\xbec" +
+	"\x0e\x01\xf1\x9cG\x81\xb0+\xcbQ`\x02*p'\x0f" +
+	"\xf2$n`\x8b\xdf~\x18!g\xa1\xd0\xdbn\xd5n" +
+	"\x80}}\xb5\xf4t\x04a\x09\xed\xb6m\x95\xfef\xe2" +
+	"\xfc\x8bG?\xbe\x99\xa4\xb1\xd8\xff\xcf\xc0a_=\xdd" +
+	".s\xc1n/}0L\xcb-\xcc\xdd\xd7\xfe\xbe\xca" +
+	"\xe7\xcb\xcaD\xcf\x97\xad\x01\xe1\xba\xf2v=\xa9Ez" +
+	"\x19?\xfe2=N\xd3\x16S\xe8\x8eQV\xbd\x98\xbc" +
+	"\xd2j\x16~\xc3\x9a\xd8\"_\x9cHHP\xd35\x9a" +
+	"2\xcc\x84\xa2F\x17\x99\x84\x90\xf2\xb6d\"\xd6\xddo" +
+	"+\xf98}`#\x8e\x9b!\xce?5\x0d$C\xd0" +
+	"\xf7|G\xaf\xfb|\x1ft\xf4\xbf\x01\x00\x00\xff\xff\xce" +
+	"&U\xf5"
 
 func RegisterSchema(reg *schemas.Registry) {
 	reg.Register(&schemas.Schema{
@@ -7233,6 +7922,7 @@ func RegisterSchema(reg *schemas.Registry) {
 		Nodes: []uint64{
 			0x817b0ba66f97511c,
 			0x82700b86dff9c471,
+			0x8c9417c0d7660ce1,
 			0x8ddcb7dc824e3e9b,
 			0x8fae259f80106363,
 			0x90424a302553fcf7,
@@ -7251,6 +7941,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xa73012c6eb8d61c6,
 			0xa85d4f39b9454ceb,
 			0xa8a7e8aa319ff2bc,
+			0xa99e1e5d8a1d316e,
 			0xa9f84f3132992a8a,
 			0xacd65fa04f49df69,
 			0xad80b2d076b649ed,
@@ -7271,13 +7962,16 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xccef7e4d6a760420,
 			0xcdbd5cef59c275f5,
 			0xce64052515b2c6fb,
+			0xd0e26a13ebfecb67,
 			0xd2bfca6cd4003fba,
 			0xd39074bf961b3e25,
 			0xd43910bfa7e92522,
 			0xd51e5aa991039f43,
 			0xd522837651753627,
 			0xd638a7ecc2964eb7,
+			0xd7095263a26185f3,
 			0xd77bc9e3c4993cd9,
+			0xdd82ec205f710247,
 			0xdecae373f862956c,
 			0xdf9179a15ec1923e,
 			0xe26fd6d8bbb793f1,
@@ -7293,6 +7987,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xf23db99d936c7e9b,
 			0xf4ddaadef26a3e8a,
 			0xf6cae4aae2360f91,
+			0xf82befbc532cc6bc,
 			0xf94a00956cc5f84a,
 			0xfa400ecd2a10ed1b,
 		},

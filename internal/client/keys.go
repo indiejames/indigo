@@ -429,6 +429,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ":":
 		m.mode = ModeCommand
 		m.cmdBuf = ""
+		m.cmdCompletionIdx = -1
 
 	case "/":
 		m.searchQuery = ""
@@ -990,18 +991,60 @@ func (m Model) handleCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.mode = ModeNormal
 		m.cmdBuf = ""
+		m.cmdCompletionIdx = -1
+
+	case "tab", "down":
+		matches := filteredCmds(m.cmdBuf)
+		if len(matches) > 0 {
+			if m.cmdCompletionIdx < 0 {
+				m.cmdCompletionIdx = 0
+			} else {
+				m.cmdCompletionIdx = (m.cmdCompletionIdx + 1) % len(matches)
+			}
+		}
+
+	case "shift+tab", "up":
+		matches := filteredCmds(m.cmdBuf)
+		if len(matches) > 0 {
+			if m.cmdCompletionIdx < 0 {
+				m.cmdCompletionIdx = len(matches) - 1
+			} else {
+				m.cmdCompletionIdx = (m.cmdCompletionIdx - 1 + len(matches)) % len(matches)
+			}
+		}
+
 	case "enter":
+		// If a completion item is selected, act on it.
+		if m.cmdCompletionIdx >= 0 {
+			matches := filteredCmds(m.cmdBuf)
+			if m.cmdCompletionIdx < len(matches) {
+				sel := matches[m.cmdCompletionIdx]
+				m.cmdCompletionIdx = -1
+				if sel.needsArgs {
+					// Fill command name and stay in command mode for argument input.
+					m.cmdBuf = sel.name + " "
+					return m, nil
+				}
+				m.cmdBuf = sel.name
+				return m.executeCommand()
+			}
+		}
 		return m.executeCommand()
+
 	case "backspace":
 		runes := []rune(m.cmdBuf)
 		if len(runes) > 0 {
 			m.cmdBuf = string(runes[:len(runes)-1])
+			m.cmdCompletionIdx = -1
 		} else {
 			m.mode = ModeNormal
+			m.cmdCompletionIdx = -1
 		}
+
 	default:
 		if len(msg.Runes) > 0 {
 			m.cmdBuf += string(msg.Runes)
+			m.cmdCompletionIdx = -1 // reset selection whenever the filter changes
 		}
 	}
 	return m, nil

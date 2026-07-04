@@ -256,8 +256,9 @@ type Model struct {
 	currentGroup   []document.Op // non-nil while accumulating ops for the current Insert session
 	groupBefore    cursorSnapshot // cursor state when currentGroup was opened
 	savedUndoDepth int           // len(undoStack) at the time of the last save
-	cmdBuf         string          // text typed after ':' while in ModeCommand
-	prefixSeq      []rune          // keys typed so far for a multi-key Normal-mode command
+	cmdBuf             string // text typed after ':' while in ModeCommand
+	cmdCompletionIdx   int    // selected item in command completion popup (−1 = none)
+	prefixSeq          []rune // keys typed so far for a multi-key Normal-mode command
 	searchQuery    string
 	searchMatches  []searchMatch
 	searchIdx      int

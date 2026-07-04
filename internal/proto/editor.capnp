@@ -27,11 +27,13 @@ interface EditorService {
   complete        @12 (bufId :UInt32, line :UInt32, col :UInt32)               -> (items :List(CompletionItem));
   definition      @13 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :DefinitionResult);
   format          @14 (bufId :UInt32)                                           -> (content :Text, changed :Bool, noFormatter :Bool);
-  handlePluginKey      @15 (clientId :UInt64, bufId :UInt32, key :Text, mode :Text) -> (result :PluginKeyResult);
+  handlePluginKey      @15 (clientId :UInt64, bufId :UInt32, key :Text, mode :Text, cursorLine :UInt32, cursorCol :UInt32) -> (result :PluginKeyResult);
   updateViewport       @16 (clientId :UInt64, topLine :UInt32, height :UInt32)      -> ();
   getPluginDecorations @17 (clientId :UInt64, bufId :UInt32)                        -> (decorations :List(PluginDecoration));
   getPluginKeys        @18 ()                                                        -> (keys :List(Text));
   saveAs               @19 (clientId :UInt64, bufferId :UInt32, path :Text)          -> ();
+  getPluginFixes       @20 (pluginName :Text, fixData :Text)                         -> (items :List(PluginFixItem));
+  applyPluginFix       @21 (pluginName :Text, fixData :Text, index :UInt32)          -> ();
 }
 
 struct PluginEdit {
@@ -46,13 +48,31 @@ enum PluginDecorationKind {
   gutter    @0;
   overlay   @1;
   statusBar @2;
+  underline @3;
+}
+
+enum PluginUnderlineStyle {
+  none     @0;
+  straight @1;
+  curly    @2;
 }
 
 struct PluginDecoration {
-  line @0 :UInt32;
-  col  @1 :UInt32;
-  text @2 :Text;
-  kind @3 :PluginDecorationKind;
+  line           @0 :UInt32;
+  col            @1 :UInt32;
+  text           @2 :Text;
+  kind           @3 :PluginDecorationKind;
+  endCol         @4 :UInt32;
+  underlineStyle @5 :PluginUnderlineStyle;
+  underlineColor @6 :Text;
+  fixable        @7 :Bool;
+  fixData        @8 :Text;
+  pluginName     @9 :Text;
+}
+
+struct PluginFixItem {
+  label   @0 :Text;
+  replace @1 :Text;
 }
 
 struct PluginKeyResult {

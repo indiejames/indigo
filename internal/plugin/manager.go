@@ -38,6 +38,16 @@ type ServerBridge interface {
 
 	// Key registration notification — called so the server can push to clients.
 	PluginKeyRegistered(trigger string)
+
+	// PluginOpenBuffers returns all currently-open (bufID, path) pairs so plugins
+	// can receive OnOpen for buffers that were opened before the plugin started.
+	PluginOpenBuffers() []PluginBufferRef
+}
+
+// PluginBufferRef identifies an open buffer by ID and path.
+type PluginBufferRef struct {
+	BufID uint32
+	Path  string
 }
 
 // PluginDecorationKind mirrors the capnp enum for use in plain-Go types.
@@ -47,6 +57,16 @@ const (
 	DecorationKindGutter    PluginDecorationKind = 0
 	DecorationKindOverlay   PluginDecorationKind = 1
 	DecorationKindStatusBar PluginDecorationKind = 2
+	DecorationKindUnderline PluginDecorationKind = 3
+)
+
+// PluginUnderlineStyle mirrors the capnp UnderlineStyle enum.
+type PluginUnderlineStyle int
+
+const (
+	PluginUnderlineNone     PluginUnderlineStyle = 0
+	PluginUnderlineStraight PluginUnderlineStyle = 1
+	PluginUnderlineCurly    PluginUnderlineStyle = 2
 )
 
 // PluginDecoration is a single decoration returned by a plugin's DecorationProvider.
@@ -55,6 +75,16 @@ type PluginDecoration struct {
 	Col  uint32
 	Text string
 	Kind PluginDecorationKind
+
+	// Underline fields (Kind == DecorationKindUnderline)
+	EndCol         uint32
+	UnderlineStyle PluginUnderlineStyle
+	UnderlineColor string
+
+	// Fix fields
+	Fixable  bool
+	FixData  string
+	PluginName string // which plugin owns this decoration (for fix routing)
 }
 
 // TextEdit is a plain-Go representation of a capnp TextEdit, used in ServerBridge.
@@ -342,20 +372,100 @@ func (m *Manager) GetDecorations(ctx context.Context, clientID uint64, bufID, st
 		}
 		for i := range rawList.Len() {
 			item := rawList.At(i)
-			text, err := item.Text()
-			if err != nil {
-				continue
-			}
+			text, _ := item.Text()
+			color, _ := item.UnderlineColor()
+			fixData, _ := item.FixData()
 			all = append(all, PluginDecoration{
-				Line: item.Line(),
-				Col:  item.Col(),
-				Text: text,
-				Kind: PluginDecorationKind(item.Kind()),
+				Line:           item.Line(),
+				Col:            item.Col(),
+				Text:           text,
+				Kind:           PluginDecorationKind(item.Kind()),
+				EndCol:         item.EndCol(),
+				UnderlineStyle: PluginUnderlineStyle(item.UnderlineStyle()),
+				UnderlineColor: color,
+				Fixable:        item.Fixable(),
+				FixData:        fixData,
+				PluginName:     p.name,
 			})
 		}
 		rel()
 	}
 	return all
+}
+
+// GetFixes calls the DecorationProvider of the named plugin to fetch fix options.
+func (m *Manager) GetFixes(ctx context.Context, pluginName, fixData string) ([]FixItem, error) {
+	m.mu.Lock()
+	var provider pluginproto.DecorationProvider
+	for _, p := range m.plugins {
+		if p.name == pluginName {
+			p.mu.RLock()
+			provider = p.decorProvider
+			p.mu.RUnlock()
+			break
+		}
+	}
+	m.mu.Unlock()
+
+	if !provider.IsValid() {
+		return nil, nil
+	}
+	tctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	fut, rel := provider.GetFixes(tctx, func(ps pluginproto.DecorationProvider_getFixes_Params) error {
+		return ps.SetFixData(fixData)
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, err
+	}
+	rawList, err := res.Items()
+	if err != nil {
+		return nil, err
+	}
+	items := make([]FixItem, rawList.Len())
+	for i := range rawList.Len() {
+		fi := rawList.At(i)
+		label, _ := fi.Label()
+		replace, _ := fi.Replace()
+		items[i] = FixItem{Label: label, Replace: replace}
+	}
+	return items, nil
+}
+
+// ApplyFix calls the DecorationProvider of the named plugin to execute a custom fix.
+func (m *Manager) ApplyFix(ctx context.Context, pluginName, fixData string, index uint32) error {
+	m.mu.Lock()
+	var provider pluginproto.DecorationProvider
+	for _, p := range m.plugins {
+		if p.name == pluginName {
+			p.mu.RLock()
+			provider = p.decorProvider
+			p.mu.RUnlock()
+			break
+		}
+	}
+	m.mu.Unlock()
+
+	if !provider.IsValid() {
+		return nil
+	}
+	tctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	fut, rel := provider.ApplyFix(tctx, func(ps pluginproto.DecorationProvider_applyFix_Params) error {
+		ps.SetIndex(index)
+		return ps.SetFixData(fixData)
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
+// FixItem is a fix option returned by GetFixes.
+type FixItem struct {
+	Label   string
+	Replace string // non-empty = direct text replacement; empty = call ApplyFix
 }
 
 // Shutdown cleanly stops all plugin processes.
@@ -391,7 +501,7 @@ func (m *Manager) Shutdown() {
 // each plugin's registered key bindings.
 //
 // Plugin handlers are called with a 30 ms deadline; timeout → handled=false.
-func (m *Manager) HandleKey(ctx context.Context, key, mode string, bufID uint32, clientID uint64) (
+func (m *Manager) HandleKey(ctx context.Context, key, mode string, bufID uint32, clientID uint64, curLine, curCol uint32) (
 	handled bool, edits []TextEdit, cursorLine, cursorCol uint32, hasCursor bool, captureKeys uint32, err error,
 ) {
 	if mode == "capture" {
@@ -401,7 +511,7 @@ func (m *Manager) HandleKey(ctx context.Context, key, mode string, bufID uint32,
 		if !h.IsValid() {
 			return false, nil, 0, 0, false, 0, nil
 		}
-		handled, edits, cursorLine, cursorCol, hasCursor, captureKeys, err = m.callHandler(ctx, h, key, mode, bufID, clientID)
+		handled, edits, cursorLine, cursorCol, hasCursor, captureKeys, err = m.callHandler(ctx, h, key, mode, bufID, clientID, curLine, curCol)
 		if err == nil && captureKeys == 0 {
 			m.clearCaptureHandler()
 		}
@@ -419,7 +529,7 @@ func (m *Manager) HandleKey(ctx context.Context, key, mode string, bufID uint32,
 		if !ok {
 			continue
 		}
-		handled, edits, cursorLine, cursorCol, hasCursor, captureKeys, err = m.callHandler(ctx, handler, key, mode, bufID, clientID)
+		handled, edits, cursorLine, cursorCol, hasCursor, captureKeys, err = m.callHandler(ctx, handler, key, mode, bufID, clientID, curLine, curCol)
 		if err != nil || !handled {
 			return
 		}
@@ -435,7 +545,7 @@ func (m *Manager) HandleKey(ctx context.Context, key, mode string, bufID uint32,
 }
 
 // callHandler invokes a KeyHandler with a 30 ms deadline and unpacks the response.
-func (m *Manager) callHandler(ctx context.Context, handler pluginproto.KeyHandler, key, mode string, bufID uint32, clientID uint64) (
+func (m *Manager) callHandler(ctx context.Context, handler pluginproto.KeyHandler, key, mode string, bufID uint32, clientID uint64, curLine, curCol uint32) (
 	handled bool, edits []TextEdit, cursorLine, cursorCol uint32, hasCursor bool, captureKeys uint32, err error,
 ) {
 	tctx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
@@ -451,6 +561,8 @@ func (m *Manager) callHandler(ctx context.Context, handler pluginproto.KeyHandle
 		}
 		kctx.SetBufId(bufID)
 		kctx.SetClientId(clientID)
+		kctx.SetCursorLine(curLine)
+		kctx.SetCursorCol(curCol)
 		return kctx.SetMode(mode)
 	})
 	defer rel()

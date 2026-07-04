@@ -732,7 +732,9 @@ func (s *editorService) HandlePluginKey(ctx context.Context, call proto.EditorSe
 
 	clientID := args.ClientId()
 	bufID := args.BufId()
-	handled, edits, cursorLine, cursorCol, hasCursor, captureKeys, handleErr := s.pluginMgr.HandleKey(ctx, key, mode, bufID, clientID)
+	cursorLine := args.CursorLine()
+	cursorCol := args.CursorCol()
+	handled, edits, cursorLine, cursorCol, hasCursor, captureKeys, handleErr := s.pluginMgr.HandleKey(ctx, key, mode, bufID, clientID, cursorLine, cursorCol)
 	if handleErr != nil {
 		return handleErr
 	}
@@ -797,12 +799,76 @@ func (s *editorService) GetPluginDecorations(ctx context.Context, call proto.Edi
 		item := list.At(i)
 		item.SetLine(d.Line)
 		item.SetCol(d.Col)
+		item.SetEndCol(d.EndCol)
 		if err := item.SetText(d.Text); err != nil {
 			return err
 		}
 		item.SetKind(proto.PluginDecorationKind(d.Kind))
+		item.SetUnderlineStyle(proto.PluginUnderlineStyle(d.UnderlineStyle))
+		if err := item.SetUnderlineColor(d.UnderlineColor); err != nil {
+			return err
+		}
+		item.SetFixable(d.Fixable)
+		if err := item.SetFixData(d.FixData); err != nil {
+			return err
+		}
+		if err := item.SetPluginName(d.PluginName); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func (s *editorService) GetPluginFixes(ctx context.Context, call proto.EditorService_getPluginFixes) error {
+	args := call.Args()
+	pluginName, err := args.PluginName()
+	if err != nil {
+		return err
+	}
+	fixData, err := args.FixData()
+	if err != nil {
+		return err
+	}
+	items, err := s.pluginMgr.GetFixes(ctx, pluginName, fixData)
+	if err != nil {
+		return err
+	}
+	res, resErr := call.AllocResults()
+	if resErr != nil {
+		return resErr
+	}
+	list, listErr := res.NewItems(int32(len(items)))
+	if listErr != nil {
+		return listErr
+	}
+	for i, it := range items {
+		fi := list.At(i)
+		if err := fi.SetLabel(it.Label); err != nil {
+			return err
+		}
+		if err := fi.SetReplace(it.Replace); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *editorService) ApplyPluginFix(ctx context.Context, call proto.EditorService_applyPluginFix) error {
+	args := call.Args()
+	pluginName, err := args.PluginName()
+	if err != nil {
+		return err
+	}
+	fixData, err := args.FixData()
+	if err != nil {
+		return err
+	}
+	index := args.Index()
+	if err := s.pluginMgr.ApplyFix(ctx, pluginName, fixData, index); err != nil {
+		return err
+	}
+	_, err = call.AllocResults()
+	return err
 }
 
 func (s *editorService) UpdateViewport(_ context.Context, call proto.EditorService_updateViewport) error {

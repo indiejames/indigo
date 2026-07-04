@@ -56,6 +56,12 @@ interface BufferEventHandler {
 
 interface DecorationProvider {
   getDecorations @0 (bufId :UInt32, visibleRange :PluginRange, clientId :UInt64) -> (decorations :List(Decoration));
+  # getFixes returns fix options for a fixable decoration identified by fixData.
+  # The editor calls this when the user triggers the fix action (Shift+F) on a
+  # decoration that has fixable = true.
+  getFixes       @1 (fixData :Text) -> (items :List(FixItem));
+  # applyFix is called for FixItems whose replace field is empty (custom actions).
+  applyFix       @2 (fixData :Text, index :UInt32) -> ();
 }
 
 # -- Supporting structs --
@@ -82,9 +88,11 @@ struct TextEdit {
 }
 
 struct KeyContext {
-  bufId    @0 :UInt32;
-  mode     @1 :Text;
-  clientId @2 :UInt64;
+  bufId      @0 :UInt32;
+  mode       @1 :Text;
+  clientId   @2 :UInt64;
+  cursorLine @3 :UInt32;
+  cursorCol  @4 :UInt32;
 }
 
 struct KeyResponse {
@@ -105,14 +113,34 @@ struct BufferEvent {
 }
 
 struct Decoration {
-  line @0 :UInt32;
-  col  @1 :UInt32;
-  text @2 :Text;
-  kind @3 :DecorationKind;
+  line           @0 :UInt32;
+  col            @1 :UInt32;
+  text           @2 :Text;
+  kind           @3 :DecorationKind;
+  endCol         @4 :UInt32;          # end column (exclusive) for underline spans
+  underlineStyle @5 :UnderlineStyle;  # only meaningful when kind = underline
+  underlineColor @6 :Text;            # hex color e.g. "#FF8C00"; empty = default
+  fixable        @7 :Bool;            # true = Shift+F can offer fixes here
+  fixData        @8 :Text;            # opaque token passed back to getFixes/applyFix
+}
+
+# FixItem is one option presented to the user in the fix popup.
+# If replace is non-empty, the editor applies it directly as a text replacement.
+# If replace is empty, the editor calls applyFix with the item's index.
+struct FixItem {
+  label   @0 :Text;
+  replace @1 :Text;
 }
 
 enum DecorationKind {
   gutter    @0;
   overlay   @1;
   statusBar @2;
+  underline @3; # applies underlineStyle/underlineColor to the span [col, endCol)
+}
+
+enum UnderlineStyle {
+  none     @0;
+  straight @1;
+  curly    @2; # undercurl / wavy — terminals that don't support it show straight
 }

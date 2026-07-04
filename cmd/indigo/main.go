@@ -18,11 +18,6 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: indigo [+line] <file|dir>")
-		os.Exit(1)
-	}
-
 	// Parse optional +N line argument (e.g. indigo +42 foo.go).
 	startLine := 0
 	args := os.Args[1:]
@@ -32,9 +27,11 @@ func main() {
 			args = args[1:]
 		}
 	}
+
+	// No file argument → open an untitled empty buffer.
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: indigo [+line] <file|dir>")
-		os.Exit(1)
+		openUntitled(startLine)
+		return
 	}
 	target := args[0]
 
@@ -45,7 +42,19 @@ func main() {
 
 	info, err := os.Stat(absTarget)
 	if err != nil {
-		fatalf("stat %s: %v", absTarget, err)
+		if !os.IsNotExist(err) {
+			fatalf("stat %s: %v", absTarget, err)
+		}
+		// File doesn't exist — create it along with any missing parent directories.
+		if mkErr := os.MkdirAll(filepath.Dir(absTarget), 0o755); mkErr != nil {
+			fatalf("create directory for %s: %v", absTarget, mkErr)
+		}
+		if mkErr := os.WriteFile(absTarget, nil, 0o644); mkErr != nil {
+			fatalf("create %s: %v", absTarget, mkErr)
+		}
+		if info, err = os.Stat(absTarget); err != nil {
+			fatalf("stat %s: %v", absTarget, err)
+		}
 	}
 
 	cfg, err := config.Load()
@@ -145,6 +154,49 @@ func gitRoot(path string) string {
 		dir = parent
 	}
 	return ""
+}
+
+func openUntitled(startLine int) {
+	workDir, err := os.Getwd()
+	if err != nil {
+		fatalf("getwd: %v", err)
+	}
+	// Walk up from cwd to find a git root so the server covers the workspace.
+	if root := gitRoot(workDir); root != "" {
+		workDir = root
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		fatalf("load config: %v", err)
+	}
+
+	sockPath := server.SocketPath(workDir)
+	if !server.IsRunning(sockPath) {
+		startServer(workDir)
+	}
+	if err := waitForServer(sockPath, 3*time.Second); err != nil {
+		fatalf("server did not start: %v", err)
+	}
+
+	rpc, err := client.Dial(sockPath)
+	if err != nil {
+		fatalf("connect to server: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	bufID, content, version, _, err := rpc.OpenFile(ctx, "")
+	cancel()
+	if err != nil {
+		fatalf("open untitled buffer: %v", err)
+	}
+
+	a := app.New(rpc, bufID, content, version, "", cfg, false, workDir, startLine)
+	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	rpc.SetPushSender(p.Send)
+	if _, err := p.Run(); err != nil {
+		fatalf("run: %v", err)
+	}
 }
 
 func fatalf(format string, args ...any) {

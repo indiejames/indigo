@@ -24,7 +24,7 @@ build-custom:
 	go build -tags "$(LANGS)" -o $(OUT) $(CMD)
 
 install: build-release
-	cp $(OUT) $(shell go env GOPATH)/bin/$(BINARY)
+	mv $(OUT) $(shell go env GOPATH)/bin/$(BINARY)
 
 test:
 	go test -tags lang_all ./...

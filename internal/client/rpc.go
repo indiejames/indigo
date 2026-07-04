@@ -383,6 +383,18 @@ func (r *RPC) Save(ctx context.Context, bufID uint32) error {
 	return err
 }
 
+// SaveAs writes the buffer to newPath and updates the server's path record.
+func (r *RPC) SaveAs(ctx context.Context, bufID uint32, newPath string) error {
+	fut, rel := r.svc.SaveAs(ctx, func(p proto.EditorService_saveAs_Params) error {
+		p.SetClientId(r.clientID)
+		p.SetBufferId(bufID)
+		return p.SetPath(newPath)
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
 // CloseBuffer signals the server that this client is done with bufID.
 func (r *RPC) CloseBuffer(ctx context.Context, bufID uint32) error {
 	fut, rel := r.svc.CloseBuffer(ctx, func(p proto.EditorService_closeBuffer_Params) error {

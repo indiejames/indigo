@@ -36,6 +36,12 @@ type errorMsg struct{ err error }
 // savedMsg signals a successful save.
 type savedMsg struct{}
 
+// savedAsMsg signals a successful save-as; carries the new path.
+type savedAsMsg struct {
+	newPath    string
+	thenClose  bool
+}
+
 // clientCountMsg carries the result of a bufferClientCount RPC.
 type clientCountMsg struct{ count uint32 }
 
@@ -267,6 +273,10 @@ type Model struct {
 	// Multi-cursor state
 	extraCursors []ExtraCursor
 
+	// Save-as dialog: non-nil while the "Save As" popup is visible.
+	saveAsInput     *string // current text typed in the dialog
+	saveAsThenClose bool    // close the buffer after a successful save-as
+
 	// LSP state
 	diagnostics []ClientDiag
 	diagTick         int            // counter; fetch every 10 ticks (~1.2s)
@@ -388,6 +398,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clampCursor()
 		return m, m.reparseHighlight()
 
+	case saveAsPromptMsg:
+		s := ""
+		m.saveAsInput = &s
+		m.saveAsThenClose = msg.thenClose
+		return m, nil
+
 	case errorMsg:
 		m.status = "ERR: " + msg.err.Error()
 		return m, nil
@@ -396,6 +412,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.buf.SetClean()
 		m.status = ""
 		m.savedUndoDepth = len(m.undoStack)
+		return m, nil
+
+	case savedAsMsg:
+		m.filePath = msg.newPath
+		m.saveAsThenClose = false
+		m.buf.SetClean()
+		m.status = ""
+		m.savedUndoDepth = len(m.undoStack)
+		if msg.thenClose {
+			return m, m.doCloseBuffer()
+		}
 		return m, nil
 
 	case clientCountMsg:

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -206,6 +207,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Don't consume: let the key fall through to normal handling.
 		}
 	}
+	if m.saveAsInput != nil {
+		return m.handleSaveAsDialog(msg)
+	}
 	// Clear transient error on any key.
 	m.status = ""
 	switch m.mode {
@@ -219,6 +223,42 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSearch(msg)
 	}
 	return m, nil
+}
+
+func (m Model) handleSaveAsDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.saveAsInput = nil
+		m.saveAsThenClose = false
+		return m, nil
+	case "enter":
+		input := strings.TrimSpace(*m.saveAsInput)
+		m.saveAsInput = nil
+		if input == "" {
+			return m, nil
+		}
+		newPath, err := filepath.Abs(input)
+		if err != nil {
+			m.status = fmt.Sprintf("E: bad path: %v", err)
+			m.saveAsThenClose = false
+			return m, nil
+		}
+		return m, m.doSaveAsNow(newPath, m.saveAsThenClose)
+	case "backspace", "ctrl+h":
+		runes := []rune(*m.saveAsInput)
+		if len(runes) > 0 {
+			s := string(runes[:len(runes)-1])
+			m.saveAsInput = &s
+		}
+		return m, nil
+	default:
+		// Append printable characters.
+		if msg.Type == tea.KeyRunes {
+			s := *m.saveAsInput + string(msg.Runes)
+			m.saveAsInput = &s
+		}
+		return m, nil
+	}
 }
 
 func (m Model) handleRecoveryPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1054,6 +1094,22 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 			m.metrics.show = !m.metrics.show
 		}
 	default:
+		if path, ok := strings.CutPrefix(cmd, "w "); ok && strings.TrimSpace(path) != "" {
+			newPath, err := filepath.Abs(strings.TrimSpace(path))
+			if err != nil {
+				m.status = fmt.Sprintf("E: bad path: %v", err)
+				return m, nil
+			}
+			return m, m.doSaveAsNow(newPath, false)
+		}
+		if path, ok := strings.CutPrefix(cmd, "wq "); ok && strings.TrimSpace(path) != "" {
+			newPath, err := filepath.Abs(strings.TrimSpace(path))
+			if err != nil {
+				m.status = fmt.Sprintf("E: bad path: %v", err)
+				return m, nil
+			}
+			return m, m.doSaveAsNow(newPath, true)
+		}
 		m.status = fmt.Sprintf("E: unknown command: %s", cmd)
 	}
 	return m, nil

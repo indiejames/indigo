@@ -1232,6 +1232,23 @@ func (m Model) View() string {
 		}
 	}
 
+	// Overlay Save As dialog (centered).
+	if m.saveAsInput != nil {
+		popup := renderSaveAsDialog(*m.saveAsInput, m.width)
+		popH := len(popup)
+		popW := lipgloss.Width(popup[0])
+		popCol := (m.width - popW) / 2
+		if popCol < 0 {
+			popCol = 0
+		}
+		startRow := max(0, vis/2-popH/2)
+		for pi, popLine := range popup {
+			if row := startRow + pi; row < vis {
+				lines[row] = overlayRight(lines[row], popLine, popCol)
+			}
+		}
+	}
+
 	var sb strings.Builder
 	for _, line := range lines {
 		sb.WriteString(line)
@@ -1239,6 +1256,36 @@ func (m Model) View() string {
 	}
 	sb.WriteString(m.renderStatusBar())
 	return sb.String()
+}
+
+// renderSaveAsDialog renders a centered "Save As" input dialog.
+func renderSaveAsDialog(input string, maxW int) []string {
+	const minInnerW = 40
+	innerW := max(minInnerW, maxW/2)
+	fieldW := innerW - 2 // 1 space padding on each side
+
+	// Scroll so the cursor is always visible at the right.
+	runes := []rune(input)
+	if len(runes) >= fieldW {
+		runes = runes[len(runes)-(fieldW-1):]
+	}
+	// fieldContent is exactly innerW runes: space + text + | cursor + trailing spaces + space
+	trailing := strings.Repeat(" ", max(0, fieldW-len(runes)-1))
+	fieldContent := " " + string(runes) + "|" + trailing + " "
+
+	const titleSuffix = "─ Save As " // 10 runes — use rune count, not byte count
+	titleSuffixW := len([]rune(titleSuffix))
+	dashes := strings.Repeat("─", max(0, innerW-titleSuffixW))
+
+	hint := "Enter: Save   Esc: Cancel"
+	hintW := len([]rune(hint))
+	hintPad := strings.Repeat(" ", max(0, innerW-hintW))
+
+	top := popupBorderStyle.Render("╭" + titleSuffix + dashes + "╮")
+	mid := popupBorderStyle.Render("│") + popupTextStyle.Render(fieldContent) + popupBorderStyle.Render("│")
+	bot := popupBorderStyle.Render("│") + popupKeyStyle.Render(hint) + popupBorderStyle.Render(hintPad+"│")
+	btm := popupBorderStyle.Render("╰" + strings.Repeat("─", innerW) + "╯")
+	return []string{top, mid, bot, btm}
 }
 
 // fileTypeName maps a file extension to a human-readable language name.

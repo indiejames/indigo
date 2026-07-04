@@ -147,8 +147,74 @@ func configDir() (string, error) {
 	return filepath.Join(home, ".config"), nil
 }
 
+// defaultConfigTemplate is written to disk the first time indigo runs.
+// Every option is commented out so the file acts as self-documenting
+// reference without changing any behaviour.
+const defaultConfigTemplate = `# Indigo editor configuration
+#
+# This file was created automatically with all settings at their default values.
+# Every option is commented out. To change a setting, remove the leading '#'
+# and update the value.
+
+# Show line numbers in the left gutter.
+# line_numbers = true
+
+# Maximum file size in bytes for which crash-recovery snapshots are kept.
+# Set to 0 to disable recovery entirely.
+# recovery_max_bytes = 104857600   # 100 MiB
+
+# How often recovery snapshots are written to disk, in seconds.
+# recovery_interval_secs = 5
+
+# Hide the visible tab markers when multiple files are open.
+# hide_tabs = false
+
+# Use fuzzy matching in the file picker (as opposed to prefix matching).
+# fuzzy_search = true
+
+# Run the configured formatter automatically whenever a file is saved.
+# format_on_save = false
+
+# ---------------------------------------------------------------------------
+# Language servers
+#
+# Indigo has built-in defaults for Go, Rust, TypeScript/JavaScript, Python,
+# C/C++, Lua, Ruby, Java, and Zig. Add a [[language_server]] block to
+# override or add a server for a given set of file extensions.
+#
+# [[language_server]]
+# extensions = ["go"]
+# command    = "gopls"
+# args       = []          # optional extra arguments
+#
+# [[language_server]]
+# extensions = ["rs"]
+# command    = "rust-analyzer"
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Formatters
+#
+# Indigo has built-in formatter defaults (gofmt, rustfmt, prettier, etc.).
+# Add a [[formatter]] block to override or add a formatter for a given set
+# of file extensions.
+#
+# [[formatter]]
+# extensions = ["go"]
+# command    = "gofmt"
+# args       = []          # optional; use {file} as a placeholder for the path
+#
+# [[formatter]]
+# extensions = ["js", "ts"]
+# command    = "prettier"
+# args       = ["--stdin-filepath", "{file}"]
+# ---------------------------------------------------------------------------
+`
+
 // Load reads the config file, returning defaults for any missing or
 // unreadable file. A parse error is the only failure that is returned.
+// When the file does not exist, a commented-out template is created so the
+// user has a ready-made reference to all available settings.
 func Load() (*Config, error) {
 	cfg := defaults()
 
@@ -157,10 +223,17 @@ func Load() (*Config, error) {
 		return cfg, nil
 	}
 
-	path := filepath.Join(dir, "indigo", "config.toml")
+	indigoDir := filepath.Join(dir, "indigo")
+	path := filepath.Join(indigoDir, "config.toml")
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			// Best-effort: create the directory and write the template.
+			// Failures here are silently ignored so a read-only home
+			// directory doesn't prevent the editor from starting.
+			if mkErr := os.MkdirAll(indigoDir, 0o755); mkErr == nil {
+				_ = os.WriteFile(path, []byte(defaultConfigTemplate), 0o644)
+			}
 			return cfg, nil
 		}
 		return cfg, err

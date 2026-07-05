@@ -185,6 +185,17 @@ var (
 	diagWarnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFDD44"))
 	diagInfoStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#88AAFF"))
 
+	// Diagnostic count indicators embedded in the status bar.
+	barDiagErrorStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#087AC8")).
+				Foreground(lipgloss.Color("#FF8888"))
+	barDiagWarnStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#087AC8")).
+				Foreground(lipgloss.Color("#FFDD44"))
+	barDiagInfoStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#087AC8")).
+				Foreground(lipgloss.Color("#88AAFF"))
+
 	// Status bar right-side indicators.
 	fileTypeStyle = lipgloss.NewStyle().
 			Background(lipgloss.Color("#065A96")).
@@ -258,6 +269,7 @@ type Model struct {
 	savedUndoDepth int           // len(undoStack) at the time of the last save
 	cmdBuf             string // text typed after ':' while in ModeCommand
 	cmdCompletionIdx   int    // selected item in command completion popup (−1 = none)
+	diagPopup          bool   // when true, show diagnostic detail popup for cursor line
 	prefixSeq          []rune // keys typed so far for a multi-key Normal-mode command
 	searchQuery    string
 	searchMatches  []searchMatch

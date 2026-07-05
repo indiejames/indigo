@@ -178,6 +178,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.warnQuit {
 		return m.handleWarnQuit(msg)
 	}
+	// Any key dismisses the diagnostic popup; Esc consumes the key, others fall through.
+	if m.diagPopup && msg.String() != "E" {
+		m.diagPopup = false
+		if msg.String() == "esc" {
+			return m, nil
+		}
+		// fall through to normal handling
+	}
+
 	// Scroll keys navigate the hover popup; all other keys dismiss it.
 	if m.hoverContent != nil {
 		// contentH mirrors the calculation in renderHoverPopup.
@@ -525,6 +534,13 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "K":
 		return m, m.fetchHover()
+
+	case "E":
+		if len(m.diagsOnLine(m.cursor.Line)) > 0 {
+			m.diagPopup = !m.diagPopup
+		} else {
+			m.status = "No diagnostics on this line"
+		}
 
 	case "F":
 		return m, m.fetchFixes()

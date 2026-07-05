@@ -884,17 +884,6 @@ func (m Model) currentWordPrefix() string {
 	return string(runes[start:col])
 }
 
-// diagsOnLine returns diagnostics on the given line, most severe first.
-func (m Model) diagsOnLine(line int) []ClientDiag {
-	var out []ClientDiag
-	for _, d := range m.diagnostics {
-		if d.Line == line {
-			out = append(out, d)
-		}
-	}
-	sortDiags(out)
-	return out
-}
 
 // diagsAtPos returns diagnostics whose underline range covers (line, col), most severe first.
 // A diagnostic covers col when d.Col <= col < d.EndCol (or endCol is clamped to col+1 for zero-width).

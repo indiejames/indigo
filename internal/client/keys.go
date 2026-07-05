@@ -36,6 +36,9 @@ var prefixCmds = []command{
 			{key: 'h', label: "Go to line start", execute: executeGoToLineStart},
 			{key: 'l', label: "Go to line end", execute: executeGoToLineEnd},
 			{key: 's', label: "Go to first non-whitespace", execute: executeGoToFirstNonWS},
+			{key: 'b', label: "Open buffer picker", execute: func(m Model) (tea.Model, tea.Cmd) {
+				return m, func() tea.Msg { return OpenBufPickerMsg{} }
+			}},
 		},
 	},
 	{

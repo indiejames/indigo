@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
@@ -52,8 +53,9 @@ type App struct {
 	active  int
 	status  string // app-level transient message (e.g. ":qa" error)
 
-	picker *filePicker // non-nil when file picker is open
-	grep   *grepPicker // non-nil when workspace search picker is open
+	picker    *filePicker // non-nil when file picker is open
+	grep      *grepPicker // non-nil when workspace search picker is open
+	bufPicker *bufPicker  // non-nil when buffer picker popup is open
 
 	configPath    string    // path to config.toml; empty means watch is disabled
 	configModTime time.Time // mtime of last observed config file
@@ -170,6 +172,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.grep.width = msg.Width
 			a.grep.height = msg.Height
 		}
+		if a.bufPicker != nil {
+			a.bufPicker.width = msg.Width
+			a.bufPicker.height = msg.Height
+		}
 		// Resize all buffers with the correct height (minus tab bar if shown).
 		bufMsg := tea.WindowSizeMsg{Width: msg.Width, Height: a.bufHeight()}
 		var cmds []tea.Cmd
@@ -235,6 +241,24 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case grepCancelledMsg:
 		a.grep = nil
+		return a, nil
+
+	// ---- buffer picker ----
+	case client.OpenBufPickerMsg:
+		if len(a.buffers) > 0 {
+			a.bufPicker = newBufPicker(a.buffers, a.active, a.width, a.height)
+		}
+		return a, nil
+
+	case bufPickedMsg:
+		a.bufPicker = nil
+		if msg.idx >= 0 && msg.idx < len(a.buffers) {
+			a.active = msg.idx
+		}
+		return a, nil
+
+	case bufPickerCancelledMsg:
+		a.bufPicker = nil
 		return a, nil
 
 	case openFileMsg:
@@ -338,6 +362,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
+	// Buffer picker intercepts all key input when open.
+	if a.bufPicker != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleBufPickerKey(km)
+		}
+		return a, nil
+	}
+
 	// No buffer open: handle essential keys at the App level.
 	if len(a.buffers) == 0 {
 		if km, ok := msg.(tea.KeyMsg); ok {
@@ -387,6 +419,22 @@ func (a App) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(msg.Runes) > 0 {
 			a.picker.setQuery(a.picker.query + string(msg.Runes))
 		}
+	}
+	return a, nil
+}
+
+// handleBufPickerKey routes key events to the buffer picker popup.
+func (a App) handleBufPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		return a, func() tea.Msg { return bufPickerCancelledMsg{} }
+	case "enter":
+		idx := a.bufPicker.selected()
+		return a, func() tea.Msg { return bufPickedMsg{idx: idx} }
+	case "up", "k":
+		a.bufPicker.moveUp()
+	case "down", "j":
+		a.bufPicker.moveDown()
 	}
 	return a, nil
 }
@@ -611,7 +659,55 @@ func (a App) View() string {
 		sb.WriteByte('\n')
 	}
 	sb.WriteString(a.buffers[a.active].View())
-	return sb.String()
+	base := sb.String()
+
+	if a.bufPicker != nil {
+		return overlayCenter(base, a.bufPicker.render(), a.width, a.height)
+	}
+	return base
+}
+
+// overlayCenter splices popup (a multi-line box) into the centre of base,
+// using ANSI-aware left/right truncation so editor colours show on both sides.
+func overlayCenter(base, popup string, termW, termH int) string {
+	baseLines := strings.Split(base, "\n")
+	popLines := strings.Split(popup, "\n")
+
+	popH := len(popLines)
+	popW := lipgloss.Width(popLines[0])
+
+	startRow := (termH - popH) / 2
+	startCol := (termW - popW) / 2
+	if startCol < 0 {
+		startCol = 0
+	}
+
+	out := make([]string, termH)
+	for i := range out {
+		if i < len(baseLines) {
+			out[i] = baseLines[i]
+		} else {
+			out[i] = strings.Repeat(" ", termW)
+		}
+	}
+
+	for pi, popLine := range popLines {
+		ri := startRow + pi
+		if ri < 0 || ri >= termH {
+			continue
+		}
+		baseLine := out[ri]
+		left := ansi.Truncate(baseLine, startCol, "")
+		// Pad left side if baseLine is shorter than startCol (e.g. empty lines).
+		leftW := lipgloss.Width(left)
+		if leftW < startCol {
+			left += strings.Repeat(" ", startCol-leftW)
+		}
+		right := ansi.TruncateLeft(baseLine, startCol+popW, "")
+		out[ri] = left + popLine + right
+	}
+
+	return strings.Join(out, "\n")
 }
 
 func (a App) renderTabBar() string {

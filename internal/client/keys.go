@@ -178,6 +178,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.warnQuit {
 		return m.handleWarnQuit(msg)
 	}
+	// Escape dismisses the diagnostic popup and suppresses re-show until cursor leaves the range.
+	// Always falls through so the mode transition (insert→normal) also happens.
+	if m.diagPopup && msg.String() == "esc" {
+		m.diagPopup = false
+		m.diagPopupSuppressed = true
+	}
+
 	// Scroll keys navigate the hover popup; all other keys dismiss it.
 	if m.hoverContent != nil {
 		// contentH mirrors the calculation in renderHoverPopup.
@@ -525,6 +532,13 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "K":
 		return m, m.fetchHover()
+
+	case "E":
+		if len(m.diagsAtPos(m.cursor.Line, m.cursor.Col)) > 0 {
+			m.diagPopup = !m.diagPopup
+		} else {
+			m.status = "No diagnostics on this line"
+		}
 
 	case "F":
 		return m, m.fetchFixes()

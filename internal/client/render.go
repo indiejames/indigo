@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,29 @@ import (
 )
 
 const tabWidth = 4
+
+// diagUnderlineStyle is the underline style used for LSP diagnostics.
+// Set once at startup based on terminal capabilities.
+var diagUnderlineStyle = func() ClientUnderlineStyle {
+	switch os.Getenv("TERM_PROGRAM") {
+	case "iTerm.app", "WezTerm", "kitty", "ghostty":
+		return ClientUnderlineCurly
+	default:
+		return ClientUnderlineStraight
+	}
+}()
+
+// diagColors maps LSP severity (1=error, 2=warn, 3+=info) to hex colors.
+func diagColor(severity uint8) string {
+	switch severity {
+	case 1:
+		return "#FF5555"
+	case 2:
+		return "#FFDD44"
+	default:
+		return "#88AAFF"
+	}
+}
 
 // decorOverlayStyle is used to render plugin overlay decorations (e.g. jumpy labels).
 var decorOverlayStyle = lipgloss.NewStyle().
@@ -241,44 +265,22 @@ func (m Model) gutterDecorFor(lineNum int) string {
 	return ""
 }
 
-// gutterWidth returns the number of columns reserved for line numbers (and diag/plugin markers).
+// gutterWidth returns the number of columns reserved for line numbers (and plugin markers).
 func (m Model) gutterWidth() int {
 	hasPluginGutter := m.hasGutterDecorations()
 	if m.cfg == nil || !m.cfg.LineNumbers {
-		w := 0
-		if len(m.diagnostics) > 0 {
-			w += 2 // diag marker
-		}
 		if hasPluginGutter {
-			w += 3 // space + up to 2 chars
+			return 3 // space + up to 2 chars
 		}
-		return w
+		return 0
 	}
 	w := len(fmt.Sprint(m.displayLineCount())) + 1
-	if len(m.diagnostics) > 0 {
-		w += 2 // space + marker
-	}
 	if hasPluginGutter {
 		w += 3 // space + up to 2 chars
 	}
 	return w
 }
 
-// diagMarker returns a styled "● " for the most severe diagnostic on line, or "  ".
-func (m Model) diagMarker(lineNum int) string {
-	diags := m.diagsOnLine(lineNum)
-	if len(diags) == 0 {
-		return "  "
-	}
-	switch diags[0].Severity {
-	case 1:
-		return diagErrorStyle.Render("●") + " "
-	case 2:
-		return diagWarnStyle.Render("●") + " "
-	default:
-		return diagInfoStyle.Render("●") + " "
-	}
-}
 
 // selectionCols returns the inclusive [selA, selB] column range selected on
 // lineNum, or (-1, -1) when lineNum is not inside the current selection.
@@ -494,13 +496,9 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 	}
 
 	if gutterW > 0 {
-		hasDiags := len(m.diagnostics) > 0
 		hasPluginGutter := m.hasGutterDecorations()
 		if chunk == 0 {
 			numW := gutterW
-			if hasDiags {
-				numW -= 2
-			}
 			if hasPluginGutter {
 				numW -= 3
 			}
@@ -511,9 +509,6 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 				} else {
 					sb.WriteString(gutterStyle.Render(numStr))
 				}
-			}
-			if hasDiags {
-				sb.WriteString(m.diagMarker(lineNum))
 			}
 			if hasPluginGutter {
 				text := m.gutterDecorFor(lineNum)
@@ -603,7 +598,44 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 	}
 
 	// Collect underline decoration ranges for this line (separate from syntax spans).
+	// Diagnostic underlines are prepended so they take precedence over plugin underlines.
 	var underlines []underlineRange
+	for _, d := range m.diagnostics {
+		// Handle single-line and multi-line diagnostics.
+		var startCol, endCol int
+		switch {
+		case d.Line == lineNum && d.EndLine == lineNum:
+			startCol, endCol = d.Col, d.EndCol
+		case d.Line == lineNum && d.EndLine > lineNum:
+			startCol, endCol = d.Col, len(runes)
+		case d.Line < lineNum && d.EndLine == lineNum:
+			startCol, endCol = 0, d.EndCol
+		case d.Line < lineNum && d.EndLine > lineNum:
+			startCol, endCol = 0, len(runes)
+		default:
+			continue
+		}
+		if startCol >= endCol {
+			endCol = startCol + 1 // ensure at least one char is underlined
+		}
+		startVis := len(expandedRunes)
+		if startCol < len(colMap) {
+			startVis = colMap[startCol]
+		}
+		endVis := len(expandedRunes)
+		if endCol < len(colMap) {
+			endVis = colMap[endCol]
+		}
+		if startVis >= chunkStart+cw || endVis <= chunkStart {
+			continue
+		}
+		seq := underlineANSI(diagUnderlineStyle, diagColor(d.Severity))
+		underlines = append(underlines, underlineRange{
+			StartCol: max(0, startVis-chunkStart),
+			EndCol:   min(cw, endVis-chunkStart),
+			StartSeq: seq,
+		})
+	}
 	for _, d := range m.decorations {
 		if d.Kind != ClientDecorationUnderline || int(d.Line) != lineNum {
 			continue
@@ -680,6 +712,58 @@ func renderFixPopup(items []ClientFixItem, selected, maxW int) []string {
 					popupBorderStyle.Render("│"))
 		}
 	}
+	lines = append(lines, popupBorderStyle.Render("╰"+strings.Repeat("─", innerW)+"╯"))
+	return lines
+}
+
+// renderDiagPopup builds styled lines for the diagnostic detail popup (Shift+E).
+// It shows all diagnostics for a single line, full terminal width.
+func renderDiagPopup(diags []ClientDiag, termW int) []string {
+	innerW := max(10, termW-2)
+
+	title := "Diagnostics"
+	dashes := max(0, innerW-len([]rune(title)))
+	top := popupBorderStyle.Render("╭") +
+		popupTextStyle.Render(title) +
+		popupBorderStyle.Render(strings.Repeat("─", dashes)+"╮")
+	lines := []string{top}
+
+	for _, d := range diags {
+		// Choose marker style by severity.
+		var markerStyle lipgloss.Style
+		switch d.Severity {
+		case 1:
+			markerStyle = diagErrorStyle.Background(popupBg)
+		case 2:
+			markerStyle = diagWarnStyle.Background(popupBg)
+		default:
+			markerStyle = diagInfoStyle.Background(popupBg)
+		}
+
+		// Build source tag plain text.
+		srcText := ""
+		if d.Source != "" {
+			srcText = "[" + d.Source + "] "
+		}
+
+		// Compute how much room is left for the message.
+		// Row layout (visible chars): 1(space) + 1(●) + 1(space) + len(srcText) + len(msg) + trailing
+		used := 3 + len([]rune(srcText))
+		avail := max(0, innerW-used)
+		msgRunes := []rune(d.Message)
+		if len(msgRunes) > avail {
+			msgRunes = append([]rune(string(msgRunes[:max(0, avail-1)])), '…')
+		}
+		trail := max(0, innerW-used-len(msgRunes))
+
+		row := popupBorderStyle.Render("│") +
+			popupTextStyle.Render(" ") +
+			markerStyle.Render("●") +
+			popupTextStyle.Render(" "+srcText+string(msgRunes)+strings.Repeat(" ", trail)) +
+			popupBorderStyle.Render("│")
+		lines = append(lines, row)
+	}
+
 	lines = append(lines, popupBorderStyle.Render("╰"+strings.Repeat("─", innerW)+"╯"))
 	return lines
 }
@@ -1388,6 +1472,20 @@ func (m Model) View() string {
 		}
 	}
 
+	// Overlay diagnostic detail popup (Shift+E) above the status bar, full width.
+	if m.diagPopup {
+		if diags := m.diagsAtPos(m.cursor.Line, m.cursor.Col); len(diags) > 0 {
+			popup := renderDiagPopup(diags, m.width)
+			popH := len(popup)
+			startRow := max(0, vis-popH)
+			for pi, popLine := range popup {
+				if row := startRow + pi; row < vis {
+					lines[row] = popLine
+				}
+			}
+		}
+	}
+
 	// Overlay metrics panel in the top-right corner.
 	if m.metrics != nil && m.metrics.show {
 		box := renderMetricsBox(m.metrics)
@@ -1603,6 +1701,28 @@ func (m Model) renderStatusBar() string {
 		right = lspSeg + right
 	}
 
+	// Diagnostic counts for the whole file, prepended before the LSP segment.
+	var errCnt, warnCnt, infoCnt int
+	for _, d := range m.diagnostics {
+		switch d.Severity {
+		case 1:
+			errCnt++
+		case 2:
+			warnCnt++
+		default:
+			infoCnt++
+		}
+	}
+	if infoCnt > 0 {
+		right = barDiagInfoStyle.Render(fmt.Sprintf(" %dI ", infoCnt)) + right
+	}
+	if warnCnt > 0 {
+		right = barDiagWarnStyle.Render(fmt.Sprintf(" %dW ", warnCnt)) + right
+	}
+	if errCnt > 0 {
+		right = barDiagErrorStyle.Render(fmt.Sprintf(" %dE ", errCnt)) + right
+	}
+
 	rightW := lipgloss.Width(right)
 
 	var centerContent string
@@ -1617,25 +1737,15 @@ func (m Model) renderStatusBar() string {
 			centerContent = m.filePath + " [+]   " + m.status
 		}
 	default:
-		if diags := m.diagsOnLine(m.cursor.Line); len(diags) > 0 {
-			// Show most-severe diagnostic on the cursor line.
-			d := diags[0]
-			src := d.Source
-			if src != "" {
-				src = "[" + src + "] "
-			}
-			centerContent = src + d.Message
-		} else {
-			centerContent = m.filePath
-			if m.buf.Dirty() {
-				centerContent += " [+]"
-			}
-			if len(m.searchMatches) > 0 {
-				centerContent += fmt.Sprintf("   [%d/%d]", m.searchIdx+1, len(m.searchMatches))
-			}
-			if len(m.extraCursors) > 0 {
-				centerContent += fmt.Sprintf("   %d cursors", 1+len(m.extraCursors))
-			}
+		centerContent = m.filePath
+		if m.buf.Dirty() {
+			centerContent += " [+]"
+		}
+		if len(m.searchMatches) > 0 {
+			centerContent += fmt.Sprintf("   [%d/%d]", m.searchIdx+1, len(m.searchMatches))
+		}
+		if len(m.extraCursors) > 0 {
+			centerContent += fmt.Sprintf("   %d cursors", 1+len(m.extraCursors))
 		}
 	}
 

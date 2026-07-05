@@ -252,7 +252,7 @@ func (s *Spell) loadUserDictFile(path string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		w := strings.TrimSpace(sc.Text())
@@ -281,7 +281,7 @@ func persistWord(path, word string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 	_, err = fmt.Fprintln(f, word)
 	return err
 }

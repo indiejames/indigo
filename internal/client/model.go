@@ -115,6 +115,9 @@ type NextBufferMsg struct{}
 // PrevBufferMsg signals the App to switch to the previous buffer.
 type PrevBufferMsg struct{}
 
+// OpenBufPickerMsg signals the App to open the buffer picker popup.
+type OpenBufPickerMsg struct{}
+
 // QuitAllMsg signals the App to quit all buffers (:qa / :qa! / :wqa).
 type QuitAllMsg struct {
 	Force   bool // :qa! — skip dirty check

@@ -346,28 +346,23 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Picker intercepts all key input when open.
+	// Each picker intercepts key input only. Non-key messages (tickMsg, diagnosticsMsg,
+	// decorationsMsg, etc.) fall through to the active buffer so the tick chain and
+	// async fetch loops keep running while any picker is open.
 	if a.picker != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handlePickerKey(km)
 		}
-		return a, nil
 	}
-
-	// Grep picker intercepts all key input when open.
 	if a.grep != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handleGrepKey(km)
 		}
-		return a, nil
 	}
-
-	// Buffer picker intercepts all key input when open.
 	if a.bufPicker != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handleBufPickerKey(km)
 		}
-		return a, nil
 	}
 
 	// No buffer open: handle essential keys at the App level.

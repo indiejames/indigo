@@ -551,8 +551,8 @@ func (s *editorService) GetDiagnostics(_ context.Context, call proto.EditorServi
 		item.SetEndLine(uint32(d.Range.End.Line))
 		item.SetEndCol(uint32(d.Range.End.Character))
 		item.SetSeverity(uint8(d.Severity))
-		item.SetMessage_(d.Message)   //nolint:errcheck
-		item.SetSource(d.Source)      //nolint:errcheck
+		item.SetMessage_(d.Message) //nolint:errcheck
+		item.SetSource(d.Source)    //nolint:errcheck
 	}
 	return nil
 }
@@ -676,7 +676,7 @@ func (s *editorService) Complete(_ context.Context, call proto.EditorService_com
 	}
 	for i, it := range items {
 		ci := list.At(i)
-		ci.SetLabel(it.Label)           //nolint:errcheck
+		ci.SetLabel(it.Label) //nolint:errcheck
 		ci.SetKind(uint8(it.Kind))
 		ci.SetDetail(it.Detail)         //nolint:errcheck
 		ci.SetInsertText(it.InsertText) //nolint:errcheck
@@ -995,14 +995,14 @@ func New(dir string) (*Server, error) {
 		return nil, fmt.Errorf("listen %s: %w", sockPath, err)
 	}
 	if err := os.Chmod(sockPath, 0600); err != nil {
-		ln.Close() //nolint:errcheck
+		ln.Close()          //nolint:errcheck
 		os.Remove(sockPath) //nolint:errcheck
 		return nil, fmt.Errorf("securing socket %s: %w", sockPath, err)
 	}
 
 	recDir, err := setupRecoveryDir()
 	if err != nil {
-		ln.Close() //nolint:errcheck
+		ln.Close()          //nolint:errcheck
 		os.Remove(sockPath) //nolint:errcheck
 		return nil, fmt.Errorf("recovery dir: %w", err)
 	}

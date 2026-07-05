@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,29 @@ import (
 )
 
 const tabWidth = 4
+
+// diagUnderlineStyle is the underline style used for LSP diagnostics.
+// Set once at startup based on terminal capabilities.
+var diagUnderlineStyle = func() ClientUnderlineStyle {
+	switch os.Getenv("TERM_PROGRAM") {
+	case "iTerm.app", "WezTerm", "kitty", "ghostty":
+		return ClientUnderlineCurly
+	default:
+		return ClientUnderlineStraight
+	}
+}()
+
+// diagColors maps LSP severity (1=error, 2=warn, 3+=info) to hex colors.
+func diagColor(severity uint8) string {
+	switch severity {
+	case 1:
+		return "#FF5555"
+	case 2:
+		return "#FFDD44"
+	default:
+		return "#88AAFF"
+	}
+}
 
 // decorOverlayStyle is used to render plugin overlay decorations (e.g. jumpy labels).
 var decorOverlayStyle = lipgloss.NewStyle().
@@ -241,44 +265,22 @@ func (m Model) gutterDecorFor(lineNum int) string {
 	return ""
 }
 
-// gutterWidth returns the number of columns reserved for line numbers (and diag/plugin markers).
+// gutterWidth returns the number of columns reserved for line numbers (and plugin markers).
 func (m Model) gutterWidth() int {
 	hasPluginGutter := m.hasGutterDecorations()
 	if m.cfg == nil || !m.cfg.LineNumbers {
-		w := 0
-		if len(m.diagnostics) > 0 {
-			w += 2 // diag marker
-		}
 		if hasPluginGutter {
-			w += 3 // space + up to 2 chars
+			return 3 // space + up to 2 chars
 		}
-		return w
+		return 0
 	}
 	w := len(fmt.Sprint(m.displayLineCount())) + 1
-	if len(m.diagnostics) > 0 {
-		w += 2 // space + marker
-	}
 	if hasPluginGutter {
 		w += 3 // space + up to 2 chars
 	}
 	return w
 }
 
-// diagMarker returns a styled "● " for the most severe diagnostic on line, or "  ".
-func (m Model) diagMarker(lineNum int) string {
-	diags := m.diagsOnLine(lineNum)
-	if len(diags) == 0 {
-		return "  "
-	}
-	switch diags[0].Severity {
-	case 1:
-		return diagErrorStyle.Render("●") + " "
-	case 2:
-		return diagWarnStyle.Render("●") + " "
-	default:
-		return diagInfoStyle.Render("●") + " "
-	}
-}
 
 // selectionCols returns the inclusive [selA, selB] column range selected on
 // lineNum, or (-1, -1) when lineNum is not inside the current selection.
@@ -494,13 +496,9 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 	}
 
 	if gutterW > 0 {
-		hasDiags := len(m.diagnostics) > 0
 		hasPluginGutter := m.hasGutterDecorations()
 		if chunk == 0 {
 			numW := gutterW
-			if hasDiags {
-				numW -= 2
-			}
 			if hasPluginGutter {
 				numW -= 3
 			}
@@ -511,9 +509,6 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 				} else {
 					sb.WriteString(gutterStyle.Render(numStr))
 				}
-			}
-			if hasDiags {
-				sb.WriteString(m.diagMarker(lineNum))
 			}
 			if hasPluginGutter {
 				text := m.gutterDecorFor(lineNum)
@@ -603,7 +598,44 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 	}
 
 	// Collect underline decoration ranges for this line (separate from syntax spans).
+	// Diagnostic underlines are prepended so they take precedence over plugin underlines.
 	var underlines []underlineRange
+	for _, d := range m.diagnostics {
+		// Handle single-line and multi-line diagnostics.
+		var startCol, endCol int
+		switch {
+		case d.Line == lineNum && d.EndLine == lineNum:
+			startCol, endCol = d.Col, d.EndCol
+		case d.Line == lineNum && d.EndLine > lineNum:
+			startCol, endCol = d.Col, len(runes)
+		case d.Line < lineNum && d.EndLine == lineNum:
+			startCol, endCol = 0, d.EndCol
+		case d.Line < lineNum && d.EndLine > lineNum:
+			startCol, endCol = 0, len(runes)
+		default:
+			continue
+		}
+		if startCol >= endCol {
+			endCol = startCol + 1 // ensure at least one char is underlined
+		}
+		startVis := len(expandedRunes)
+		if startCol < len(colMap) {
+			startVis = colMap[startCol]
+		}
+		endVis := len(expandedRunes)
+		if endCol < len(colMap) {
+			endVis = colMap[endCol]
+		}
+		if startVis >= chunkStart+cw || endVis <= chunkStart {
+			continue
+		}
+		seq := underlineANSI(diagUnderlineStyle, diagColor(d.Severity))
+		underlines = append(underlines, underlineRange{
+			StartCol: max(0, startVis-chunkStart),
+			EndCol:   min(cw, endVis-chunkStart),
+			StartSeq: seq,
+		})
+	}
 	for _, d := range m.decorations {
 		if d.Kind != ClientDecorationUnderline || int(d.Line) != lineNum {
 			continue
@@ -1442,7 +1474,7 @@ func (m Model) View() string {
 
 	// Overlay diagnostic detail popup (Shift+E) above the status bar, full width.
 	if m.diagPopup {
-		if diags := m.diagsOnLine(m.cursor.Line); len(diags) > 0 {
+		if diags := m.diagsAtPos(m.cursor.Line, m.cursor.Col); len(diags) > 0 {
 			popup := renderDiagPopup(diags, m.width)
 			popH := len(popup)
 			startRow := max(0, vis-popH)

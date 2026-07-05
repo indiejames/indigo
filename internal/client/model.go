@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"time"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -125,6 +126,17 @@ type pluginKeyResultMsg struct{ result PluginKeyResult }
 
 // decorationsMsg carries fresh plugin decorations from the server.
 type decorationsMsg struct{ items []ClientDecoration }
+
+// showDiagPopupMsg fires after the 300 ms auto-show delay.
+type showDiagPopupMsg struct{}
+
+// scheduleShowDiagPopup returns a command that delivers showDiagPopupMsg after 300 ms.
+func scheduleShowDiagPopup() tea.Cmd {
+	return func() tea.Msg {
+		time.Sleep(300 * time.Millisecond)
+		return showDiagPopupMsg{}
+	}
+}
 
 // highlightMsg carries freshly computed syntax-highlight spans and parse time.
 type highlightMsg struct {
@@ -270,6 +282,7 @@ type Model struct {
 	cmdBuf             string // text typed after ':' while in ModeCommand
 	cmdCompletionIdx   int    // selected item in command completion popup (−1 = none)
 	diagPopup          bool   // when true, show diagnostic detail popup for cursor line
+	diagPopupSuppressed bool  // Escape pressed; don't re-show until cursor leaves the range
 	prefixSeq          []rune // keys typed so far for a multi-key Normal-mode command
 	searchQuery    string
 	searchMatches  []searchMatch
@@ -483,9 +496,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.reparseHighlight()
 
 	case diagnosticsMsg:
-		m.diagnostics = msg.diags
+		m.diagnostics = m.expandDiags(msg.diags)
 		if msg.lspReady {
 			m.lspActive = true
+		}
+		atCursor := len(m.diagsAtPos(m.cursor.Line, m.cursor.Col)) > 0
+		if m.diagPopup && !atCursor {
+			m.diagPopup = false
+			m.diagPopupSuppressed = false
+		}
+		if !m.diagPopup && !m.diagPopupSuppressed && atCursor {
+			return m, scheduleShowDiagPopup()
+		}
+		return m, nil
+
+	case showDiagPopupMsg:
+		if !m.diagPopupSuppressed && len(m.diagsAtPos(m.cursor.Line, m.cursor.Col)) > 0 {
+			m.diagPopup = true
 		}
 		return m, nil
 
@@ -615,12 +642,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.metrics != nil {
 			m.metrics.lastKeyAt = time.Now()
 		}
+		prevLine := m.cursor.Line
 		prevTopLine := m.topLine
 		newModel, cmd := m.handleKey(msg)
-		if nm, ok := newModel.(Model); ok && nm.topLine != prevTopLine {
-			return nm, tea.Batch(cmd, nm.updateViewportCmd())
+		nm, ok := newModel.(Model)
+		if !ok {
+			return newModel, cmd
 		}
-		return newModel, cmd
+		if nm.topLine != prevTopLine {
+			cmd = tea.Batch(cmd, nm.updateViewportCmd())
+		}
+		// When the cursor moves, manage the diagnostic popup.
+		if nm.cursor.Line != prevLine || nm.cursor.Col != m.cursor.Col {
+			atPos := len(nm.diagsAtPos(nm.cursor.Line, nm.cursor.Col)) > 0
+			if !atPos {
+				// Left the diagnostic range: dismiss and clear suppression.
+				nm.diagPopup = false
+				nm.diagPopupSuppressed = false
+			} else if nm.diagPopup {
+				// Still in range with popup visible: keep it.
+			} else if !nm.diagPopupSuppressed {
+				// Entered a range (not suppressed): schedule show.
+				cmd = tea.Batch(cmd, scheduleShowDiagPopup())
+			}
+		}
+		return nm, cmd
 	}
 	return m, nil
 }
@@ -846,11 +892,61 @@ func (m Model) diagsOnLine(line int) []ClientDiag {
 			out = append(out, d)
 		}
 	}
-	// Sort: lower severity number = more severe (1=error, 2=warn, ...)
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j].Severity < out[j-1].Severity; j-- {
-			out[j], out[j-1] = out[j-1], out[j]
+	sortDiags(out)
+	return out
+}
+
+// diagsAtPos returns diagnostics whose underline range covers (line, col), most severe first.
+// A diagnostic covers col when d.Col <= col < d.EndCol (or endCol is clamped to col+1 for zero-width).
+func (m Model) diagsAtPos(line, col int) []ClientDiag {
+	var out []ClientDiag
+	for _, d := range m.diagnostics {
+		if d.Line != line {
+			continue
+		}
+		end := d.EndCol
+		if end <= d.Col {
+			end = d.Col + 1
+		}
+		if col >= d.Col && col < end {
+			out = append(out, d)
+		}
+	}
+	sortDiags(out)
+	return out
+}
+
+func sortDiags(diags []ClientDiag) {
+	for i := 1; i < len(diags); i++ {
+		for j := i; j > 0 && diags[j].Severity < diags[j-1].Severity; j-- {
+			diags[j], diags[j-1] = diags[j-1], diags[j]
+		}
+	}
+}
+
+// expandDiags widens zero-width (point) diagnostic ranges to cover the full
+// identifier/token at that position, so the underline and popup trigger span
+// the whole token rather than just a single character.
+func (m Model) expandDiags(diags []ClientDiag) []ClientDiag {
+	out := make([]ClientDiag, len(diags))
+	copy(out, diags)
+	for i, d := range out {
+		if d.EndLine == d.Line && d.EndCol <= d.Col && d.Line < m.buf.LineCount() {
+			runes := []rune(m.buf.Line(d.Line))
+			end := d.Col
+			if end < len(runes) && isIdentRune(runes[end]) {
+				for end < len(runes) && isIdentRune(runes[end]) {
+					end++
+				}
+			} else {
+				end = d.Col + 1
+			}
+			out[i].EndCol = end
 		}
 	}
 	return out
+}
+
+func isIdentRune(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }

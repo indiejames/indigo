@@ -51,6 +51,7 @@ type discardRecoveryMsg struct{ content string }
 
 // diagnosticsMsg carries fresh diagnostics from the server.
 type diagnosticsMsg struct {
+	bufID    uint32
 	diags    []ClientDiag
 	lspReady bool // true only when the LSP client process is actually running
 }
@@ -128,7 +129,10 @@ type QuitAllMsg struct {
 type pluginKeyResultMsg struct{ result PluginKeyResult }
 
 // decorationsMsg carries fresh plugin decorations from the server.
-type decorationsMsg struct{ items []ClientDecoration }
+type decorationsMsg struct {
+	bufID uint32
+	items []ClientDecoration
+}
 
 // showDiagPopupMsg fires after the 300 ms auto-show delay.
 type showDiagPopupMsg struct{}
@@ -499,6 +503,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.reparseHighlight()
 
 	case diagnosticsMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
 		m.diagnostics = m.expandDiags(msg.diags)
 		if msg.lspReady {
 			m.lspActive = true
@@ -618,6 +625,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case decorationsMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
 		m.decorations = msg.items
 		return m, nil
 
@@ -683,7 +693,7 @@ func (m Model) fetchDiagnostics() tea.Cmd {
 		if err != nil {
 			return nil
 		}
-		return diagnosticsMsg{diags: result.Diags, lspReady: result.LspReady}
+		return diagnosticsMsg{bufID: bufID, diags: result.Diags, lspReady: result.LspReady}
 	}
 }
 
@@ -705,7 +715,7 @@ func (m Model) fetchDecorations() tea.Cmd {
 		if err != nil {
 			return nil
 		}
-		return decorationsMsg{items: items}
+		return decorationsMsg{bufID: bufID, items: items}
 	}
 }
 

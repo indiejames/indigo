@@ -927,6 +927,9 @@ func (s *editorService) GetPluginDecorations(ctx context.Context, call proto.Edi
 		if err := item.SetPluginName(d.PluginName); err != nil {
 			return err
 		}
+		if err := item.SetTextColor(d.TextColor); err != nil {
+			return err
+		}
 	}
 	return nil
 }

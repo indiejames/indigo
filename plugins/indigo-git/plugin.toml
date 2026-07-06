@@ -1,0 +1,10 @@
+name        = "indigo-git"
+version     = "0.1.0"
+sdk_version = "0.1.0"
+description = "Git integration: branch name in status bar, diff decorations in gutter."
+
+[binaries]
+"darwin/arm64" = "indigo-git-darwin-arm64"
+"darwin/amd64" = "indigo-git-darwin-amd64"
+"linux/amd64"  = "indigo-git-linux-amd64"
+"linux/arm64"  = "indigo-git-linux-arm64"

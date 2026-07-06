@@ -86,6 +86,9 @@ type ClientDecoration struct {
 	Fixable    bool
 	FixData    string
 	PluginName string
+
+	// TextColor is the hex foreground color for gutter/overlay text; empty = default.
+	TextColor string
 }
 
 // RPC wraps a Cap'n Proto connection to the editor server.
@@ -278,6 +281,10 @@ func (r *RPC) GetDecorations(ctx context.Context, bufID uint32) ([]ClientDecorat
 		if err != nil {
 			return nil, err
 		}
+		textColor, err := item.TextColor()
+		if err != nil {
+			return nil, err
+		}
 		out[i] = ClientDecoration{
 			Line:           item.Line(),
 			Col:            item.Col(),
@@ -289,6 +296,7 @@ func (r *RPC) GetDecorations(ctx context.Context, bufID uint32) ([]ClientDecorat
 			Fixable:        item.Fixable(),
 			FixData:        fixData,
 			PluginName:     pluginName,
+			TextColor:      textColor,
 		}
 	}
 	return out, nil

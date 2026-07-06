@@ -74,8 +74,24 @@ install-spell: build-spell
 uninstall-spell:
 	rm -rf $(SPELL_INSTALL)
 
-build-plugins: build-jumpy build-spell
+GIT_DIR     := $(PLUGINS_DIR)/indigo-git
+GIT_OUT     := $(GIT_DIR)/indigo-git-$(GOOS)-$(GOARCH)
+GIT_INSTALL := $(HOME)/.config/indigo/plugins/indigo-git
+
+build-git:
+	go build -o $(GIT_OUT) ./$(GIT_DIR)
+
+install-git: build-git
+	mkdir -p $(GIT_INSTALL)
+	mv $(GIT_OUT) $(GIT_INSTALL)/
+	cp $(GIT_DIR)/plugin.toml $(GIT_INSTALL)/
+
+uninstall-git:
+	rm -rf $(GIT_INSTALL)
+
+build-plugins: build-jumpy build-spell build-git
 
 .PHONY: build build-release build-minimal build-no-heavy build-custom install test vet lint clean \
         build-jumpy install-jumpy uninstall-jumpy \
-        build-spell install-spell uninstall-spell build-plugins
+        build-spell install-spell uninstall-spell \
+        build-git install-git uninstall-git build-plugins

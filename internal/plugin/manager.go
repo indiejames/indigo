@@ -85,6 +85,9 @@ type PluginDecoration struct {
 	Fixable  bool
 	FixData  string
 	PluginName string // which plugin owns this decoration (for fix routing)
+
+	// TextColor is the hex foreground color for gutter/overlay text; empty = default.
+	TextColor string
 }
 
 // TextEdit is a plain-Go representation of a capnp TextEdit, used in ServerBridge.
@@ -375,6 +378,7 @@ func (m *Manager) GetDecorations(ctx context.Context, clientID uint64, bufID, st
 			text, _ := item.Text()
 			color, _ := item.UnderlineColor()
 			fixData, _ := item.FixData()
+			textColor, _ := item.TextColor()
 			all = append(all, PluginDecoration{
 				Line:           item.Line(),
 				Col:            item.Col(),
@@ -386,6 +390,7 @@ func (m *Manager) GetDecorations(ctx context.Context, clientID uint64, bufID, st
 				Fixable:        item.Fixable(),
 				FixData:        fixData,
 				PluginName:     p.name,
+				TextColor:      textColor,
 			})
 		}
 		rel()

@@ -255,19 +255,19 @@ func (m Model) hasGutterDecorations() bool {
 	return false
 }
 
-// gutterDecorFor returns the gutter decoration text for lineNum, or "".
-func (m Model) gutterDecorFor(lineNum int) string {
-	for _, d := range m.decorations {
-		if d.Kind == ClientDecorationGutter && int(d.Line) == lineNum {
-			return d.Text
+// gutterDecorAt returns the gutter ClientDecoration for lineNum, or nil.
+func (m Model) gutterDecorAt(lineNum int) *ClientDecoration {
+	for i := range m.decorations {
+		if m.decorations[i].Kind == ClientDecorationGutter && int(m.decorations[i].Line) == lineNum {
+			return &m.decorations[i]
 		}
 	}
-	return ""
+	return nil
 }
 
 // gutterWidth returns the number of columns reserved for line numbers (and plugin markers).
 func (m Model) gutterWidth() int {
-	hasPluginGutter := m.hasGutterDecorations()
+	hasPluginGutter := m.reservePluginGutter || m.hasGutterDecorations()
 	if m.cfg == nil || !m.cfg.LineNumbers {
 		if hasPluginGutter {
 			return 3 // space + up to 2 chars
@@ -511,11 +511,17 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 				}
 			}
 			if hasPluginGutter {
-				text := m.gutterDecorFor(lineNum)
-				if text == "" {
+				decor := m.gutterDecorAt(lineNum)
+				if decor == nil || decor.Text == "" {
 					sb.WriteString(gutterStyle.Render("   "))
+				} else if decor.TextColor != "" {
+					// Solid 1-cell colored bar: wider than a thin │ line, narrower than a 2-cell block.
+					barStyle := lipgloss.NewStyle().Background(lipgloss.Color(decor.TextColor))
+					sb.WriteString(" ")
+					sb.WriteString(barStyle.Render(" "))
+					sb.WriteString(" ")
 				} else {
-					label := text
+					label := decor.Text
 					if len([]rune(label)) > 2 {
 						label = string([]rune(label)[:2])
 					}
@@ -1721,6 +1727,13 @@ func (m Model) renderStatusBar() string {
 	}
 	if errCnt > 0 {
 		right = barDiagErrorStyle.Render(fmt.Sprintf(" %dE ", errCnt)) + right
+	}
+
+	// Plugin status bar decorations (e.g. git branch) go on the right, before file type.
+	for _, d := range m.decorations {
+		if d.Kind == ClientDecorationStatusBar && d.Text != "" {
+			right = barStyle.Render(d.Text) + right
+		}
 	}
 
 	rightW := lipgloss.Width(right)

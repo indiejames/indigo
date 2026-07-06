@@ -302,8 +302,9 @@ type Model struct {
 	recoveryPrompt bool // waiting for user to accept or discard recovery content
 
 	// Plugin decorations
-	decorations []ClientDecoration
-	decorTick   int // poll every 3 ticks (~360ms)
+	decorations        []ClientDecoration
+	decorTick          int  // poll every 3 ticks (~360ms)
+	reservePluginGutter bool // latched true once gutter decorations have been seen; never resets
 
 	// Capture mode: plugin owns the next N keypresses.
 	captureMode      bool
@@ -418,7 +419,7 @@ func tick() tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(tick(), m.reparseHighlight())
+	return tea.Batch(tick(), m.reparseHighlight(), m.fetchDecorations())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -629,6 +630,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // stale result from a previous buffer switch; discard
 		}
 		m.decorations = msg.items
+		if !m.reservePluginGutter {
+			for _, d := range msg.items {
+				if d.Kind == ClientDecorationGutter {
+					m.reservePluginGutter = true
+					break
+				}
+			}
+		}
 		return m, nil
 
 	case pluginKeyResultMsg:

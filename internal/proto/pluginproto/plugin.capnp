@@ -122,6 +122,7 @@ struct Decoration {
   underlineColor @6 :Text;            # hex color e.g. "#FF8C00"; empty = default
   fixable        @7 :Bool;            # true = Shift+F can offer fixes here
   fixData        @8 :Text;            # opaque token passed back to getFixes/applyFix
+  textColor      @9 :Text;            # hex foreground color for gutter/overlay text; empty = default
 }
 
 # FixItem is one option presented to the user in the fix popup.

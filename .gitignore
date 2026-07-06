@@ -7,6 +7,7 @@
 /indigo
 /jumpy
 /indigo-spell
+/indigo-git
 
 # Common binary output directories
 bin/
@@ -32,6 +33,7 @@ examples
 # Plugin built binaries (source is tracked, binaries are not)
 !plugins/*/jumpy-*
 !plugins/*/indigo-spell-*
+!plugins/*/indigo-git-*
 
 # Dependency directories (Optional)
 # Only uncomment if you explicitly want to vendor dependencies

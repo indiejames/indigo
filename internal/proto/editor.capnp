@@ -69,6 +69,7 @@ struct PluginDecoration {
   fixable        @7 :Bool;
   fixData        @8 :Text;
   pluginName     @9 :Text;
+  textColor      @10 :Text;  # hex foreground color for gutter/overlay text; empty = default
 }
 
 struct PluginFixItem {

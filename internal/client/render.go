@@ -255,16 +255,6 @@ func (m Model) hasGutterDecorations() bool {
 	return false
 }
 
-// gutterDecorFor returns the gutter decoration text for lineNum, or "".
-func (m Model) gutterDecorFor(lineNum int) string {
-	for _, d := range m.decorations {
-		if d.Kind == ClientDecorationGutter && int(d.Line) == lineNum {
-			return d.Text
-		}
-	}
-	return ""
-}
-
 // gutterDecorAt returns the gutter ClientDecoration for lineNum, or nil.
 func (m Model) gutterDecorAt(lineNum int) *ClientDecoration {
 	for i := range m.decorations {

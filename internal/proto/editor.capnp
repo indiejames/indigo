@@ -9,6 +9,7 @@ interface ClientCallback {
   moveCursor    @1 (bufId :UInt32, line :UInt32, col :UInt32) -> ();
   openFile      @2 (path :Text, line :UInt32)                  -> ();
   keyRegistered @3 (trigger :Text)                             -> ();
+  fileChanged   @4 (bufId :UInt32, dirty :Bool)                -> ();
 }
 
 interface EditorService {

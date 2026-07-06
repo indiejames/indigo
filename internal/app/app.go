@@ -16,6 +16,16 @@ import (
 	"github.com/indiejames/indigo/internal/config"
 )
 
+func appLog(format string, args ...any) {
+	path := filepath.Join(os.TempDir(), "indigo-plugins.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close() //nolint:errcheck
+	fmt.Fprintf(f, "[app] "+format+"\n", args...) //nolint:errcheck
+}
+
 // appQuitMsg is returned by the cleanup cmd to trigger program exit.
 type appQuitMsg struct{}
 
@@ -42,6 +52,12 @@ type configTickMsg struct {
 }
 
 
+// bufferReloadedMsg replaces a buffer model in-place after an external-change reload.
+type bufferReloadedMsg struct {
+	idx   int
+	model client.Model
+}
+
 type App struct {
 	rpc     *client.RPC
 	cfg     *config.Config
@@ -56,6 +72,12 @@ type App struct {
 	picker    *filePicker // non-nil when file picker is open
 	grep      *grepPicker // non-nil when workspace search picker is open
 	bufPicker *bufPicker  // non-nil when buffer picker popup is open
+
+	// fileChangedIdx is the index of a dirty buffer awaiting user decision after
+	// an external modification. -1 means no prompt is active.
+	// fileChangedSel is 0 for "reload" and 1 for "keep local".
+	fileChangedIdx int
+	fileChangedSel int
 
 	configPath    string    // path to config.toml; empty means watch is disabled
 	configModTime time.Time // mtime of last observed config file
@@ -110,12 +132,13 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 	}
 	cfgPath, cfgMod := configPathAndMtime()
 	return &App{
-		rpc:           rpc,
-		cfg:           cfg,
-		workDir:       workDir,
-		buffers:       []client.Model{m},
-		configPath:    cfgPath,
-		configModTime: cfgMod,
+		rpc:            rpc,
+		cfg:            cfg,
+		workDir:        workDir,
+		buffers:        []client.Model{m},
+		fileChangedIdx: -1,
+		configPath:     cfgPath,
+		configModTime:  cfgMod,
 	}
 }
 
@@ -124,11 +147,12 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 func NewWithPicker(rpc *client.RPC, cfg *config.Config, workDir string) *App {
 	cfgPath, cfgMod := configPathAndMtime()
 	return &App{
-		rpc:           rpc,
-		cfg:           cfg,
-		workDir:       workDir,
-		configPath:    cfgPath,
-		configModTime: cfgMod,
+		rpc:            rpc,
+		cfg:            cfg,
+		workDir:        workDir,
+		fileChangedIdx: -1,
+		configPath:     cfgPath,
+		configModTime:  cfgMod,
 	}
 }
 
@@ -328,6 +352,42 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appQuitMsg:
 		return a, tea.Quit
 
+	// ---- external file change notification from server ----
+	case client.FileChangedMsg:
+		appLog("FileChangedMsg received: BufID=%d dirty=%v numBufs=%d", msg.BufID, msg.Dirty, len(a.buffers))
+		idx := -1
+		for i, buf := range a.buffers {
+			appLog("  buf[%d].BufID()=%d", i, buf.BufID())
+			if buf.BufID() == msg.BufID {
+				idx = i
+				break
+			}
+		}
+		appLog("FileChangedMsg: idx=%d", idx)
+		if idx < 0 {
+			return a, nil
+		}
+		if !msg.Dirty {
+			// Buffer is clean — reload silently.
+			appLog("FileChangedMsg: calling doReloadBuffer(%d)", idx)
+			return a, a.doReloadBuffer(idx)
+		}
+		// Buffer has unsaved edits — show the overlay prompt.
+		a.fileChangedIdx = idx
+		return a, nil
+
+	case bufferReloadedMsg:
+		if msg.idx >= 0 && msg.idx < len(a.buffers) {
+			a.buffers[msg.idx] = msg.model
+			if msg.idx == a.active {
+				updated, _ := a.buffers[msg.idx].Update(
+					tea.WindowSizeMsg{Width: a.width, Height: a.bufHeight()})
+				a.buffers[msg.idx] = updated.(client.Model)
+			}
+			return a, msg.model.Init()
+		}
+		return a, nil
+
 	// ---- server push (plugin effects) ----
 	case client.PluginShowMsgMsg:
 		// Plugins are not allowed to write to the tab bar.
@@ -349,6 +409,30 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Each picker intercepts key input only. Non-key messages (tickMsg, diagnosticsMsg,
 	// decorationsMsg, etc.) fall through to the active buffer so the tick chain and
 	// async fetch loops keep running while any picker is open.
+	// File-changed overlay: intercept ALL keys while the prompt is visible.
+	if a.fileChangedIdx >= 0 {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			switch km.String() {
+			case "up", "k":
+				a.fileChangedSel = 0
+			case "down", "j":
+				a.fileChangedSel = 1
+			case "enter":
+				idx := a.fileChangedIdx
+				sel := a.fileChangedSel
+				a.fileChangedIdx = -1
+				a.fileChangedSel = 0
+				if sel == 0 {
+					return a, a.doReloadBuffer(idx)
+				}
+			case "esc":
+				a.fileChangedIdx = -1
+				a.fileChangedSel = 0
+			}
+			return a, nil // swallow all keys while overlay is open
+		}
+	}
+
 	if a.picker != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handlePickerKey(km)
@@ -581,6 +665,38 @@ func (a App) doOpenFileAtMatch(absPath string, line, col, matchLen int) tea.Cmd 
 	}
 }
 
+// doReloadBuffer closes the server-side buffer and reopens it so the server
+// re-reads the file from disk. The result replaces the buffer at idx in-place.
+func (a App) doReloadBuffer(idx int) tea.Cmd {
+	if idx < 0 || idx >= len(a.buffers) {
+		appLog("doReloadBuffer: idx %d out of range (len=%d)", idx, len(a.buffers))
+		return nil
+	}
+	m := a.buffers[idx]
+	path := m.FilePath()
+	oldBufID := m.BufID()
+	rpc := a.rpc
+	cfg := a.cfg
+	appLog("doReloadBuffer: queuing cmd for idx=%d path=%q oldBufID=%d", idx, path, oldBufID)
+	return func() tea.Msg {
+		appLog("doReloadBuffer: cmd running, calling CloseBuffer bufID=%d", oldBufID)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := rpc.CloseBuffer(ctx, oldBufID); err != nil {
+			appLog("doReloadBuffer: CloseBuffer error: %v", err)
+		}
+		appLog("doReloadBuffer: CloseBuffer done, calling OpenFile path=%q", path)
+		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, path)
+		if err != nil {
+			appLog("doReloadBuffer: OpenFile error: %v", err)
+			return errorOpenMsg{err}
+		}
+		appLog("doReloadBuffer: OpenFile done, new bufID=%d contentLen=%d", bufID, len(content))
+		newModel := client.New(rpc, bufID, content, version, path, cfg, fromRecovery)
+		return bufferReloadedMsg{idx: idx, model: newModel}
+	}
+}
+
 func (a App) doCloseAllAndQuit() tea.Cmd {
 	buffers := a.buffers
 	rpc := a.rpc
@@ -656,10 +772,59 @@ func (a App) View() string {
 	sb.WriteString(a.buffers[a.active].View())
 	base := sb.String()
 
+	if a.fileChangedIdx >= 0 {
+		return overlayCenter(base, renderFileChangedPrompt(a.width, a.fileChangedSel), a.width, a.height)
+	}
 	if a.bufPicker != nil {
 		return overlayCenter(base, a.bufPicker.render(), a.width, a.height)
 	}
 	return base
+}
+
+func renderFileChangedPrompt(w, sel int) string {
+	innerW := 40
+	if w > 0 && w*2/3 < innerW {
+		innerW = w * 2 / 3
+	}
+	if innerW < 30 {
+		innerW = 30
+	}
+
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#FFAA44")).
+		Background(lipgloss.Color("#1E2A38"))
+	titleStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#0D1B2A")).
+		Foreground(lipgloss.Color("#FFAA44")).
+		Bold(true).
+		Padding(0, 1)
+	divStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#1E2A38")).
+		Foreground(lipgloss.Color("#FFAA44"))
+	itemStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#1E2A38")).
+		Foreground(lipgloss.Color("#AABBCC")).
+		Padding(0, 1)
+	selStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#2D5F8A")).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Padding(0, 1)
+
+	style := func(idx int, label string) string {
+		if idx == sel {
+			return selStyle.Width(innerW).Render(label)
+		}
+		return itemStyle.Width(innerW).Render(label)
+	}
+
+	rows := []string{
+		titleStyle.Width(innerW).Render("⚠  File changed on disk"),
+		divStyle.Render(strings.Repeat("─", innerW)),
+		style(0, "  Reload  (discard local changes)"),
+		style(1, "  Keep local version"),
+	}
+	return borderStyle.Render(strings.Join(rows, "\n"))
 }
 
 // overlayCenter splices popup (a multi-line box) into the centre of base,

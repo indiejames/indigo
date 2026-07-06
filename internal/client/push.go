@@ -90,3 +90,18 @@ func (s *callbackServer) KeyRegistered(_ context.Context, call proto.ClientCallb
 	_, err = call.AllocResults()
 	return err
 }
+
+// FileChangedMsg is sent when a file open in a buffer was modified externally.
+type FileChangedMsg struct {
+	BufID uint32
+	Dirty bool // true if the buffer has unsaved local edits
+}
+
+func (s *callbackServer) FileChanged(_ context.Context, call proto.ClientCallback_fileChanged) error {
+	args := call.Args()
+	msg := FileChangedMsg{BufID: args.BufId(), Dirty: args.Dirty()}
+	clientLog("FileChanged callback: bufID=%d dirty=%v", msg.BufID, msg.Dirty)
+	s.dispatch(msg)
+	_, err := call.AllocResults()
+	return err
+}

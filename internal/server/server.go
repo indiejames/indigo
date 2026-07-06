@@ -15,6 +15,7 @@ import (
 
 	capnp "capnproto.org/go/capnp/v3"
 	"capnproto.org/go/capnp/v3/rpc"
+	"github.com/fsnotify/fsnotify"
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
@@ -78,6 +79,10 @@ type editorService struct {
 	pluginMgr *plugin.Manager
 	cfg       *config.Config
 
+	watcher      *fsnotify.Watcher
+	savingMu     sync.Mutex
+	savingPaths  map[string]time.Time // paths currently being saved by indigo
+
 	// shutdown is called when the last client disconnects (cleanly or not).
 	shutdown        func()
 	onClientConnect func() // called once per Connect RPC; used to mark that real clients have connected
@@ -93,18 +98,111 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 		}
 	}
 	lspMgr := lsp.NewManager(workspaceDir, servers)
+	watcher, _ := fsnotify.NewWatcher()
 	svc := &editorService{
 		buffers:         make(map[uint32]*bufferEntry),
 		clientMap:       make(map[uint64]*clientEntry),
 		recDir:          recDir,
 		lspMgr:          lspMgr,
+		watcher:         watcher,
+		savingPaths:     make(map[string]time.Time),
 		fmtMgr:          format.NewManager(lspMgr, cfg, workspaceDir),
 		cfg:             cfg,
 		shutdown:        shutdown,
 		onClientConnect: onClientConnect,
 	}
 	svc.pluginMgr = plugin.NewManager(workspaceDir, svc)
+	if watcher != nil {
+		go svc.watchLoop()
+	}
 	return svc
+}
+
+// watchLoop processes fsnotify events and notifies clients when a file they
+// have open is modified externally.
+func (s *editorService) watchLoop() {
+	for {
+		select {
+		case event, ok := <-s.watcher.Events:
+			if !ok {
+				return
+			}
+			serverLog("watchLoop: event=%s name=%q", event.Op, event.Name)
+			if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) {
+				s.handleExternalWrite(event.Name)
+			}
+		case err, ok := <-s.watcher.Errors:
+			if !ok {
+				return
+			}
+			serverLog("watchLoop: error=%v", err)
+		}
+	}
+}
+
+// handleExternalWrite is called when fsnotify reports a write to a watched file.
+func (s *editorService) handleExternalWrite(path string) {
+	serverLog("handleExternalWrite: path=%q", path)
+
+	// Ignore writes we caused ourselves (Save/SaveAs).
+	s.savingMu.Lock()
+	savedAt, isSaving := s.savingPaths[path]
+	s.savingMu.Unlock()
+	if isSaving && time.Since(savedAt) < 2*time.Second {
+		serverLog("handleExternalWrite: skipping (self-save at %v)", savedAt)
+		return
+	}
+
+	s.mu.Lock()
+	var bufID uint32
+	var entry *bufferEntry
+	for id, e := range s.buffers {
+		if e.buf.Path() == path {
+			bufID = id
+			entry = e
+			break
+		}
+	}
+	if entry == nil {
+		serverLog("handleExternalWrite: no buffer for path %q (buffers: %d)", path, len(s.buffers))
+		s.mu.Unlock()
+		return
+	}
+	dirty := entry.buf.Dirty()
+	callbacks := s.callbacksForBuffer(entry)
+	s.mu.Unlock()
+
+	serverLog("handleExternalWrite: notifying %d clients for bufID=%d dirty=%v", len(callbacks), bufID, dirty)
+	ctx := context.Background()
+	for i, cb := range callbacks {
+		fut, rel := cb.FileChanged(ctx, func(p proto.ClientCallback_fileChanged_Params) error {
+			p.SetBufId(bufID)
+			p.SetDirty(dirty)
+			return nil
+		})
+		_, err := fut.Struct()
+		rel()
+		serverLog("handleExternalWrite: client[%d] FileChanged returned err=%v", i, err)
+	}
+}
+
+// markSaving records that we are about to write path ourselves so the watcher
+// can ignore the resulting event.
+func (s *editorService) markSaving(path string) {
+	s.savingMu.Lock()
+	s.savingPaths[path] = time.Now()
+	s.savingMu.Unlock()
+}
+
+// unmarkSaving clears the saving flag for path after a short delay to absorb
+// any late fsnotify events that arrive after the write completes.
+func (s *editorService) unmarkSaving(path string) {
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		s.savingMu.Lock()
+		delete(s.savingPaths, path)
+		s.savingMu.Unlock()
+	}()
 }
 
 // recoveryFilePath returns the path for the recovery file for a given source file.
@@ -178,6 +276,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	if err != nil {
 		return err
 	}
+	serverLog("OpenFile: clientID=%d path=%q", clientID, path)
 
 	content, fromRecovery := s.loadContent(path)
 
@@ -230,6 +329,9 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	if path != "" {
 		go s.lspMgr.DidOpen(path, content)
 		go s.pluginMgr.DispatchBufferOpen(context.Background(), bufID, path)
+		if s.watcher != nil {
+			s.watcher.Add(path) //nolint:errcheck
+		}
 	}
 	return nil
 }
@@ -424,9 +526,12 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 		}
 	}
 
+	s.markSaving(path)
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		s.unmarkSaving(path)
 		return err
 	}
+	s.unmarkSaving(path)
 	entry.buf.SetClean()
 	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
 	go s.lspMgr.DidSave(path)
@@ -452,9 +557,12 @@ func (s *editorService) SaveAs(_ context.Context, call proto.EditorService_saveA
 	}
 
 	content := entry.buf.Content()
+	s.markSaving(newPath)
 	if err := os.WriteFile(newPath, []byte(content), 0o644); err != nil {
+		s.unmarkSaving(newPath)
 		return err
 	}
+	s.unmarkSaving(newPath)
 	oldPath := entry.buf.Path()
 	entry.buf = document.New(newPath, content)
 	entry.buf.SetClean()
@@ -493,6 +601,7 @@ func (s *editorService) CloseBuffer(_ context.Context, call proto.EditorService_
 	args := call.Args()
 	clientID := args.ClientId()
 	bufID := args.BufferId()
+	serverLog("CloseBuffer: clientID=%d bufID=%d", clientID, bufID)
 
 	var removedPath string
 	s.mu.Lock()
@@ -509,6 +618,9 @@ func (s *editorService) CloseBuffer(_ context.Context, call proto.EditorService_
 	// sha256("") recovery entry so it isn't replayed on the next invocation.
 	os.Remove(recoveryFilePath(s.recDir, removedPath)) //nolint:errcheck
 	if removedPath != "" {
+		if s.watcher != nil {
+			s.watcher.Remove(removedPath) //nolint:errcheck
+		}
 		go s.lspMgr.DidClose(removedPath)
 		go s.pluginMgr.DispatchBufferClose(context.Background(), bufID, removedPath)
 	}
@@ -1124,6 +1236,9 @@ func (s *Server) Wait() {
 	s.deleteAllRecoveryFiles()
 	s.svc.lspMgr.Shutdown()
 	s.svc.pluginMgr.Shutdown()
+	if s.svc.watcher != nil {
+		s.svc.watcher.Close() //nolint:errcheck
+	}
 	os.Remove(s.socketPath) //nolint:errcheck
 }
 

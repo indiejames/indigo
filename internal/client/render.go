@@ -265,9 +265,19 @@ func (m Model) gutterDecorFor(lineNum int) string {
 	return ""
 }
 
+// gutterDecorAt returns the gutter ClientDecoration for lineNum, or nil.
+func (m Model) gutterDecorAt(lineNum int) *ClientDecoration {
+	for i := range m.decorations {
+		if m.decorations[i].Kind == ClientDecorationGutter && int(m.decorations[i].Line) == lineNum {
+			return &m.decorations[i]
+		}
+	}
+	return nil
+}
+
 // gutterWidth returns the number of columns reserved for line numbers (and plugin markers).
 func (m Model) gutterWidth() int {
-	hasPluginGutter := m.hasGutterDecorations()
+	hasPluginGutter := m.reservePluginGutter || m.hasGutterDecorations()
 	if m.cfg == nil || !m.cfg.LineNumbers {
 		if hasPluginGutter {
 			return 3 // space + up to 2 chars
@@ -511,16 +521,21 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 				}
 			}
 			if hasPluginGutter {
-				text := m.gutterDecorFor(lineNum)
-				if text == "" {
+				decor := m.gutterDecorAt(lineNum)
+				if decor == nil || decor.Text == "" {
 					sb.WriteString(gutterStyle.Render("   "))
 				} else {
-					label := text
+					label := decor.Text
 					if len([]rune(label)) > 2 {
 						label = string([]rune(label)[:2])
 					}
 					sb.WriteString(" ")
-					sb.WriteString(decorOverlayStyle.Render(fmt.Sprintf("%-2s", label)))
+					if decor.TextColor != "" {
+						colored := lipgloss.NewStyle().Foreground(lipgloss.Color(decor.TextColor)).Render(fmt.Sprintf("%-2s", label))
+						sb.WriteString(colored)
+					} else {
+						sb.WriteString(decorOverlayStyle.Render(fmt.Sprintf("%-2s", label)))
+					}
 				}
 			}
 		} else {
@@ -1721,6 +1736,13 @@ func (m Model) renderStatusBar() string {
 	}
 	if errCnt > 0 {
 		right = barDiagErrorStyle.Render(fmt.Sprintf(" %dE ", errCnt)) + right
+	}
+
+	// Plugin status bar decorations (e.g. git branch) go on the right, before file type.
+	for _, d := range m.decorations {
+		if d.Kind == ClientDecorationStatusBar && d.Text != "" {
+			right = barStyle.Render(d.Text) + right
+		}
 	}
 
 	rightW := lipgloss.Width(right)

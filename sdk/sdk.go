@@ -115,6 +115,10 @@ type Decoration struct {
 	// Fix fields — when Fixable is true, Shift+F at this decoration calls GetFixes.
 	Fixable bool
 	FixData string // opaque token passed back to GetFixes / ApplyFix
+
+	// TextColor is the hex foreground color for gutter or overlay text (e.g. "#44BB44").
+	// Empty means the terminal's default foreground color.
+	TextColor string
 }
 
 // FixItem is one option presented in the fix popup.
@@ -681,6 +685,9 @@ func (s *decorProviderServer) GetDecorations(_ context.Context, call pluginproto
 		}
 		item.SetFixable(d.Fixable)
 		if err := item.SetFixData(d.FixData); err != nil {
+			return err
+		}
+		if err := item.SetTextColor(d.TextColor); err != nil {
 			return err
 		}
 	}

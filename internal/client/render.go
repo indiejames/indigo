@@ -524,18 +524,19 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 				decor := m.gutterDecorAt(lineNum)
 				if decor == nil || decor.Text == "" {
 					sb.WriteString(gutterStyle.Render("   "))
+				} else if decor.TextColor != "" {
+					// Solid 1-cell colored bar: wider than a thin │ line, narrower than a 2-cell block.
+					barStyle := lipgloss.NewStyle().Background(lipgloss.Color(decor.TextColor))
+					sb.WriteString(" ")
+					sb.WriteString(barStyle.Render(" "))
+					sb.WriteString(" ")
 				} else {
 					label := decor.Text
 					if len([]rune(label)) > 2 {
 						label = string([]rune(label)[:2])
 					}
 					sb.WriteString(" ")
-					if decor.TextColor != "" {
-						colored := lipgloss.NewStyle().Foreground(lipgloss.Color(decor.TextColor)).Render(fmt.Sprintf("%-2s", label))
-						sb.WriteString(colored)
-					} else {
-						sb.WriteString(decorOverlayStyle.Render(fmt.Sprintf("%-2s", label)))
-					}
+					sb.WriteString(decorOverlayStyle.Render(fmt.Sprintf("%-2s", label)))
 				}
 			}
 		} else {

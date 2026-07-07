@@ -14,10 +14,26 @@ import (
 	"github.com/indiejames/indigo/internal/app"
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
+	"github.com/indiejames/indigo/internal/highlight"
 	"github.com/indiejames/indigo/internal/server"
+	"github.com/indiejames/indigo/internal/theme"
 )
 
 func main() {
+	// Handle --import-theme helix:<path> or --import-theme vscode:<path>.
+	if len(os.Args) == 3 && os.Args[1] == "--import-theme" {
+		cfgDir, _ := config.ConfigDir()
+		outDir := filepath.Join(cfgDir, "indigo", "themes")
+		outPath, err := theme.Import(os.Args[2], outDir)
+		if err != nil {
+			fatalf("import theme: %v", err)
+		}
+		fmt.Printf("Theme written to %s\n", outPath)
+		fmt.Printf("To activate it, add the following to ~/.config/indigo/config.toml:\n")
+		fmt.Printf("  theme = %q\n", strings.TrimSuffix(filepath.Base(outPath), ".toml"))
+		return
+	}
+
 	// Parse optional +N line argument (e.g. indigo +42 foo.go).
 	startLine := 0
 	args := os.Args[1:]
@@ -61,6 +77,7 @@ func main() {
 	if err != nil {
 		fatalf("load config: %v", err)
 	}
+	loadAndApplyTheme(cfg)
 
 	// Determine workspace root.
 	var workDir string
@@ -170,6 +187,7 @@ func openUntitled(startLine int) {
 	if err != nil {
 		fatalf("load config: %v", err)
 	}
+	loadAndApplyTheme(cfg)
 
 	sockPath := server.SocketPath(workDir)
 	if !server.IsRunning(sockPath) {
@@ -197,6 +215,26 @@ func openUntitled(startLine int) {
 	if _, err := p.Run(); err != nil {
 		fatalf("run: %v", err)
 	}
+}
+
+// loadAndApplyTheme resolves the theme named in cfg, applies it to the client
+// UI styles, and updates the syntax highlight palette. Errors are non-fatal;
+// the built-in default-dark theme is used as a fallback.
+func loadAndApplyTheme(cfg *config.Config) {
+	cfgDir, _ := config.ConfigDir()
+	t, err := theme.Load(cfg.Theme, cfgDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "indigo: theme %q: %v (using default)\n", cfg.Theme, err)
+		t = theme.Default()
+	}
+	client.ApplyTheme(t)
+
+	// Convert theme.SyntaxStyle → highlight.SyntaxStyle (same fields, separate types).
+	hl := make(map[string]highlight.SyntaxStyle, len(t.Syntax))
+	for scope, s := range t.Syntax {
+		hl[scope] = highlight.SyntaxStyle{Fg: s.Fg, Bold: s.Bold, Italic: s.Italic}
+	}
+	highlight.ApplyTheme(hl)
 }
 
 func fatalf(format string, args ...any) {

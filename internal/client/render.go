@@ -30,15 +30,15 @@ var diagUnderlineStyle = func() ClientUnderlineStyle {
 	}
 }()
 
-// diagColors maps LSP severity (1=error, 2=warn, 3+=info) to hex colors.
+// diagColor maps LSP severity (1=error, 2=warn, 3+=info) to the active theme hex color.
 func diagColor(severity uint8) string {
 	switch severity {
 	case 1:
-		return "#FF5555"
+		return activeDiagError
 	case 2:
-		return "#FFDD44"
+		return activeDiagWarn
 	default:
-		return "#88AAFF"
+		return activeDiagInfo
 	}
 }
 
@@ -693,7 +693,7 @@ func renderFixPopup(items []ClientFixItem, selected, maxW int) []string {
 	title := "Fix"
 	titleR := []rune(title)
 	dashCount := max(0, innerW-len(titleR))
-	top := popupBorderStyle.Render("╭" + string(titleR) + strings.Repeat("─", dashCount) + "╮")
+	top := popupBorderStyle.Render(bdrTL + string(titleR) + strings.Repeat(bdrH, dashCount) + bdrTR)
 	lines := []string{top}
 
 	start := 0
@@ -710,15 +710,15 @@ func renderFixPopup(items []ClientFixItem, selected, maxW int) []string {
 		trail := max(1, innerW-1-len(lr))
 		if i == selected {
 			content := " " + string(lr) + strings.Repeat(" ", trail)
-			lines = append(lines, popupBorderStyle.Render("│")+selectionStyle.Render(content)+popupBorderStyle.Render("│"))
+			lines = append(lines, popupBorderStyle.Render(bdrV)+selectionStyle.Render(content)+popupBorderStyle.Render(bdrV))
 		} else {
 			lines = append(lines,
-				popupBorderStyle.Render("│")+
+				popupBorderStyle.Render(bdrV)+
 					popupTextStyle.Render(" "+string(lr)+strings.Repeat(" ", trail))+
-					popupBorderStyle.Render("│"))
+					popupBorderStyle.Render(bdrV))
 		}
 	}
-	lines = append(lines, popupBorderStyle.Render("╰"+strings.Repeat("─", innerW)+"╯"))
+	lines = append(lines, popupBorderStyle.Render(bdrBL+strings.Repeat(bdrH, innerW)+bdrBR))
 	return lines
 }
 
@@ -729,9 +729,9 @@ func renderDiagPopup(diags []ClientDiag, termW int) []string {
 
 	title := "Diagnostics"
 	dashes := max(0, innerW-len([]rune(title)))
-	top := popupBorderStyle.Render("╭") +
+	top := popupBorderStyle.Render(bdrTL) +
 		popupTextStyle.Render(title) +
-		popupBorderStyle.Render(strings.Repeat("─", dashes)+"╮")
+		popupBorderStyle.Render(strings.Repeat(bdrH, dashes)+bdrTR)
 	lines := []string{top}
 
 	for _, d := range diags {
@@ -762,15 +762,15 @@ func renderDiagPopup(diags []ClientDiag, termW int) []string {
 		}
 		trail := max(0, innerW-used-len(msgRunes))
 
-		row := popupBorderStyle.Render("│") +
+		row := popupBorderStyle.Render(bdrV) +
 			popupTextStyle.Render(" ") +
 			markerStyle.Render("●") +
 			popupTextStyle.Render(" "+srcText+string(msgRunes)+strings.Repeat(" ", trail)) +
-			popupBorderStyle.Render("│")
+			popupBorderStyle.Render(bdrV)
 		lines = append(lines, row)
 	}
 
-	lines = append(lines, popupBorderStyle.Render("╰"+strings.Repeat("─", innerW)+"╯"))
+	lines = append(lines, popupBorderStyle.Render(bdrBL+strings.Repeat(bdrH, innerW)+bdrBR))
 	return lines
 }
 
@@ -833,9 +833,9 @@ func renderPopupBox(title string, items []command, maxW int) []string {
 		titleStr = string(titleRunes)
 	}
 	remaining := max(0, innerW-len(titleRunes))
-	top := popupBorderStyle.Render("╭") +
+	top := popupBorderStyle.Render(bdrTL) +
 		popupTextStyle.Render(titleStr) +
-		popupBorderStyle.Render(strings.Repeat("─", remaining)+"╮")
+		popupBorderStyle.Render(strings.Repeat(bdrH, remaining)+bdrTR)
 
 	lines := []string{top}
 	for _, item := range items {
@@ -856,14 +856,14 @@ func renderPopupBox(title string, items []command, maxW int) []string {
 		if padW < 0 {
 			padW = 0
 		}
-		row := popupBorderStyle.Render("│") +
+		row := popupBorderStyle.Render(bdrV) +
 			popupKeyStyle.Render(keyPart) +
 			popupTextStyle.Render(sep+label+strings.Repeat(" ", padW)) +
-			popupBorderStyle.Render("│")
+			popupBorderStyle.Render(bdrV)
 		lines = append(lines, row)
 	}
 
-	bottom := popupBorderStyle.Render("╰" + strings.Repeat("─", innerW) + "╯")
+	bottom := popupBorderStyle.Render(bdrBL + strings.Repeat(bdrH, innerW) + bdrBR)
 	lines = append(lines, bottom)
 	return lines
 }
@@ -887,21 +887,21 @@ func renderMetricsBox(m *metricsData) []string {
 		{"key→frame", fmtDur(m.keyToFrameDuration)},
 	}
 	title := "Metrics"
-	top := popupBorderStyle.Render("╭") +
+	top := popupBorderStyle.Render(bdrTL) +
 		popupTextStyle.Render(title) +
-		popupBorderStyle.Render(strings.Repeat("─", metricsInnerW-len([]rune(title)))+"╮")
+		popupBorderStyle.Render(strings.Repeat(bdrH, metricsInnerW-len([]rune(title)))+bdrTR)
 	lines := []string{top}
 	for _, r := range rows {
 		// Right-align value in an 8-char field so the panel width never changes.
 		valField := fmt.Sprintf("%8s", r.val)
-		line := popupBorderStyle.Render("│") +
+		line := popupBorderStyle.Render(bdrV) +
 			popupTextStyle.Render(" "+r.label+" ") +
 			popupKeyStyle.Render(valField) +
 			popupTextStyle.Render(" ") +
-			popupBorderStyle.Render("│")
+			popupBorderStyle.Render(bdrV)
 		lines = append(lines, line)
 	}
-	lines = append(lines, popupBorderStyle.Render("╰"+strings.Repeat("─", metricsInnerW)+"╯"))
+	lines = append(lines, popupBorderStyle.Render(bdrBL+strings.Repeat(bdrH, metricsInnerW)+bdrBR))
 	return lines
 }
 
@@ -977,8 +977,8 @@ func renderHoverPopup(content string, maxW, scroll, maxH int) []string {
 	}
 
 	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#4488CC"))
+		Border(bdrLipgloss).
+		BorderForeground(popupBorderStyle.GetForeground())
 
 	lines := strings.Split(boxStyle.Render(strings.Join(bodyLines, "\n")), "\n")
 	// Trim any trailing empty lines that lipgloss may append.
@@ -1137,7 +1137,7 @@ func renderCompletionPopup(items []ClientCompletion, selected, maxW int) []strin
 	title := "Completions"
 	titleR := []rune(title)
 	dashCount := max(0, innerW-len(titleR))
-	top := popupBorderStyle.Render("╭" + string(titleR) + strings.Repeat("─", dashCount) + "╮")
+	top := popupBorderStyle.Render(bdrTL + string(titleR) + strings.Repeat(bdrH, dashCount) + bdrTR)
 	lines := []string{top}
 
 	for i := start; i < end; i++ {
@@ -1168,16 +1168,16 @@ func renderCompletionPopup(items []ClientCompletion, selected, maxW int) []strin
 
 		if i == selected {
 			content := " " + kind + " " + string(lr) + detailPart + strings.Repeat(" ", trail)
-			lines = append(lines, popupBorderStyle.Render("│")+selectionStyle.Render(content)+popupBorderStyle.Render("│"))
+			lines = append(lines, popupBorderStyle.Render(bdrV)+selectionStyle.Render(content)+popupBorderStyle.Render(bdrV))
 		} else {
 			lines = append(lines,
-				popupBorderStyle.Render("│")+
+				popupBorderStyle.Render(bdrV)+
 					popupKeyStyle.Render(" "+kind+" ")+
 					popupTextStyle.Render(string(lr)+detailPart+strings.Repeat(" ", trail))+
-					popupBorderStyle.Render("│"))
+					popupBorderStyle.Render(bdrV))
 		}
 	}
-	lines = append(lines, popupBorderStyle.Render("╰"+strings.Repeat("─", innerW)+"╯"))
+	lines = append(lines, popupBorderStyle.Render(bdrBL+strings.Repeat(bdrH, innerW)+bdrBR))
 	return lines
 }
 
@@ -1547,18 +1547,18 @@ func renderSaveAsDialog(input string, maxW int) []string {
 	trailing := strings.Repeat(" ", max(0, fieldW-len(runes)-1))
 	fieldContent := " " + string(runes) + "|" + trailing + " "
 
-	const titleSuffix = "─ Save As " // 10 runes — use rune count, not byte count
+	titleSuffix := bdrH + " Save As "
 	titleSuffixW := len([]rune(titleSuffix))
-	dashes := strings.Repeat("─", max(0, innerW-titleSuffixW))
+	dashes := strings.Repeat(bdrH, max(0, innerW-titleSuffixW))
 
 	hint := "Enter: Save   Esc: Cancel"
 	hintW := len([]rune(hint))
 	hintPad := strings.Repeat(" ", max(0, innerW-hintW))
 
-	top := popupBorderStyle.Render("╭" + titleSuffix + dashes + "╮")
-	mid := popupBorderStyle.Render("│") + popupTextStyle.Render(fieldContent) + popupBorderStyle.Render("│")
-	bot := popupBorderStyle.Render("│") + popupKeyStyle.Render(hint) + popupBorderStyle.Render(hintPad+"│")
-	btm := popupBorderStyle.Render("╰" + strings.Repeat("─", innerW) + "╯")
+	top := popupBorderStyle.Render(bdrTL + titleSuffix + dashes + bdrTR)
+	mid := popupBorderStyle.Render(bdrV) + popupTextStyle.Render(fieldContent) + popupBorderStyle.Render(bdrV)
+	bot := popupBorderStyle.Render(bdrV) + popupKeyStyle.Render(hint) + popupBorderStyle.Render(hintPad+bdrV)
+	btm := popupBorderStyle.Render(bdrBL + strings.Repeat(bdrH, innerW) + bdrBR)
 	return []string{top, mid, bot, btm}
 }
 

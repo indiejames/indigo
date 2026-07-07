@@ -1,0 +1,69 @@
+name = "one-dark"
+
+[ui]
+bar_bg          = "#21252B"
+bar_fg          = "#ABB2BF"
+bar_dark_bg     = "#181A1F"
+normal_mode_fg  = "#98C379"
+insert_mode_fg  = "#61AFEF"
+selection_bg    = "#3E4451"
+selection_fg    = "#ABB2BF"
+gutter_fg       = "#4B5263"
+gutter_cur_fg   = "#ABB2BF"
+popup_bg        = "#21252B"
+popup_border_fg = "#528BFF"
+popup_key_fg    = "#E5C07B"
+popup_text_fg   = "#ABB2BF"
+search_match_bg = "#3E4451"
+search_match_fg = "#E5C07B"
+search_cur_bg   = "#E5C07B"
+search_cur_fg   = "#282C34"
+diag_error_fg   = "#E06C75"
+diag_warn_fg    = "#E5C07B"
+diag_info_fg    = "#61AFEF"
+popup_border    = "rounded"
+
+[syntax]
+"comment"               = {fg = "#5C6370", italic = true}
+"string"                = {fg = "#98C379"}
+"string.special"        = {fg = "#E5C07B"}
+"number"                = {fg = "#D19A66"}
+"boolean"               = {fg = "#56B6C2"}
+"constant.builtin"      = {fg = "#56B6C2"}
+"constant"              = {fg = "#D19A66"}
+"keyword"               = {fg = "#C678DD"}
+"keyword.builtin"       = {fg = "#56B6C2"}
+"keyword.operator"      = {fg = "#C678DD"}
+"keyword.return"        = {fg = "#C678DD"}
+"keyword.import"        = {fg = "#C678DD"}
+"operator"              = {fg = "#56B6C2"}
+"function"              = {fg = "#61AFEF"}
+"function.call"         = {fg = "#61AFEF"}
+"function.builtin"      = {fg = "#56B6C2"}
+"function.method"       = {fg = "#61AFEF"}
+"function.method.call"  = {fg = "#61AFEF"}
+"type"                  = {fg = "#E5C07B"}
+"type.builtin"          = {fg = "#56B6C2"}
+"namespace"             = {fg = "#E5C07B"}
+"module"                = {fg = "#E5C07B"}
+"tag"                   = {fg = "#E06C75"}
+"attribute"             = {fg = "#D19A66"}
+"variable.builtin"      = {fg = "#E06C75"}
+"variable"              = {fg = "#ABB2BF"}
+"label"                 = {fg = "#61AFEF"}
+"punctuation.bracket"   = {fg = "#ABB2BF"}
+"punctuation.delimiter" = {fg = "#ABB2BF"}
+"punctuation.special"   = {fg = "#C678DD"}
+"markup.heading"        = {fg = "#61AFEF", bold = true}
+"markup.heading.1"      = {fg = "#61AFEF", bold = true}
+"markup.heading.2"      = {fg = "#C678DD", bold = true}
+"markup.heading.3"      = {fg = "#98C379", bold = true}
+"markup.heading.4"      = {fg = "#56B6C2", bold = true}
+"markup.strong"         = {fg = "#E5C07B", bold = true}
+"markup.italic"         = {fg = "#98C379", italic = true}
+"markup.raw"            = {fg = "#98C379"}
+"markup.raw.block"      = {fg = "#98C379"}
+"markup.link.url"       = {fg = "#61AFEF"}
+"markup.link.label"     = {fg = "#ABB2BF"}
+"markup.list"           = {fg = "#C678DD"}
+"markup.quote"          = {fg = "#5C6370", italic = true}

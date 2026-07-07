@@ -176,7 +176,16 @@ type captureEntry struct {
 	priority int
 }
 
-var captureTable = map[string]captureEntry{
+// SyntaxStyle is the theme-facing description of a token style.
+// Defined here (rather than importing the theme package) to avoid a circular import.
+type SyntaxStyle struct {
+	Fg     string
+	Bold   bool
+	Italic bool
+}
+
+// defaultCaptureTable holds the built-in default-dark colors and is never modified.
+var defaultCaptureTable = map[string]captureEntry{
 	"comment":               {hexToANSI("#6A9955"), 100},
 	"string":                {hexToANSI("#CE9178"), 90},
 	"string.special":        {hexToANSI("#D7BA7D"), 88},
@@ -222,27 +231,66 @@ var captureTable = map[string]captureEntry{
 	"markup.strong":        {hexToANSIBold("#E5C07B"), 83},
 	"markup.italic":        {hexToANSIItalic("#D7BA7D"), 83},
 	"markup.strikethrough": {hexToANSI("#808080"), 83},
-	// "markup.raw":           {hexToANSI("#808080"), 82},
-	// "markup.raw.block":     {hexToANSI("#808080"), 82},
-	"markup.raw":       {hexToANSI("#ABC2A1"), 82},
-	"markup.raw.block": {hexToANSI("#ABC2A1"), 82},
-	// "markup.link":           {hexToANSI("#4EC9B0"), 78},
-	// "markup.link.url":       {hexToANSI("#4EC9B0"), 78},
-	"markup.link":       {hexToANSI("#615bd3"), 78},
-	"markup.link.url":   {hexToANSI("#615bd3"), 78},
-	"markup.link.label": {hexToANSI("#9CDCFE"), 76},
-	"markup.list":       {hexToANSI("#C586C0"), 76},
-	"markup.quote":      {hexToANSI("#6A9955"), 74},
+	"markup.raw":           {hexToANSI("#ABC2A1"), 82},
+	"markup.raw.block":     {hexToANSI("#ABC2A1"), 82},
+	"markup.link":          {hexToANSI("#615bd3"), 78},
+	"markup.link.url":      {hexToANSI("#615bd3"), 78},
+	"markup.link.label":    {hexToANSI("#9CDCFE"), 76},
+	"markup.list":          {hexToANSI("#C586C0"), 76},
+	"markup.quote":         {hexToANSI("#6A9955"), 74},
 
 	// text.* — old nvim-treesitter naming still used by some grammars.
 	"text":          {hexToANSI("#D4D4D4"), 27},
 	"text.title":    {hexToANSI("#569CD6"), 87},
 	"text.strong":   {hexToANSIBold("#E5C07B"), 83},
 	"text.emphasis": {hexToANSIItalic("#D7BA7D"), 83},
-	// "text.literal":   {hexToANSI("#808080"), 82},
-	"text.literal":   {hexToANSI("#d5890e"), 82},
-	"text.uri":       {hexToANSI("#615bd3"), 78},
+	"text.literal":  {hexToANSI("#d5890e"), 82},
+	"text.uri":      {hexToANSI("#615bd3"), 78},
 	"text.reference": {hexToANSI("#9CDCFE"), 76},
+}
+
+// captureTable is the active mapping, rebuilt by ApplyTheme.
+// Starts as a copy of defaultCaptureTable (set in init).
+var captureTable map[string]captureEntry
+
+func init() {
+	captureTable = make(map[string]captureEntry, len(defaultCaptureTable))
+	for k, v := range defaultCaptureTable {
+		captureTable[k] = v
+	}
+}
+
+// ApplyTheme rebuilds the active syntax color table from the theme's syntax map.
+// Scopes absent from the theme keep their default-dark colors; scopes present
+// in the theme override only the color, preserving the built-in priority.
+func ApplyTheme(syntax map[string]SyntaxStyle) {
+	updated := make(map[string]captureEntry, len(defaultCaptureTable))
+	for k, v := range defaultCaptureTable {
+		updated[k] = v
+	}
+	for scope, style := range syntax {
+		if style.Fg == "" {
+			continue
+		}
+		prio := 0
+		if e, ok := defaultCaptureTable[scope]; ok {
+			prio = e.priority
+		}
+		updated[scope] = captureEntry{ansi: syntaxANSI(style.Fg, style.Bold, style.Italic), priority: prio}
+	}
+	captureTable = updated
+}
+
+func syntaxANSI(fg string, bold, italic bool) string {
+	color := hexToANSI(fg)
+	var prefix string
+	if bold {
+		prefix += "\x1b[1m"
+	}
+	if italic {
+		prefix += "\x1b[3m"
+	}
+	return prefix + color
 }
 
 func captureANSI(name string) (string, int, bool) {

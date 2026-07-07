@@ -70,6 +70,7 @@ type Config struct {
 	FuzzySearch          bool              `toml:"fuzzy_search"`
 	FormatOnSave         bool              `toml:"format_on_save"`
 	Formatters           []FormatterConfig `toml:"formatter"`
+	Theme                string            `toml:"theme"`
 }
 
 func defaults() *Config {
@@ -135,8 +136,8 @@ func (c *Config) EffectiveFormatters() []FormatterConfig {
 	return result
 }
 
-// configDir returns the XDG config home: $XDG_CONFIG_HOME if set, else ~/.config.
-func configDir() (string, error) {
+// ConfigDir returns the XDG config home: $XDG_CONFIG_HOME if set, else ~/.config.
+func ConfigDir() (string, error) {
 	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
 		return d, nil
 	}
@@ -174,6 +175,10 @@ const defaultConfigTemplate = `# Indigo editor configuration
 
 # Run the configured formatter automatically whenever a file is saved.
 # format_on_save = false
+
+# Color theme. Built-in options: default-dark, dracula, catppuccin-mocha, gruvbox-dark, one-dark.
+# Custom themes go in ~/.config/indigo/themes/<name>.toml.
+# theme = "default-dark"
 
 # ---------------------------------------------------------------------------
 # Language servers
@@ -214,7 +219,7 @@ const defaultConfigTemplate = `# Indigo editor configuration
 // Path returns the absolute path of the user config file.
 // The file may not exist yet.
 func Path() (string, error) {
-	dir, err := configDir()
+	dir, err := ConfigDir()
 	if err != nil {
 		return "", err
 	}
@@ -228,7 +233,7 @@ func Path() (string, error) {
 func Load() (*Config, error) {
 	cfg := defaults()
 
-	dir, err := configDir()
+	dir, err := ConfigDir()
 	if err != nil {
 		return cfg, nil
 	}

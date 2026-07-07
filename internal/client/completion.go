@@ -119,12 +119,12 @@ func renderCmdCompletionPopup(input string, selIdx int, termW int) []string {
 	if selIdx >= 0 {
 		sel := matches[selIdx]
 
-		hdr := "─ " + sel.name + " "
+		hdr := bdrH + " " + sel.name + " "
 		if len([]rune(hdr)) > innerW {
 			hdr = string([]rune(hdr)[:innerW])
 		}
 		dashes := max(0, innerW-len([]rune(hdr)))
-		descTop := popupBorderStyle.Render("╭" + hdr + strings.Repeat("─", dashes) + "╮")
+		descTop := popupBorderStyle.Render(bdrTL + hdr + strings.Repeat(bdrH, dashes) + bdrTR)
 		lines = append(lines, cmdPopupPad(descTop, termW))
 
 		descAvail := innerW - 2
@@ -133,30 +133,30 @@ func renderCmdCompletionPopup(input string, selIdx int, termW int) []string {
 			desc = string([]rune(desc)[:max(0, descAvail-1)]) + "…"
 		}
 		trail := max(0, descAvail-len([]rune(desc)))
-		descRow := popupBorderStyle.Render("│") +
+		descRow := popupBorderStyle.Render(bdrV) +
 			popupTextStyle.Render(" "+desc+strings.Repeat(" ", trail)+" ") +
-			popupBorderStyle.Render("│")
+			popupBorderStyle.Render(bdrV)
 		lines = append(lines, cmdPopupPad(descRow, termW))
 
-		descBot := popupBorderStyle.Render("╰" + strings.Repeat("─", innerW) + "╯")
+		descBot := popupBorderStyle.Render(bdrBL + strings.Repeat(bdrH, innerW) + bdrBR)
 		lines = append(lines, cmdPopupPad(descBot, termW))
 	}
 
 	// Commands box — top border.
 	cmdTitle := "Commands"
 	cmdDashes := max(0, innerW-len(cmdTitle))
-	top := popupBorderStyle.Render("╭") +
+	top := popupBorderStyle.Render(bdrTL) +
 		popupTextStyle.Render(cmdTitle) +
-		popupBorderStyle.Render(strings.Repeat("─", cmdDashes)+"╮")
+		popupBorderStyle.Render(strings.Repeat(bdrH, cmdDashes)+bdrTR)
 	lines = append(lines, cmdPopupPad(top, termW))
 
 	// "more above" indicator.
 	if visStart > 0 {
 		text := fmt.Sprintf("  ↑ %d more", visStart)
 		padW := max(0, innerW-len([]rune(text)))
-		row := popupBorderStyle.Render("│") +
+		row := popupBorderStyle.Render(bdrV) +
 			popupTextStyle.Render(text+strings.Repeat(" ", padW)) +
-			popupBorderStyle.Render("│")
+			popupBorderStyle.Render(bdrV)
 		lines = append(lines, cmdPopupPad(row, termW))
 	}
 
@@ -166,15 +166,15 @@ func renderCmdCompletionPopup(input string, selIdx int, termW int) []string {
 		padW := max(0, innerW-2-len([]rune(name)))
 		if i == selIdx {
 			content := "▶ " + name + strings.Repeat(" ", padW)
-			row := popupBorderStyle.Render("│") +
+			row := popupBorderStyle.Render(bdrV) +
 				selectionStyle.Render(content) +
-				popupBorderStyle.Render("│")
+				popupBorderStyle.Render(bdrV)
 			lines = append(lines, cmdPopupPad(row, termW))
 		} else {
 			content := "  " + name + strings.Repeat(" ", padW)
-			row := popupBorderStyle.Render("│") +
+			row := popupBorderStyle.Render(bdrV) +
 				popupTextStyle.Render(content) +
-				popupBorderStyle.Render("│")
+				popupBorderStyle.Render(bdrV)
 			lines = append(lines, cmdPopupPad(row, termW))
 		}
 	}
@@ -183,14 +183,14 @@ func renderCmdCompletionPopup(input string, selIdx int, termW int) []string {
 	if visEnd < len(matches) {
 		text := fmt.Sprintf("  ↓ %d more", len(matches)-visEnd)
 		padW := max(0, innerW-len([]rune(text)))
-		row := popupBorderStyle.Render("│") +
+		row := popupBorderStyle.Render(bdrV) +
 			popupTextStyle.Render(text+strings.Repeat(" ", padW)) +
-			popupBorderStyle.Render("│")
+			popupBorderStyle.Render(bdrV)
 		lines = append(lines, cmdPopupPad(row, termW))
 	}
 
 	// Bottom border.
-	bottom := popupBorderStyle.Render("╰" + strings.Repeat("─", innerW) + "╯")
+	bottom := popupBorderStyle.Render(bdrBL + strings.Repeat(bdrH, innerW) + bdrBR)
 	lines = append(lines, cmdPopupPad(bottom, termW))
 
 	return lines

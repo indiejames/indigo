@@ -11,6 +11,7 @@ import (
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/highlight"
+	"github.com/indiejames/indigo/internal/theme"
 )
 
 type Mode int
@@ -161,73 +162,145 @@ type metricsData struct {
 	keyToFrameDuration time.Duration
 }
 
+// UI styles — initialized to default-dark values; replaced by ApplyTheme before first render.
 var (
-	barStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#087AC8")).
-			Foreground(lipgloss.Color("#FFFFFF"))
+	barStyle        lipgloss.Style
+	normalModeStyle lipgloss.Style
+	insertModeStyle lipgloss.Style
+	cursorStyle     lipgloss.Style
 
-	normalModeStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#087AC8")).
-			Foreground(lipgloss.Color("#AAFFAA")).
-			Bold(true)
+	popupBg          lipgloss.Color
+	popupBorderStyle lipgloss.Style
+	popupKeyStyle    lipgloss.Style
+	popupTextStyle   lipgloss.Style
 
-	insertModeStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#087AC8")).
-			Foreground(lipgloss.Color("#AADDFF")).
-			Bold(true)
+	selectionStyle lipgloss.Style
+	gutterStyle    lipgloss.Style
+	gutterCurStyle lipgloss.Style
 
+	diagErrorStyle lipgloss.Style
+	diagWarnStyle  lipgloss.Style
+	diagInfoStyle  lipgloss.Style
+
+	barDiagErrorStyle lipgloss.Style
+	barDiagWarnStyle  lipgloss.Style
+	barDiagInfoStyle  lipgloss.Style
+
+	fileTypeStyle  lipgloss.Style
+	lspIdleStyle   lipgloss.Style
+	lspActiveStyle lipgloss.Style
+
+	// Hex colors for diagnostic underlines (updated by ApplyTheme).
+	activeDiagError = "#FF5555"
+	activeDiagWarn  = "#FFDD44"
+	activeDiagInfo  = "#88AAFF"
+
+	// Popup border characters (updated by ApplyTheme).
+	bdrTL       = "╭"
+	bdrTR       = "╮"
+	bdrBL       = "╰"
+	bdrBR       = "╯"
+	bdrH        = "─"
+	bdrV        = "│"
+	bdrLipgloss = lipgloss.RoundedBorder()
+)
+
+func init() {
+	applyDefaultDark()
+}
+
+// ApplyTheme updates all UI styles and border characters from the given theme.
+// Must be called before the first render (i.e. before tea.NewProgram).
+func ApplyTheme(t *theme.Theme) {
+	barBg := lipgloss.Color(t.UI.BarBg)
+	darkBg := lipgloss.Color(t.UI.BarDarkBg)
+	pb := lipgloss.Color(t.UI.PopupBg)
+
+	barStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(t.UI.BarFg))
+	normalModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(t.UI.NormalModeFg)).Bold(true)
+	insertModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(t.UI.InsertModeFg)).Bold(true)
 	cursorStyle = lipgloss.NewStyle().Reverse(true)
 
-	popupBg          = lipgloss.Color("#1E2A38")
-	popupBorderStyle = lipgloss.NewStyle().
-				Background(popupBg).
-				Foreground(lipgloss.Color("#4488CC"))
-	popupKeyStyle = lipgloss.NewStyle().
-			Background(popupBg).
-			Foreground(lipgloss.Color("#FFDD44")).
-			Bold(true)
-	popupTextStyle = lipgloss.NewStyle().
-			Background(popupBg).
-			Foreground(lipgloss.Color("#CCDDEE"))
+	popupBg = pb
+	popupBorderStyle = lipgloss.NewStyle().Background(pb).Foreground(lipgloss.Color(t.UI.PopupBorderFg))
+	popupKeyStyle = lipgloss.NewStyle().Background(pb).Foreground(lipgloss.Color(t.UI.PopupKeyFg)).Bold(true)
+	popupTextStyle = lipgloss.NewStyle().Background(pb).Foreground(lipgloss.Color(t.UI.PopupTextFg))
 
-	selectionStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#2D5F8A")).
-			Foreground(lipgloss.Color("#FFFFFF"))
+	selectionStyle = lipgloss.NewStyle().Background(lipgloss.Color(t.UI.SelectionBg)).Foreground(lipgloss.Color(t.UI.SelectionFg))
+	gutterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.GutterFg))
+	gutterCurStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.GutterCurFg))
 
-	gutterStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#606060"))
+	diagErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.DiagErrorFg))
+	diagWarnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.DiagWarnFg))
+	diagInfoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.DiagInfoFg))
 
-	gutterCurStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#AAAAAA"))
+	barDiagErrorStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(t.UI.DiagErrorFg))
+	barDiagWarnStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(t.UI.DiagWarnFg))
+	barDiagInfoStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(t.UI.DiagInfoFg))
+
+	fileTypeStyle = lipgloss.NewStyle().Background(darkBg).Foreground(lipgloss.Color("#CCDDFF"))
+	lspIdleStyle = lipgloss.NewStyle().Background(darkBg).Foreground(lipgloss.Color("#667788"))
+	lspActiveStyle = lipgloss.NewStyle().Background(darkBg).Foreground(lipgloss.Color(t.UI.NormalModeFg))
+
+	activeDiagError = t.UI.DiagErrorFg
+	activeDiagWarn = t.UI.DiagWarnFg
+	activeDiagInfo = t.UI.DiagInfoFg
+
+	bc := t.BorderChars()
+	bdrTL, bdrTR, bdrBL, bdrBR, bdrH, bdrV = bc[0], bc[1], bc[2], bc[3], bc[4], bc[5]
+	switch t.UI.PopupBorder {
+	case "square":
+		bdrLipgloss = lipgloss.NormalBorder()
+	case "double":
+		bdrLipgloss = lipgloss.DoubleBorder()
+	case "none":
+		bdrLipgloss = lipgloss.HiddenBorder()
+	default:
+		bdrLipgloss = lipgloss.RoundedBorder()
+	}
+}
+
+// applyDefaultDark initialises all styles to the built-in default-dark palette.
+// Called from init() so tests and any code path that skips ApplyTheme still work.
+func applyDefaultDark() {
+	barBg := lipgloss.Color("#087AC8")
+	barFg := lipgloss.Color("#FFFFFF")
+	darkBg := lipgloss.Color("#065A96")
+	pb := lipgloss.Color("#1E2A38")
+
+	barStyle = lipgloss.NewStyle().Background(barBg).Foreground(barFg)
+	normalModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color("#AAFFAA")).Bold(true)
+	insertModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color("#AADDFF")).Bold(true)
+	cursorStyle = lipgloss.NewStyle().Reverse(true)
+
+	popupBg = pb
+	popupBorderStyle = lipgloss.NewStyle().Background(pb).Foreground(lipgloss.Color("#4488CC"))
+	popupKeyStyle = lipgloss.NewStyle().Background(pb).Foreground(lipgloss.Color("#FFDD44")).Bold(true)
+	popupTextStyle = lipgloss.NewStyle().Background(pb).Foreground(lipgloss.Color("#CCDDEE"))
+
+	selectionStyle = lipgloss.NewStyle().Background(lipgloss.Color("#2D5F8A")).Foreground(lipgloss.Color("#FFFFFF"))
+	gutterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#606060"))
+	gutterCurStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
 
 	diagErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555"))
-	diagWarnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFDD44"))
-	diagInfoStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#88AAFF"))
+	diagWarnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFDD44"))
+	diagInfoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#88AAFF"))
 
-	// Diagnostic count indicators embedded in the status bar.
-	barDiagErrorStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#087AC8")).
-				Foreground(lipgloss.Color("#FF8888"))
-	barDiagWarnStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#087AC8")).
-				Foreground(lipgloss.Color("#FFDD44"))
-	barDiagInfoStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#087AC8")).
-				Foreground(lipgloss.Color("#88AAFF"))
+	barDiagErrorStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color("#FF8888"))
+	barDiagWarnStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color("#FFDD44"))
+	barDiagInfoStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color("#88AAFF"))
 
-	// Status bar right-side indicators.
-	fileTypeStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#065A96")).
-			Foreground(lipgloss.Color("#CCDDFF"))
+	fileTypeStyle = lipgloss.NewStyle().Background(darkBg).Foreground(lipgloss.Color("#CCDDFF"))
+	lspIdleStyle = lipgloss.NewStyle().Background(darkBg).Foreground(lipgloss.Color("#667788"))
+	lspActiveStyle = lipgloss.NewStyle().Background(darkBg).Foreground(lipgloss.Color("#AAFFAA"))
 
-	lspIdleStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#065A96")).
-			Foreground(lipgloss.Color("#667788")) // dim — configured but not yet confirmed running
+	activeDiagError = "#FF5555"
+	activeDiagWarn = "#FFDD44"
+	activeDiagInfo = "#88AAFF"
 
-	lspActiveStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#065A96")).
-			Foreground(lipgloss.Color("#AAFFAA")) // green — confirmed running
-)
+	bdrTL, bdrTR, bdrBL, bdrBR, bdrH, bdrV = "╭", "╮", "╰", "╯", "─", "│"
+	bdrLipgloss = lipgloss.RoundedBorder()
+}
 
 // Selection tracks the selected range in the buffer.
 // [Anchor, Head] is inclusive on both ends for display purposes.

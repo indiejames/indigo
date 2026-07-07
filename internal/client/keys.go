@@ -188,6 +188,36 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.diagPopupSuppressed = true
 	}
 
+	// Scroll keys navigate the help popup; q/esc/? dismiss it.
+	if m.helpVisible {
+		helpLines := helpPopupLines()
+		maxPopH := max(6, m.height-4)
+		contentH := maxPopH - 2
+		maxScroll := max(0, len(helpLines)-contentH)
+		switch msg.String() {
+		case "j", "down":
+			m.helpScroll = min(m.helpScroll+1, maxScroll)
+			return m, nil
+		case "k", "up":
+			m.helpScroll = max(0, m.helpScroll-1)
+			return m, nil
+		case "ctrl+f":
+			m.helpScroll = min(m.helpScroll+m.height/4, maxScroll)
+			return m, nil
+		case "ctrl+b":
+			m.helpScroll = max(0, m.helpScroll-m.height/4)
+			return m, nil
+		case "esc", "q", "?":
+			m.helpVisible = false
+			m.helpScroll = 0
+			return m, nil
+		default:
+			m.helpVisible = false
+			m.helpScroll = 0
+			// Don't consume: let the key fall through to normal handling.
+		}
+	}
+
 	// Scroll keys navigate the hover popup; all other keys dismiss it.
 	if m.hoverContent != nil {
 		// contentH mirrors the calculation in renderHoverPopup.
@@ -739,6 +769,10 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "C":
 		m = m.withClearedSearch()
 		addCursorBelow(&m)
+
+	case "?":
+		m.helpVisible = true
+		m.helpScroll = 0
 
 	case "alt+s":
 		if m.sel == nil {

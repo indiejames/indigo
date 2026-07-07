@@ -1297,6 +1297,176 @@ func mergeOverlays(a, b []lineOverlay) []lineOverlay {
 	return out
 }
 
+// ---- Help popup ----
+
+type helpEntry struct {
+	key  string // left column
+	desc string // right column; empty = section header
+}
+
+// helpEntries is the complete reference displayed by the ? popup.
+var helpEntries = []helpEntry{
+	{key: "Navigation"},
+	{key: "h / ←", desc: "Move left"},
+	{key: "j / ↓", desc: "Move down"},
+	{key: "k / ↑", desc: "Move up"},
+	{key: "l / →", desc: "Move right"},
+	{key: "b", desc: "Move to previous word start"},
+	{key: "e", desc: "Move to word end"},
+	{key: "0 / ^ / Home", desc: "Line start"},
+	{key: "$ / End", desc: "Line end"},
+	{key: "G", desc: "End of file"},
+	{key: "Ctrl+f / PgDn", desc: "Page down"},
+	{key: "Ctrl+b / PgUp", desc: "Page up"},
+	{key: ""},
+	{key: "Go to (g…)"},
+	{key: "gg", desc: "Top of file"},
+	{key: "ge", desc: "End of file"},
+	{key: "gd", desc: "Go to definition"},
+	{key: "gh", desc: "Line start"},
+	{key: "gl", desc: "Line end"},
+	{key: "gs", desc: "First non-whitespace"},
+	{key: "gb", desc: "Open buffer picker"},
+	{key: ""},
+	{key: "Editing"},
+	{key: "i", desc: "Insert before cursor"},
+	{key: "a", desc: "Insert after cursor"},
+	{key: "A", desc: "Insert at line end"},
+	{key: "o", desc: "New line below"},
+	{key: "O", desc: "New line above"},
+	{key: "d", desc: "Delete selection"},
+	{key: "c", desc: "Change selection (delete + insert)"},
+	{key: "y", desc: "Yank (copy) selection"},
+	{key: "u", desc: "Undo"},
+	{key: "U", desc: "Redo"},
+	{key: ""},
+	{key: "Selection"},
+	{key: "w", desc: "Select word"},
+	{key: "W", desc: "Extend word forward"},
+	{key: "x", desc: "Select line"},
+	{key: "X", desc: "Extend line backward"},
+	{key: "%", desc: "Select all"},
+	{key: ";", desc: "Clear selection"},
+	{key: "Alt+;", desc: "Flip selection (swap anchor/head)"},
+	{key: "mi / mw", desc: "Select inside object / word"},
+	{key: ""},
+	{key: "Search"},
+	{key: "/", desc: "Start search"},
+	{key: "n", desc: "Next match"},
+	{key: "N", desc: "Previous match"},
+	{key: ""},
+	{key: "Multi-cursor"},
+	{key: "Ctrl+d", desc: "Add cursor at next occurrence"},
+	{key: "C", desc: "Add cursor below"},
+	{key: "Alt+s", desc: "Split selection into cursors"},
+	{key: ""},
+	{key: "LSP / Diagnostics"},
+	{key: "K", desc: "Hover documentation"},
+	{key: "E", desc: "Toggle diagnostic detail"},
+	{key: "F", desc: "Fix suggestions"},
+	{key: ""},
+	{key: "Files & Buffers"},
+	{key: "Ctrl+p", desc: "File picker"},
+	{key: "Ctrl+s", desc: "Save"},
+	{key: "]b / [b", desc: "Next / previous buffer"},
+	{key: ":"},
+	{key: "  w", desc: "Save"},
+	{key: "  q", desc: "Close buffer"},
+	{key: "  wq", desc: "Save and close"},
+	{key: "  e <path>", desc: "Open file"},
+	{key: "  themes", desc: "List available themes"},
+	{key: "  theme <name>", desc: "Switch theme"},
+}
+
+const helpKeyW = 18 // fixed left-column width for key strings
+
+// helpPopupLines returns the pre-rendered text lines of the help popup body
+// (without the border). Called from both handleKey (for scroll-clamping) and
+// renderHelpPopup (for display).
+func helpPopupLines() []string {
+	lines := make([]string, 0, len(helpEntries))
+	for _, e := range helpEntries {
+		if e.desc == "" {
+			if e.key == "" {
+				// blank spacer
+				lines = append(lines, "")
+			} else {
+				// section header
+				lines = append(lines, popupKeyStyle.Render(e.key))
+			}
+		} else {
+			key := e.key
+			if len([]rune(key)) > helpKeyW {
+				key = string([]rune(key)[:helpKeyW])
+			}
+			padded := fmt.Sprintf("  %-*s  ", helpKeyW, key)
+			lines = append(lines, popupTextStyle.Render(padded)+popupTextStyle.Render(e.desc))
+		}
+	}
+	return lines
+}
+
+// renderHelpPopup renders the help popup as a slice of styled, full-width lines.
+// innerW is the content width (excluding borders).
+func renderHelpPopup(width, scroll, maxH int) []string {
+	innerW := min(width-4, 64) // cap at 64 so it doesn't sprawl on huge terminals
+	if innerW < 30 {
+		innerW = max(30, width-4)
+	}
+
+	bodyLines := helpPopupLines()
+	total := len(bodyLines)
+	contentH := maxH - 2
+	if contentH < 1 {
+		contentH = 1
+	}
+	// Clamp scroll.
+	if scroll > total-contentH {
+		scroll = max(0, total-contentH)
+	}
+	end := min(scroll+contentH, total)
+	visible := bodyLines[scroll:end]
+	// Pad to fixed height so the box doesn't shrink near the bottom.
+	for len(visible) < contentH {
+		visible = append(visible, "")
+	}
+
+	// Pad each line to innerW visual columns.
+	padded := make([]string, len(visible))
+	for i, line := range visible {
+		lw := lipgloss.Width(line)
+		if lw < innerW {
+			line += popupTextStyle.Render(strings.Repeat(" ", innerW-lw))
+		}
+		padded[i] = line
+	}
+
+	title := "Help — ? to close"
+	titleRunes := []rune(title)
+	dashes := max(0, innerW-len(titleRunes))
+	top := popupBorderStyle.Render(bdrTL+string(titleRunes)) +
+		popupBorderStyle.Render(strings.Repeat(bdrH, dashes)+bdrTR)
+
+	out := []string{top}
+	for _, line := range padded {
+		out = append(out, popupBorderStyle.Render(bdrV)+line+popupBorderStyle.Render(bdrV))
+	}
+
+	needsScroll := total > contentH
+	var bottom string
+	if needsScroll {
+		shown := min(scroll+contentH, total)
+		indicator := fmt.Sprintf(" j/k scroll   %d/%d ", shown, total)
+		indicatorRunes := []rune(indicator)
+		remainDashes := max(0, innerW-len(indicatorRunes))
+		bottom = popupBorderStyle.Render(bdrBL+indicator+strings.Repeat(bdrH, remainDashes)+bdrBR)
+	} else {
+		bottom = popupBorderStyle.Render(bdrBL + strings.Repeat(bdrH, innerW) + bdrBR)
+	}
+	out = append(out, bottom)
+	return out
+}
+
 // ---- View ----
 
 func (m Model) View() string {
@@ -1509,6 +1679,24 @@ func (m Model) View() string {
 	// Overlay Save As dialog (centered).
 	if m.saveAsInput != nil {
 		popup := renderSaveAsDialog(*m.saveAsInput, m.width)
+		popH := len(popup)
+		popW := lipgloss.Width(popup[0])
+		popCol := (m.width - popW) / 2
+		if popCol < 0 {
+			popCol = 0
+		}
+		startRow := max(0, vis/2-popH/2)
+		for pi, popLine := range popup {
+			if row := startRow + pi; row < vis {
+				lines[row] = overlayRight(lines[row], popLine, popCol)
+			}
+		}
+	}
+
+	// Overlay help popup (centered).
+	if m.helpVisible {
+		maxPopH := max(6, vis-4)
+		popup := renderHelpPopup(m.width, m.helpScroll, maxPopH)
 		popH := len(popup)
 		popW := lipgloss.Width(popup[0])
 		popCol := (m.width - popW) / 2

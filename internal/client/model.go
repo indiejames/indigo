@@ -394,6 +394,9 @@ type Model struct {
 	diagnostics []ClientDiag
 	diagTick         int            // counter; fetch every 10 ticks (~1.2s)
 	lspActive        bool           // true once first diagnostic poll returns (LSP is running)
+	helpVisible  bool // true = help popup visible
+	helpScroll   int  // scroll offset within the help popup
+
 	hoverContent     *string        // non-nil = hover popup visible
 	hoverScroll      int            // scroll offset within the hover popup
 	hoverTotalLines  int            // total rendered body lines; used to clamp scroll

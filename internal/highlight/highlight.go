@@ -133,6 +133,225 @@ func extractSpans(query *sitter.Query, tree *sitter.Tree, content []byte) LineSp
 	return result
 }
 
+// --- tree-sitter text objects ---
+
+// TextObject describes a source region found by a text-object query.
+type TextObject struct {
+	StartLine, StartCol int
+	EndLine, EndCol     int
+}
+
+// node type sets shared across languages.
+var (
+	tsFunctionTypes = map[string]bool{
+		"function_declaration": true, "method_declaration": true, "func_literal": true,
+		"function_definition": true, "function_item": true,
+		"arrow_function": true, "function": true, "method_definition": true,
+		"constructor_declaration": true,
+	}
+	tsTypeTypes = map[string]bool{
+		"type_declaration": true, "type_spec": true,
+		"struct_item": true, "enum_item": true, "type_item": true, "impl_item": true,
+		"interface_declaration": true, "class_declaration": true, "type_alias_declaration": true,
+		"class_definition": true, "struct_specifier": true, "enum_specifier": true,
+	}
+	tsBlockTypes = map[string]bool{
+		"block": true, "statement_block": true,
+		"declaration_list": true, "field_declaration_list": true,
+	}
+	tsCommentTypes = map[string]bool{
+		"comment": true, "line_comment": true, "block_comment": true, "doc_comment": true,
+	}
+	tsArgListTypes = map[string]bool{
+		"argument_list": true, "arguments": true,
+		"call_arguments": true, "positional_arguments": true,
+	}
+)
+
+// TextObjectAt finds the "inside" text object of the given kind at (line, col).
+// kind is one of: "function", "type", "argument", "comment".
+// Returns (obj, true) on success.
+func (h *Highlighter) TextObjectAt(content []byte, line, col int, kind string) (TextObject, bool) {
+	if h == nil {
+		return TextObject{}, false
+	}
+	p := sitter.NewParser()
+	p.SetLanguage(h.lang)
+	tree, err := p.ParseString(context.Background(), nil, content)
+	if err != nil || tree == nil {
+		return TextObject{}, false
+	}
+	defer tree.Close()
+
+	pt := sitter.Point{Row: uint(line), Column: uint(col)}
+	leaf := tree.RootNode().DescendantForPointRange(pt, pt)
+	if leaf.IsNull() {
+		return TextObject{}, false
+	}
+
+	switch kind {
+	case "function":
+		return tsFunctionInside(leaf)
+	case "type":
+		return tsTypeInside(leaf)
+	case "argument":
+		return tsArgumentAt(leaf, pt)
+	case "comment":
+		return tsCommentAt(leaf)
+	}
+	return TextObject{}, false
+}
+
+// TextObjectAround finds the full "around" span of the given kind at (line, col).
+// Unlike TextObjectAt, it returns the complete node span including delimiters.
+// kind is one of: "function", "type", "argument", "comment".
+func (h *Highlighter) TextObjectAround(content []byte, line, col int, kind string) (TextObject, bool) {
+	if h == nil {
+		return TextObject{}, false
+	}
+	p := sitter.NewParser()
+	p.SetLanguage(h.lang)
+	tree, err := p.ParseString(context.Background(), nil, content)
+	if err != nil || tree == nil {
+		return TextObject{}, false
+	}
+	defer tree.Close()
+
+	pt := sitter.Point{Row: uint(line), Column: uint(col)}
+	leaf := tree.RootNode().DescendantForPointRange(pt, pt)
+	if leaf.IsNull() {
+		return TextObject{}, false
+	}
+
+	switch kind {
+	case "function":
+		fn, ok := tsAncestor(leaf, tsFunctionTypes)
+		if !ok {
+			return TextObject{}, false
+		}
+		return tsNodeSpan(fn), true
+	case "type":
+		tn, ok := tsAncestor(leaf, tsTypeTypes)
+		if !ok {
+			return TextObject{}, false
+		}
+		// For Go: the top-level type_declaration is what we want.
+		// Walk up one more level if the direct ancestor is a nested spec.
+		parent := tn.Parent()
+		if !parent.IsNull() && tsTypeTypes[parent.Type()] {
+			return tsNodeSpan(parent), true
+		}
+		return tsNodeSpan(tn), true
+	case "argument":
+		return tsArgumentAt(leaf, pt)
+	case "comment":
+		return tsCommentAt(leaf)
+	}
+	return TextObject{}, false
+}
+
+func tsNodeSpan(n sitter.Node) TextObject {
+	sp, ep := n.StartPoint(), n.EndPoint()
+	return TextObject{int(sp.Row), int(sp.Column), int(ep.Row), int(ep.Column)}
+}
+
+func tsAncestor(node sitter.Node, types map[string]bool) (sitter.Node, bool) {
+	for !node.IsNull() {
+		if types[node.Type()] {
+			return node, true
+		}
+		node = node.Parent()
+	}
+	return node, false
+}
+
+// blockInsideSpan returns the span of a block's content, excluding the brace lines.
+// EndCol is set to math.MaxInt for multi-line blocks; callers should clamp to the
+// actual line length before storing into a cursor or selection.
+func blockInsideSpan(block sitter.Node) TextObject {
+	sp := block.StartPoint()
+	ep := block.EndPoint()
+	if ep.Row > sp.Row {
+		return TextObject{int(sp.Row) + 1, 0, int(ep.Row) - 1, math.MaxInt}
+	}
+	// Single-line block: select between the braces.
+	sc, ec := int(sp.Column)+1, int(ep.Column)-1
+	if ec < sc {
+		ec = sc
+	}
+	return TextObject{int(sp.Row), sc, int(ep.Row), ec}
+}
+
+// findDescendantBlock does a depth-limited DFS for the first block-type child.
+// A limit of 4 is enough for all real grammars (e.g. Go's type_declaration →
+// type_spec → struct_type → field_declaration_list is 3 levels).
+func findDescendantBlock(node sitter.Node, depth int) (sitter.Node, bool) {
+	if depth == 0 {
+		return sitter.Node{}, false
+	}
+	for i := range node.ChildCount() {
+		child := node.Child(i)
+		if tsBlockTypes[child.Type()] {
+			return child, true
+		}
+		if result, found := findDescendantBlock(child, depth-1); found {
+			return result, found
+		}
+	}
+	return sitter.Node{}, false
+}
+
+func tsFunctionInside(node sitter.Node) (TextObject, bool) {
+	fn, ok := tsAncestor(node, tsFunctionTypes)
+	if !ok {
+		return TextObject{}, false
+	}
+	if block, found := findDescendantBlock(fn, 4); found {
+		return blockInsideSpan(block), true
+	}
+	return tsNodeSpan(fn), true
+}
+
+func tsTypeInside(node sitter.Node) (TextObject, bool) {
+	tn, ok := tsAncestor(node, tsTypeTypes)
+	if !ok {
+		return TextObject{}, false
+	}
+	if block, found := findDescendantBlock(tn, 4); found {
+		return blockInsideSpan(block), true
+	}
+	return tsNodeSpan(tn), true
+}
+
+func tsArgumentAt(node sitter.Node, pt sitter.Point) (TextObject, bool) {
+	argList, ok := tsAncestor(node, tsArgListTypes)
+	if !ok {
+		return TextObject{}, false
+	}
+	for i := range argList.NamedChildCount() {
+		child := argList.NamedChild(i)
+		sp, ep := child.StartPoint(), child.EndPoint()
+		containsRow := sp.Row <= pt.Row && pt.Row <= ep.Row
+		if !containsRow {
+			continue
+		}
+		colOK := (sp.Row < pt.Row || sp.Column <= pt.Column) &&
+			(ep.Row > pt.Row || ep.Column >= pt.Column)
+		if colOK {
+			return tsNodeSpan(child), true
+		}
+	}
+	return TextObject{}, false
+}
+
+func tsCommentAt(node sitter.Node) (TextObject, bool) {
+	cn, ok := tsAncestor(node, tsCommentTypes)
+	if !ok {
+		return TextObject{}, false
+	}
+	return tsNodeSpan(cn), true
+}
+
 func lineAt(lines []string, n int) string {
 	if n < 0 || n >= len(lines) {
 		return ""

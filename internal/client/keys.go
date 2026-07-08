@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/highlight"
 )
 
 // command is a node in the prefix-command tree.
@@ -66,15 +67,33 @@ var prefixCmds = []command{
 		label:     "Match",
 		menuTitle: "Match",
 		children: []command{
-			{key: 'm', label: "Go to matching bracket"},
+			{key: 'm', label: "Go to matching bracket", execute: executeGotoMatchingBracket},
 			{
 				key:       'i',
 				label:     "Select inside object",
 				menuTitle: "Match Inside",
 				children: []command{
 					{key: 'w', label: "Word", execute: executeSelectInsideWord},
-					{key: 'm', label: "Closes surrounding pair"},
-					{key: '.', label: "... or any character acting as a pair"},
+					{key: 'm', label: "Closest surrounding pair", execute: executeSelectInsideBrackets},
+					{key: '.', label: "Quote/delimiter pair", execute: executeSelectInsideChar},
+					{key: 'f', label: "Function", execute: executeSelectInsideFunction},
+					{key: 't', label: "Type definition", execute: executeSelectInsideType},
+					{key: 'a', label: "Argument/parameter", execute: executeSelectInsideArgument},
+					{key: 'c', label: "Comment", execute: executeSelectInsideComment},
+				},
+			},
+			{
+				key:       'a',
+				label:     "Select around object",
+				menuTitle: "Match Around",
+				children: []command{
+					{key: 'w', label: "Word", execute: executeSelectInsideWord},
+					{key: 'm', label: "Closest surrounding pair", execute: executeSelectAroundBrackets},
+					{key: '.', label: "Quote/delimiter pair", execute: executeSelectAroundChar},
+					{key: 'f', label: "Function", execute: executeSelectAroundFunction},
+					{key: 't', label: "Type definition", execute: executeSelectAroundType},
+					{key: 'a', label: "Argument/parameter", execute: executeSelectAroundArgument},
+					{key: 'c', label: "Comment", execute: executeSelectAroundComment},
 				},
 			},
 		},
@@ -172,6 +191,378 @@ func executeSelectInsideWord(m Model) (tea.Model, tea.Cmd) {
 		m.scrollToCursor()
 	})
 	return m, nil
+}
+
+var openBrackets = map[rune]rune{'(': ')', '[': ']', '{': '}'}
+var closeBrackets = map[rune]rune{')': '(', ']': '[', '}': '{'}
+
+// scanMatchingClose scans forward from (line, col+1) for the close bracket that
+// balances the open bracket at col, handling nesting.
+func scanMatchingClose(m Model, line, col int, open, close rune) (int, int, bool) {
+	depth := 1
+	for ln := line; ln < m.buf.LineCount(); ln++ {
+		runes := []rune(m.buf.Line(ln))
+		start := 0
+		if ln == line {
+			start = col + 1
+		}
+		for c := start; c < len(runes); c++ {
+			switch runes[c] {
+			case open:
+				depth++
+			case close:
+				depth--
+				if depth == 0 {
+					return ln, c, true
+				}
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// scanMatchingOpen scans backward from (line, col-1) for the open bracket that
+// balances the close bracket at col, handling nesting.
+func scanMatchingOpen(m Model, line, col int, open, close rune) (int, int, bool) {
+	depth := 1
+	for ln := line; ln >= 0; ln-- {
+		runes := []rune(m.buf.Line(ln))
+		end := len(runes) - 1
+		if ln == line {
+			end = col - 1
+		}
+		for c := end; c >= 0; c-- {
+			switch runes[c] {
+			case close:
+				depth++
+			case open:
+				depth--
+				if depth == 0 {
+					return ln, c, true
+				}
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// executeGotoMatchingBracket moves the cursor to the bracket matching the one
+// at (or nearest ahead of) the cursor position.
+func executeGotoMatchingBracket(m Model) (tea.Model, tea.Cmd) {
+	ln := m.cursor.Line
+	runes := []rune(m.buf.Line(ln))
+	if len(runes) == 0 {
+		return m, nil
+	}
+	col := min(m.cursor.Col, len(runes)-1)
+	ch := runes[col]
+
+	// Not on a bracket — scan forward on the current line for the first one.
+	if _, isOpen := openBrackets[ch]; !isOpen {
+		if _, isClose := closeBrackets[ch]; !isClose {
+			found := false
+			for c := col + 1; c < len(runes); c++ {
+				r := runes[c]
+				if _, ok := openBrackets[r]; ok {
+					col, ch, found = c, r, true
+					break
+				}
+				if _, ok := closeBrackets[r]; ok {
+					col, ch, found = c, r, true
+					break
+				}
+			}
+			if !found {
+				return m, nil
+			}
+		}
+	}
+
+	var matchLn, matchCol int
+	var ok bool
+	if close, isOpen := openBrackets[ch]; isOpen {
+		matchLn, matchCol, ok = scanMatchingClose(m, ln, col, ch, close)
+	} else if open, isClose := closeBrackets[ch]; isClose {
+		matchLn, matchCol, ok = scanMatchingOpen(m, ln, col, open, ch)
+	}
+	if ok {
+		m.sel = nil
+		m.cursor = document.Pos{Line: matchLn, Col: matchCol}
+		m.scrollToCursor()
+	}
+	return m, nil
+}
+
+// executeSelectInsideBrackets finds the innermost bracket pair surrounding the
+// cursor and selects the content between the brackets.
+func executeSelectInsideBrackets(m Model) (tea.Model, tea.Cmd) {
+	ln := m.cursor.Line
+	col := m.cursor.Col
+
+	// Scan backward to find the nearest unmatched opening bracket.
+	nestDepth := map[rune]int{}
+	openLn, openCol := -1, -1
+	var openCh, closeCh rune
+	found := false
+
+searchBack:
+	for l := ln; l >= 0; l-- {
+		runes := []rune(m.buf.Line(l))
+		end := len(runes) - 1
+		if l == ln {
+			end = min(col, len(runes)-1)
+		}
+		for c := end; c >= 0; c-- {
+			r := runes[c]
+			if open, isClose := closeBrackets[r]; isClose {
+				nestDepth[open]++
+			} else if close, isOpen := openBrackets[r]; isOpen {
+				if nestDepth[r] > 0 {
+					nestDepth[r]--
+				} else {
+					openLn, openCol = l, c
+					openCh, closeCh = r, close
+					found = true
+					break searchBack
+				}
+			}
+		}
+	}
+
+	if !found {
+		return m, nil
+	}
+	closeLn, closeCol, ok := scanMatchingClose(m, openLn, openCol, openCh, closeCh)
+	if !ok {
+		return m, nil
+	}
+
+	// Select content between the brackets (exclusive of the brackets themselves).
+	startLn, startCol := openLn, openCol+1
+	endLn, endCol := closeLn, closeCol-1
+	// When the closing bracket is at col 0, the selection ends at the last char
+	// of the previous line rather than col -1 (which would panic scrollToCursor).
+	if endCol < 0 {
+		if endLn == 0 {
+			return m, nil
+		}
+		endLn--
+		endCol = max(0, len([]rune(m.buf.Line(endLn)))-1)
+	}
+	if endLn < startLn || (endLn == startLn && endCol < startCol) {
+		return m, nil
+	}
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: startLn, Col: startCol},
+		Head:   document.Pos{Line: endLn, Col: endCol},
+	}
+	m.cursor = m.sel.Head
+	m.scrollToCursor()
+	return m, nil
+}
+
+// executeSelectInsideChar finds the tightest surrounding pair of identical
+// delimiter characters (", ', `) on the current line and selects between them.
+func executeSelectInsideChar(m Model) (tea.Model, tea.Cmd) {
+	ln := m.cursor.Line
+	col := m.cursor.Col
+	runes := []rune(m.buf.Line(ln))
+
+	bestStart, bestEnd := -1, -1
+	for _, ch := range []rune{'"', '\'', '`'} {
+		var positions []int
+		for i, r := range runes {
+			if r == ch {
+				positions = append(positions, i)
+			}
+		}
+		for i := 0; i+1 < len(positions); i += 2 {
+			s, e := positions[i], positions[i+1]
+			if s <= col && col <= e {
+				if bestStart == -1 || (e-s) < (bestEnd-bestStart) {
+					bestStart, bestEnd = s, e
+				}
+			}
+		}
+	}
+
+	if bestStart == -1 || bestEnd <= bestStart+1 {
+		return m, nil
+	}
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: ln, Col: bestStart + 1},
+		Head:   document.Pos{Line: ln, Col: bestEnd - 1},
+	}
+	m.cursor = m.sel.Head
+	m.scrollToCursor()
+	return m, nil
+}
+
+// applyTextObject converts a highlight.TextObject into a selection, clamping EndCol
+// to the actual line length when the sentinel math.MaxInt is used.
+func applyTextObject(m Model, to highlight.TextObject) (tea.Model, tea.Cmd) {
+	endCol := to.EndCol
+	if endCol > m.buf.LineLen(to.EndLine) {
+		endCol = max(0, m.buf.LineLen(to.EndLine)-1)
+	}
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: to.StartLine, Col: to.StartCol},
+		Head:   document.Pos{Line: to.EndLine, Col: endCol},
+	}
+	m.cursor = m.sel.Head
+	m.scrollToCursor()
+	return m, nil
+}
+
+func executeSelectInsideFunction(m Model) (tea.Model, tea.Cmd) {
+	to, ok := m.hlr.TextObjectAt([]byte(m.buf.Content()), m.cursor.Line, m.cursor.Col, "function")
+	if !ok {
+		return m, nil
+	}
+	return applyTextObject(m, to)
+}
+
+func executeSelectInsideType(m Model) (tea.Model, tea.Cmd) {
+	to, ok := m.hlr.TextObjectAt([]byte(m.buf.Content()), m.cursor.Line, m.cursor.Col, "type")
+	if !ok {
+		return m, nil
+	}
+	return applyTextObject(m, to)
+}
+
+func executeSelectInsideArgument(m Model) (tea.Model, tea.Cmd) {
+	to, ok := m.hlr.TextObjectAt([]byte(m.buf.Content()), m.cursor.Line, m.cursor.Col, "argument")
+	if !ok {
+		return m, nil
+	}
+	return applyTextObject(m, to)
+}
+
+func executeSelectInsideComment(m Model) (tea.Model, tea.Cmd) {
+	to, ok := m.hlr.TextObjectAt([]byte(m.buf.Content()), m.cursor.Line, m.cursor.Col, "comment")
+	if !ok {
+		return m, nil
+	}
+	return applyTextObject(m, to)
+}
+
+// --- match around ---
+
+func executeSelectAroundBrackets(m Model) (tea.Model, tea.Cmd) {
+	ln := m.cursor.Line
+	col := m.cursor.Col
+
+	// Scan backward to find the nearest unmatched opening bracket (same as inside).
+	nestDepth := map[rune]int{}
+	openLn, openCol := -1, -1
+	var openCh, closeCh rune
+	found := false
+
+searchBackAround:
+	for l := ln; l >= 0; l-- {
+		runes := []rune(m.buf.Line(l))
+		end := len(runes) - 1
+		if l == ln {
+			end = min(col, len(runes)-1)
+		}
+		for c := end; c >= 0; c-- {
+			r := runes[c]
+			if open, isClose := closeBrackets[r]; isClose {
+				nestDepth[open]++
+			} else if close, isOpen := openBrackets[r]; isOpen {
+				if nestDepth[r] > 0 {
+					nestDepth[r]--
+				} else {
+					openLn, openCol = l, c
+					openCh, closeCh = r, close
+					found = true
+					break searchBackAround
+				}
+			}
+		}
+	}
+	if !found {
+		return m, nil
+	}
+	closeLn, closeCol, ok := scanMatchingClose(m, openLn, openCol, openCh, closeCh)
+	if !ok {
+		return m, nil
+	}
+	// Around: include the brackets themselves.
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: openLn, Col: openCol},
+		Head:   document.Pos{Line: closeLn, Col: closeCol},
+	}
+	m.cursor = m.sel.Head
+	m.scrollToCursor()
+	return m, nil
+}
+
+func executeSelectAroundChar(m Model) (tea.Model, tea.Cmd) {
+	ln := m.cursor.Line
+	col := m.cursor.Col
+	runes := []rune(m.buf.Line(ln))
+
+	bestStart, bestEnd := -1, -1
+	for _, ch := range []rune{'"', '\'', '`'} {
+		var positions []int
+		for i, r := range runes {
+			if r == ch {
+				positions = append(positions, i)
+			}
+		}
+		for i := 0; i+1 < len(positions); i += 2 {
+			s, e := positions[i], positions[i+1]
+			if s <= col && col <= e {
+				if bestStart == -1 || (e-s) < (bestEnd-bestStart) {
+					bestStart, bestEnd = s, e
+				}
+			}
+		}
+	}
+	if bestStart == -1 {
+		return m, nil
+	}
+	// Around: include the delimiter characters.
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: ln, Col: bestStart},
+		Head:   document.Pos{Line: ln, Col: bestEnd},
+	}
+	m.cursor = m.sel.Head
+	m.scrollToCursor()
+	return m, nil
+}
+
+func executeSelectAroundFunction(m Model) (tea.Model, tea.Cmd) {
+	to, ok := m.hlr.TextObjectAround([]byte(m.buf.Content()), m.cursor.Line, m.cursor.Col, "function")
+	if !ok {
+		return m, nil
+	}
+	return applyTextObject(m, to)
+}
+
+func executeSelectAroundType(m Model) (tea.Model, tea.Cmd) {
+	to, ok := m.hlr.TextObjectAround([]byte(m.buf.Content()), m.cursor.Line, m.cursor.Col, "type")
+	if !ok {
+		return m, nil
+	}
+	return applyTextObject(m, to)
+}
+
+func executeSelectAroundArgument(m Model) (tea.Model, tea.Cmd) {
+	to, ok := m.hlr.TextObjectAround([]byte(m.buf.Content()), m.cursor.Line, m.cursor.Col, "argument")
+	if !ok {
+		return m, nil
+	}
+	return applyTextObject(m, to)
+}
+
+func executeSelectAroundComment(m Model) (tea.Model, tea.Cmd) {
+	to, ok := m.hlr.TextObjectAround([]byte(m.buf.Content()), m.cursor.Line, m.cursor.Col, "comment")
+	if !ok {
+		return m, nil
+	}
+	return applyTextObject(m, to)
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

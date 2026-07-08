@@ -565,6 +565,87 @@ func executeSelectAroundComment(m Model) (tea.Model, tea.Cmd) {
 	return applyTextObject(m, to)
 }
 
+// --- comment toggle ---
+
+func leadingWhitespace(runes []rune) int {
+	i := 0
+	for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t') {
+		i++
+	}
+	return i
+}
+
+// executeToggleComment comments or uncomments the current line (or selection).
+// All lines already commented → uncomment; otherwise → comment all.
+func executeToggleComment(m Model) (tea.Model, tea.Cmd) {
+	prefix := highlight.LineCommentPrefix(m.filePath)
+	prefixRunes := []rune(prefix)
+
+	startLine, endLine := m.cursor.Line, m.cursor.Line
+	if m.sel != nil {
+		a, h := m.sel.Anchor, m.sel.Head
+		if a.Line <= h.Line {
+			startLine, endLine = a.Line, h.Line
+		} else {
+			startLine, endLine = h.Line, a.Line
+		}
+	}
+
+	// Determine whether every line in range starts with the comment prefix.
+	allCommented := true
+outer:
+	for ln := startLine; ln <= endLine; ln++ {
+		runes := []rune(m.buf.Line(ln))
+		indent := leadingWhitespace(runes)
+		rest := runes[indent:]
+		if len(rest) < len(prefixRunes) {
+			allCommented = false
+			break outer
+		}
+		for i, r := range prefixRunes {
+			if rest[i] != r {
+				allCommented = false
+				break outer
+			}
+		}
+	}
+
+	ops := make([]document.Op, 0, endLine-startLine+1)
+	if allCommented {
+		for ln := startLine; ln <= endLine; ln++ {
+			runes := []rune(m.buf.Line(ln))
+			indent := leadingWhitespace(runes)
+			deleteLen := len(prefixRunes)
+			// Also remove the single space that was added after the prefix.
+			if indent+deleteLen < len(runes) && runes[indent+deleteLen] == ' ' {
+				deleteLen++
+			}
+			ops = append(ops, document.Op{
+				ClientID: m.rpc.ClientID(),
+				Type:     document.OpDelete,
+				FromLine: ln, FromCol: indent,
+				ToLine:   ln, ToCol: indent + deleteLen,
+			})
+		}
+	} else {
+		for ln := startLine; ln <= endLine; ln++ {
+			runes := []rune(m.buf.Line(ln))
+			indent := leadingWhitespace(runes)
+			ops = append(ops, document.Op{
+				ClientID:   m.rpc.ClientID(),
+				Type:       document.OpInsert,
+				InsertLine: ln,
+				InsertCol:  indent,
+				InsertText: prefix + " ",
+			})
+		}
+	}
+
+	m, cmd := applyBatch(m, ops)
+	m.sel = nil
+	return m, cmd
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.recoveryPrompt {
 		return m.handleRecoveryPrompt(msg)
@@ -1160,6 +1241,9 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "C":
 		m = m.withClearedSearch()
 		addCursorBelow(&m)
+
+	case "ctrl+/", "ctrl+_": // ctrl+/ and ctrl+_ are the same byte (0x1F) in most terminals
+		return executeToggleComment(m)
 
 	case "?":
 		m.helpVisible = true

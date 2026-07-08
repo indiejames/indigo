@@ -48,6 +48,25 @@ func applyOp(m Model, op document.Op) (Model, tea.Cmd) {
 	return m, tea.Batch(m.sendOp(op), m.reparseHighlight())
 }
 
+// applyBatch applies a slice of ops as a single undoable action.
+// Inverses are computed before each apply, so the ops must not share lines.
+func applyBatch(m Model, ops []document.Op) (Model, tea.Cmd) {
+	if len(ops) == 0 {
+		return m, nil
+	}
+	before := m.cursorSnap()
+	inverses := make([]document.Op, len(ops))
+	cmds := make([]tea.Cmd, 0, len(ops)+1)
+	for i, op := range ops {
+		inverses[i] = inverseOp(m, op) // must be before Apply
+		cmds = append(cmds, m.sendOp(op))
+	}
+	m.undoStack = append(m.undoStack, undoEntry{ops: inverses, before: before})
+	m.redoStack = nil
+	cmds = append(cmds, m.reparseHighlight())
+	return m, tea.Batch(cmds...)
+}
+
 // inverseOp returns the op that reverses op.
 // For OpInsert the inverse is an OpDelete of the same span.
 // For OpDelete the inverse is an OpInsert of the text that was there.

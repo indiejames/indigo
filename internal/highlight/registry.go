@@ -43,6 +43,38 @@ func lookupKey(filePath string) string {
 	return ""
 }
 
+// lineCommentByKey maps the registry lookup key (extension or filename) to the
+// line comment prefix for that language.
+var lineCommentByKey = map[string]string{
+	// // style
+	".go": "//", ".js": "//", ".mjs": "//", ".cjs": "//",
+	".ts": "//", ".tsx": "//", ".java": "//", ".c": "//", ".h": "//",
+	".cc": "//", ".cpp": "//", ".cxx": "//", ".hh": "//", ".hpp": "//", ".hxx": "//",
+	".cs": "//", ".dart": "//", ".kt": "//", ".kts": "//",
+	".groovy": "//", ".gvy": "//", ".gy": "//", ".gsh": "//",
+	".scala": "//", ".sc": "//", ".php": "//", ".proto": "//",
+	".tf": "//", ".hcl": "//", ".rs": "//", ".swift": "//",
+	".svelte": "//",
+	// # style
+	".py": "#", ".rb": "#", ".sh": "#", ".bash": "#",
+	"dockerfile": "#", ".r": "#", ".gd": "#",
+	".ex": "#", ".exs": "#", ".nix": "#",
+	".toml": "#", ".yaml": "#", ".yml": "#", ".graphql": "#", ".gql": "#",
+	// -- style
+	".lua": "--", ".hs": "--", ".lhs": "--", ".elm": "--",
+	".sql": "--", ".ml": "--", ".mli": "--",
+}
+
+// LineCommentPrefix returns the line comment prefix for the given file path
+// (e.g. "//" for Go, "#" for Python, "--" for Lua). Falls back to "//".
+func LineCommentPrefix(filePath string) string {
+	k := lookupKey(filePath)
+	if p, ok := lineCommentByKey[k]; ok {
+		return p
+	}
+	return "//"
+}
+
 func languageForPath(filePath string) (*sitter.Language, []byte) {
 	k := lookupKey(filePath)
 	if k == "" {

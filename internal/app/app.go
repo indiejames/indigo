@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"golang.org/x/term"
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
@@ -131,7 +132,7 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 		m = m.AtLine(startLine)
 	}
 	cfgPath, cfgMod := configPathAndMtime()
-	return &App{
+	a := &App{
 		rpc:            rpc,
 		cfg:            cfg,
 		workDir:        workDir,
@@ -140,6 +141,13 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 		configPath:     cfgPath,
 		configModTime:  cfgMod,
 	}
+	// Pre-seed terminal size so the first View() renders the editor layout
+	// immediately rather than a "loading…" placeholder.
+	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		a.width, a.height = w, h
+		a.resizeAllBuffers()
+	}
+	return a
 }
 
 // NewWithPicker creates an App with the file picker open immediately

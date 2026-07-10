@@ -662,8 +662,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Scroll keys navigate the help popup; q/esc/? dismiss it.
 	if m.helpVisible {
-		helpLines := helpPopupLines()
-		maxPopH := max(6, m.height-4)
+		helpLines := helpPopupLines(m.pluginBindings)
+		maxPopH := max(6, m.height-5) // matches vis-4 in View() where vis = m.height-1
 		contentH := maxPopH - 2
 		maxScroll := max(0, len(helpLines)-contentH)
 		switch msg.String() {
@@ -1266,8 +1266,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return executeToggleComment(m)
 
 	case "?":
-		m.helpVisible = true
-		m.helpScroll = 0
+		return m, m.fetchPluginBindings()
 
 	case "alt+s":
 		if m.sel == nil {

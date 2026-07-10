@@ -986,6 +986,55 @@ func (s *editorService) ApplyPluginFix(ctx context.Context, call proto.EditorSer
 	return err
 }
 
+func (s *editorService) GetPluginActions(ctx context.Context, call proto.EditorService_getPluginActions) error {
+	args := call.Args()
+	bufID := args.BufId()
+	line := args.Line()
+	col := args.Col()
+	actions, err := s.pluginMgr.GetActionsAt(ctx, bufID, line, col)
+	if err != nil {
+		return err
+	}
+	res, resErr := call.AllocResults()
+	if resErr != nil {
+		return resErr
+	}
+	list, listErr := res.NewItems(int32(len(actions)))
+	if listErr != nil {
+		return listErr
+	}
+	for i, a := range actions {
+		it := list.At(i)
+		if err := it.SetLabel(a.Label); err != nil {
+			return err
+		}
+		if err := it.SetReplace(a.Replace); err != nil {
+			return err
+		}
+		it.SetFromLine(a.FromLine)
+		it.SetFromCol(a.FromCol)
+		it.SetToLine(a.ToLine)
+		it.SetToCol(a.ToCol)
+		if err := it.SetPluginName(a.PluginName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *editorService) ApplyPluginAction(ctx context.Context, call proto.EditorService_applyPluginAction) error {
+	args := call.Args()
+	pluginName, err := args.PluginName()
+	if err != nil {
+		return err
+	}
+	if err := s.pluginMgr.ApplyAction(ctx, pluginName, args.BufId(), args.Line(), args.Col(), args.Index()); err != nil {
+		return err
+	}
+	_, err = call.AllocResults()
+	return err
+}
+
 func (s *editorService) UpdateViewport(_ context.Context, call proto.EditorService_updateViewport) error {
 	args := call.Args()
 	clientID := args.ClientId()
@@ -1001,6 +1050,31 @@ func (s *editorService) UpdateViewport(_ context.Context, call proto.EditorServi
 
 	_, err := call.AllocResults()
 	return err
+}
+
+func (s *editorService) GetPluginBindings(_ context.Context, call proto.EditorService_getPluginBindings) error {
+	bindings := s.pluginMgr.AllPluginBindings()
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	list, err := res.NewBindings(int32(len(bindings)))
+	if err != nil {
+		return err
+	}
+	for i, b := range bindings {
+		item := list.At(i)
+		if err := item.SetPluginName(b.PluginName); err != nil {
+			return err
+		}
+		if err := item.SetKey(b.Key); err != nil {
+			return err
+		}
+		if err := item.SetDescription(b.Description); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *editorService) GetPluginKeys(_ context.Context, call proto.EditorService_getPluginKeys) error {

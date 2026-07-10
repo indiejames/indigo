@@ -203,6 +203,42 @@ func (a *Api) HandleBufferEvents(h BufferHandlers) error {
 	return err
 }
 
+// ActionItem is one context-sensitive action contributed to the F-key popup.
+// If Replace is non-empty the editor applies it as a text replacement over [FromLine:FromCol, ToLine:ToCol).
+// If Replace is empty the editor calls the ActionProvider's applyAction callback.
+type ActionItem struct {
+	Label    string
+	Replace  string
+	FromLine uint32
+	FromCol  uint32
+	ToLine   uint32
+	ToCol    uint32
+}
+
+// ActionHandlers groups the callbacks for an action provider.
+// GetActions is required. ApplyAction is optional (nil = no custom callbacks).
+type ActionHandlers struct {
+	// GetActions returns actions for the given cursor position.
+	// Called when the user presses F; should return quickly.
+	GetActions func(bufID, line, col uint32) []ActionItem
+	// ApplyAction is called for ActionItems whose Replace field is empty.
+	// index is the position of the chosen item in the slice returned by GetActions.
+	ApplyAction func(bufID, line, col, index uint32)
+}
+
+// RegisterActionProvider registers an action provider that contributes items
+// to the F-key popup. Plugins that only need text replacements can leave
+// ApplyAction nil.
+func (a *Api) RegisterActionProvider(h ActionHandlers) error {
+	srv := pluginproto.ActionProvider_ServerToClient(&actionProviderServer{h: h})
+	fut, rel := a.api.RegisterActionProvider(context.Background(), func(p pluginproto.EditorApi_registerActionProvider_Params) error {
+		return p.SetProvider(srv)
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
 // DecorationHandlers groups the callbacks for a decoration provider.
 // GetDecorations is required. GetFixes and ApplyFix are optional (nil = not supported).
 type DecorationHandlers struct {
@@ -718,6 +754,46 @@ func (s *decorProviderServer) GetFixes(_ context.Context, call pluginproto.Decor
 		}
 	}
 	return nil
+}
+
+type actionProviderServer struct {
+	h ActionHandlers
+}
+
+func (s *actionProviderServer) GetActions(_ context.Context, call pluginproto.ActionProvider_getActions) error {
+	args := call.Args()
+	items := s.h.GetActions(args.BufId(), args.Line(), args.Col())
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	list, err := res.NewItems(int32(len(items)))
+	if err != nil {
+		return err
+	}
+	for i, it := range items {
+		ai := list.At(i)
+		if err := ai.SetLabel(it.Label); err != nil {
+			return err
+		}
+		if err := ai.SetReplace(it.Replace); err != nil {
+			return err
+		}
+		ai.SetFromLine(it.FromLine)
+		ai.SetFromCol(it.FromCol)
+		ai.SetToLine(it.ToLine)
+		ai.SetToCol(it.ToCol)
+	}
+	return nil
+}
+
+func (s *actionProviderServer) ApplyAction(_ context.Context, call pluginproto.ActionProvider_applyAction) error {
+	if s.h.ApplyAction != nil {
+		args := call.Args()
+		s.h.ApplyAction(args.BufId(), args.Line(), args.Col(), args.Index())
+	}
+	_, err := call.AllocResults()
+	return err
 }
 
 func (s *decorProviderServer) ApplyFix(_ context.Context, call pluginproto.DecorationProvider_applyFix) error {

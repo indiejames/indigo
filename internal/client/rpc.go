@@ -64,10 +64,20 @@ const (
 	ClientUnderlineCurly    ClientUnderlineStyle = 2
 )
 
-// ClientFixItem is one fix option returned by GetPluginFixes.
+// ClientFixItem is one item in the F-key popup, from either a decoration fix or an action provider.
 type ClientFixItem struct {
 	Label   string
-	Replace string // non-empty = direct replacement; empty = call ApplyPluginFix
+	Replace string // non-empty = delete [FromLine:FromCol, ToLine:ToCol) then insert Replace
+
+	// Range for direct replacement (used when Replace != "").
+	FromLine, FromCol int
+	ToLine, ToCol     int
+
+	// Callback info (used when Replace == "").
+	Plugin    string // plugin name
+	FixData   string // opaque token for decoration-based fixes; "" for action provider items
+	OrigIndex int    // original index within the plugin's fix/action list
+	IsAction  bool   // true = call ApplyPluginAction; false = call ApplyPluginFix
 }
 
 // ClientDecoration is one decoration item returned by a plugin provider.
@@ -98,8 +108,16 @@ type RPC struct {
 	clientID uint64
 	cb       *callbackServer
 
-	pluginKeysMu sync.RWMutex
-	pluginKeys   map[string]bool
+	pluginKeysMu  sync.RWMutex
+	pluginKeys    map[string]bool
+	pluginBindings []ClientPluginBinding
+}
+
+// ClientPluginBinding is a key binding contributed by a plugin, for the help popup.
+type ClientPluginBinding struct {
+	PluginName  string
+	Key         string
+	Description string
 }
 
 // Dial connects to the server at socketPath and registers this client.
@@ -170,6 +188,24 @@ func Dial(socketPath string) (*RPC, error) {
 	}
 	krel()
 
+	// Fetch plugin bindings for the help popup.
+	bfut, brel := svc.GetPluginBindings(context.Background(), func(_ proto.EditorService_getPluginBindings_Params) error {
+		return nil
+	})
+	if bres, err := bfut.Struct(); err == nil {
+		if rawList, err := bres.Bindings(); err == nil {
+			r.pluginBindings = make([]ClientPluginBinding, rawList.Len())
+			for i := range r.pluginBindings {
+				item := rawList.At(i)
+				name, _ := item.PluginName()
+				key, _ := item.Key()
+				desc, _ := item.Description()
+				r.pluginBindings[i] = ClientPluginBinding{PluginName: name, Key: key, Description: desc}
+			}
+		}
+	}
+	brel()
+
 	return r, nil
 }
 
@@ -188,6 +224,38 @@ func (r *RPC) addPluginKey(trigger string) {
 	r.pluginKeysMu.Lock()
 	r.pluginKeys[trigger] = true
 	r.pluginKeysMu.Unlock()
+}
+
+// PluginBindings returns the cached key bindings snapshot from startup.
+func (r *RPC) PluginBindings() []ClientPluginBinding {
+	r.pluginKeysMu.RLock()
+	defer r.pluginKeysMu.RUnlock()
+	return r.pluginBindings
+}
+
+// GetPluginBindings fetches fresh plugin key bindings from the server.
+func (r *RPC) GetPluginBindings(ctx context.Context) ([]ClientPluginBinding, error) {
+	fut, rel := r.svc.GetPluginBindings(ctx, func(_ proto.EditorService_getPluginBindings_Params) error {
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, err
+	}
+	rawList, err := res.Bindings()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ClientPluginBinding, rawList.Len())
+	for i := range out {
+		item := rawList.At(i)
+		name, _ := item.PluginName()
+		key, _ := item.Key()
+		desc, _ := item.Description()
+		out[i] = ClientPluginBinding{PluginName: name, Key: key, Description: desc}
+	}
+	return out, nil
 }
 
 // HasPluginKey reports whether any plugin registered this key trigger.
@@ -344,6 +412,61 @@ func (r *RPC) ApplyPluginFix(ctx context.Context, pluginName, fixData string, in
 		if err := p.SetFixData(fixData); err != nil {
 			return err
 		}
+		p.SetIndex(index)
+		return nil
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
+// GetPluginActions fetches context-sensitive actions from all registered action providers.
+func (r *RPC) GetPluginActions(ctx context.Context, bufID uint32, line, col uint32) ([]ClientFixItem, error) {
+	fut, rel := r.svc.GetPluginActions(ctx, func(p proto.EditorService_getPluginActions_Params) error {
+		p.SetBufId(bufID)
+		p.SetLine(line)
+		p.SetCol(col)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, err
+	}
+	rawList, err := res.Items()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ClientFixItem, rawList.Len())
+	for i := range out {
+		item := rawList.At(i)
+		label, _ := item.Label()
+		replace, _ := item.Replace()
+		pluginName, _ := item.PluginName()
+		out[i] = ClientFixItem{
+			Label:    label,
+			Replace:  replace,
+			FromLine: int(item.FromLine()),
+			FromCol:  int(item.FromCol()),
+			ToLine:   int(item.ToLine()),
+			ToCol:    int(item.ToCol()),
+			Plugin:   pluginName,
+			OrigIndex: i,
+			IsAction: true,
+		}
+	}
+	return out, nil
+}
+
+// ApplyPluginAction asks an action provider plugin to execute a custom action.
+func (r *RPC) ApplyPluginAction(ctx context.Context, pluginName string, bufID, line, col, index uint32) error {
+	fut, rel := r.svc.ApplyPluginAction(ctx, func(p proto.EditorService_applyPluginAction_Params) error {
+		if err := p.SetPluginName(pluginName); err != nil {
+			return err
+		}
+		p.SetBufId(bufID)
+		p.SetLine(line)
+		p.SetCol(col)
 		p.SetIndex(index)
 		return nil
 	})

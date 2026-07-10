@@ -63,10 +63,13 @@ type hoverMsg struct{ result ClientHoverResult }
 // sigHelpMsg carries a signature-help result (nil Signatures = dismiss).
 type sigHelpMsg struct{ help *ClientSigHelp }
 
-// fixItemsMsg carries fix suggestions for a decoration.
+// pluginBindingsMsg delivers fresh plugin key bindings for the help popup.
+type pluginBindingsMsg struct{ bindings []ClientPluginBinding }
+
+// fixItemsMsg carries fix suggestions and/or context-sensitive actions for the F popup.
 type fixItemsMsg struct {
 	items []ClientFixItem
-	decor ClientDecoration
+	decor *ClientDecoration // nil when items come only from action providers
 }
 
 // completionsMsg carries fresh completion items.
@@ -408,8 +411,11 @@ type Model struct {
 
 	// Fix popup state (Shift+F)
 	fixItems []ClientFixItem   // non-empty = popup visible
-	fixDecor *ClientDecoration // decoration being fixed
+	fixDecor *ClientDecoration // decoration being fixed (nil for action-only items)
 	fixIdx   int
+
+	// Plugin help entries loaded at startup for the ? popup.
+	pluginBindings []ClientPluginBinding
 }
 
 // WithConfig returns a copy of the model with a new config applied.
@@ -435,6 +441,7 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath string
 		hlr:            highlight.New(filePath),
 		metrics:        &metricsData{},
 		recoveryPrompt: fromRecovery,
+		pluginBindings: rpc.PluginBindings(),
 	}
 }
 
@@ -613,6 +620,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case pluginBindingsMsg:
+		m.pluginBindings = msg.bindings
+		m.helpVisible = true
+		m.helpScroll = 0
+		return m, nil
+
 	case sigHelpMsg:
 		m.sigHelp = msg.help
 		return m, nil
@@ -631,8 +644,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fixItemsMsg:
 		if len(msg.items) > 0 {
 			m.fixItems = msg.items
-			d := msg.decor
-			m.fixDecor = &d
+			m.fixDecor = msg.decor
 			m.fixIdx = 0
 		}
 		return m, nil
@@ -903,18 +915,62 @@ func (m Model) fixableDecorationAtCursor() *ClientDecoration {
 	return nil
 }
 
-// fetchFixes finds the fixable decoration at the cursor and fetches fix items.
-func (m Model) fetchFixes() tea.Cmd {
-	d := m.fixableDecorationAtCursor()
-	if d == nil {
-		return nil
+// fetchPluginBindings fetches fresh plugin key bindings from the server and
+// opens the help popup once the response arrives. Called when ? is pressed so
+// that plugins registered after startup are always visible.
+func (m Model) fetchPluginBindings() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		bindings, err := m.rpc.GetPluginBindings(ctx)
+		if err != nil {
+			return pluginBindingsMsg{bindings: m.pluginBindings} // fall back to cached
+		}
+		return pluginBindingsMsg{bindings: bindings}
 	}
-	decor := *d
+}
+
+// fetchFixes collects fix items from the fixable decoration at the cursor (if any)
+// and context-sensitive actions from all registered action providers, then merges
+// them into a single F-popup list.
+func (m Model) fetchFixes() tea.Cmd {
+	decor := m.fixableDecorationAtCursor()
+	bufID := m.bufID
+	line := uint32(m.cursor.Line)
+	col := uint32(m.cursor.Col)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		items, err := m.rpc.GetPluginFixes(ctx, decor.PluginName, decor.FixData)
-		if err != nil || len(items) == 0 {
+
+		var items []ClientFixItem
+
+		// Decoration-based fixes from the plugin that owns the underline/marker.
+		if decor != nil {
+			fixes, err := m.rpc.GetPluginFixes(ctx, decor.PluginName, decor.FixData)
+			if err == nil {
+				for i, fix := range fixes {
+					items = append(items, ClientFixItem{
+						Label:    fix.Label,
+						Replace:  fix.Replace,
+						FromLine: int(decor.Line),
+						FromCol:  int(decor.Col),
+						ToLine:   int(decor.Line),
+						ToCol:    int(decor.EndCol),
+						Plugin:   decor.PluginName,
+						FixData:  decor.FixData,
+						OrigIndex: i,
+					})
+				}
+			}
+		}
+
+		// Context-sensitive actions from all registered action providers.
+		actions, err := m.rpc.GetPluginActions(ctx, bufID, line, col)
+		if err == nil {
+			items = append(items, actions...)
+		}
+
+		if len(items) == 0 {
 			return nil
 		}
 		return fixItemsMsg{items: items, decor: decor}
@@ -923,31 +979,31 @@ func (m Model) fetchFixes() tea.Cmd {
 
 // applyFixCmd applies the selected fix: either a direct text replacement or a plugin callback.
 func (m Model) applyFixCmd(idx int) tea.Cmd {
-	if m.fixDecor == nil || idx < 0 || idx >= len(m.fixItems) {
+	if idx < 0 || idx >= len(m.fixItems) {
 		return nil
 	}
 	item := m.fixItems[idx]
-	decor := *m.fixDecor
 	if item.Replace != "" {
-		// Direct replacement: delete the decorated range and insert the replacement.
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			delOp := document.Op{
-				Type:     document.OpDelete,
-				FromLine: int(decor.Line),
-				FromCol:  int(decor.Col),
-				ToLine:   int(decor.Line),
-				ToCol:    int(decor.EndCol),
-				ClientID: m.rpc.ClientID(),
-			}
-			if _, err := m.rpc.ApplyOp(ctx, m.bufID, delOp); err != nil {
-				return errorMsg{err}
+			if item.FromLine != item.ToLine || item.FromCol != item.ToCol {
+				delOp := document.Op{
+					Type:     document.OpDelete,
+					FromLine: item.FromLine,
+					FromCol:  item.FromCol,
+					ToLine:   item.ToLine,
+					ToCol:    item.ToCol,
+					ClientID: m.rpc.ClientID(),
+				}
+				if _, err := m.rpc.ApplyOp(ctx, m.bufID, delOp); err != nil {
+					return errorMsg{err}
+				}
 			}
 			insOp := document.Op{
 				Type:       document.OpInsert,
-				InsertLine: int(decor.Line),
-				InsertCol:  int(decor.Col),
+				InsertLine: item.FromLine,
+				InsertCol:  item.FromCol,
 				InsertText: item.Replace,
 				ClientID:   m.rpc.ClientID(),
 			}
@@ -957,13 +1013,24 @@ func (m Model) applyFixCmd(idx int) tea.Cmd {
 			return nil
 		}
 	}
-	// Plugin-driven fix.
-	pluginName := decor.PluginName
-	fixData := decor.FixData
+	if item.IsAction {
+		bufID := m.bufID
+		line := uint32(m.cursor.Line)
+		col := uint32(m.cursor.Col)
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := m.rpc.ApplyPluginAction(ctx, item.Plugin, bufID, line, col, uint32(item.OrigIndex)); err != nil {
+				return errorMsg{err}
+			}
+			return nil
+		}
+	}
+	// Decoration-based fix with plugin callback.
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := m.rpc.ApplyPluginFix(ctx, pluginName, fixData, uint32(idx)); err != nil {
+		if err := m.rpc.ApplyPluginFix(ctx, item.Plugin, item.FixData, uint32(item.OrigIndex)); err != nil {
 			return errorMsg{err}
 		}
 		return nil

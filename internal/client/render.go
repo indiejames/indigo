@@ -1341,8 +1341,8 @@ var helpEntries = []helpEntry{
 	{key: "U", desc: "Redo"},
 	{key: ""},
 	{key: "Selection"},
-	{key: "w", desc: "Select word"},
-	{key: "W", desc: "Extend word forward"},
+	{key: "w", desc: "Next word start"},
+	{key: "W", desc: "Extend selection to next word start"},
 	{key: "x", desc: "Select line"},
 	{key: "X", desc: "Extend line backward"},
 	{key: "%", desc: "Select all"},
@@ -1383,15 +1383,13 @@ const helpKeyW = 18 // fixed left-column width for key strings
 // helpPopupLines returns the pre-rendered text lines of the help popup body
 // (without the border). Called from both handleKey (for scroll-clamping) and
 // renderHelpPopup (for display).
-func helpPopupLines() []string {
-	lines := make([]string, 0, len(helpEntries))
+func helpPopupLines(pluginBindings []ClientPluginBinding) []string {
+	lines := make([]string, 0, len(helpEntries)+len(pluginBindings)+4)
 	for _, e := range helpEntries {
 		if e.desc == "" {
 			if e.key == "" {
-				// blank spacer
 				lines = append(lines, "")
 			} else {
-				// section header
 				lines = append(lines, popupKeyStyle.Render(e.key))
 			}
 		} else {
@@ -1403,18 +1401,56 @@ func helpPopupLines() []string {
 			lines = append(lines, popupTextStyle.Render(padded)+popupTextStyle.Render(e.desc))
 		}
 	}
+
+	// Append plugin key bindings grouped by plugin name.
+	if len(pluginBindings) > 0 {
+		// Group by plugin name preserving first-seen order.
+		seen := make(map[string]bool)
+		type group struct {
+			name     string
+			bindings []ClientPluginBinding
+		}
+		var groups []group
+		for _, b := range pluginBindings {
+			if !seen[b.PluginName] {
+				seen[b.PluginName] = true
+				groups = append(groups, group{name: b.PluginName})
+			}
+			for i := range groups {
+				if groups[i].name == b.PluginName {
+					groups[i].bindings = append(groups[i].bindings, b)
+					break
+				}
+			}
+		}
+		lines = append(lines, "")
+		lines = append(lines, popupKeyStyle.Render("Plugins"))
+		for _, g := range groups {
+			// Plugin name sub-header (indented).
+			lines = append(lines, popupTextStyle.Render("  "+g.name))
+			for _, b := range g.bindings {
+				key := b.Key
+				if len([]rune(key)) > helpKeyW-2 {
+					key = string([]rune(key)[:helpKeyW-2])
+				}
+				padded := fmt.Sprintf("    %-*s  ", helpKeyW-2, key)
+				lines = append(lines, popupTextStyle.Render(padded)+popupTextStyle.Render(b.Description))
+			}
+		}
+	}
+
 	return lines
 }
 
 // renderHelpPopup renders the help popup as a slice of styled, full-width lines.
 // innerW is the content width (excluding borders).
-func renderHelpPopup(width, scroll, maxH int) []string {
+func renderHelpPopup(width, scroll, maxH int, pluginBindings []ClientPluginBinding) []string {
 	innerW := min(width-4, 64) // cap at 64 so it doesn't sprawl on huge terminals
 	if innerW < 30 {
 		innerW = max(30, width-4)
 	}
 
-	bodyLines := helpPopupLines()
+	bodyLines := helpPopupLines(pluginBindings)
 	total := len(bodyLines)
 	contentH := maxH - 2
 	if contentH < 1 {
@@ -1611,25 +1647,34 @@ func (m Model) View() string {
 		}
 	}
 
-	// Overlay fix popup near the decorated word.
-	if len(m.fixItems) > 0 && m.fixDecor != nil {
+	// Overlay fix/action popup near the decorated word (or cursor for action-only items).
+	if len(m.fixItems) > 0 {
 		popup := renderFixPopup(m.fixItems, m.fixIdx, m.width)
 		popH := len(popup)
 		popW := lipgloss.Width(popup[0])
 
 		gutterW := m.gutterWidth()
-		lineStr := m.buf.Line(int(m.fixDecor.Line))
-		_, colMap := expandTabsRemap([]rune(lineStr))
-		visCol := int(m.fixDecor.Col)
-		if int(m.fixDecor.Col) < len(colMap) {
-			visCol = colMap[m.fixDecor.Col]
+		var anchorLine int
+		var anchorCol int
+		if m.fixDecor != nil {
+			lineStr := m.buf.Line(int(m.fixDecor.Line))
+			_, colMap := expandTabsRemap([]rune(lineStr))
+			visCol := int(m.fixDecor.Col)
+			if int(m.fixDecor.Col) < len(colMap) {
+				visCol = colMap[m.fixDecor.Col]
+			}
+			anchorLine = int(m.fixDecor.Line)
+			anchorCol = visCol
+		} else {
+			anchorLine = m.cursor.Line
+			anchorCol = m.cursor.Col
 		}
-		popCol := gutterW + visCol
+		popCol := gutterW + anchorCol
 		if popCol+popW > m.width {
 			popCol = max(0, m.width-popW)
 		}
 
-		decorScreenRow := screenRowOf(layout, int(m.fixDecor.Line), visCol, cw)
+		decorScreenRow := screenRowOf(layout, anchorLine, anchorCol, cw)
 		if decorScreenRow < 0 {
 			decorScreenRow = m.cursorVisualRowFromTop(cw)
 		}
@@ -1696,7 +1741,7 @@ func (m Model) View() string {
 	// Overlay help popup (centered).
 	if m.helpVisible {
 		maxPopH := max(6, vis-4)
-		popup := renderHelpPopup(m.width, m.helpScroll, maxPopH)
+		popup := renderHelpPopup(m.width, m.helpScroll, maxPopH, m.pluginBindings)
 		popH := len(popup)
 		popW := lipgloss.Width(popup[0])
 		popCol := (m.width - popW) / 2

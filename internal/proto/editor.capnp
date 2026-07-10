@@ -32,9 +32,12 @@ interface EditorService {
   updateViewport       @16 (clientId :UInt64, topLine :UInt32, height :UInt32)      -> ();
   getPluginDecorations @17 (clientId :UInt64, bufId :UInt32)                        -> (decorations :List(PluginDecoration));
   getPluginKeys        @18 ()                                                        -> (keys :List(Text));
+  getPluginBindings    @24 ()                                                        -> (bindings :List(PluginBinding));
   saveAs               @19 (clientId :UInt64, bufferId :UInt32, path :Text)          -> ();
   getPluginFixes       @20 (pluginName :Text, fixData :Text)                         -> (items :List(PluginFixItem));
   applyPluginFix       @21 (pluginName :Text, fixData :Text, index :UInt32)          -> ();
+  getPluginActions     @22 (bufId :UInt32, line :UInt32, col :UInt32)                -> (items :List(PluginActionItem));
+  applyPluginAction    @23 (pluginName :Text, bufId :UInt32, line :UInt32, col :UInt32, index :UInt32) -> ();
 }
 
 struct PluginEdit {
@@ -75,6 +78,22 @@ struct PluginDecoration {
 struct PluginFixItem {
   label   @0 :Text;
   replace @1 :Text;
+}
+
+struct PluginBinding {
+  pluginName  @0 :Text;
+  key         @1 :Text;
+  description @2 :Text;
+}
+
+struct PluginActionItem {
+  label      @0 :Text;
+  replace    @1 :Text;
+  fromLine   @2 :UInt32;
+  fromCol    @3 :UInt32;
+  toLine     @4 :UInt32;
+  toCol      @5 :UInt32;
+  pluginName @6 :Text;
 }
 
 struct PluginKeyResult {

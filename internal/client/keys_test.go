@@ -167,16 +167,16 @@ func TestHandleNormalEscClearsSelection(t *testing.T) {
 	}
 }
 
-func TestHandleNormalSelectWord(t *testing.T) {
+func TestHandleNormalNextWordStart(t *testing.T) {
 	m := newTestModel("hello world\n")
 	m.cursor = document.Pos{Line: 0, Col: 0}
 	m2, _ := m.handleNormal(fakeKey("w"))
 	got := m2.(Model)
-	if got.sel == nil {
-		t.Fatal("w: sel should be set")
+	if got.sel != nil {
+		t.Error("w: sel should be nil (w is navigation, not selection)")
 	}
-	if got.sel.Anchor.Col != 0 || got.sel.Head.Col != 4 {
-		t.Errorf("w: sel [%d,%d], want [0,4]", got.sel.Anchor.Col, got.sel.Head.Col)
+	if got.cursor.Col != 6 {
+		t.Errorf("w: cursor col = %d, want 6 (start of 'world')", got.cursor.Col)
 	}
 }
 

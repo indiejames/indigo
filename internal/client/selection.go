@@ -249,6 +249,23 @@ func findWordAt(runes []rune, col int) (start, end int, found bool) {
 	return start, i - 1, true
 }
 
+// findNextWordStart returns the column of the start of the next word at or after col.
+// If col is inside a word, skips to the end of that word first.
+func findNextWordStart(runes []rune, col int) (int, bool) {
+	n := len(runes)
+	i := col
+	for i < n && isWordChar(runes[i]) {
+		i++
+	}
+	for i < n && !isWordChar(runes[i]) {
+		i++
+	}
+	if i >= n {
+		return -1, false
+	}
+	return i, true
+}
+
 // findPrevWordStart returns the start column of the word that precedes col.
 // When col is mid-word, returns the start of that word.
 // When col is at a word boundary or on non-word chars, returns the start of the prior word.
@@ -338,6 +355,52 @@ func (m *Model) moveToPrevWordStart() {
 	}
 	m.cursor = document.Pos{}
 	m.scrollToCursor()
+}
+
+// moveToNextWordStart moves the cursor to the start of the next word,
+// crossing line boundaries if necessary. Selection is cleared by the caller.
+func (m *Model) moveToNextWordStart() {
+	totalLines := m.buf.LineCount()
+	for l := m.cursor.Line; l < totalLines; l++ {
+		runes := []rune(m.buf.Line(l))
+		col := 0
+		if l == m.cursor.Line {
+			col = m.cursor.Col
+		}
+		if s, ok := findNextWordStart(runes, col); ok {
+			m.cursor = document.Pos{Line: l, Col: s}
+			m.scrollToCursor()
+			return
+		}
+	}
+}
+
+// extendToNextWordStart moves the selection head forward to the start of the
+// next word. If there is no selection, starts one at the cursor.
+func (m *Model) extendToNextWordStart() {
+	head := m.cursor
+	if m.sel != nil {
+		head = m.sel.Head
+	}
+	totalLines := m.buf.LineCount()
+	for l := head.Line; l < totalLines; l++ {
+		runes := []rune(m.buf.Line(l))
+		col := 0
+		if l == head.Line {
+			col = head.Col
+		}
+		if s, ok := findNextWordStart(runes, col); ok {
+			newHead := document.Pos{Line: l, Col: s}
+			if m.sel == nil {
+				m.sel = &Selection{Anchor: m.cursor, Head: newHead}
+			} else {
+				m.sel.Head = newHead
+			}
+			m.cursor = newHead
+			m.scrollToCursor()
+			return
+		}
+	}
 }
 
 // moveToWordEnd moves the cursor to the end of the current or next word,

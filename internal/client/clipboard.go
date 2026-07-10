@@ -7,6 +7,29 @@ import (
 	"strings"
 )
 
+// readClipboard returns the current system clipboard contents.
+func readClipboard() (string, error) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbpaste")
+	case "linux":
+		if _, err := exec.LookPath("xclip"); err == nil {
+			cmd = exec.Command("xclip", "-selection", "clipboard", "-o")
+		} else if _, err := exec.LookPath("xsel"); err == nil {
+			cmd = exec.Command("xsel", "--clipboard", "--output")
+		} else if _, err := exec.LookPath("wl-paste"); err == nil {
+			cmd = exec.Command("wl-paste", "--no-newline")
+		} else {
+			return "", fmt.Errorf("no clipboard tool found (install xclip, xsel, or wl-copy)")
+		}
+	default:
+		return "", fmt.Errorf("clipboard not supported on %s", runtime.GOOS)
+	}
+	out, err := cmd.Output()
+	return string(out), err
+}
+
 // writeClipboard copies text to the system clipboard.
 func writeClipboard(text string) error {
 	var cmd *exec.Cmd

@@ -20,6 +20,7 @@ interface EditorApi {
   registerCommand       @2 (name :Text,    handler :CommandHandler)       -> ();
   registerBufferHandler @3 (handler :BufferEventHandler)                  -> ();
   registerDecorations   @4 (provider :DecorationProvider)                 -> ();
+  registerActionProvider @16 (provider :ActionProvider)                    -> ();
 
   # -- Editor effects --
   applyEdit    @5 (bufId :UInt32, edits :List(TextEdit))                  -> ();
@@ -62,6 +63,25 @@ interface DecorationProvider {
   getFixes       @1 (fixData :Text) -> (items :List(FixItem));
   # applyFix is called for FixItems whose replace field is empty (custom actions).
   applyFix       @2 (fixData :Text, index :UInt32) -> ();
+}
+
+# ActionProvider supplies context-sensitive actions for any cursor position.
+# Unlike DecorationProvider.getFixes, actions are not tied to a visible decoration.
+interface ActionProvider {
+  # getActions is called when the user presses F; returns actions relevant to (bufId, line, col).
+  getActions  @0 (bufId :UInt32, line :UInt32, col :UInt32) -> (items :List(ActionItem));
+  # applyAction is called for ActionItems whose replace field is empty (custom actions).
+  applyAction @1 (bufId :UInt32, line :UInt32, col :UInt32, index :UInt32) -> ();
+}
+
+# ActionItem is one option presented in the F popup from an ActionProvider.
+struct ActionItem {
+  label    @0 :Text;
+  replace  @1 :Text;    # non-empty = insert this text after deleting [from, to)
+  fromLine @2 :UInt32;
+  fromCol  @3 :UInt32;
+  toLine   @4 :UInt32;
+  toCol    @5 :UInt32;
 }
 
 # -- Supporting structs --

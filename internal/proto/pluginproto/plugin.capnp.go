@@ -673,6 +673,26 @@ func (c EditorApi) VisibleRange(ctx context.Context, params func(EditorApi_visib
 
 }
 
+func (c EditorApi) RegisterActionProvider(ctx context.Context, params func(EditorApi_registerActionProvider_Params) error) (EditorApi_registerActionProvider_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xa73012c6eb8d61c6,
+			MethodID:      16,
+			InterfaceName: "internal/proto/pluginproto/plugin.capnp:EditorApi",
+			MethodName:    "registerActionProvider",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorApi_registerActionProvider_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorApi_registerActionProvider_Results_Future{Future: ans.Future()}, release
+
+}
+
 func (c EditorApi) WaitStreaming() error {
 	return capnp.Client(c).WaitStreaming()
 }
@@ -777,6 +797,8 @@ type EditorApi_Server interface {
 	BufferInfo(context.Context, EditorApi_bufferInfo) error
 
 	VisibleRange(context.Context, EditorApi_visibleRange) error
+
+	RegisterActionProvider(context.Context, EditorApi_registerActionProvider) error
 }
 
 // EditorApi_NewServer creates a new Server from an implementation of EditorApi_Server.
@@ -795,7 +817,7 @@ func EditorApi_ServerToClient(s EditorApi_Server) EditorApi {
 // This can be used to create a more complicated Server.
 func EditorApi_Methods(methods []server.Method, s EditorApi_Server) []server.Method {
 	if cap(methods) == 0 {
-		methods = make([]server.Method, 0, 16)
+		methods = make([]server.Method, 0, 17)
 	}
 
 	methods = append(methods, server.Method{
@@ -987,6 +1009,18 @@ func EditorApi_Methods(methods []server.Method, s EditorApi_Server) []server.Met
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
 			return s.VisibleRange(ctx, EditorApi_visibleRange{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xa73012c6eb8d61c6,
+			MethodID:      16,
+			InterfaceName: "internal/proto/pluginproto/plugin.capnp:EditorApi",
+			MethodName:    "registerActionProvider",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.RegisterActionProvider(ctx, EditorApi_registerActionProvider{call})
 		},
 	})
 
@@ -1263,6 +1297,23 @@ func (c EditorApi_visibleRange) Args() EditorApi_visibleRange_Params {
 func (c EditorApi_visibleRange) AllocResults() (EditorApi_visibleRange_Results, error) {
 	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 8, PointerCount: 0})
 	return EditorApi_visibleRange_Results(r), err
+}
+
+// EditorApi_registerActionProvider holds the state for a server call to EditorApi.registerActionProvider.
+// See server.Call for documentation.
+type EditorApi_registerActionProvider struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorApi_registerActionProvider) Args() EditorApi_registerActionProvider_Params {
+	return EditorApi_registerActionProvider_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorApi_registerActionProvider) AllocResults() (EditorApi_registerActionProvider_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorApi_registerActionProvider_Results(r), err
 }
 
 // EditorApi_List is a list of EditorApi.
@@ -4022,6 +4073,156 @@ func (f EditorApi_visibleRange_Results_Future) Struct() (EditorApi_visibleRange_
 	return EditorApi_visibleRange_Results(p.Struct()), err
 }
 
+type EditorApi_registerActionProvider_Params capnp.Struct
+
+// EditorApi_registerActionProvider_Params_TypeID is the unique identifier for the type EditorApi_registerActionProvider_Params.
+const EditorApi_registerActionProvider_Params_TypeID = 0xc257488f85be6060
+
+func NewEditorApi_registerActionProvider_Params(s *capnp.Segment) (EditorApi_registerActionProvider_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorApi_registerActionProvider_Params(st), err
+}
+
+func NewRootEditorApi_registerActionProvider_Params(s *capnp.Segment) (EditorApi_registerActionProvider_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorApi_registerActionProvider_Params(st), err
+}
+
+func ReadRootEditorApi_registerActionProvider_Params(msg *capnp.Message) (EditorApi_registerActionProvider_Params, error) {
+	root, err := msg.Root()
+	return EditorApi_registerActionProvider_Params(root.Struct()), err
+}
+
+func (s EditorApi_registerActionProvider_Params) String() string {
+	str, _ := text.Marshal(0xc257488f85be6060, capnp.Struct(s))
+	return str
+}
+
+func (s EditorApi_registerActionProvider_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorApi_registerActionProvider_Params) DecodeFromPtr(p capnp.Ptr) EditorApi_registerActionProvider_Params {
+	return EditorApi_registerActionProvider_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorApi_registerActionProvider_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorApi_registerActionProvider_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorApi_registerActionProvider_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorApi_registerActionProvider_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorApi_registerActionProvider_Params) Provider() ActionProvider {
+	p, _ := capnp.Struct(s).Ptr(0)
+	return ActionProvider(p.Interface().Client())
+}
+
+func (s EditorApi_registerActionProvider_Params) HasProvider() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorApi_registerActionProvider_Params) SetProvider(v ActionProvider) error {
+	if !v.IsValid() {
+		return capnp.Struct(s).SetPtr(0, capnp.Ptr{})
+	}
+	seg := s.Segment()
+	in := capnp.NewInterface(seg, seg.Message().CapTable().Add(capnp.Client(v)))
+	return capnp.Struct(s).SetPtr(0, in.ToPtr())
+}
+
+// EditorApi_registerActionProvider_Params_List is a list of EditorApi_registerActionProvider_Params.
+type EditorApi_registerActionProvider_Params_List = capnp.StructList[EditorApi_registerActionProvider_Params]
+
+// NewEditorApi_registerActionProvider_Params creates a new list of EditorApi_registerActionProvider_Params.
+func NewEditorApi_registerActionProvider_Params_List(s *capnp.Segment, sz int32) (EditorApi_registerActionProvider_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorApi_registerActionProvider_Params](l), err
+}
+
+// EditorApi_registerActionProvider_Params_Future is a wrapper for a EditorApi_registerActionProvider_Params promised by a client call.
+type EditorApi_registerActionProvider_Params_Future struct{ *capnp.Future }
+
+func (f EditorApi_registerActionProvider_Params_Future) Struct() (EditorApi_registerActionProvider_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorApi_registerActionProvider_Params(p.Struct()), err
+}
+func (p EditorApi_registerActionProvider_Params_Future) Provider() ActionProvider {
+	return ActionProvider(p.Future.Field(0, nil).Client())
+}
+
+type EditorApi_registerActionProvider_Results capnp.Struct
+
+// EditorApi_registerActionProvider_Results_TypeID is the unique identifier for the type EditorApi_registerActionProvider_Results.
+const EditorApi_registerActionProvider_Results_TypeID = 0x8fc89a4127613732
+
+func NewEditorApi_registerActionProvider_Results(s *capnp.Segment) (EditorApi_registerActionProvider_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorApi_registerActionProvider_Results(st), err
+}
+
+func NewRootEditorApi_registerActionProvider_Results(s *capnp.Segment) (EditorApi_registerActionProvider_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorApi_registerActionProvider_Results(st), err
+}
+
+func ReadRootEditorApi_registerActionProvider_Results(msg *capnp.Message) (EditorApi_registerActionProvider_Results, error) {
+	root, err := msg.Root()
+	return EditorApi_registerActionProvider_Results(root.Struct()), err
+}
+
+func (s EditorApi_registerActionProvider_Results) String() string {
+	str, _ := text.Marshal(0x8fc89a4127613732, capnp.Struct(s))
+	return str
+}
+
+func (s EditorApi_registerActionProvider_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorApi_registerActionProvider_Results) DecodeFromPtr(p capnp.Ptr) EditorApi_registerActionProvider_Results {
+	return EditorApi_registerActionProvider_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorApi_registerActionProvider_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorApi_registerActionProvider_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorApi_registerActionProvider_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorApi_registerActionProvider_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// EditorApi_registerActionProvider_Results_List is a list of EditorApi_registerActionProvider_Results.
+type EditorApi_registerActionProvider_Results_List = capnp.StructList[EditorApi_registerActionProvider_Results]
+
+// NewEditorApi_registerActionProvider_Results creates a new list of EditorApi_registerActionProvider_Results.
+func NewEditorApi_registerActionProvider_Results_List(s *capnp.Segment, sz int32) (EditorApi_registerActionProvider_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[EditorApi_registerActionProvider_Results](l), err
+}
+
+// EditorApi_registerActionProvider_Results_Future is a wrapper for a EditorApi_registerActionProvider_Results promised by a client call.
+type EditorApi_registerActionProvider_Results_Future struct{ *capnp.Future }
+
+func (f EditorApi_registerActionProvider_Results_Future) Struct() (EditorApi_registerActionProvider_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorApi_registerActionProvider_Results(p.Struct()), err
+}
+
 type KeyHandler capnp.Client
 
 // KeyHandler_TypeID is the unique identifier for the type KeyHandler.
@@ -6444,6 +6645,687 @@ func (f DecorationProvider_applyFix_Results_Future) Struct() (DecorationProvider
 	return DecorationProvider_applyFix_Results(p.Struct()), err
 }
 
+type ActionProvider capnp.Client
+
+// ActionProvider_TypeID is the unique identifier for the type ActionProvider.
+const ActionProvider_TypeID = 0xf5672472b4c3a4e7
+
+func (c ActionProvider) GetActions(ctx context.Context, params func(ActionProvider_getActions_Params) error) (ActionProvider_getActions_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xf5672472b4c3a4e7,
+			MethodID:      0,
+			InterfaceName: "internal/proto/pluginproto/plugin.capnp:ActionProvider",
+			MethodName:    "getActions",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 16, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(ActionProvider_getActions_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return ActionProvider_getActions_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c ActionProvider) ApplyAction(ctx context.Context, params func(ActionProvider_applyAction_Params) error) (ActionProvider_applyAction_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xf5672472b4c3a4e7,
+			MethodID:      1,
+			InterfaceName: "internal/proto/pluginproto/plugin.capnp:ActionProvider",
+			MethodName:    "applyAction",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 16, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(ActionProvider_applyAction_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return ActionProvider_applyAction_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c ActionProvider) WaitStreaming() error {
+	return capnp.Client(c).WaitStreaming()
+}
+
+// String returns a string that identifies this capability for debugging
+// purposes.  Its format should not be depended on: in particular, it
+// should not be used to compare clients.  Use IsSame to compare clients
+// for equality.
+func (c ActionProvider) String() string {
+	return "ActionProvider(" + capnp.Client(c).String() + ")"
+}
+
+// AddRef creates a new Client that refers to the same capability as c.
+// If c is nil or has resolved to null, then AddRef returns nil.
+func (c ActionProvider) AddRef() ActionProvider {
+	return ActionProvider(capnp.Client(c).AddRef())
+}
+
+// Release releases a capability reference.  If this is the last
+// reference to the capability, then the underlying resources associated
+// with the capability will be released.
+//
+// Release will panic if c has already been released, but not if c is
+// nil or resolved to null.
+func (c ActionProvider) Release() {
+	capnp.Client(c).Release()
+}
+
+// Resolve blocks until the capability is fully resolved or the Context
+// expires.
+func (c ActionProvider) Resolve(ctx context.Context) error {
+	return capnp.Client(c).Resolve(ctx)
+}
+
+func (c ActionProvider) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Client(c).EncodeAsPtr(seg)
+}
+
+func (ActionProvider) DecodeFromPtr(p capnp.Ptr) ActionProvider {
+	return ActionProvider(capnp.Client{}.DecodeFromPtr(p))
+}
+
+// IsValid reports whether c is a valid reference to a capability.
+// A reference is invalid if it is nil, has resolved to null, or has
+// been released.
+func (c ActionProvider) IsValid() bool {
+	return capnp.Client(c).IsValid()
+}
+
+// IsSame reports whether c and other refer to a capability created by the
+// same call to NewClient.  This can return false negatives if c or other
+// are not fully resolved: use Resolve if this is an issue.  If either
+// c or other are released, then IsSame panics.
+func (c ActionProvider) IsSame(other ActionProvider) bool {
+	return capnp.Client(c).IsSame(capnp.Client(other))
+}
+
+// Update the flowcontrol.FlowLimiter used to manage flow control for
+// this client. This affects all future calls, but not calls already
+// waiting to send. Passing nil sets the value to flowcontrol.NopLimiter,
+// which is also the default.
+func (c ActionProvider) SetFlowLimiter(lim fc.FlowLimiter) {
+	capnp.Client(c).SetFlowLimiter(lim)
+}
+
+// Get the current flowcontrol.FlowLimiter used to manage flow control
+// for this client.
+func (c ActionProvider) GetFlowLimiter() fc.FlowLimiter {
+	return capnp.Client(c).GetFlowLimiter()
+}
+
+// A ActionProvider_Server is a ActionProvider with a local implementation.
+type ActionProvider_Server interface {
+	GetActions(context.Context, ActionProvider_getActions) error
+
+	ApplyAction(context.Context, ActionProvider_applyAction) error
+}
+
+// ActionProvider_NewServer creates a new Server from an implementation of ActionProvider_Server.
+func ActionProvider_NewServer(s ActionProvider_Server) *server.Server {
+	c, _ := s.(server.Shutdowner)
+	return server.New(ActionProvider_Methods(nil, s), s, c)
+}
+
+// ActionProvider_ServerToClient creates a new Client from an implementation of ActionProvider_Server.
+// The caller is responsible for calling Release on the returned Client.
+func ActionProvider_ServerToClient(s ActionProvider_Server) ActionProvider {
+	return ActionProvider(capnp.NewClient(ActionProvider_NewServer(s)))
+}
+
+// ActionProvider_Methods appends Methods to a slice that invoke the methods on s.
+// This can be used to create a more complicated Server.
+func ActionProvider_Methods(methods []server.Method, s ActionProvider_Server) []server.Method {
+	if cap(methods) == 0 {
+		methods = make([]server.Method, 0, 2)
+	}
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xf5672472b4c3a4e7,
+			MethodID:      0,
+			InterfaceName: "internal/proto/pluginproto/plugin.capnp:ActionProvider",
+			MethodName:    "getActions",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.GetActions(ctx, ActionProvider_getActions{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xf5672472b4c3a4e7,
+			MethodID:      1,
+			InterfaceName: "internal/proto/pluginproto/plugin.capnp:ActionProvider",
+			MethodName:    "applyAction",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.ApplyAction(ctx, ActionProvider_applyAction{call})
+		},
+	})
+
+	return methods
+}
+
+// ActionProvider_getActions holds the state for a server call to ActionProvider.getActions.
+// See server.Call for documentation.
+type ActionProvider_getActions struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c ActionProvider_getActions) Args() ActionProvider_getActions_Params {
+	return ActionProvider_getActions_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c ActionProvider_getActions) AllocResults() (ActionProvider_getActions_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return ActionProvider_getActions_Results(r), err
+}
+
+// ActionProvider_applyAction holds the state for a server call to ActionProvider.applyAction.
+// See server.Call for documentation.
+type ActionProvider_applyAction struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c ActionProvider_applyAction) Args() ActionProvider_applyAction_Params {
+	return ActionProvider_applyAction_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c ActionProvider_applyAction) AllocResults() (ActionProvider_applyAction_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ActionProvider_applyAction_Results(r), err
+}
+
+// ActionProvider_List is a list of ActionProvider.
+type ActionProvider_List = capnp.CapList[ActionProvider]
+
+// NewActionProvider_List creates a new list of ActionProvider.
+func NewActionProvider_List(s *capnp.Segment, sz int32) (ActionProvider_List, error) {
+	l, err := capnp.NewPointerList(s, sz)
+	return capnp.CapList[ActionProvider](l), err
+}
+
+type ActionProvider_getActions_Params capnp.Struct
+
+// ActionProvider_getActions_Params_TypeID is the unique identifier for the type ActionProvider_getActions_Params.
+const ActionProvider_getActions_Params_TypeID = 0xcfb6de9d0dbfb16f
+
+func NewActionProvider_getActions_Params(s *capnp.Segment) (ActionProvider_getActions_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0})
+	return ActionProvider_getActions_Params(st), err
+}
+
+func NewRootActionProvider_getActions_Params(s *capnp.Segment) (ActionProvider_getActions_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0})
+	return ActionProvider_getActions_Params(st), err
+}
+
+func ReadRootActionProvider_getActions_Params(msg *capnp.Message) (ActionProvider_getActions_Params, error) {
+	root, err := msg.Root()
+	return ActionProvider_getActions_Params(root.Struct()), err
+}
+
+func (s ActionProvider_getActions_Params) String() string {
+	str, _ := text.Marshal(0xcfb6de9d0dbfb16f, capnp.Struct(s))
+	return str
+}
+
+func (s ActionProvider_getActions_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ActionProvider_getActions_Params) DecodeFromPtr(p capnp.Ptr) ActionProvider_getActions_Params {
+	return ActionProvider_getActions_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ActionProvider_getActions_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ActionProvider_getActions_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ActionProvider_getActions_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ActionProvider_getActions_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s ActionProvider_getActions_Params) BufId() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s ActionProvider_getActions_Params) SetBufId(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+func (s ActionProvider_getActions_Params) Line() uint32 {
+	return capnp.Struct(s).Uint32(4)
+}
+
+func (s ActionProvider_getActions_Params) SetLine(v uint32) {
+	capnp.Struct(s).SetUint32(4, v)
+}
+
+func (s ActionProvider_getActions_Params) Col() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s ActionProvider_getActions_Params) SetCol(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+// ActionProvider_getActions_Params_List is a list of ActionProvider_getActions_Params.
+type ActionProvider_getActions_Params_List = capnp.StructList[ActionProvider_getActions_Params]
+
+// NewActionProvider_getActions_Params creates a new list of ActionProvider_getActions_Params.
+func NewActionProvider_getActions_Params_List(s *capnp.Segment, sz int32) (ActionProvider_getActions_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0}, sz)
+	return capnp.StructList[ActionProvider_getActions_Params](l), err
+}
+
+// ActionProvider_getActions_Params_Future is a wrapper for a ActionProvider_getActions_Params promised by a client call.
+type ActionProvider_getActions_Params_Future struct{ *capnp.Future }
+
+func (f ActionProvider_getActions_Params_Future) Struct() (ActionProvider_getActions_Params, error) {
+	p, err := f.Future.Ptr()
+	return ActionProvider_getActions_Params(p.Struct()), err
+}
+
+type ActionProvider_getActions_Results capnp.Struct
+
+// ActionProvider_getActions_Results_TypeID is the unique identifier for the type ActionProvider_getActions_Results.
+const ActionProvider_getActions_Results_TypeID = 0xa0eae48a4803db37
+
+func NewActionProvider_getActions_Results(s *capnp.Segment) (ActionProvider_getActions_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return ActionProvider_getActions_Results(st), err
+}
+
+func NewRootActionProvider_getActions_Results(s *capnp.Segment) (ActionProvider_getActions_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return ActionProvider_getActions_Results(st), err
+}
+
+func ReadRootActionProvider_getActions_Results(msg *capnp.Message) (ActionProvider_getActions_Results, error) {
+	root, err := msg.Root()
+	return ActionProvider_getActions_Results(root.Struct()), err
+}
+
+func (s ActionProvider_getActions_Results) String() string {
+	str, _ := text.Marshal(0xa0eae48a4803db37, capnp.Struct(s))
+	return str
+}
+
+func (s ActionProvider_getActions_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ActionProvider_getActions_Results) DecodeFromPtr(p capnp.Ptr) ActionProvider_getActions_Results {
+	return ActionProvider_getActions_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ActionProvider_getActions_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ActionProvider_getActions_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ActionProvider_getActions_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ActionProvider_getActions_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s ActionProvider_getActions_Results) Items() (ActionItem_List, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return ActionItem_List(p.List()), err
+}
+
+func (s ActionProvider_getActions_Results) HasItems() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s ActionProvider_getActions_Results) SetItems(v ActionItem_List) error {
+	return capnp.Struct(s).SetPtr(0, v.ToPtr())
+}
+
+// NewItems sets the items field to a newly
+// allocated ActionItem_List, preferring placement in s's segment.
+func (s ActionProvider_getActions_Results) NewItems(n int32) (ActionItem_List, error) {
+	l, err := NewActionItem_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return ActionItem_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, l.ToPtr())
+	return l, err
+}
+
+// ActionProvider_getActions_Results_List is a list of ActionProvider_getActions_Results.
+type ActionProvider_getActions_Results_List = capnp.StructList[ActionProvider_getActions_Results]
+
+// NewActionProvider_getActions_Results creates a new list of ActionProvider_getActions_Results.
+func NewActionProvider_getActions_Results_List(s *capnp.Segment, sz int32) (ActionProvider_getActions_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[ActionProvider_getActions_Results](l), err
+}
+
+// ActionProvider_getActions_Results_Future is a wrapper for a ActionProvider_getActions_Results promised by a client call.
+type ActionProvider_getActions_Results_Future struct{ *capnp.Future }
+
+func (f ActionProvider_getActions_Results_Future) Struct() (ActionProvider_getActions_Results, error) {
+	p, err := f.Future.Ptr()
+	return ActionProvider_getActions_Results(p.Struct()), err
+}
+
+type ActionProvider_applyAction_Params capnp.Struct
+
+// ActionProvider_applyAction_Params_TypeID is the unique identifier for the type ActionProvider_applyAction_Params.
+const ActionProvider_applyAction_Params_TypeID = 0x954e3ae7a3e86666
+
+func NewActionProvider_applyAction_Params(s *capnp.Segment) (ActionProvider_applyAction_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0})
+	return ActionProvider_applyAction_Params(st), err
+}
+
+func NewRootActionProvider_applyAction_Params(s *capnp.Segment) (ActionProvider_applyAction_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0})
+	return ActionProvider_applyAction_Params(st), err
+}
+
+func ReadRootActionProvider_applyAction_Params(msg *capnp.Message) (ActionProvider_applyAction_Params, error) {
+	root, err := msg.Root()
+	return ActionProvider_applyAction_Params(root.Struct()), err
+}
+
+func (s ActionProvider_applyAction_Params) String() string {
+	str, _ := text.Marshal(0x954e3ae7a3e86666, capnp.Struct(s))
+	return str
+}
+
+func (s ActionProvider_applyAction_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ActionProvider_applyAction_Params) DecodeFromPtr(p capnp.Ptr) ActionProvider_applyAction_Params {
+	return ActionProvider_applyAction_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ActionProvider_applyAction_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ActionProvider_applyAction_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ActionProvider_applyAction_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ActionProvider_applyAction_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s ActionProvider_applyAction_Params) BufId() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s ActionProvider_applyAction_Params) SetBufId(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+func (s ActionProvider_applyAction_Params) Line() uint32 {
+	return capnp.Struct(s).Uint32(4)
+}
+
+func (s ActionProvider_applyAction_Params) SetLine(v uint32) {
+	capnp.Struct(s).SetUint32(4, v)
+}
+
+func (s ActionProvider_applyAction_Params) Col() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s ActionProvider_applyAction_Params) SetCol(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+func (s ActionProvider_applyAction_Params) Index() uint32 {
+	return capnp.Struct(s).Uint32(12)
+}
+
+func (s ActionProvider_applyAction_Params) SetIndex(v uint32) {
+	capnp.Struct(s).SetUint32(12, v)
+}
+
+// ActionProvider_applyAction_Params_List is a list of ActionProvider_applyAction_Params.
+type ActionProvider_applyAction_Params_List = capnp.StructList[ActionProvider_applyAction_Params]
+
+// NewActionProvider_applyAction_Params creates a new list of ActionProvider_applyAction_Params.
+func NewActionProvider_applyAction_Params_List(s *capnp.Segment, sz int32) (ActionProvider_applyAction_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0}, sz)
+	return capnp.StructList[ActionProvider_applyAction_Params](l), err
+}
+
+// ActionProvider_applyAction_Params_Future is a wrapper for a ActionProvider_applyAction_Params promised by a client call.
+type ActionProvider_applyAction_Params_Future struct{ *capnp.Future }
+
+func (f ActionProvider_applyAction_Params_Future) Struct() (ActionProvider_applyAction_Params, error) {
+	p, err := f.Future.Ptr()
+	return ActionProvider_applyAction_Params(p.Struct()), err
+}
+
+type ActionProvider_applyAction_Results capnp.Struct
+
+// ActionProvider_applyAction_Results_TypeID is the unique identifier for the type ActionProvider_applyAction_Results.
+const ActionProvider_applyAction_Results_TypeID = 0xfe3536f5537e2d29
+
+func NewActionProvider_applyAction_Results(s *capnp.Segment) (ActionProvider_applyAction_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ActionProvider_applyAction_Results(st), err
+}
+
+func NewRootActionProvider_applyAction_Results(s *capnp.Segment) (ActionProvider_applyAction_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ActionProvider_applyAction_Results(st), err
+}
+
+func ReadRootActionProvider_applyAction_Results(msg *capnp.Message) (ActionProvider_applyAction_Results, error) {
+	root, err := msg.Root()
+	return ActionProvider_applyAction_Results(root.Struct()), err
+}
+
+func (s ActionProvider_applyAction_Results) String() string {
+	str, _ := text.Marshal(0xfe3536f5537e2d29, capnp.Struct(s))
+	return str
+}
+
+func (s ActionProvider_applyAction_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ActionProvider_applyAction_Results) DecodeFromPtr(p capnp.Ptr) ActionProvider_applyAction_Results {
+	return ActionProvider_applyAction_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ActionProvider_applyAction_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ActionProvider_applyAction_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ActionProvider_applyAction_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ActionProvider_applyAction_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// ActionProvider_applyAction_Results_List is a list of ActionProvider_applyAction_Results.
+type ActionProvider_applyAction_Results_List = capnp.StructList[ActionProvider_applyAction_Results]
+
+// NewActionProvider_applyAction_Results creates a new list of ActionProvider_applyAction_Results.
+func NewActionProvider_applyAction_Results_List(s *capnp.Segment, sz int32) (ActionProvider_applyAction_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[ActionProvider_applyAction_Results](l), err
+}
+
+// ActionProvider_applyAction_Results_Future is a wrapper for a ActionProvider_applyAction_Results promised by a client call.
+type ActionProvider_applyAction_Results_Future struct{ *capnp.Future }
+
+func (f ActionProvider_applyAction_Results_Future) Struct() (ActionProvider_applyAction_Results, error) {
+	p, err := f.Future.Ptr()
+	return ActionProvider_applyAction_Results(p.Struct()), err
+}
+
+type ActionItem capnp.Struct
+
+// ActionItem_TypeID is the unique identifier for the type ActionItem.
+const ActionItem_TypeID = 0xe3256d4395285889
+
+func NewActionItem(s *capnp.Segment) (ActionItem, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 2})
+	return ActionItem(st), err
+}
+
+func NewRootActionItem(s *capnp.Segment) (ActionItem, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 2})
+	return ActionItem(st), err
+}
+
+func ReadRootActionItem(msg *capnp.Message) (ActionItem, error) {
+	root, err := msg.Root()
+	return ActionItem(root.Struct()), err
+}
+
+func (s ActionItem) String() string {
+	str, _ := text.Marshal(0xe3256d4395285889, capnp.Struct(s))
+	return str
+}
+
+func (s ActionItem) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ActionItem) DecodeFromPtr(p capnp.Ptr) ActionItem {
+	return ActionItem(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ActionItem) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ActionItem) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ActionItem) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ActionItem) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s ActionItem) Label() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s ActionItem) HasLabel() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s ActionItem) LabelBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s ActionItem) SetLabel(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s ActionItem) Replace() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s ActionItem) HasReplace() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s ActionItem) ReplaceBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s ActionItem) SetReplace(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+func (s ActionItem) FromLine() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s ActionItem) SetFromLine(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+func (s ActionItem) FromCol() uint32 {
+	return capnp.Struct(s).Uint32(4)
+}
+
+func (s ActionItem) SetFromCol(v uint32) {
+	capnp.Struct(s).SetUint32(4, v)
+}
+
+func (s ActionItem) ToLine() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s ActionItem) SetToLine(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+func (s ActionItem) ToCol() uint32 {
+	return capnp.Struct(s).Uint32(12)
+}
+
+func (s ActionItem) SetToCol(v uint32) {
+	capnp.Struct(s).SetUint32(12, v)
+}
+
+// ActionItem_List is a list of ActionItem.
+type ActionItem_List = capnp.StructList[ActionItem]
+
+// NewActionItem creates a new list of ActionItem.
+func NewActionItem_List(s *capnp.Segment, sz int32) (ActionItem_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 2}, sz)
+	return capnp.StructList[ActionItem](l), err
+}
+
+// ActionItem_Future is a wrapper for a ActionItem promised by a client call.
+type ActionItem_Future struct{ *capnp.Future }
+
+func (f ActionItem_Future) Struct() (ActionItem, error) {
+	p, err := f.Future.Ptr()
+	return ActionItem(p.Struct()), err
+}
+
 type PluginInfo capnp.Struct
 
 // PluginInfo_TypeID is the unique identifier for the type PluginInfo.
@@ -7679,267 +8561,297 @@ func NewUnderlineStyle_List(s *capnp.Segment, sz int32) (UnderlineStyle_List, er
 	return capnp.NewEnumList[UnderlineStyle](s, sz)
 }
 
-const schema_a3f8c1e2d4b07659 = "x\xda\xb4Z}t\x14U\x96\xbf\xb7\xaac\x911\xa1" +
-	"\xbbR\xcd\x06\x08!!$!d\x14H\x80\x19@\xb1" +
-	"CB\x80\x04\x18R\x89s\x8e\xb0\xb8l%]i\x0a" +
-	":UMUuH\xd0\x19\x04\x87=\x0bG\xce\x00\x0a" +
-	"\xae(\xab0\xa0\xe2YT8\x8b\xae\x0c\x88\xb8\x8a\x0b" +
-	"\x0e\xb3\xc3\x8e\x1f\xf3!\xc3A\x86u\xd1aXXq" +
-	"qg\x98\xde\xf3^w}t\xba!t\x12\xffK^" +
-	"\xdd~\xefW\xf7\xfb\xfe^M\xf8:\xa7\xc6S\x95\xbb" +
-	"r\x180-\x15\x98uGl\x84\xf8\xa4\xf6\xfc\x9d\x0f" +
-	"\xad\x01\xbe\x1a\x01\xb2\x18\x0e`\xe2\xce\x9cV\x06P8" +
-	"\x92\xb3\x120\xb6\xe2\x9d\xaf\xcf\xfe\xdd\x9d\x91\xb5n\x81" +
-	"a\xb9%D\xa0*\x97\x08\x9c\xcbi\xff\xf8\xad\xfc'" +
-	"\x1e\x03\xbe\x02c\x0b;_\xfd\xe0\xd3c\xd7\x7f\x92\x10" +
-	"\xdc\x91\xbb\x16\x85\xfd\xb9\x1c\x80\xb0\x8f\x0a?}\xdf\xf7" +
-	"\xd6~\xf2\xfa'\x1bA\xac\xc0\x14\xe9\xec\xc1\xbbP\x18" +
-	"5\x98\xfcY8\xb8\x08\x01cmm\xbeG\x9e-{" +
-	"\xf9\xc7\xc0W\xb0\x8e4\xe0\xc4\x06\xefoP\x90\xbdD" +
-	"T\xf2r(d\xf98\x80\xd8\xff\xfe\xb9\xa5lBc" +
-	"\xed\xa68V\x0fyz\xc9\xbb\x8c\x01OlfG\xfb" +
-	"\xef7\x1f=\xbb\x19\xc4j\xb4_\xe3\xa2w8y\x0d" +
-	"\xf4\xbd\x02x\xa3\xfb\xd9\xf6\xc3\x0d?\x7f\x9c\xff\xae\xfd" +
-	"\xf8)_%y\xbc\xdf\xb7\x12\xf0\xc6\xee%\xc7\x1e=" +
-	"\xfc\xc4\xd6\xb8\x12\x90B\xe4\xa9\x12&\xf3\x01\xc0X\xfd" +
-	"\x9a\x11\xbe\xd9\xc3\xb7lK\xda_\xe6\xe9\x06?\xe0_" +
-	"\x01\x8c1\x9f\x9c\x9e\x92\xfb\xc7\x93\xdb\x80\xbf\xc7\xc26" +
-	",\xaf\x99`\xdb%\xbe\xfa\xcb;\xd5\xaf\xb6\xf5\xd0\x09" +
-	"\x15\x19\x92w\x08\x85\xbb\xf3\x88\x02\xc7\xe6\x11\x05~\xb4" +
-	"\xb5q0\x1bf\x9f\x04\x17\x92uy\xab\xc89;\xf3" +
-	"\x08\x92q\x9b\xd6\x9f\x1d\xd3\xfa\xf9v\x82\x84I\x1ct" +
-	",\x8f\xbe\xe8\xaf\xf3\x08\x90\x9d\x1b\x17\xaf\xdd2j\xd5" +
-	"N\xe0+\x98$\x9dF\x85C(l\x14\xc8Y\xeb\x85" +
-	"\x10`l\xcb\xd4\xb7\xbf\xfd\xda\xe6\x9c\xdd\xee\xb3\x0e\x0a" +
-	"\xcb\xc8V\xa7\x05r\xd6\xcf\xfe\xfa\xd5\xd6c\x1bN\xee" +
-	"\x06~\xa2-pM\xc8#\x02\xb9~\"\xf0\xe6\x03C" +
-	"\xbez\xb1\xe6\xea\xf3@\xd5J\xb1T\xf9\xab\xc9K\x1f" +
-	"\x976~q<o\xc2\x0b)\x96\x1d\xeb\xdf\x82\xc2\x0c" +
-	"?\x11\x9d\xee\xe7<Bv>\xb1\xec\x17\xf3\xea\xdf\x98" +
-	"\xba\xe0\xc1\x17-\xfd\xd2\xa3\xae\xfc\x15\xb5@v>Q" +
-	"\xcc\xe1\xab\xcfV\xbd\xf4_/\xbc\x18\xd7o\\@\xce" +
-	"o&\x02k\xf2\x09\x16\xb5\xaap\xc3\x83#\xffq\xaf" +
-	"[`g~\xdc\xd3\xa9\xc0\x86\xca\xa7\xaa\xab\x16\\\xdf" +
-	"\xeb\xf6\x9e\xfcJ\x02V9\xdb\xb0\xe0\xb9%\x1f\xfd\x93" +
-	"\xeb\xc9\x85\xfc\xb5\xe4\xc9\xa5\x86\xd7:\x7fq\xe0\x91}" +
-	"\xeeM\xcf\xe57\x92Mo\xd0M_{\xed\xd1\x97\x0f" +
-	"\x0b\xdf}9\xe5=\x0b\x87nGa\xf2P\xa2\xed\xaa" +
-	"\xa1\xb3\x85\x85\xe4\xaf\xa3Y\xe3\xcf\xff\xf9\xc2\xc8W\\" +
-	"\x9b\xcd\x18\xba\x85l&\x0d%\x9b\x1d\xfb\xd7w\x96\xbf" +
-	"\x19zj?\xf1\x14\xd7nY\x14\xd1V\xb2\xe1>\xb2" +
-	"\xcd\xc4\xbdC\xbf\xcb\x00\xc6\xc66g7/y\xfa\xf8" +
-	"~\xb7\xfd\xae\x0c\xa7>\x99]@\xf6{X[sW" +
-	"\xe5\xc1w\x0e\xa6\x1a\xa1`\x15\x0a\xd3\x0b\x08\xb8\xa9\x05" +
-	"\xb3\x05\x99\xfc\x15{fh\xfd\xa3\xda\xbe\xd9o\xb8\xb4" +
-	"0\xbf`8\xd1\xc2\xb1\x05\xff\xf2\xfc\x97\x07\x9e9\x94" +
-	"\xb2O}\xc1!\x14\x1e\xa4\xfb,,\x98-\xac\xa1\xfb" +
-	"\x9c\xbb\xf7\xe9\xd3\x97\xbf\xfc\xcb\x9bn\x9d)\x05\x8b\x08" +
-	"\xacu\x14\xd6y~\xf6'\xf7\x94\xaf|+alz" +
-	"\xd2\x9e\x02j\xeb#T\xe0\xe4C\x97V\xdf\xbb\xe4\xe3" +
-	"\xb7\x92\xa2\xedL\x01}\xb3k\x05\x9f\x01\xc6\xe6h\x15" +
-	"\xa5WB\xe5\xef\xa6KJ\xa7GlG\xe1\xe2\x08\x02" +
-	"\xea\xc2\x08\xe2:\xde\xf7\x7f\xbc\xea\xae\xe9O\xbe\x07\xfc" +
-	"xG\xef\x85\xd4\x8d\x17\x16\x92\xf3\xfe\xf9\xb4\x7fO{" +
-	"h\xe2\xbf\xb9b\xb7\xbb\x90\xc6\xee\xc9\xcbc\x0a\xe6\xcf" +
-	"\x9du\xb2\xa7E\xe8\x1e\xd1\xc2\xed(l,$\x7f\xae" +
-	"/\xa4\xf9\xac\xd8\xd3\xb9l\xfe\x0f/\xff\xccm\x91=" +
-	"#)\xee##\xc9I\xd7\xa2o/\xbc\xbc\xf8\xc8\xa9" +
-	"t\xb8\xcf\x8c\xdc\x85\xc2\xb5\x91\x04\xf7\x95\x91\x04\xf7\x9f" +
-	"\x8e\x1f\x18R\x96\x15\xfc\xb9\xdb E%\x04V\xe8\xfd" +
-	"\xbf|!,\xfb\xf4\x17n\x15\xd7\x17Q\x15KE\x01" +
-	"\xc0?\x1d\x0a|\x10>y\xf4?\\\x8f\xd7\x14Q\xaf" +
-	"\xddA\x1e\xc7\xca\xee+\xd8v\xd4\xdc\xf4K\xb7F\x8e" +
-	"\x14}\x8b\x08|H\x05J\xca.\xbep\xd47\xf5\x03" +
-	"\x10\xef!Y&\x11\xfaE\x1b\x88\xc4\x90b\x92f\xea" +
-	"\x9ee7\xef]4\xf2\xc3tY\xed`\xf1!\x14N" +
-	"\x15\x9379QL\xb6\x1b\xf3\x9d\xa8\xd8\xf9h\xc9\x87" +
-	"I\xe1}\xb1\x98\xa1qTL\xde\xf5\xf5\xefm{\xfb" +
-	"\x0f/L\xf9(Ib\xe1(j\xa4\x15\xa3\x88\xc4\xff" +
-	"\xac\x93v\xb55g\x7f\xec2\xd2\xa9Q\xadD\x1b\xbf" +
-	"\xbe\xf7\xa9w\xce\x9fx\xe8\xe3\xa4\xdf\x9e\x18Es\xe2" +
-	"9\xfa\xdb\xd9\xcc\x8a%\xc5\x7fX{\x86\xbc\x8e-1" +
-	"\xbf\x84*L)!\x12\xe1\xad\xad\xd7\x8d\xf3'\x7f\x97" +
-	"\xe2\xe2\xef\x96\xfc\x06\x85s%\xe4]\xce\x94\xbc'H" +
-	"\xa3\x89\x8b\xdf\xb7\xe5\xd8\xdf\xec\xec\xde|\xd6\x85\xa5a" +
-	"\xf4\"\x82\xe5\xca\xe3\xaf\xff\xf4W\x1fi\x9f\xf600" +
-	"K-4z\x03\x0a\x0f\x8e\xa6\xd12\x9a\xe8\xf0\xb7\xcf" +
-	"\xfft\xda\xe2]\x8f\x9dw\x19\xf8\xcah\x9a>C\x91" +
-	"M\xd2\xfb\xff\xf9\xd8g=\xebh\\q\xa3w\xa1\x80" +
-	"\xa5d\x9f\x1b\xa3\x09\xf8\xfd\xa1w\x03\xc7G\xcf\xb8\xe8" +
-	"\x82\xb3\xb0\x94\xaaF~\xee\xad\x9ck?Yw\xd1\xed" +
-	"\x90\xdf/\xa5\xa1\xd6QJ,\xb3\xf9W\xe3\xa7\xec\xcc" +
-	"\xf7\x7f\xee\x82\xb0\xb1T'?\xfd\xdb\x7f?\xf0\xde\x03" +
-	"[~\xfbGwc\xb0\xbe\x94\xe6\xd3=\xa5\xe4\xd4a" +
-	"W\x8d\x97\x0e>2\xf7\xb2;\x8c\xb1l\x1a\x11\x18V" +
-	"F\x04V~~\xff\xfa\x86\x0b\xfb/\xbb\xf6\xee.\xa3" +
-	"\xe5:\xb4\x9b\xff\xecP\xf6\xb9\xffN\x14\x16\xbaw\xb4" +
-	"\x8c\xfa\xdfF\xfa\xd3\xa7\x7f\x18~|\xc7\x1b\xd3\xaf\xba" +
-	"\xf7\xbeXFqc9M\xe6\xf7-\xbb\xfa\xbb\x97\xce" +
-	"|\xe9\xda{T9\x0d\xd9\xcd\xde\xef|\xfa\xd2\xefO" +
-	"~\x95\x94<\x0a\xcb\xe9\xe6\x93\xcb\x89\xda\x0f\x1f\xbf\xab" +
-	"\xe5\xf0\xe5o_O\xa9\x90\xa7\xca\x0f\xa1p\xa1\x9c(" +
-	"\xf6\\\xf9\x02\xc0\xb3\x8d\xd7\xdf\x0dom\xfc\xda\xa5\x81" +
-	"\xaf\xcbi\x18\x0d\x19CP\x16\\\xf2U\x9e\x1a\\\xf3" +
-	"\x7fn\x94+\xc6T\x13\x81\xf5c\x02pwLQM" +
-	"YW\xa5\xf0\xa0\xf1\x11]3\xb5\xf1\x91p4\xa4\xa8" +
-	"\xee\xbf\xc7\xb5I\x1152\xad>\xa8\x98\x9a>#\xa2" +
-	"\x8c\xd3\xe5\x90b\x98\xb2>W\xee\xaeU\xd4\xa0\xa2\x86" +
-	"J\x9b$\x9d\x93:\x0cq\x10\xeb\x01\xf0 \x00?\xb6" +
-	"\x16@,eQ\x9c\xc0 \x8f\xe8'\xa7\xf3w\x93\xc5" +
-	"\x0a\x16\xc5I\x0c\xae6u%\x14\x92u\xcc\x01\x06s" +
-	"\x00W/\x95\xd4`X\xd6\x91w*\x16 \xf2\x806" +
-	"F.\x03\x8cQ\xb5I\xd7\xdad\xc3H\x87\xad$\x1d" +
-	"\xb6\xca\x04\xb6\x99\x0crm\x1dA\x0b\x97W\xd2C\x06" +
-	"\x0e\x06lb\x91\xae\x0dv!\xca\xea\x0d\xd1,\xa5\xab" +
-	"\xc1\x94;\xa0\x09\xd1\x0d\xa0\xba\x17\xe5\x14\x85\xa5V9" +
-	"l\xabF\x97#a\xa9M\xb6\xfe\xbf\xfd\xe3\xe7\xca\xdd" +
-	"\xcd\xb2\x11\xd18\xd5\x90\x09\x04\xbf\x0d\xe1\x07\xe4\xb4." +
-	"\x16\xc5\x1f1h!XC`=\xcc\xa2\xf8\x0f\x0c\xf2" +
-	"\x0c\xfaI^\xe5\xb76\x03\x88O\xb0(>\xc7 \xcf" +
-	"\xa2\x1fY\x00~\x07Y|\x86E\xf1E\x06y\x0f\xfa" +
-	"\xd1\x03\xc0\xefi\x05\x10w\xb3(\xbe\xcaX\xd6\x0c\"" +
-	"\x02\x83\x08X$\x07\x15\xd3V\xa3\xcfIB\x80T\xa1" +
-	"mQ\xdd\xd0\xf4&\x0d\xd0@\x9f\xd3\x8f\x02\xa2\x0f0" +
-	"\xb6T2\xea\x88\x00\xa0nm\x18k\x93\"fT\x97" +
-	"\xe7\x02'w\x1b8\x08\x18\x1c\xe4\xd2\xcc\x1d\xbdi\xa6" +
-	"6\xda\xde.\xeb\xf5\x9d\xb2j\xce!PYY'\x0a" +
-	"\xf2\xb1Y\x00VmrU\xdd\x15\xd3\x80\xe1e\x0e\xd1" +
-	"\xee\x1d\xd0Ji\xfc\xc2F`x\x91C\xc6\xee\xc5\xd0" +
-	"j\xb5\xf9z\xf2\xbb\xa9\x1c\xb2vw\x88Vf&\x06" +
-	"g\xf8Q\\@S\x17Dd\xb5\x06c\x9aZ\xb7T" +
-	"RC2\x00\xd4`@S[\xa4N\xb9\x06Wkj" +
-	"]X3\xe4\x1alB\x1c\xa0xm\x96\x0do4l" +
-	"\x1a}\x0a-Y\x0a6\x13\x98$\xb2$\xb6\xc3\x10s" +
-	"l\xaf\xaa'\x1eT\xc3\xa28\xcf\xf1\xaa\x06\x12X3" +
-	"Y\x14\x9b\\^5\x7f8\x808\x87E\xf1~\x06\x8b" +
-	"Z\xa3\xed\x0dA\xcb\x84\xdev]\xebH\xf5\x01\xd6\xd4" +
-	"\xd28\xc6m\xc3\xaf\xd3::$58'\x9ec\xc6" +
-	"\xc5\xbd\xb3\xb4I\xf2\xea=RCe\"2k\\\x91" +
-	"9\x9d\xe4\x8b)\xf1\xd4\x90.\x1dpmf\x17\xfa\x9c" +
-	"~#Sp\xc9\xba\x9d\xa7\xa8\xb2A,\x14\xe5\xc2\xa6" +
-	"!zll\xb9D\xb9\x83X\x14KI\x82 R7" +
-	"KK}K\x94\x96S\xb8\xed9\xcd\xb1\xa7\xad\x8e\x86" +
-	"i\x8eA\x91I\xd8\xb3\x11@\x9c\xc7\xa2\xf8\x00\x83\x01" +
-	"\xc3\x0cjQ\xd3\xcaV\xe4_Y\xb7\xf3|L\xeeR" +
-	"\xcc:-H\xbc\x1c=\xc0\xa0\x072\xf0\xea\x9ea+" +
-	"\xeb\xe3\xe2qB\x15\x166\xd1\xb8\xfd\xe4\xd8D\xffi" +
-	"\xd2\x02\x86b*\x9a\xda#EW\xa6K\xd1%N\x8a" +
-	"\xf6\x12\x0bXN\xcb\xb5i\xe1\x94\x1c\xd4\x87\x10\x8d\xbf" +
-	"^\xe2\xcdJ\x03$\xc0:\x92\\\xa06\xe1\x02~\xc6" +
-	"]0m\x92\xa2\x1f\x05\xd3\xf6\xbc[G\xb5\xe3\x05\xcd" +
-	"N\x04\xf3L\xc2\x0d\xc4Z\xc7\x0d\x92\xc3:f\x98\x92" +
-	"n\xceST@[k\xabe\x95\x9e\x99\xa2\xb9^M" +
-	"7Sn\xd3t\xc9T\x02\x9a:WQ\x834sS" +
-	"\x00c\xa7Q\x1d\x8c\xaa\x05@\x86\x1f\xd6\x0c\x80,?" +
-	"\xa4\x19 \x10\x8a\x9a\xa6\xac\xaf\xd6:e=,u\x13" +
-	"8f\xd4\xa8\x95\x00\xf5XT\x0d\xcaz\x98B\xeb\x8f" +
-	"\xf1,P\x9aj\xd8\x99\xc5e:\x12!9,\x8aC" +
-	"\x19\x8cEt\xadS\x09\xca:\x89\x01\xde\xe9\xec35" +
-	"\xdf\\\xb9\xbbGF\xb3\xa2\xe0f\x07\xeb\xa4\x1bP\x0d" +
-	"\x1a|>\x87\x0b\x1b\x98t\xda,\x17\x19IU%\xeb" +
-	"v\x95\x88\x0a1a\x0d)\xbe6\x1f\x88\x16\x97&\\" +
-	"\xc1\xed\xc0\x08\x97\x90\x94_\xab\xe7G\xabu\x17\xce\xd1" +
-	"\xa7g\x90C\xc6\xea\x86\x9d\xde[8\x8dk\x81\x11N" +
-	" )\xc1\x16s\x85\x16\x9b\"\x1c\xc1\x03\xc0\x08o " +
-	"\x87\x1e\x9bkBk\xe0\x10\xf6\xe1.`\x84\xbd\xc8a" +
-	"\x96=\xc1\xa15\xf2\x0a;\xb0\x19\x18a+rx\x87" +
-	"M\x0e\xa1\xc5\xe0\x08\xebq\x110\xc2\x1a\xe4\x90\xb3'" +
-	"G\xb4\xf8\x0b!\x8a\x8d\xc0\x08\x1d\xc8\xe1 \x9b#A" +
-	"k\xd6\x12$l\x05FX\x88\x1cf\xdb\xe4'Z\xfc" +
-	"\x9e0\x9f\xee\\\x8f\x1c~\xcb\x1eB\xd0\x1a\xeb\x85\xa9" +
-	"\xf4i\x15rx\xa7M\xc4\xe1n\x88s\x87B\x19\xc5" +
-	"\\\x88\x1c\xe6\xd8\x84$Z\x13\x98\xc0\xd3\xa7\xd9\xc8a" +
-	"\xae=\x0f\xa35\xac\xf07H+s\x85\xc3\xc16;" +
-	"\x82\x16\x0b\xc2_X\x04\x0c\x7f\x86C\xaf=p\xa05" +
-	"{\xf1\xa7\x97\x01\xc3\x9f\xe0bV\x98\xa0\xd5\x87\xb0j" +
-	"\xa8\x06\x9d\xe5\x06\xd5\x90us\x8e\xc6j\xcb\xdd\xcb\x09" +
-	"W\x03\xf7\x9a\x95&\x8b\xa8\xfb\xb9\x9fX1\xc8i\xaa" +
-	"Q\x831)\x12\x09w\xd7\x07\x15@\xb3\x06c\x1dZ" +
-	"\xa7L\xfaH`5\xf2#-\"\xab\xb3\x94p\xbc\xdd" +
-	"\x8a\x19K\xb5\x95\xf3e\xc3\x00N\x0a\xc9d\xcbDa" +
-	"\x04\xd60\xe8\x09R\x90\x1c\x0bl\xe2\xc0x\xba\x04\xb4" +
-	"\x1e\x92\x96\x08P\xae\xc1\xc0JM\x0f\xce \xe7\xb5R" +
-	"\x98\x0d*\xb0\xedZ\x0d\xc6:\x15Ci\x0d\xcb\xcd\xe0" +
-	"%\xddSr;\x97A\xa6\xb6\xdeB\xd3\xd3\x8d6\xae" +
-	"\xc9\"]\xd5JN\xca\\D3n\xd1U\xf5\xad\x1a" +
-	"\xd3f\x95V\x91\x0eL\xdb\xbe\xf8\x19,\x92\xc9o\xd0" +
-	"\xe7\xb0\x08\x99\x1e\xed$\xdb\xa6D.\x1d\x17\x92\xcdY" +
-	"J\xd7m\xf4N\x8a)w\xb8f\x11\xfb\xfa 1\x8b" +
-	"\xf4\xcf&)\xadu^\x7f\xdb\x80xN7\xc0\xda\xb0" +
-	"\xef=R\xbc\x9f\x00\xe8\xabU\xb2n\xb7 %\xa6)" +
-	"\x0fM\xe8\x16\x95\x82\x16Y\xcf\xf3$\x95dq\x81x" +
-	"\xddH\x8e\x84\xec\xbeY\xde]|\xd3\x15\xc1\xd6D\x11" +
-	"\xac`0\x16L\xc8\x02\xc9\x12\x8e\x1f\xd8\xdcv\x0f?" +
-	"\xb8\xedn\x84\x8d7\x91\x15\xd6\xa9B6V\x02\xb4x" +
-	"\x90\xc5\x16\x1f:\xbd\x93\x90\x8b%\x00-\x83\xc8\xba\x1f" +
-	"\xed&Z\xe0\xa9x\x0eY\x1eJ\xc4Y\x0f\x9d\xb6\x85" +
-	"!t\xddG\xd6G\x90u\x0fK\x07na\x18N\x03" +
-	"h\xf1\x93\xf5b\xb2\x9e\x95\xe5\xc7,\x00\xa1\x10W\x01" +
-	"\xb4\x8c \xeb\x15d\xfd\x0e\xf4\xe3\x1d\x00B\x19]/" +
-	"%\xeb\x13\xc8:\xf7\x88\x1f9\x00\xe1n\xac\x05h\xa9" +
-	" \xeb\x93\xc8\xfa \xc6\x8f\x83\x00\x84*\xba~\x17Y" +
-	"\x9fB\xd6\xb3Y?f\x03\x08\x93\xb1\x19\xa0e\x12Y" +
-	"\xaf\xc1[t\xc2^S\xee\xb2\xc7\x00\xefrE\x0d\xa2" +
-	"\xd7\xb9\xfc\x01D/`@V\x83u\xae\xe6\xd9\xee\xc5" +
-	"\x02r\x8b\xd9\x1d\x96\xd1\xeb\x90a\xf1_\xb8E\xea\xb4" +
-	"\xb0\xe60H\xedJ\x97\xd4\x1a\x96-\x8a\x80\xfc?S" +
-	"2%{\xf2 p\xc8/\x00\xf5\x14*%\x83`\xb7" +
-	"*\x85\x14\x92\xd3\xf5y\x95N@%)\xc0>\xca\xd3" +
-	"\xdbQ\x81\xc4dbG\x90E\x86\xa3uO\xc0\xf3\xa4" +
-	"\xe0fs1EULE\x0a+\xc0\xae\xea{E\xb1" +
-	"\x0aa<p\xd8L\x1a8\xab\x11\x0c\xc4\x13\x8d\x0d\xd9" +
-	"\xba\xcct\xdd\xbf\xdd*\xe8\xfbXi\x96&\xd1\x10}" +
-	"Lj\x19(\xca*\xe8\xed\x9a]zorh\xf2\xec" +
-	"\xd3\xbf\xa3\xec\xb9\xdcg\x9f%\x11'[\xcc\xa2\xb8\xd4" +
-	"5\x91\xc9\x8b\x00\xc4 \x8bb\xc4\x99\xcb;\xc8\x94\x16" +
-	"fQ\xec\"\xf9\xa48\xce\xdeE\xc9\x94\x16aQ|" +
-	"\x98AoD2\x97\xda.\x1a\x96\xd4PT\x0a\xc9\xc0" +
-	"6\x04\x9dEE\x95\xeb\xb4\xa8\x0ah\xda\x93\x9bb\xcc" +
-	"Tt\xb3\xdbf\xe32\x1c\xba\x1bT\xb6]\xbb\x9d\x81" +
-	"\xdb\xc5\x89zU\xa9\xc3\xa6@Ww\xca\xba\xa1hj" +
-	"\xe6q\x1c\x070\xce\x0a\x9cU\xe9g&w\x10+j" +
-	"\xbb\x86>\xe7Bo@\xba\xa4\x05\x11Y\xed\x03g1" +
-	"W\xee\xae\xd3TSf\xbb\xcc\x1e|nu\x1a>\xb7" +
-	"2\xc1\xe7\xfe\xbd\x8by[G\xc6\xc1\x1f\xb1(nr" +
-	"\xf1\xb9\x1b\x89\xeb<\x96`~=\x9e8\x9f\xebf~" +
-	"{pt\x1dZ\xd0a\xa3\xdb\xc2\x8a\xac\x9a\x0dA2" +
-	"Sf\x03\x83\xd96\x9f;O\x01\xd65\xde\xc7\x17\xeb" +
-	"4\xc0p\x7fB\xc3j\xc5e\xa7\xd9\xba\x19E\xd2F" +
-	"t\xa5\x9a\x99\x13\xe7q/i\x9685$\xdf\x0ew" +
-	"\xefn\xb1)\xd3\x91\xdaVs\xb2\x1a\xec\x0f\x85\xe9(" +
-	"\xc0\x9ajL\xbb\xd3\x1d\x98\xbe9M\"u+\xb3g" +
-	"9\x1d\x80\x00\xe8oC\xda\x87hOwd\x89s$" +
-	"'E\x14\xe4\x9d\x8fCzP2\x03\xd0\x9d\xda\x00z" +
-	"\xa1\xcd\x97\xb9\xf9\xb5D\xf0\x8a$x\x9bX\x14\x17\xa7" +
-	"\xd4\x98\xe4\xe9\x12}\xceE~Bg\xe9\xc24\xd3:" +
-	"_\x17 \x01\x15\xcf=\xdfT\xe5\x8b\x8f\xcf\x96\x9a\xbe" +
-	"\xa9\xd9\xb6/\xed\x915\xd3\xa6/Z)\x17\x89\x93z" +
-	"T\xd7\xa4>\xb9_\x11K\x13\xc0,\xa5+5\xfe\xfb" +
-	"\x94E\xac\xb8\xefE\xd5\xd5\xce\x05i\xb2\xaa{\xbb\xdc" +
-	"\x1b\x90WM\x03\xb2\xf6\x16 '\xa5&\xac\"E\x0d" +
-	"\xca]\x99_\x15\xf6D\x95\x18nshkn}\x86" +
-	"\x82\xf1\x0f\xa7\xe0\x15^\\\x05\x0c\xdf\xc0!\xda\xdf\xc0" +
-	"\xa0\xf5\xe1\x17?\xbd\x11\x18~2\x87\x8c\xfd\xbd\x07Z" +
-	"\x1f\x8d\xf0c\x1b\xe9u`\xccJ\x17\x10\x88'\x8c\x1a" +
-	"\x8cY\x19:\xceTY*\xa1\xff\x0d@\x17M\xf9\x9a" +
-	"\xcc[\xff\xfb\xe5.\x93\xb8\x0f@\\\x1bv2\xabL" +
-	"w[0\xdc}\x09h]\x1a\xd5:).\x93k\xbf" +
-	"\xd5\xaa\xbc\xf2\xfet\x93U\x1f\x87\xb8\xccykK\x91" +
-	"\x9c\xac\x9a7o\x0f\xd2e\x84\x1e\x8dTR\xf7= " +
-	"\xd3P\x7fR\x82s\xb5\x9b\x8eB\xebu\xb0\xed\xe7\x9d" +
-	"I\x8a\x19\xfa\xb0\x9fE\"k\xcb\xd3\x91\xa3\xbd\x8e\x18" +
-	"mK\xa5o\xe8\x83\x14\xab<\xc7\xb5\x1b\x88Szn" +
-	"l\xcd\x0e\x0c\x1b[\x15\xc1v\x17\x8b\xe2\x14&\xb3\x0b" +
-	"\xb4\xfei.\xf3\xaf\x03R/\xa2\xec.\xa7\xb7\xcfn" +
-	"\\\x05\x9c[.w[\xdaO\xdc\xa9\xdb_7\xf6\xef" +
-	"N=1.\xf4ih\xef\x83.\x13\xddR\xea|\x97" +
-	"y\x1bd\x91\xbf\xd0\xeb}lI\x9a[\xf9j\xd7W" +
-	"\x16\x19\x8d%E\xedZT\x0df>\xde\x7f?\xc1\xcd" +
-	"%\xd8;Z\x19(\x94\xc2J\x1a<C\x1a\xe9\xc5," +
-	"_\x0d\xe0U5U\x8e\x19\xa6.)\xa1\xa5&\x00\x14" +
-	"\xb5E\xf5p\xf7@\xe8=\x9d\xf3eF/8\xb1o" +
-	"\x7fY<@\xb1\xdfT$\xdd\xeaf8M\x97\xfe\xff" +
-	"\x01\x00\x00\xff\xff}UP\xb0"
+const schema_a3f8c1e2d4b07659 = "x\xda\xb4{\x7fx\x14\xd5\xb9\xffyg6\x0c\xa9@" +
+	"2\xcc\x86J\x90\x04BB~\x10\x90\x04\x15\x8c\xe2\x86" +
+	"\x84\x08\x09 \x99\xc4>\x15\xbe\xfa\xd5Iv\xb2\x0c\xee" +
+	"\xce\xac3\x93\x90\xa0\x88`\xb9\xf7\xc2#\x8f\x82F\x0b" +
+	"\xcaU\x90\xaa\xf8\x88\x8a\x8fh\xa5(b\x05\x0b\xd6\xb6" +
+	"\xde\x8a\xd6*\xf2(\xf6R\xb4\x96\x8bW\xbcx[\xdc" +
+	"\xfb\xbcgv~lv!\xd9$\xfe\x97=\xe7\xcc9" +
+	"\x9f\xf3\x9e\xf7\xe7\xe7\x9cL}vD\xb5\xafb\xf8\xf4" +
+	"K\x08\xd3<\x172\x86\xc4.\x11\x1f\xd2\x9e\xb8\xe8\xf6" +
+	"U\x84\xaf\x04B2\x18\x8e\x90i0\xa2\x85! \x8c" +
+	"\x1d\xb1\x8c@\xec\xb67\xbf;\xf6/\x17EW{\x07" +
+	"t\x8d(\xc0\x01\x1b\xe8\x80O\x87\xb5}\xf0\xfa\x8f\x1f" +
+	"\xb8\x87\xf0%\x10[\xd4\xf1\xfc{\x9f\xed?\xfbx|" +
+	"\xe0\xb9\x11\xabA\xe0\xb38B\x84\xe1Y8\xf8\xe1k" +
+	"\xae[\xfd\xf1\xcb\x1f\xaf'b\x09$\x8dV\xb2\xb6\x81" +
+	"\xb0\x0aGO[\x91\x95\x0f\x04b\xad\xad\xd9w=Z" +
+	"\xf4\xec\xbd\x84/a\xdd\xd1\x04\xa6\xed\xc8\xfe3\x08\x07" +
+	"\xb2q\xe8\xfel\x0e\x04\x99\xe7\x08\x89UN\x97\x8ag" +
+	"m\xfe\xcd\xbd\x16V\x1f\xf6.\xe0\xd71\xc4\x17\xfb\x9f" +
+	"\x7f6\x17Mm\xa8\xb9/\xa1g)\xf6\xcc\x8e\xb4}" +
+	"\xbea\xdf\xb1\x0dD\xac\x04g\x83\xf5|.nP\xe2" +
+	"\x9f#p\xae\xeb\xd1\xb6\xbd\xf5\xbf\xbb\x9f\x9f\xeet\x7f" +
+	"\xc7\x97a7?\x12\xb7\xd4\xd6\xf6\xd7\xc7OT]\xd7" +
+	"M\xc4\xe9\xc0\xc4\xe7^1\xb2\x09\x07l\x1ay\x82\xc0" +
+	"\xb9\xed7\xef\xbf{\xef\x03\xdd\x96\xfc\x00\xbb#\x02\x95" +
+	"\xdf\x1a!@ V\xb7\xea\x92\xec9\xb9\x1b\x1fL\x00" +
+	"\xb0[\xa0+\xbc#<G \xc6|\xfc\xee\x8c\xe1\x7f" +
+	"?\xfc \xe1\xaf\xb2\xc1+\xfe&\x04\xbfM|\xfe\x8f" +
+	"\x17\xa9\xdf>\xd8C\x9ct\x88\xec\xdf\x03\xc2\x0a?\xca" +
+	"\xbe\xcb\x8f@\xdf\xefn\x18\xc1\x86\xd9\x87\x88\x07\xc9\x11" +
+	"\xffr\\\xe7\xb4\x1f\x91L\xb9o\xed\xb1\xe2\x96/6" +
+	"#\x12{'|\x0e\x95Di\x0e\x02\x99\xfe\x11;w" +
+	"\xdd\xe7_<F,Y\xd0\x19\x0e\xe4\xd0\xad~\x9a\x83" +
+	"3l]\x7f\xe3\xea\x8d\xe3\x97o%|\x09\x93p^" +
+	"\xfc\xa8= \x94\x8eB0E\xa3B\x04b\x1b\xaf|" +
+	"c\xd2K\x1b\x86m\xf7\x82\x11G-\xc5\xa9\"\xa3p" +
+	"\xaa\xdf\xfe\xbf\xe7[\xf6\xaf;\xbc\x9d\xf0\xd3\x9c\x01\x1b" +
+	"F\x8d\xc4\x01;\xe8\x80\xd7n\xc8\xf9\xf6\xa9\xea\xaf\x9f" +
+	"\xb0\xc0P\xb0\xef\x8c\xaaD\xa9\x1c\x94\xd6\x7fyp\xe4" +
+	"\xd4'\x93\xb4\xe6\xc0\xa8\x8d \x1cE\x14\xd3>\x1c5" +
+	"\xc7'\x1c\x19\x8dZ\xf3\xe5\xfc\xbaW\xae\\x\xd3S" +
+	"\xf6\x01\xd0\xa5^\x1dM\x8f\xe8\xc8h\x94\xdc\xde\xaf\x1f" +
+	"\xadx\xfa\xafO>e\x1d\x805\xa0\"\x97\xee{A" +
+	".bQ+\xc6\xae\xbb)\xef\xdfwx\x07Dr\xa9" +
+	"\x15\xad\xa5\x03\xd6\x95m\xaa\xacXxv\x87G\xff^" +
+	"\xc9-C\xb0\xca\xb1\xfa\x85\x8f\xdd\xfc\xfe3\x9e\x9e]" +
+	"\xb9\xab\xb1\xe7\xab\xfa\x97:\xfe\xf0\xc2];\xbd\x93\xee" +
+	"\xccm\xc0I\x0f\xd1I_z\xe9\xeeg\xf7\x0a\xd3\x9f" +
+	"M\xda\xe7\xc9\xdc\xcd \xc0\x18\x94\xf6\xb9\xdc9B\x11" +
+	"\xfe\xb5/\xe3\xd2\xe3\xff\xfcK\xdes\x9e\xc9\x86\x8f\xd9" +
+	"\x88\x93M\x1e\x83\x93\xed\xff\xf5\x9b\xb7\xbe\x16\xda\xb4\x0b" +
+	"U\xc93[\x06E$\x8d\xd9\x0cB\x17N3\xad}" +
+	"\xcct\x86@\xac\xb4)\xb3\xe9\xe6\x87\x0f\xee\xf2\x9e\xdf" +
+	"\xabc\xa9\xd2\x1e\x19\x8b\xf3\xdd\xa1\xad*/\xdb\xfd\xe6" +
+	"\xee$pg\xc6.\x07!3\x0f\xc1e\xe4\xcd\x11*" +
+	"\xf0\xaf\xd8#\x17\xd7\xdd\xad\xed\x9c\xf3\x8aG\x0a\xa3\xf3" +
+	"rQ\x0a\xfb\x17\xfe\xf2\x89o^xdO\xd2<|" +
+	"\x1e\xaa\x14\x9d\xa7(o\x8e\xb0\x80\xce\xf3\xe9\xd5\x0f\xbf" +
+	"{\xea\x9b\xef_\xf3\xca\xec\xf2\xbc\xc5\x08K\xccCX" +
+	"\xc7\xf99\x1f_5q\xd9\xeb\xf1\xc3\xa6+\xdd\x96G" +
+	"\xcfz-\x1dp\xf8\xf6\xafV^}\xf3\x07\xaf'\x98" +
+	"\xe3\x8e<\xba\xb3\xfdy'\x08\xc4n\xb9\xe5\xb55\xf7" +
+	"\xce\xfd\xe9\x1b\xde\xado\xc9_\x8d\x03^\xc9\xc7)\xe6" +
+	"j%\x85\xa7C\x13\x0f\xa4\xf2\x88G\xf37\x83p&" +
+	"\x1fQ\x9f\xceG\xdd\xcaz\xfb\xde\xe5\xe53\x1fz\x8b" +
+	"\xf0\x97:\xb3-\x18G\xf5\\\x1e\x87\xb3\xbd\xf8\xae\xff" +
+	"\x17m\xa1i\xbf\xf1X\xff\x9aq\xd4\xfa\x0f\x9f*\x1e" +
+	"\xb3`\xde\xb5\x87{\x1e\x19\x9dc\xd5\xb8\xcd l\x1a" +
+	"\x87\x7fv\x8f\xa3\xcet\x9c\xafc\xe9\x82;O\xfd\xd6" +
+	"\x8b{\xd7x\xba\xb1C\xe3q\xa53\xedo,:u" +
+	"\xe3\xab\xef\xa4\xc2}r\xfc6\x10\xa0\x80\xaa\xd4x\xc4" +
+	"\xfd\x8f\x83/\xe4\x14e\x04\x7f\xe79\xb1E\x05\x05\x08" +
+	"K\xdb\xb5o\xf8\x96O^\xfa\xbd\xd7!\x8a\x05To" +
+	"#\x05\xe8FBo\x7f\xff\xa5\xb0\xf4\xb3?x\x0f)" +
+	"c\x02=\xa4\xf1\x13\x02\x04\xfe\xb1'\xf0^\xf8\xf0\xbe" +
+	"\xff\xf0t\xcf\x9a@\xbf\xbf\x09\xbbcE\xd7\x8cyp" +
+	"\x9fy\xdf\x1f\xbd\"[1\xe1G8\xa0\x9b\x0e((" +
+	":\xf9\xe4\xbe\xec+\xdf#\xe2U\x88\xc0\x1a\xb1{\xc2" +
+	":\xaa\x9d\x13\x10B\xed\xa3\xec\x86\x1d\x8b\xf3\x8e\xa4r" +
+	"\x9c\xed\x85{@X_\x88[][\x88\xd3\x15_\xd1" +
+	".v\xdc]p$\xc1A\xec(dp\xbaW\x0bQ" +
+	"\x18/_\xf7\xe0\x1b\x7f{r\xc6\xfb\x09#F\x17\xd1" +
+	"S\xac(\xc2\x11\xff\xbdF\xda\xd6\xda\x94\xf9\x81\xe7\x14" +
+	"\xd7\x17\xb5\xa0\xb8>\xbcz\xd3\x9b\xc7\x0f\xdd\xfeA\xc2" +
+	"\xb7k\x8b\xa8\xdb\xddJ\xbf\x9d\xc3\xdcv\xf3\xb8\xbf\xad" +
+	">\x8a\xdbq\x8dw\"\x15X\xe9D\x1c\x11\xeen9" +
+	"k\x1c?\xfcI\x92\x91\xac\x99\xf8g\x10\xb6N\xc4\xbd" +
+	"l\x99\xf8\x960\xbe\x18\x8d\xe4\x9a\x8d\xfb\xff\xff\xd6\xae" +
+	"\x0d\xc7<X2\x8b\x17#\x96\xd3\xf7\xbf\xfc\xab?\xbd" +
+	"\xaf}\xd6C\x03XzB\xc5\xeb@\x18\x8b\x13\x08\xa3" +
+	"\x8bQ\x86ko(\xe9\xae\x8d\x14\x1dG\x192=\xf5" +
+	"eW\xf1f\x10\x0e\x15\xd3\x08Q\xfcST\xbf\x8f\x9e" +
+	"\xf8U\xd5\x8d\xdb\xee9\xeeQ\x98\x9cR\xea\xafC\xd1" +
+	"\xfb\xa4\xb7\xff\xf3\x9e\x13=\x93\x02k\x9f\xa5\xdb@(" +
+	"*\xc5e\xc7\x97\xe2^w\x85\x0e\x04\x0eN\x98u\xd2" +
+	"\x83~E)\x95\xa4\xfc\xd8\xeb\xc3\xce<\xbe\xe6\xa4W" +
+	"\xc1\xbbJ\xadT\xa5\x14\x0fr\xc3\x9f.\x9d\xb1\xf5\xc7" +
+	"\xfe/\xbc\xbe\xb6T\xc7Oo\xf9\xfd\x0bo\xdd\xb0\xf1" +
+	"\xa3\xbf{\xb3\x9c\x9d\xa5\xd4\x81\x1f\xa2\xab\x8e\xfe\xdax" +
+	"z\xf7]\xf3Ny\xfdFQY\x15\x0e\x98Y\x86\x03" +
+	"\x96}q\xfd\xda\xfa\xbf\xec:\xe5\x99{K\x19\xcd0" +
+	"B\xdb\xf9\x13{2?\xfd\xafx$\xa3so*\xa3" +
+	"\xea\xba\x8b~\xfa\xf0\x9d\xe1\xfb\xb7\xbc2\xf3k\xef\xdc" +
+	"\xc3'Q\xdcE\x93h\xf4\xb8f\xe9\xd7\x9f<}\xf4" +
+	"\x1b\xcf\xdcu\x93\xa8\x0b8\xb1\xfd\xd7/\xea\x85\xa13" +
+	"I\x07?k\xd2\x1e\x10\x16MB\xb1\xfdd\xd2\xbf\x0a" +
+	";\xf1\xaf\xd8\x86\xac+>{\xfa\xf3\xc3\xdf&\xf8\xb6" +
+	"\xeeI\x14\xca\xceIx\xa6{\x0f\x967\xef=5\xe9" +
+	"lR\x00\xaf+\xdf\x03\xc2M\xe58\xdf\xa2\xf2\x85\x04" +
+	"\x8e5\x9c=\x10\xeen\xf8\xce#\xaf\xdb\xca\xa9\x8d\xae" +
+	"/\xc7=\x8d\xf9*\xbb\xec\x9d\x11\xd5\xff\xeb\xdd\xd3\xc9" +
+	"\xf2J\x1c\x00\x93qO\xa5\x93\xefl>s\xc5\xe5\xdf" +
+	"{\xc2w\xd1\xe4\xc5\x0c\x99\x1aSTS\xd6U)<" +
+	"\xf4\xd2\xa8\xae\x99\xda\xa5\xd1p{HQ\xbd\x7fOi" +
+	"\x95\xa2j\xb4\xaa.\xa8\x98\x9a>+\xaaL\xd1\xe5\x90" +
+	"b\x98\xb2>O\xee\xaaQ\xd4\xa0\xa2\x86\x0a\x1b%\x9d" +
+	"\x93\"\x868\x94\xf5\x11\xe2\x03B\xf8\xd2\x1aB\xc4B" +
+	"\x16\xc4\xa9\x0c\xf0\x00~\xc4\xc5O\xc6\xc6\x12\x16\xc4\xcb" +
+	"\x18Xi\xeaJ($\xeb0\x8c00\x8c\xc0\xca%" +
+	"\x92\x1a\x0c\xcb:\xf0n\xa8%\x00<\x01\x07#\x97\x06" +
+	"\xc6v\xb5Q\xd7Ze\xc3H\x85\xad \x15\xb6\xb28" +
+	"\xb6\xd9\x0cp\xad\x91\xa0\x8d+K\xd2C\x06\x8c \xd0" +
+	"\xc8\x02m\x1b\xe1A\x94\xd1\x1b\xa2k\x95\xcezS\x8e" +
+	"\x90F\x00/\x80\xca^\x84\x93\x1f\x96Z\xe4\xb0#\x1a" +
+	"]\x8e\x86\xa5V\xd9\xfe\xdd\xf7\xe5\xe7\xc9]M\xb2\x11" +
+	"\xd58\xd5\x90\x11\x82\xdf\x81\xb0\x02W\xebdA\xfc\x19" +
+	"\x036\x82U\x08\xeb\x0e\x16\xc4\x9f3\xc03\xe0Gw" +
+	"\xcew7\x11\">\xc0\x82\xf8\x18\x03<\x0b~`\x09" +
+	"\xe1\xb7`\xe3#,\x88O1\xc0\xfb\xc0\x0f>B\xf8" +
+	"_\xb4\x10\"ngA|\x9e\xb1O3\x08@\x18\x00" +
+	"\x02\xf9rP1\x1d1f\xbb\xbe\x8f\x00\x15hk\xbb" +
+	"nhz\xa3F\xc0\x80l7\xd3&\x00\xd9\x04bK" +
+	"$\xa3\x16\x07\x10\xd0\xed\x09c\xadR\xd4l\xd7\xe5y" +
+	"\x84\x93\xbb\x0c\x18J\x18\x18\xea\x91\xcc\x90\xde$S\xd3" +
+	"\xde\xd6&\xebu\x1d\xb2j\xceE\xa8\xac\xac\xa3\x80\xb2" +
+	"\xd9\x0cB\xec\x90\xe8\xc9\x06n\xab\"\x0c/s\x00N" +
+	"\xd2\x03\xb6k\xe4\x175\x10\x86\x179`\x9c$\x12\xec" +
+	"\"\x82\xaf\xc3\xef\xae\xe4\x80u\xd2Z\xb0\x03\x02\x1e8" +
+	"\xc3\x8f\xe7\x02\x9a\xba0*\xab\xd5\x10\xd3\xd4\xda%\x92" +
+	"\x1a\x92\x09!\xd5\x10\xd0\xd4f\xa9C\xae\x86\x95\x9aZ" +
+	"\x1b\xd6\x0c\xb9\x1a\x1a\xc1\xdd`f\xfa\xf6:\xab\xd5T" +
+	"44\x8b\x0e%(\xeb\x85M\xb2\xd1\x1e6\x0dB\x06" +
+	"\xc9\x074\xc9F\x16N\xd8/s\x95\xa5`\x13n\x1d" +
+	"\xadUb#\x868\xcc\xd1\xd4:\xd4\xcaj\x16\xc4\xf9" +
+	"\xae\xa6\xd6\xa3\xb1\xcefAl\xf4h\xea\x82\\B\xc4" +
+	"\xb9,\x88\xd73\x90\xdf\xd2\xdeV\x1f\xb4\xd5\"\xabM" +
+	"\xd7\"\xc9z\xc5\x9aZ\x0ae\xeb3\xfcZ-\x12\x91" +
+	"\xd4\xe0\\\xcboM\xb14\xbe\xb0Q\xca\xd2{\xb8\x9b" +
+	"\xb2\xb8\xb5W{\xac}&\xfa\xa0\x19\x96\xbbI\xe5b" +
+	"\xb8V\xb3\x13\xb2\xdd\xd4\xa9\x07\xb8^\x8f*\xf1\xb0\xa7" +
+	"H\xd1h\xb8\xcbj\xa3\"\x8e\x80!f;\x08%\x14" +
+	"\xf1\x8d,\x88K<\x08e\x84}\x0b\x0bb\x18e\xcc" +
+	"X2V\x10v\x90\x051\x8a\xde\x80\xb5\xbcA\x04?" +
+	"_\xc2\x82h&\x09>\xac\xa8\xb2\xfd\x83k\xd5\xc2\xf6" +
+	"\xdf\xf9\x8a\x1a\x94;\x93\xcc6M\x95\x99\xaf\xa8\xb2A" +
+	"\x15\x99\x0b\x9b\x86\xe8s64\x1c\x11\x0deA,D" +
+	"_\x8a\xa3\xce\xe7\xc1\xfb\x17Sl]\xf7\xaai\x95\xab" +
+	"\xa6\x8e\x0c\xeb\xab\\=\x85\xb8\x08\x174\x10\"\xceg" +
+	"A\xbc\x81\x81\x80a\x06\xb5v\xd3v\xec\xf8S\xd6\x9d" +
+	"\x90\x18\x93;\x15\xb3V\x0b\xa2C\x00\x1fa\xc0\x97\x8e" +
+	"\x06\xf4\xf4p\xb2>\xc5r)q\xcb\x07\xa3\xefq\xa4" +
+	"\x91\xfeh\xd4\x02\x86B\xd5*1\x9a\x95\xa5\x8af\x05" +
+	"n4;\xaf\x16\x0c\xc4\xf3X\xdb\x8b\xef\xac0@\x95" +
+	":A\x05j\xe2*\xe0g\xbc\xb9\x85Cr\x0d \xb7" +
+	"p4\xef\xc2\xce\xca\xd5\x82&\xd719\x96$\xd6\xb8" +
+	"j\x90h41\xc3\x94ts\xbe\xa2\x12p\xa4\xb6R" +
+	"V\xe9\x9a\xe9K\xae\x87#\x08\xc9\xa6\xd5b8jp" +
+	">\xbbQL9\xe2\x09\xd9N\x05\x12\x0f\xd9}V\x9e" +
+	"\xd9r\xab\xa6K\xa6\x12\xd0\xd4y\x8a\x1a\xa4a\x96\x8a" +
+	"\xa0\xb4\x8a\x9e\xc2\xf8\x1aB\x80\xe1G7\x11\x02,\x9f" +
+	"\xd3DH \xd4n\x9a\xb2\xbeR\xeb\x90\xf5\xb0\xd4\x85" +
+	"\x021\xdb\x8d\x1a\x89\x80\x1ekW\x83\xb2\x1e\xa6\xc2\x19" +
+	"\x88\xfa\xd8\xa0P\x10\xb6\xcb\xf6\xc8\x01mt\x18\x0b\xe2" +
+	"\xc5\x0c\xc4\xa2q\xd9\xa1\x15\xf2n\xf5\x97\xae\x02\xcd\x93" +
+	"\xbbz\x84\x8aT\x07\xe0]X\xc7\xd4M5\xa8\xf9g" +
+	"\xbbl\xee\xe0\xc4\xa9&9\xdfH\x08\xd7\x19}\x15\"" +
+	"(x\x84\xb31Sr\x18m\xb09_\x81g6\x13" +
+	"F\x18\xce`\xaed\x17z`\xd7k\x02\xd0\xdes\xc0" +
+	"\x01c\x175n\xc1%\x9c\x86\xd5\x84\x11N\x02\xe6K" +
+	"6\x81\x0a6g'\x1c\x85\x17\x08#|\x08\x1c\xf8\x1c" +
+	"F\x13\xec*Sx\x07\xb6\x11F8\x04\x1c\x0cq\xaa" +
+	"|\xb0y\x13\xe1Uh\"\x8c\xb0\x1b8\xe0\x1c\x0a\x12" +
+	"l\x9eP\xd8\x01\x8b\x09#l\x05\x0e\x86:\xec\x02\xd8" +
+	",\x99\xd0\x0d\x0d\x84\x11\xd6\x03\x07\x99\x0e\x13\x07v\x81" +
+	"-\xac\x82\x16\xc2\x08]\xc0\xc1\x8f\x1c\xfa\x1el\x9aY" +
+	"\x88\xd0\x99e\xe0\xe0\"\xa7\xf2\x04\x9b\x1b\x12\x16\xd1^" +
+	"\x118\x18\xe6\xf0\xc1\xb0\x9dX\x14\xb6PG1\xcf\x04" +
+	"\x0e\x86;\xc49\xd8e\xb7PA{K\x81\x83\x11\x0e" +
+	"g\x02v\xcd)\x8c\x85*\xc2\x08<p\x90\xe5\xb0p" +
+	"`\xb3mB\x06\xae\xcb\x9f\xe3 \xdb)\x1d\xc1\xae\xb9" +
+	"\xf9\xd3K\x09\xc3\x9f\xe4 \xc3\xe1\xde\xc0\xa6\xfa\xf9\xa3" +
+	"{\x08\xc3\x7f\xc8\xc5l+\x02;\xffc\xd5P5\xb8" +
+	"\xcd\xf5\xaa!\xeb\xe6\\\x8d\xd5n\xf56\xc75\x91x" +
+	"\xdbl?\x9eO\xb5\xd3\xdbc\x9b(\xa7\xa9F5\xc4" +
+	"h\x0aS\x17T\x08\x98\xd5\x10\x8bh\x1d2\xd6\x04\x84" +
+	"\xd5\xf0#-*\xab\xd7*a+u\x8e\x19K\xb4e" +
+	"\x0bd\xc3 \x9c\x14\x92q\xcax\xe4&\xaca\xd0\x15" +
+	"\xa4 .K\xd8\xf8\x82\x96?'`wb*J@" +
+	"\xae\x86\xc02M\x0f\xce\xc2\xf5Z(\xccz\x95\xb0m" +
+	"Z5\xc4:\x14Ci\x09\xcbM$\x0b\xb3V/j" +
+	"\xdb\xdf\x06,\xa7\x91\x98\xb5\xa7\x11e\xec\x0djz\xaa" +
+	"\x0a\xd6S@\xa6\x8a\xb8\x89\x01\x85\x8bj\xc6\x05\x12\xdd" +
+	"\xfee\x12\xb4&qr\xc9\x14!\xc4\xcf@\xbe\x8c\xdf" +
+	"@\xb6K:\xa5\xbb\xb4\xeb\xa6\xbd\x11\xecZ\xa5\xb3\x0f" +
+	"y_\x8f\xf8\xe5\\\x9d\xf5\x88_\xfd;\x93\xa4jg" +
+	"\xe4@S\x18\xbb\x1e\xb3'\xec\x7f~g\xe5B\x84\xf4" +
+	"\xf7T2\xfa\x1a\xca\xe2E\xb3\x8f\x86\x02\x9by\x03\xfb" +
+	"2\x89\xe7\xb1\xf8\xcd\xe0\x02V\xc4I\xb3~M}\xf2" +
+	"\xde\xb0\x9d*|\xb6\xc4\xc3g\x09\x03\xb1`|,A" +
+	"\x07\xe2\xea\x81s\xf7\xd2\xdf<\x86\xb5\x12\xe0\x12{U" +
+	"!\x13\xca\x08i\xf6\x01\x0b\xcd\xd9\xe0\xe6}\xc2p(" +
+	" \xa4y(\xb6\xfb\xc1)\x00\x04\x9e\x0e\x1f\x86\xcd\x17" +
+	"\xe3p\xd6G\xcb(!\x87\xb6gc\xfb%\xd8\xeec" +
+	")\xaf\"\x8c\x86*B\x9a\xfd\xd8>\x0e\xdb32\xfc" +
+	"\x90A\x880\x16\x96\x13\xd2|\x09\xb6\x97`\xfb\x10\xf0" +
+	"\xc3\x10B\x84\"\xda^\x88\xedS\xb1\x9d\xbb\xcb\x0f\x1c" +
+	"!\xc2d\xa8!\xa4\xb9\x04\xdb/\xc3\xf6\xa1\x8c\x1f\x86" +
+	"\x12\"T\xd0\xf6rl\x9f\x81\xed\x99\xac\x1f2\x09\x11" +
+	".\x87&B\x9a/\xc3\xf6j\xb8@\x16\x9fe\xca\x9d" +
+	"N\x09\x93u\xab\xa2\x06!\xcb\xbd\x9c$\x00Y\x04\x02" +
+	"\xb2\x1a\xac\xf5$\xfeN\x16\x17\x90\x9b\xcd\xae\xb0\x0cY" +
+	".\x1bj}\xe1\x1dR\xab\x855\x97(lS:\xa5" +
+	"\x96\xb0l3A\xf8{\xb6dJN\xd5\x84p\xf0\x0b" +
+	"\x02z\x12c\x96\x86\xb1\xdbAD\x0a\xc9\xa92\xc42" +
+	"\xd7\xa0\x12\x04\xe0,\xe5\xebm\xa9@\xbc\xaar,\xc8" +
+	"\xbej\x01\xfb\x9a\x8a\xe71Ngr1EULE" +
+	"\x0a+\x84].\xf7;\xa2\xd81\xd22\x1c6\x9d\xd4" +
+	"\xcfN!\x03\x96\xa3q \xdb\xd7\xf5\x9e\xfb\xe1\x0b\x19" +
+	"}?#\xcd\x92\x04f\xa8\x9fN-\x0dA\xd9\xb1\xbe" +
+	"MsB\xefy\x16M\xac\xdb\x06\xb6\x94\xc3)xx" +
+	"\x99\xb2T\xbc\xccb\x97\x82\xb19\x85\x08V\x98a\x16" +
+	"\xc4N\xf4'\xe3,Z\xa6\x1d+\xcc(\x0b\xe2\x1d\x0c" +
+	"dE%s\x89\xa3\xa2aI\x0d\xb5K!\x99\xb0\xf5" +
+	"A\xb7QQ\xe5Z\xad]%`:U\xa7b\xccV" +
+	"t\xb3\xcb!]\x07\x8f}\x8c\xc7\xa8\xbe\xd5\\\xce\xc5" +
+	"K\x8f\x9a\xab\x8f\xbcE\xbd\xca\xb6i}\xe1,<\x0c" +
+	"|\x96*E\x1c\xc2}e\x87\xac\x1b\x8a\xa6\xa6\xefN" +
+	",\x00Sl\xfb]\x9e\xba\xe8\xf3\xfa\x12Em\xd3 " +
+	"\xdb\xbd\xd6\x1e\x94dmaTV\xfbA\xfb\xcc\x93\xbb" +
+	"j5\xd5\x94\xd9N\xb3\xc7\xedAe\x8a\xdb\x83\xb2\xf8" +
+	"\xed\xc1\xbfy8\xd95x\xa8?cA\xbc\xcfs{" +
+	"\xb0\x1e5\xf8\x9e\xf8=\x83\xcfg\xdd\x1ex\xef\x19z" +
+	"\x90\x88\x11-\xe8\xde}\xb4\x86\x15Y5\xeb\x83\xa8\x19" +
+	"\x99\x84\x81L\xe7\xf6`\xbeBX\x0fCb5\xd6j" +
+	"\x04\xc2\x03\xe5\x19-\x99\xba\x16z\x1e\x96\xa9\x15e\xa5" +
+	"\x9a\xe9_\xd3XZ\xd2$qjH\xee\xcbM\x917" +
+	"\xd3\xa7dQrv\xcf\xc9jp \xe4\xb6+\x00\xbb" +
+	"\xee2\x9d\x84{0\xc8''G\xed\x8d;K`\xfa" +
+	"m\x0a\xb5\xe0\xbcL\xff\xc0\xa9\xc6\x0b\x95\x1c)b\x90" +
+	"W\x01zf\"\x83`\xb4\x03\xcd\xe5\xfb\xe1\xa1R-" +
+	"Y\xe0.\xc9IQ\x05x\xf7\xddW\x0f\x9f<\x08\x89" +
+	"}/\xba\xe1\xa8\xc6R/\xad\x1aw8\":\x9cF" +
+	"\x16\xc4\x1b\x93\xc2sb\xcd\x0e\xd9\xee\x13\x9c\xb8\xccR" +
+	"\xb9\x96tS\xa4\xda\x00:\x01\xcb_\xfePI\x83E" +
+	"J8!\xf4\x07\xa2\x05\xfa\x93Y\xdat@\xea@\x9b" +
+	"t\xd5~Y\x8f\xc4$\xc1z\x07d\xb1\xd4i]\xab" +
+	"t&\xfb\xac~y>\xdb\xee{\x11u\xa5\xfb\x84 " +
+	"Q\xd4\xbd]\x7f\x0f\xcaVS\x80\xac\xb9\x00\xc8\xcb\x92" +
+	"\x1d\xd6yn\xe5\x86\xa4\x8b*\xce\x0b\x0c\xa3U\x8d\xfd" +
+	">\x0c\xac7\x91\xe49^\\N\x18\xbe\x9e\x03\xf7q" +
+	"\x1a\xd8o:\xf9\x99\x0d\x84\xe1/\xe7\x80q\x1eb\x81" +
+	"\xfd\x9a\x8b/m\xa0\x17\xe61\xdb]\x90\x80\xe50\xaa" +
+	"!f{h\x8b\xff\xb3EB\x7f\x0dB\x01B\xa9\xae" +
+	"\xf4\xab\xa6\xeb\xe5N\x13\xd5\x87\x10K\x1a\x8e3+K" +
+	"\x15\xe8rS\x05\xba\x1a\xd7\xc5\xa5s\x89\xbdR\x95\x97" +
+	"]\x9f\xaa(\xcd\xe8[\xc4\xae7Y9\x82\xa0/v" +
+	"@o\xaa\xf4\xbc\x03\xb1AoA|?gA\xdc\xee" +
+	"\xd6\"[\xd1\x03?\xc6\x82\xf8\x8c'\xe5\xdbQ\xe3\xbe" +
+	"\x0d\xe1}\x8c\x95\xf2\xed\xac\"D|\x8a\x05\xf1E\x06" +
+	"\xf8\x0c\x96\xb2\x1a\xfc.\\\xe7\x19\x16\xc4_\xf6\xfa\x0c" +
+	"\x06\x05B\x89[B\x9c\x8a\x05\xdb<DC\xc0\xd4\xbc" +
+	"\xd7f\xf9\xa6V\xab\x0d(\x1d\xf4\xb2\x02\xe9_\xa1\xd8" +
+	"\xea\xc5\xc9\xaay\xfeD/\x95\x9f\xec\x91\xe6$\x94s" +
+	"\x83R^\x0f\xc4Q\xba\xcf7Rq\xb2\xbd2%\x03" +
+	"\xbc\xbeK:\x86~\xccg_Xh\xb7\xa6b\xdb{" +
+	"-\x16[\x97H?\xd0C6;i\xb1\xa4\x1b\xb08" +
+	"b/\xb6&\x17\x86\x83\xad\x02\xb1\x95\xb3 \xce`\x06" +
+	"\xf96\xf9\x82\x92K\xff\x05P\xf2\x9d\xa8\x93\xfb\xf5\xf6" +
+	"\\\xcf\x93\xd6p\xb7\xca]\xb6\xf4\xe3\xeff\x9c\xd7\xda" +
+	"\xfdOj<\x85_\xbfX\xa0~\xc82\x9eC\xf6\xa3" +
+	"R\xefq\xebd\xf9\x16\x8c\xbe\xf6\xfbp\xb0\xff\x9d\x84" +
+	"\xafXL\x18\xbe\x14\xa3\xaf\xfd\xcf4`?\x0f\xe5\xc7" +
+	"\xb6\x10\x86\xcf\xa1\x11\x96\xceHX\xf7\xeamV\xabI" +
+	"8ES\xfb\xcd?\xc6\xd3V\xe7\xddY\xaf\xa5_A" +
+	"\x8a\xc73\x95\x9e\xca/\xad\xd27\xbfMkW\x83I" +
+	"LV\xaf\x92\xfdI\x9c\x86\x8e\x13\xd54\x92S(c" +
+	"\xcb\xa8Y\xe74\xd0\xd7\x0b|%!Y\xaa\xa6\xca1" +
+	"\xc3\xd4%%\xb4\xc4$\x84\xe4\xb7\xb6\xeb\xe1\xae\xc1\xd0" +
+	"\x88Tf\x91\x1e\x85\xe5z%\xe7\x9f<\x06\xc9+5" +
+	"\xe6K\x17z>q\xa1\xaaj \xcf\xd8\xec|\xec\xff" +
+	"\x02\x00\x00\xff\xff0\xb7\x07I"
 
 func RegisterSchema(reg *schemas.Registry) {
 	reg.Register(&schemas.Schema{
@@ -7950,15 +8862,18 @@ func RegisterSchema(reg *schemas.Registry) {
 			0x8c9417c0d7660ce1,
 			0x8ddcb7dc824e3e9b,
 			0x8fae259f80106363,
+			0x8fc89a4127613732,
 			0x90424a302553fcf7,
 			0x91dfbf91e4666d44,
 			0x93ce49bc669f0079,
+			0x954e3ae7a3e86666,
 			0x9594bc83c15f00a4,
 			0x96921a47101c8145,
 			0x96caee0d38d1dc02,
 			0x96f66e0bd3b051a2,
 			0x97036c030e4a95d6,
 			0x9aea6227df89902e,
+			0xa0eae48a4803db37,
 			0xa17a2192825c8da1,
 			0xa40c91b62bc23992,
 			0xa4ca8ac162b05bcc,
@@ -7980,6 +8895,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xbefef4efd19b3ce1,
 			0xc077263bdc4711e3,
 			0xc0d75f3c7fed7bca,
+			0xc257488f85be6060,
 			0xc52667f124286f48,
 			0xc7973d2c7a8fcb0f,
 			0xc8336766a514d1b4,
@@ -7987,6 +8903,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xccef7e4d6a760420,
 			0xcdbd5cef59c275f5,
 			0xce64052515b2c6fb,
+			0xcfb6de9d0dbfb16f,
 			0xd0e26a13ebfecb67,
 			0xd2bfca6cd4003fba,
 			0xd39074bf961b3e25,
@@ -8000,6 +8917,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xdecae373f862956c,
 			0xdf9179a15ec1923e,
 			0xe26fd6d8bbb793f1,
+			0xe3256d4395285889,
 			0xe38ca25c3abba6db,
 			0xe78ce6cb61907067,
 			0xe94123c63fc567b1,
@@ -8011,10 +8929,12 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xf0e109bae711a467,
 			0xf23db99d936c7e9b,
 			0xf4ddaadef26a3e8a,
+			0xf5672472b4c3a4e7,
 			0xf6cae4aae2360f91,
 			0xf82befbc532cc6bc,
 			0xf94a00956cc5f84a,
 			0xfa400ecd2a10ed1b,
+			0xfe3536f5537e2d29,
 		},
 		Compressed: true,
 	})

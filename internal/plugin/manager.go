@@ -108,21 +108,27 @@ type PluginToml struct {
 	// Only applies when the plugin registers exactly one key binding.
 	// Example: trigger_key = "r"
 	TriggerKey string `toml:"trigger_key"`
+	// KeyDescription is a short description of the trigger key shown in the ? help popup.
+	// If omitted, the plugin's description field is used (truncated).
+	KeyDescription string `toml:"key_description"`
 }
 
 // registeredPlugin holds a running plugin's process, RPC connection, and
 // the handlers it registered during initialize.
 type registeredPlugin struct {
-	name    string
-	process *os.Process
-	rpcConn *rpc.Conn
+	name           string
+	description    string // from manifest description field
+	keyDescription string // from manifest key_description field; empty = use description
+	process        *os.Process
+	rpcConn        *rpc.Conn
 
-	mu            sync.RWMutex
-	keyBindings   map[string]pluginproto.KeyHandler
-	insertHooks   map[string]pluginproto.KeyHandler
-	commands      map[string]pluginproto.CommandHandler
-	bufHandler    pluginproto.BufferEventHandler
-	decorProvider pluginproto.DecorationProvider
+	mu             sync.RWMutex
+	keyBindings    map[string]pluginproto.KeyHandler
+	insertHooks    map[string]pluginproto.KeyHandler
+	commands       map[string]pluginproto.CommandHandler
+	bufHandler     pluginproto.BufferEventHandler
+	decorProvider  pluginproto.DecorationProvider
+	actionProvider pluginproto.ActionProvider
 }
 
 func (p *registeredPlugin) release() {
@@ -139,6 +145,7 @@ func (p *registeredPlugin) release() {
 	}
 	p.bufHandler.Release()
 	p.decorProvider.Release()
+	p.actionProvider.Release()
 }
 
 // Manager discovers plugins in the user's plugins directory and manages their
@@ -254,11 +261,13 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 	}
 
 	reg := &registeredPlugin{
-		name:        name,
-		process:     proc,
-		keyBindings: make(map[string]pluginproto.KeyHandler),
-		insertHooks: make(map[string]pluginproto.KeyHandler),
-		commands:    make(map[string]pluginproto.CommandHandler),
+		name:           name,
+		description:    manifest.Description,
+		keyDescription: manifest.KeyDescription,
+		process:        proc,
+		keyBindings:    make(map[string]pluginproto.KeyHandler),
+		insertHooks:    make(map[string]pluginproto.KeyHandler),
+		commands:       make(map[string]pluginproto.CommandHandler),
 	}
 
 	apiServer := &editorApiServer{reg: reg, bridge: m.bridge}
@@ -321,6 +330,38 @@ func (m *Manager) AllRegisteredKeys() []string {
 		p.mu.RUnlock()
 	}
 	return keys
+}
+
+// PluginBinding describes one key binding contributed by a plugin.
+type PluginBinding struct {
+	PluginName  string
+	Key         string
+	Description string // short description for the help popup
+}
+
+// AllPluginBindings returns all key bindings contributed by loaded plugins,
+// with the plugin name and a short description for each.
+func (m *Manager) AllPluginBindings() []PluginBinding {
+	m.mu.Lock()
+	plugins := m.plugins
+	m.mu.Unlock()
+	var bindings []PluginBinding
+	for _, p := range plugins {
+		p.mu.RLock()
+		desc := p.keyDescription
+		if desc == "" {
+			desc = p.description
+		}
+		for k := range p.keyBindings {
+			bindings = append(bindings, PluginBinding{
+				PluginName:  p.name,
+				Key:         k,
+				Description: desc,
+			})
+		}
+		p.mu.RUnlock()
+	}
+	return bindings
 }
 
 // GetDecorations calls every registered DecorationProvider and aggregates the results.
@@ -471,6 +512,106 @@ func (m *Manager) ApplyFix(ctx context.Context, pluginName, fixData string, inde
 type FixItem struct {
 	Label   string
 	Replace string // non-empty = direct text replacement; empty = call ApplyFix
+}
+
+// ActionItem is one context-sensitive action returned by an ActionProvider.
+type ActionItem struct {
+	Label      string
+	Replace    string // non-empty = insert this text after deleting [FromLine:FromCol, ToLine:ToCol)
+	FromLine   uint32
+	FromCol    uint32
+	ToLine     uint32
+	ToCol      uint32
+	PluginName string // which plugin owns this item (for callbacks)
+}
+
+// GetActionsAt calls all registered action providers for (bufID, line, col)
+// and returns the merged list of actions.
+func (m *Manager) GetActionsAt(ctx context.Context, bufID, line, col uint32) ([]ActionItem, error) {
+	m.mu.Lock()
+	providers := make([]struct {
+		name     string
+		provider pluginproto.ActionProvider
+	}, 0, len(m.plugins))
+	for _, p := range m.plugins {
+		p.mu.RLock()
+		if p.actionProvider.IsValid() {
+			providers = append(providers, struct {
+				name     string
+				provider pluginproto.ActionProvider
+			}{name: p.name, provider: p.actionProvider.AddRef()})
+		}
+		p.mu.RUnlock()
+	}
+	m.mu.Unlock()
+
+	var all []ActionItem
+	for _, entry := range providers {
+		tctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		fut, rel := entry.provider.GetActions(tctx, func(ps pluginproto.ActionProvider_getActions_Params) error {
+			ps.SetBufId(bufID)
+			ps.SetLine(line)
+			ps.SetCol(col)
+			return nil
+		})
+		res, err := fut.Struct()
+		cancel()
+		rel()
+		entry.provider.Release()
+		if err != nil {
+			continue
+		}
+		rawList, err := res.Items()
+		if err != nil {
+			continue
+		}
+		for i := range rawList.Len() {
+			it := rawList.At(i)
+			label, _ := it.Label()
+			replace, _ := it.Replace()
+			all = append(all, ActionItem{
+				Label:      label,
+				Replace:    replace,
+				FromLine:   it.FromLine(),
+				FromCol:    it.FromCol(),
+				ToLine:     it.ToLine(),
+				ToCol:      it.ToCol(),
+				PluginName: entry.name,
+			})
+		}
+	}
+	return all, nil
+}
+
+// ApplyAction calls the named plugin's ActionProvider.applyAction.
+func (m *Manager) ApplyAction(ctx context.Context, pluginName string, bufID, line, col, index uint32) error {
+	m.mu.Lock()
+	var provider pluginproto.ActionProvider
+	for _, p := range m.plugins {
+		if p.name == pluginName {
+			p.mu.RLock()
+			provider = p.actionProvider
+			p.mu.RUnlock()
+			break
+		}
+	}
+	m.mu.Unlock()
+
+	if !provider.IsValid() {
+		return nil
+	}
+	tctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	fut, rel := provider.ApplyAction(tctx, func(ps pluginproto.ActionProvider_applyAction_Params) error {
+		ps.SetBufId(bufID)
+		ps.SetLine(line)
+		ps.SetCol(col)
+		ps.SetIndex(index)
+		return nil
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
 }
 
 // Shutdown cleanly stops all plugin processes.

@@ -130,6 +130,19 @@ func (s *editorApiServer) RegisterDecorations(_ context.Context, call pluginprot
 	return err
 }
 
+func (s *editorApiServer) RegisterActionProvider(_ context.Context, call pluginproto.EditorApi_registerActionProvider) error {
+	provider := call.Args().Provider()
+	if !provider.IsValid() {
+		return fmt.Errorf("invalid action provider")
+	}
+	s.reg.mu.Lock()
+	s.reg.actionProvider.Release()
+	s.reg.actionProvider = provider.AddRef()
+	s.reg.mu.Unlock()
+	_, err := call.AllocResults()
+	return err
+}
+
 // -- Editor effect methods --
 
 func (s *editorApiServer) ApplyEdit(_ context.Context, call pluginproto.EditorApi_applyEdit) error {

@@ -1,13 +1,17 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -104,6 +108,10 @@ type PluginToml struct {
 	SdkVersion  string            `toml:"sdk_version"` // stored but not validated yet
 	Description string            `toml:"description"`
 	Binaries    map[string]string `toml:"binaries"`
+	// Hashes maps the same os/arch keys as Binaries to expected SHA-256 hashes
+	// in the form "sha256:<hex>". When present, the binary is rejected if its
+	// hash does not match. Manifests that omit this field skip hash checking.
+	Hashes map[string]string `toml:"hashes"`
 	// TriggerKey overrides the key the plugin registers as its trigger.
 	// Only applies when the plugin registers exactly one key binding.
 	// Example: trigger_key = "r"
@@ -878,8 +886,10 @@ func pluginsConfigDir() (string, error) {
 
 func (m *Manager) pluginSocketPath(pluginName string) string {
 	h := sha256.Sum256([]byte(m.workDir))
-	dir := filepath.Join(os.TempDir(), fmt.Sprintf("indigo-%x", h[:8]))
-	os.MkdirAll(dir, 0o700) //nolint:errcheck
+	// Match the server's directory naming: include UID to isolate per-user.
+	dir := filepath.Join(os.TempDir(), fmt.Sprintf("indigo-%d-%x", os.Getuid(), h[:8]))
+	os.MkdirAll(dir, 0o700)  //nolint:errcheck
+	os.Chmod(dir, 0o700)     //nolint:errcheck
 	return filepath.Join(dir, "plugin-"+pluginName+".sock")
 }
 
@@ -904,7 +914,39 @@ func selectBinary(pluginDir string, manifest *PluginToml) (string, error) {
 	if _, err := os.Stat(abs); err != nil {
 		return "", err
 	}
+	if expected, ok := manifest.Hashes[key]; ok {
+		if err := verifyBinaryHash(abs, expected); err != nil {
+			return "", fmt.Errorf("plugin binary integrity check failed: %w", err)
+		}
+	}
 	return abs, nil
+}
+
+// verifyBinaryHash checks that the file at path matches expected, which must be
+// in the form "sha256:<lowercase-hex>". Returns an error if the hash does not
+// match or the format is unrecognised.
+func verifyBinaryHash(path, expected string) error {
+	const prefix = "sha256:"
+	if !strings.HasPrefix(expected, prefix) {
+		return fmt.Errorf("unsupported hash format %q (want sha256:<hex>)", expected)
+	}
+	want, err := hex.DecodeString(expected[len(prefix):])
+	if err != nil {
+		return fmt.Errorf("invalid hash hex: %w", err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close() //nolint:errcheck
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return err
+	}
+	if !bytes.Equal(h.Sum(nil), want) {
+		return fmt.Errorf("hash mismatch for %s", filepath.Base(path))
+	}
+	return nil
 }
 
 func waitForSocket(path string, timeout time.Duration) error {

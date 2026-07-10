@@ -33,14 +33,22 @@ func (l *serverRPCLogger) Info(msg string, args ...any)  { serverLog("rpc info: 
 func (l *serverRPCLogger) Warn(msg string, args ...any)  { serverLog("rpc warn: %s %v", msg, args) }
 func (l *serverRPCLogger) Error(msg string, args ...any) { serverLog("rpc error: %s %v", msg, args) }
  
-// SocketPath returns the Unix socket path for a given working directory.
-func SocketPath(dir string) string {
+// socketDir returns the private 0700 directory that holds sockets for a workspace.
+// Including the UID ensures different users on the same machine never share a directory.
+func socketDir(dir string) string {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		abs = dir
 	}
 	h := sha256.Sum256([]byte(abs))
-	return filepath.Join(os.TempDir(), fmt.Sprintf("indigo-%x.sock", h[:8]))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("indigo-%d-%x", os.Getuid(), h[:8]))
+}
+
+// SocketPath returns the Unix socket path for a given working directory.
+// The socket lives inside a per-user 0700 directory so no time-of-check /
+// time-of-use race is possible between creating and chmod-ing the socket.
+func SocketPath(dir string) string {
+	return filepath.Join(socketDir(dir), "server.sock")
 }
 
 // IsRunning returns true if a server socket exists and is accepting connections.
@@ -1176,17 +1184,24 @@ func (s *Server) triggerShutdown() {
 
 // New creates and starts a server for the given working directory.
 func New(dir string) (*Server, error) {
+	// Create (or tighten) the private socket directory before creating the socket
+	// so it is never world-accessible, even for the instant between Listen and
+	// a subsequent chmod call.
+	sockDir := socketDir(dir)
+	if err := os.MkdirAll(sockDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create socket dir %s: %w", sockDir, err)
+	}
+	// MkdirAll does not change permissions of existing dirs; enforce 0700 explicitly.
+	if err := os.Chmod(sockDir, 0o700); err != nil {
+		return nil, fmt.Errorf("secure socket dir %s: %w", sockDir, err)
+	}
+
 	sockPath := SocketPath(dir)
 	os.Remove(sockPath) //nolint:errcheck // clean up stale socket
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
 		return nil, fmt.Errorf("listen %s: %w", sockPath, err)
-	}
-	if err := os.Chmod(sockPath, 0600); err != nil {
-		ln.Close()          //nolint:errcheck
-		os.Remove(sockPath) //nolint:errcheck
-		return nil, fmt.Errorf("securing socket %s: %w", sockPath, err)
 	}
 
 	recDir, err := setupRecoveryDir()

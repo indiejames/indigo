@@ -1038,7 +1038,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "K":
 		return m, m.fetchHover()
 
-	case "E":
+	case "D":
 		if len(m.diagsAtPos(m.cursor.Line, m.cursor.Col)) > 0 {
 			m.diagPopup = !m.diagPopup
 		} else {
@@ -1103,12 +1103,12 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	// Selection: create or extend. All operations apply to every cursor.
-	case "w":
+	case "W":
 		m.applyToAllCursors(func(m *Model) {
-			m.selectWord()
+			m.extendToNextWordStart()
 		})
 
-	case "W":
+	case "E":
 		m.applyToAllCursors(func(m *Model) {
 			m.extendWordForward()
 		})
@@ -1221,6 +1221,11 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		})
 
 	// Word/line navigation.
+	case "w":
+		m.applyToAllCursors(func(m *Model) {
+			m.sel = nil
+			m.moveToNextWordStart()
+		})
 	case "b":
 		m.applyToAllCursors(func(m *Model) {
 			m.sel = nil
@@ -1231,6 +1236,21 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.sel = nil
 			m.moveToWordEnd()
 		})
+
+	case "p":
+		text, err := readClipboard()
+		if err != nil {
+			m.status = "clipboard: " + err.Error()
+		} else if text != "" {
+			op := document.Op{
+				ClientID:   m.rpc.ClientID(),
+				Type:       document.OpInsert,
+				InsertLine: m.cursor.Line,
+				InsertCol:  m.cursor.Col,
+				InsertText: text,
+			}
+			return applyOp(m, op)
+		}
 	case "B":
 		m.extendWordBackward()
 

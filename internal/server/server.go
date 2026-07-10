@@ -32,7 +32,7 @@ func (l *serverRPCLogger) Debug(msg string, args ...any) { serverLog("rpc debug:
 func (l *serverRPCLogger) Info(msg string, args ...any)  { serverLog("rpc info: %s %v", msg, args) }
 func (l *serverRPCLogger) Warn(msg string, args ...any)  { serverLog("rpc warn: %s %v", msg, args) }
 func (l *serverRPCLogger) Error(msg string, args ...any) { serverLog("rpc error: %s %v", msg, args) }
-
+ 
 // SocketPath returns the Unix socket path for a given working directory.
 func SocketPath(dir string) string {
 	abs, err := filepath.Abs(dir)

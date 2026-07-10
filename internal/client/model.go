@@ -414,6 +414,9 @@ type Model struct {
 	fixDecor *ClientDecoration // decoration being fixed (nil for action-only items)
 	fixIdx   int
 
+	// Mark for deferred selection: set with z, select-to with Z.
+	mark *document.Pos
+
 	// Plugin help entries loaded at startup for the ? popup.
 	pluginBindings []ClientPluginBinding
 }
@@ -447,6 +450,14 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath string
 
 // Dirty reports whether the buffer has unsaved changes.
 func (m Model) Dirty() bool { return m.buf.Dirty() }
+
+// clientID returns the RPC client ID, or 0 when rpc is nil (e.g. in tests).
+func (m Model) clientID() uint64 {
+	if m.rpc == nil {
+		return 0
+	}
+	return m.rpc.ClientID()
+}
 
 // cursorSnap captures the current cursor, selection, and extra-cursor state.
 func (m Model) cursorSnap() cursorSnapshot {

@@ -267,15 +267,15 @@ func (m Model) gutterDecorAt(lineNum int) *ClientDecoration {
 
 // gutterWidth returns the number of columns reserved for line numbers (and plugin markers).
 func (m Model) gutterWidth() int {
-	hasPluginGutter := m.reservePluginGutter || m.hasGutterDecorations()
+	hasExtraGutter := m.mark != nil || m.reservePluginGutter || m.hasGutterDecorations()
 	if m.cfg == nil || !m.cfg.LineNumbers {
-		if hasPluginGutter {
+		if hasExtraGutter {
 			return 3 // space + up to 2 chars
 		}
 		return 0
 	}
 	w := len(fmt.Sprint(m.displayLineCount())) + 1
-	if hasPluginGutter {
+	if hasExtraGutter {
 		w += 3 // space + up to 2 chars
 	}
 	return w
@@ -496,10 +496,10 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 	}
 
 	if gutterW > 0 {
-		hasPluginGutter := m.hasGutterDecorations()
+		hasExtraGutter := m.mark != nil || m.hasGutterDecorations()
 		if chunk == 0 {
 			numW := gutterW
-			if hasPluginGutter {
+			if hasExtraGutter {
 				numW -= 3
 			}
 			if numW > 0 {
@@ -510,23 +510,28 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 					sb.WriteString(gutterStyle.Render(numStr))
 				}
 			}
-			if hasPluginGutter {
-				decor := m.gutterDecorAt(lineNum)
-				if decor == nil || decor.Text == "" {
-					sb.WriteString(gutterStyle.Render("   "))
-				} else if decor.TextColor != "" {
-					// Solid 1-cell colored bar: wider than a thin │ line, narrower than a 2-cell block.
-					barStyle := lipgloss.NewStyle().Background(lipgloss.Color(decor.TextColor))
-					sb.WriteString(" ")
-					sb.WriteString(barStyle.Render(" "))
-					sb.WriteString(" ")
+			if hasExtraGutter {
+				if m.mark != nil && lineNum == m.mark.Line {
+					markGutterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00"))
+					sb.WriteString(markGutterStyle.Render(" ◆ "))
 				} else {
-					label := decor.Text
-					if len([]rune(label)) > 2 {
-						label = string([]rune(label)[:2])
+					decor := m.gutterDecorAt(lineNum)
+					if decor == nil || decor.Text == "" {
+						sb.WriteString(gutterStyle.Render("   "))
+					} else if decor.TextColor != "" {
+						// Solid 1-cell colored bar: wider than a thin │ line, narrower than a 2-cell block.
+						barStyle := lipgloss.NewStyle().Background(lipgloss.Color(decor.TextColor))
+						sb.WriteString(" ")
+						sb.WriteString(barStyle.Render(" "))
+						sb.WriteString(" ")
+					} else {
+						label := decor.Text
+						if len([]rune(label)) > 2 {
+							label = string([]rune(label)[:2])
+						}
+						sb.WriteString(" ")
+						sb.WriteString(decorOverlayStyle.Render(fmt.Sprintf("%-2s", label)))
 					}
-					sb.WriteString(" ")
-					sb.WriteString(decorOverlayStyle.Render(fmt.Sprintf("%-2s", label)))
 				}
 			}
 		} else {
@@ -1349,6 +1354,10 @@ var helpEntries = []helpEntry{
 	{key: ";", desc: "Clear selection"},
 	{key: "Alt+;", desc: "Flip selection (swap anchor/head)"},
 	{key: "mi / mw", desc: "Select inside object / word"},
+	{key: "z", desc: "Set mark at cursor (Esc clears)"},
+	{key: "Z", desc: "Select from mark to cursor"},
+	{key: ">", desc: "Indent selected lines"},
+	{key: "<", desc: "Unindent selected lines"},
 	{key: ""},
 	{key: "Search"},
 	{key: "/", desc: "Start search"},

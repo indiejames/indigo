@@ -646,6 +646,73 @@ outer:
 	return m, cmd
 }
 
+// selectionLineRange returns the first and last line covered by the current
+// selection, falling back to the cursor line when there is no selection.
+func (m Model) selectionLineRange() (startLine, endLine int) {
+	if m.sel == nil {
+		return m.cursor.Line, m.cursor.Line
+	}
+	start, end := m.sel.ordered()
+	return start.Line, end.Line
+}
+
+// executeIndent adds one tab stop at the start of every selected line (or the
+// cursor line). The selection is preserved as a line range so the user can
+// press > repeatedly without re-selecting.
+func executeIndent(m Model) (tea.Model, tea.Cmd) {
+	startLine, endLine := m.selectionLineRange()
+	ops := make([]document.Op, 0, endLine-startLine+1)
+	for ln := startLine; ln <= endLine; ln++ {
+		ops = append(ops, document.Op{
+			ClientID:   m.clientID(),
+			Type:       document.OpInsert,
+			InsertLine: ln,
+			InsertCol:  0,
+			InsertText: "\t",
+		})
+	}
+	m, cmd := applyBatch(m, ops)
+	m.sel = nil
+	return m, cmd
+}
+
+// executeUnindent removes one tab stop from the start of every selected line
+// (or the cursor line): one '\t', or up to four leading spaces.
+// The selection is preserved as a line range so repeated < keeps working.
+func executeUnindent(m Model) (tea.Model, tea.Cmd) {
+	startLine, endLine := m.selectionLineRange()
+	ops := make([]document.Op, 0, endLine-startLine+1)
+	for ln := startLine; ln <= endLine; ln++ {
+		runes := []rune(m.buf.Line(ln))
+		if len(runes) == 0 {
+			continue
+		}
+		var remove int
+		if runes[0] == '\t' {
+			remove = 1
+		} else {
+			for remove < len(runes) && runes[remove] == ' ' && remove < 4 {
+				remove++
+			}
+		}
+		if remove == 0 {
+			continue
+		}
+		ops = append(ops, document.Op{
+			ClientID: m.clientID(),
+			Type:     document.OpDelete,
+			FromLine: ln, FromCol: 0,
+			ToLine:   ln, ToCol: remove,
+		})
+	}
+	if len(ops) == 0 {
+		return m, nil
+	}
+	m, cmd := applyBatch(m, ops)
+	m.sel = nil
+	return m, cmd
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.recoveryPrompt {
 		return m.handleRecoveryPrompt(msg)
@@ -969,6 +1036,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.extraCursors = nil
 		m.sel = nil
+		m.mark = nil
 		m = m.withClearedSearch()
 
 	// Enter insert mode — clear any selection and start an undo group.
@@ -977,6 +1045,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.groupBefore = m.cursorSnap()
+		m.insertLineCount = m.buf.LineCount()
 		m.mode = ModeInsert
 
 	case "a":
@@ -984,6 +1053,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.groupBefore = m.cursorSnap()
+		m.insertLineCount = m.buf.LineCount()
 		m.mode = ModeInsert
 		m.cursor.Col++
 
@@ -992,6 +1062,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.groupBefore = m.cursorSnap()
+		m.insertLineCount = m.buf.LineCount()
 		m.mode = ModeInsert
 		m.cursor.Col = m.buf.LineLen(m.cursor.Line)
 
@@ -1000,6 +1071,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.groupBefore = m.cursorSnap()
+		m.insertLineCount = m.buf.LineCount()
 		m.mode = ModeInsert
 		line := m.cursor.Line
 		op := document.Op{
@@ -1017,6 +1089,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.groupBefore = m.cursorSnap()
+		m.insertLineCount = m.buf.LineCount()
 		m.mode = ModeInsert
 		col := 0
 		if m.cursor.Line > 0 {
@@ -1072,7 +1145,26 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(m.undoStack) == m.savedUndoDepth {
 				m.buf.SetClean()
 			}
-			return m, tea.Sequence(append(cmds, m.reparseHighlight())...)
+			fp := m.filePath
+			newDepth := len(m.undoStack)
+			// Compute the net line delta produced by the inverse ops that were
+			// just applied — this lets the App reverse any line-shift it made
+			// when those edits were originally recorded.
+			atLine, lineDelta := -1, 0
+			for _, inv := range entry.ops {
+				al, d := opLineDelta(inv)
+				if atLine < 0 || al < atLine {
+					atLine = al
+				}
+				lineDelta += d
+			}
+			if atLine < 0 {
+				atLine = 0
+			}
+			undoCmd := func() tea.Msg {
+				return UndoMsg{FilePath: fp, NewDepth: newDepth, AtLine: atLine, LineDelta: lineDelta}
+			}
+			return m, tea.Sequence(append(cmds, m.reparseHighlight(), undoCmd)...)
 		}
 
 	case "U":
@@ -1150,6 +1242,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.withClearedSearch()
 		m.currentGroup = []document.Op{}
 		m.groupBefore = m.cursorSnap()
+		m.insertLineCount = m.buf.LineCount()
 		if len(m.extraCursors) > 0 {
 			m2, cmd := deleteAllCursorSelections(m)
 			m2.mode = ModeInsert
@@ -1279,6 +1372,34 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			splitSelectionIntoCursors(&m)
 		}
 
+	// Mark-based selection.
+	case "z":
+		pos := m.cursor
+		m.mark = &pos
+		m.status = "mark set"
+
+	case "Z":
+		if m.mark == nil {
+			m.status = "no mark set (press z to set mark)"
+		} else {
+			m.sel = &Selection{Anchor: *m.mark, Head: m.cursor}
+			m.status = ""
+		}
+
+	// Indent / unindent selected lines (or current line).
+	case ">":
+		return executeIndent(m)
+
+	case "<":
+		return executeUnindent(m)
+
+	// Jump list navigation.
+	case "-":
+		return m, func() tea.Msg { return JumpBackMsg{} }
+
+	case "=", "+":
+		return m, func() tea.Msg { return JumpForwardMsg{} }
+
 	default:
 		// Check whether this key starts a prefix command sequence.
 		if len(msg.Runes) > 0 {
@@ -1328,11 +1449,28 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor.Col--
 		}
 		// Commit the undo group accumulated during this Insert session.
+		var recordCmd tea.Cmd
 		if len(m.currentGroup) > 0 {
 			m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: m.groupBefore})
+			fp := m.filePath
+			atLine := minAffectedLine(m.currentGroup)
+			lineDelta := m.buf.LineCount() - m.insertLineCount
+			startLine := m.groupBefore.cursor.Line
+			startCol := m.groupBefore.cursor.Col
+			depth := len(m.undoStack)
+			recordCmd = func() tea.Msg {
+				return EditRecordMsg{
+					FilePath:  fp,
+					Line:      startLine,
+					Col:       startCol,
+					AtLine:    atLine,
+					LineDelta: lineDelta,
+					UndoDepth: depth,
+				}
+			}
 		}
 		m.currentGroup = nil
-		return m, nil
+		return m, recordCmd
 
 	case "ctrl+c":
 		return m, m.doCloseBuffer()

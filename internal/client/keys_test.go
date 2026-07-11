@@ -274,6 +274,35 @@ func TestHandleInsertEscCommitsUndoGroup(t *testing.T) {
 	}
 }
 
+// TestJumpListRecordsInsertStart is a regression test: the EditRecordMsg emitted
+// when leaving insert mode must carry the cursor line where insert mode was
+// entered, not the line where the cursor ended up after typing.
+func TestJumpListRecordsInsertStart(t *testing.T) {
+	m := newTestModel("line0\nline1\nline2\nline3\nline4\n")
+	m.cursor = document.Pos{Line: 2, Col: 0}
+	m.mode = ModeInsert
+	m.currentGroup = []document.Op{}
+	m.groupBefore = m.cursorSnap() // start of insert session: line 2
+	m.insertLineCount = m.buf.LineCount()
+
+	// Simulate typing that advanced the cursor to line 4 (e.g. newlines inserted).
+	m.cursor = document.Pos{Line: 4, Col: 3}
+	m.currentGroup = append(m.currentGroup, document.Op{Type: document.OpInsert})
+
+	_, cmd := m.handleInsert(fakeKey("esc"))
+	if cmd == nil {
+		t.Fatal("expected recordCmd, got nil")
+	}
+	msg := cmd()
+	rec, ok := msg.(EditRecordMsg)
+	if !ok {
+		t.Fatalf("cmd() returned %T, want EditRecordMsg", msg)
+	}
+	if rec.Line != 2 {
+		t.Errorf("EditRecordMsg.Line = %d, want 2 (insert session start line)", rec.Line)
+	}
+}
+
 func TestHandleInsertMoveRight(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.mode = ModeInsert
@@ -399,5 +428,125 @@ func TestExecuteSelectInsideWordEmptyLine(t *testing.T) {
 	got := m2.(Model)
 	if got.sel != nil {
 		t.Error("miw on empty line: sel should be nil")
+	}
+}
+
+// --- z / Z mark-based selection ---
+
+func TestMarkSetZ(t *testing.T) {
+	m := newTestModel("hello world\n")
+	m.cursor = document.Pos{Line: 0, Col: 3}
+	m2, _ := m.handleNormal(fakeKey("z"))
+	got := m2.(Model)
+	if got.mark == nil {
+		t.Fatal("z: mark should be set")
+	}
+	if *got.mark != (document.Pos{Line: 0, Col: 3}) {
+		t.Errorf("z: mark = %v, want {0,3}", *got.mark)
+	}
+}
+
+func TestMarkSelectZ(t *testing.T) {
+	m := newTestModel("hello world\n")
+	mark := document.Pos{Line: 0, Col: 2}
+	m.mark = &mark
+	m.cursor = document.Pos{Line: 0, Col: 7}
+	m2, _ := m.handleNormal(fakeKey("Z"))
+	got := m2.(Model)
+	if got.sel == nil {
+		t.Fatal("Z: sel should be set after mark+jump")
+	}
+	if got.sel.Anchor != mark {
+		t.Errorf("Z: sel.Anchor = %v, want %v", got.sel.Anchor, mark)
+	}
+	if got.sel.Head != m.cursor {
+		t.Errorf("Z: sel.Head = %v, want %v", got.sel.Head, m.cursor)
+	}
+}
+
+func TestMarkSelectZNoMark(t *testing.T) {
+	m := newTestModel("hello\n")
+	m2, _ := m.handleNormal(fakeKey("Z"))
+	got := m2.(Model)
+	if got.sel != nil {
+		t.Error("Z with no mark: sel should remain nil")
+	}
+	if got.status == "" {
+		t.Error("Z with no mark: status should describe the error")
+	}
+}
+
+// --- > indent / < unindent ---
+
+func TestIndentCurrentLine(t *testing.T) {
+	m := newTestModel("hello\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m2, _ := executeIndent(m)
+	got := m2.(Model)
+	line := got.buf.Line(0)
+	if line != "\thello" {
+		t.Errorf("indent: line = %q, want %q", line, "\thello")
+	}
+}
+
+func TestIndentMultipleLines(t *testing.T) {
+	m := newTestModel("aa\nbb\ncc\n")
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: 0, Col: 0},
+		Head:   document.Pos{Line: 1, Col: 0},
+	}
+	m2, _ := executeIndent(m)
+	got := m2.(Model)
+	if got.buf.Line(0) != "\taa" {
+		t.Errorf("indent line 0: got %q, want %q", got.buf.Line(0), "\taa")
+	}
+	if got.buf.Line(1) != "\tbb" {
+		t.Errorf("indent line 1: got %q, want %q", got.buf.Line(1), "\tbb")
+	}
+	if got.buf.Line(2) != "cc" {
+		t.Errorf("indent line 2 should be unchanged, got %q", got.buf.Line(2))
+	}
+	if got.sel != nil {
+		t.Error("indent: sel should be cleared after indent")
+	}
+}
+
+func TestUnindentTab(t *testing.T) {
+	m := newTestModel("\thello\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m2, _ := executeUnindent(m)
+	got := m2.(Model)
+	if got.buf.Line(0) != "hello" {
+		t.Errorf("unindent tab: got %q, want %q", got.buf.Line(0), "hello")
+	}
+}
+
+func TestUnindentSpaces(t *testing.T) {
+	m := newTestModel("    hello\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m2, _ := executeUnindent(m)
+	got := m2.(Model)
+	if got.buf.Line(0) != "hello" {
+		t.Errorf("unindent spaces: got %q, want %q", got.buf.Line(0), "hello")
+	}
+}
+
+func TestUnindentPartialSpaces(t *testing.T) {
+	m := newTestModel("  hello\n") // only 2 spaces
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m2, _ := executeUnindent(m)
+	got := m2.(Model)
+	if got.buf.Line(0) != "hello" {
+		t.Errorf("unindent 2 spaces: got %q, want %q", got.buf.Line(0), "hello")
+	}
+}
+
+func TestUnindentNoIndent(t *testing.T) {
+	m := newTestModel("hello\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m2, _ := executeUnindent(m)
+	got := m2.(Model)
+	if got.buf.Line(0) != "hello" {
+		t.Errorf("unindent with no indent: line changed unexpectedly to %q", got.buf.Line(0))
 	}
 }

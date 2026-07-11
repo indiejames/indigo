@@ -5,14 +5,15 @@ $Go.import("github.com/indiejames/indigo/internal/proto");
 
 # EditorService is the capability exposed by the server over a Unix socket.
 interface ClientCallback {
-  showMessage   @0 (text :Text)                                -> ();
-  moveCursor    @1 (bufId :UInt32, line :UInt32, col :UInt32) -> ();
-  openFile      @2 (path :Text, line :UInt32)                  -> ();
-  keyRegistered @3 (trigger :Text)                             -> ();
-  fileChanged   @4 (bufId :UInt32, dirty :Bool)                -> ();
-  setBookmark    @5 (filePath :Text, line :UInt32, col :UInt32, note :Text, marker :Text) -> ();
-  showBookmarks  @6 () -> ();
-  promptBookmark @7 (filePath :Text, line :UInt32, col :UInt32, marker :Text) -> ();
+  showMessage     @0 (text :Text)                                -> ();
+  moveCursor      @1 (bufId :UInt32, line :UInt32, col :UInt32) -> ();
+  openFile        @2 (path :Text, line :UInt32)                  -> ();
+  keyRegistered   @3 (trigger :Text)                             -> ();
+  fileChanged     @4 (bufId :UInt32, dirty :Bool)                -> ();
+  showPluginPopup @5 (title :Text, items :List(PopupItem))       -> ();
+  hidePluginPopup @6 ()                                          -> ();
+  showInputPrompt @7 (title :Text, placeholder :Text)            -> ();
+  hideInputPrompt @8 ()                                          -> ();
 }
 
 interface EditorService {
@@ -41,6 +42,10 @@ interface EditorService {
   applyPluginFix       @21 (pluginName :Text, fixData :Text, index :UInt32)          -> ();
   getPluginActions     @22 (bufId :UInt32, line :UInt32, col :UInt32)                -> (items :List(PluginActionItem));
   applyPluginAction    @23 (pluginName :Text, bufId :UInt32, line :UInt32, col :UInt32, index :UInt32) -> ();
+  pluginPopupSelected  @25 (index :UInt32)  -> ();
+  pluginPopupCancelled @26 ()               -> ();
+  pluginInputConfirmed @27 (text :Text)     -> ();
+  pluginInputCancelled @28 ()               -> ();
 }
 
 struct PluginEdit {
@@ -52,10 +57,17 @@ struct PluginEdit {
 }
 
 enum PluginDecorationKind {
-  gutter    @0;
-  overlay   @1;
-  statusBar @2;
-  underline @3;
+  gutter     @0;
+  overlay    @1;
+  statusBar  @2;
+  underline  @3;
+  leftGutter @4;
+}
+
+struct PopupItem {
+  label    @0 :Text;
+  sublabel @1 :Text;
+  data     @2 :Text;
 }
 
 enum PluginUnderlineStyle {

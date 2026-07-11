@@ -265,6 +265,26 @@ func (m Model) gutterDecorAt(lineNum int) *ClientDecoration {
 	return nil
 }
 
+// hasLeftGutterDecorations reports whether any plugin decoration uses the leftGutter kind.
+func (m Model) hasLeftGutterDecorations() bool {
+	for _, d := range m.decorations {
+		if d.Kind == ClientDecorationLeftGutter {
+			return true
+		}
+	}
+	return false
+}
+
+// leftGutterDecorAt returns the leftGutter ClientDecoration for lineNum, or nil.
+func (m Model) leftGutterDecorAt(lineNum int) *ClientDecoration {
+	for i := range m.decorations {
+		if m.decorations[i].Kind == ClientDecorationLeftGutter && int(m.decorations[i].Line) == lineNum {
+			return &m.decorations[i]
+		}
+	}
+	return nil
+}
+
 // gutterWidth returns the number of columns reserved for line numbers and gutter markers.
 //
 // Layout (when line numbers are enabled):
@@ -279,7 +299,7 @@ func (m Model) gutterWidth() int {
 	hasRightGutter := m.reservePluginGutter || m.hasGutterDecorations()
 	if m.cfg == nil || !m.cfg.LineNumbers {
 		// No line numbers: fall back to minimal — only show gutters when needed.
-		hasLeftContent := m.mark != nil || len(m.LeftGutterMarkers) > 0
+		hasLeftContent := m.mark != nil || m.hasLeftGutterDecorations()
 		if !hasLeftContent && !hasRightGutter {
 			return 0
 		}
@@ -519,8 +539,8 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 			if m.mark != nil && lineNum == m.mark.Line {
 				markGutterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00"))
 				sb.WriteString(markGutterStyle.Render("◆ "))
-			} else if lm, ok := m.LeftGutterMarkers[lineNum]; ok {
-				color := lm.Color
+			} else if lm := m.leftGutterDecorAt(lineNum); lm != nil {
+				color := lm.TextColor
 				if color == "" {
 					color = "#5588FF"
 				}

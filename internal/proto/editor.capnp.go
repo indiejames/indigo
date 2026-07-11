@@ -116,63 +116,83 @@ func (c ClientCallback) FileChanged(ctx context.Context, params func(ClientCallb
 
 }
 
-func (c ClientCallback) SetBookmark(ctx context.Context, params func(ClientCallback_setBookmark_Params) error) (ClientCallback_setBookmark_Results_Future, capnp.ReleaseFunc) {
+func (c ClientCallback) ShowPluginPopup(ctx context.Context, params func(ClientCallback_showPluginPopup_Params) error) (ClientCallback_showPluginPopup_Results_Future, capnp.ReleaseFunc) {
 
 	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      5,
 			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
-			MethodName:    "setBookmark",
+			MethodName:    "showPluginPopup",
 		},
 	}
 	if params != nil {
-		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 3}
-		s.PlaceArgs = func(s capnp.Struct) error { return params(ClientCallback_setBookmark_Params(s)) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 2}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(ClientCallback_showPluginPopup_Params(s)) }
 	}
 
 	ans, release := capnp.Client(c).SendCall(ctx, s)
-	return ClientCallback_setBookmark_Results_Future{Future: ans.Future()}, release
+	return ClientCallback_showPluginPopup_Results_Future{Future: ans.Future()}, release
 
 }
 
-func (c ClientCallback) ShowBookmarks(ctx context.Context, params func(ClientCallback_showBookmarks_Params) error) (ClientCallback_showBookmarks_Results_Future, capnp.ReleaseFunc) {
+func (c ClientCallback) HidePluginPopup(ctx context.Context, params func(ClientCallback_hidePluginPopup_Params) error) (ClientCallback_hidePluginPopup_Results_Future, capnp.ReleaseFunc) {
 
 	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      6,
 			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
-			MethodName:    "showBookmarks",
+			MethodName:    "hidePluginPopup",
 		},
 	}
 	if params != nil {
 		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 0}
-		s.PlaceArgs = func(s capnp.Struct) error { return params(ClientCallback_showBookmarks_Params(s)) }
+		s.PlaceArgs = func(s capnp.Struct) error { return params(ClientCallback_hidePluginPopup_Params(s)) }
 	}
 
 	ans, release := capnp.Client(c).SendCall(ctx, s)
-	return ClientCallback_showBookmarks_Results_Future{Future: ans.Future()}, release
+	return ClientCallback_hidePluginPopup_Results_Future{Future: ans.Future()}, release
 
 }
 
-func (c ClientCallback) PromptBookmark(ctx context.Context, params func(ClientCallback_promptBookmark_Params) error) (ClientCallback_promptBookmark_Results_Future, capnp.ReleaseFunc) {
+func (c ClientCallback) ShowInputPrompt(ctx context.Context, params func(ClientCallback_showInputPrompt_Params) error) (ClientCallback_showInputPrompt_Results_Future, capnp.ReleaseFunc) {
 
 	s := capnp.Send{
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      7,
 			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
-			MethodName:    "promptBookmark",
+			MethodName:    "showInputPrompt",
 		},
 	}
 	if params != nil {
-		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 2}
-		s.PlaceArgs = func(s capnp.Struct) error { return params(ClientCallback_promptBookmark_Params(s)) }
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 2}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(ClientCallback_showInputPrompt_Params(s)) }
 	}
 
 	ans, release := capnp.Client(c).SendCall(ctx, s)
-	return ClientCallback_promptBookmark_Results_Future{Future: ans.Future()}, release
+	return ClientCallback_showInputPrompt_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c ClientCallback) HideInputPrompt(ctx context.Context, params func(ClientCallback_hideInputPrompt_Params) error) (ClientCallback_hideInputPrompt_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xa16aa1ea8b7d14ed,
+			MethodID:      8,
+			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			MethodName:    "hideInputPrompt",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(ClientCallback_hideInputPrompt_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return ClientCallback_hideInputPrompt_Results_Future{Future: ans.Future()}, release
 
 }
 
@@ -259,11 +279,13 @@ type ClientCallback_Server interface {
 
 	FileChanged(context.Context, ClientCallback_fileChanged) error
 
-	SetBookmark(context.Context, ClientCallback_setBookmark) error
+	ShowPluginPopup(context.Context, ClientCallback_showPluginPopup) error
 
-	ShowBookmarks(context.Context, ClientCallback_showBookmarks) error
+	HidePluginPopup(context.Context, ClientCallback_hidePluginPopup) error
 
-	PromptBookmark(context.Context, ClientCallback_promptBookmark) error
+	ShowInputPrompt(context.Context, ClientCallback_showInputPrompt) error
+
+	HideInputPrompt(context.Context, ClientCallback_hideInputPrompt) error
 }
 
 // ClientCallback_NewServer creates a new Server from an implementation of ClientCallback_Server.
@@ -282,7 +304,7 @@ func ClientCallback_ServerToClient(s ClientCallback_Server) ClientCallback {
 // This can be used to create a more complicated Server.
 func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []server.Method {
 	if cap(methods) == 0 {
-		methods = make([]server.Method, 0, 8)
+		methods = make([]server.Method, 0, 9)
 	}
 
 	methods = append(methods, server.Method{
@@ -350,10 +372,10 @@ func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      5,
 			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
-			MethodName:    "setBookmark",
+			MethodName:    "showPluginPopup",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
-			return s.SetBookmark(ctx, ClientCallback_setBookmark{call})
+			return s.ShowPluginPopup(ctx, ClientCallback_showPluginPopup{call})
 		},
 	})
 
@@ -362,10 +384,10 @@ func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      6,
 			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
-			MethodName:    "showBookmarks",
+			MethodName:    "hidePluginPopup",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
-			return s.ShowBookmarks(ctx, ClientCallback_showBookmarks{call})
+			return s.HidePluginPopup(ctx, ClientCallback_hidePluginPopup{call})
 		},
 	})
 
@@ -374,10 +396,22 @@ func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      7,
 			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
-			MethodName:    "promptBookmark",
+			MethodName:    "showInputPrompt",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
-			return s.PromptBookmark(ctx, ClientCallback_promptBookmark{call})
+			return s.ShowInputPrompt(ctx, ClientCallback_showInputPrompt{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xa16aa1ea8b7d14ed,
+			MethodID:      8,
+			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			MethodName:    "hideInputPrompt",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.HideInputPrompt(ctx, ClientCallback_hideInputPrompt{call})
 		},
 	})
 
@@ -469,55 +503,72 @@ func (c ClientCallback_fileChanged) AllocResults() (ClientCallback_fileChanged_R
 	return ClientCallback_fileChanged_Results(r), err
 }
 
-// ClientCallback_setBookmark holds the state for a server call to ClientCallback.setBookmark.
+// ClientCallback_showPluginPopup holds the state for a server call to ClientCallback.showPluginPopup.
 // See server.Call for documentation.
-type ClientCallback_setBookmark struct {
+type ClientCallback_showPluginPopup struct {
 	*server.Call
 }
 
 // Args returns the call's arguments.
-func (c ClientCallback_setBookmark) Args() ClientCallback_setBookmark_Params {
-	return ClientCallback_setBookmark_Params(c.Call.Args())
+func (c ClientCallback_showPluginPopup) Args() ClientCallback_showPluginPopup_Params {
+	return ClientCallback_showPluginPopup_Params(c.Call.Args())
 }
 
 // AllocResults allocates the results struct.
-func (c ClientCallback_setBookmark) AllocResults() (ClientCallback_setBookmark_Results, error) {
+func (c ClientCallback_showPluginPopup) AllocResults() (ClientCallback_showPluginPopup_Results, error) {
 	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
-	return ClientCallback_setBookmark_Results(r), err
+	return ClientCallback_showPluginPopup_Results(r), err
 }
 
-// ClientCallback_showBookmarks holds the state for a server call to ClientCallback.showBookmarks.
+// ClientCallback_hidePluginPopup holds the state for a server call to ClientCallback.hidePluginPopup.
 // See server.Call for documentation.
-type ClientCallback_showBookmarks struct {
+type ClientCallback_hidePluginPopup struct {
 	*server.Call
 }
 
 // Args returns the call's arguments.
-func (c ClientCallback_showBookmarks) Args() ClientCallback_showBookmarks_Params {
-	return ClientCallback_showBookmarks_Params(c.Call.Args())
+func (c ClientCallback_hidePluginPopup) Args() ClientCallback_hidePluginPopup_Params {
+	return ClientCallback_hidePluginPopup_Params(c.Call.Args())
 }
 
 // AllocResults allocates the results struct.
-func (c ClientCallback_showBookmarks) AllocResults() (ClientCallback_showBookmarks_Results, error) {
+func (c ClientCallback_hidePluginPopup) AllocResults() (ClientCallback_hidePluginPopup_Results, error) {
 	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
-	return ClientCallback_showBookmarks_Results(r), err
+	return ClientCallback_hidePluginPopup_Results(r), err
 }
 
-// ClientCallback_promptBookmark holds the state for a server call to ClientCallback.promptBookmark.
+// ClientCallback_showInputPrompt holds the state for a server call to ClientCallback.showInputPrompt.
 // See server.Call for documentation.
-type ClientCallback_promptBookmark struct {
+type ClientCallback_showInputPrompt struct {
 	*server.Call
 }
 
 // Args returns the call's arguments.
-func (c ClientCallback_promptBookmark) Args() ClientCallback_promptBookmark_Params {
-	return ClientCallback_promptBookmark_Params(c.Call.Args())
+func (c ClientCallback_showInputPrompt) Args() ClientCallback_showInputPrompt_Params {
+	return ClientCallback_showInputPrompt_Params(c.Call.Args())
 }
 
 // AllocResults allocates the results struct.
-func (c ClientCallback_promptBookmark) AllocResults() (ClientCallback_promptBookmark_Results, error) {
+func (c ClientCallback_showInputPrompt) AllocResults() (ClientCallback_showInputPrompt_Results, error) {
 	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
-	return ClientCallback_promptBookmark_Results(r), err
+	return ClientCallback_showInputPrompt_Results(r), err
+}
+
+// ClientCallback_hideInputPrompt holds the state for a server call to ClientCallback.hideInputPrompt.
+// See server.Call for documentation.
+type ClientCallback_hideInputPrompt struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c ClientCallback_hideInputPrompt) Args() ClientCallback_hideInputPrompt_Params {
+	return ClientCallback_hideInputPrompt_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c ClientCallback_hideInputPrompt) AllocResults() (ClientCallback_hideInputPrompt_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_hideInputPrompt_Results(r), err
 }
 
 // ClientCallback_List is a list of ClientCallback.
@@ -1276,514 +1327,600 @@ func (f ClientCallback_fileChanged_Results_Future) Struct() (ClientCallback_file
 	return ClientCallback_fileChanged_Results(p.Struct()), err
 }
 
-type ClientCallback_setBookmark_Params capnp.Struct
+type ClientCallback_showPluginPopup_Params capnp.Struct
 
-// ClientCallback_setBookmark_Params_TypeID is the unique identifier for the type ClientCallback_setBookmark_Params.
-const ClientCallback_setBookmark_Params_TypeID = 0xf651bb9766280006
+// ClientCallback_showPluginPopup_Params_TypeID is the unique identifier for the type ClientCallback_showPluginPopup_Params.
+const ClientCallback_showPluginPopup_Params_TypeID = 0xf651bb9766280006
 
-func NewClientCallback_setBookmark_Params(s *capnp.Segment) (ClientCallback_setBookmark_Params, error) {
-	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3})
-	return ClientCallback_setBookmark_Params(st), err
+func NewClientCallback_showPluginPopup_Params(s *capnp.Segment) (ClientCallback_showPluginPopup_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return ClientCallback_showPluginPopup_Params(st), err
 }
 
-func NewRootClientCallback_setBookmark_Params(s *capnp.Segment) (ClientCallback_setBookmark_Params, error) {
-	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3})
-	return ClientCallback_setBookmark_Params(st), err
+func NewRootClientCallback_showPluginPopup_Params(s *capnp.Segment) (ClientCallback_showPluginPopup_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return ClientCallback_showPluginPopup_Params(st), err
 }
 
-func ReadRootClientCallback_setBookmark_Params(msg *capnp.Message) (ClientCallback_setBookmark_Params, error) {
+func ReadRootClientCallback_showPluginPopup_Params(msg *capnp.Message) (ClientCallback_showPluginPopup_Params, error) {
 	root, err := msg.Root()
-	return ClientCallback_setBookmark_Params(root.Struct()), err
+	return ClientCallback_showPluginPopup_Params(root.Struct()), err
 }
 
-func (s ClientCallback_setBookmark_Params) String() string {
+func (s ClientCallback_showPluginPopup_Params) String() string {
 	str, _ := text.Marshal(0xf651bb9766280006, capnp.Struct(s))
 	return str
 }
 
-func (s ClientCallback_setBookmark_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+func (s ClientCallback_showPluginPopup_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
 	return capnp.Struct(s).EncodeAsPtr(seg)
 }
 
-func (ClientCallback_setBookmark_Params) DecodeFromPtr(p capnp.Ptr) ClientCallback_setBookmark_Params {
-	return ClientCallback_setBookmark_Params(capnp.Struct{}.DecodeFromPtr(p))
+func (ClientCallback_showPluginPopup_Params) DecodeFromPtr(p capnp.Ptr) ClientCallback_showPluginPopup_Params {
+	return ClientCallback_showPluginPopup_Params(capnp.Struct{}.DecodeFromPtr(p))
 }
 
-func (s ClientCallback_setBookmark_Params) ToPtr() capnp.Ptr {
+func (s ClientCallback_showPluginPopup_Params) ToPtr() capnp.Ptr {
 	return capnp.Struct(s).ToPtr()
 }
-func (s ClientCallback_setBookmark_Params) IsValid() bool {
+func (s ClientCallback_showPluginPopup_Params) IsValid() bool {
 	return capnp.Struct(s).IsValid()
 }
 
-func (s ClientCallback_setBookmark_Params) Message() *capnp.Message {
+func (s ClientCallback_showPluginPopup_Params) Message() *capnp.Message {
 	return capnp.Struct(s).Message()
 }
 
-func (s ClientCallback_setBookmark_Params) Segment() *capnp.Segment {
+func (s ClientCallback_showPluginPopup_Params) Segment() *capnp.Segment {
 	return capnp.Struct(s).Segment()
 }
-func (s ClientCallback_setBookmark_Params) FilePath() (string, error) {
+func (s ClientCallback_showPluginPopup_Params) Title() (string, error) {
 	p, err := capnp.Struct(s).Ptr(0)
 	return p.Text(), err
 }
 
-func (s ClientCallback_setBookmark_Params) HasFilePath() bool {
+func (s ClientCallback_showPluginPopup_Params) HasTitle() bool {
 	return capnp.Struct(s).HasPtr(0)
 }
 
-func (s ClientCallback_setBookmark_Params) FilePathBytes() ([]byte, error) {
+func (s ClientCallback_showPluginPopup_Params) TitleBytes() ([]byte, error) {
 	p, err := capnp.Struct(s).Ptr(0)
 	return p.TextBytes(), err
 }
 
-func (s ClientCallback_setBookmark_Params) SetFilePath(v string) error {
+func (s ClientCallback_showPluginPopup_Params) SetTitle(v string) error {
 	return capnp.Struct(s).SetText(0, v)
 }
 
-func (s ClientCallback_setBookmark_Params) Line() uint32 {
-	return capnp.Struct(s).Uint32(0)
-}
-
-func (s ClientCallback_setBookmark_Params) SetLine(v uint32) {
-	capnp.Struct(s).SetUint32(0, v)
-}
-
-func (s ClientCallback_setBookmark_Params) Col() uint32 {
-	return capnp.Struct(s).Uint32(4)
-}
-
-func (s ClientCallback_setBookmark_Params) SetCol(v uint32) {
-	capnp.Struct(s).SetUint32(4, v)
-}
-
-func (s ClientCallback_setBookmark_Params) Note() (string, error) {
+func (s ClientCallback_showPluginPopup_Params) Items() (PopupItem_List, error) {
 	p, err := capnp.Struct(s).Ptr(1)
-	return p.Text(), err
+	return PopupItem_List(p.List()), err
 }
 
-func (s ClientCallback_setBookmark_Params) HasNote() bool {
+func (s ClientCallback_showPluginPopup_Params) HasItems() bool {
 	return capnp.Struct(s).HasPtr(1)
 }
 
-func (s ClientCallback_setBookmark_Params) NoteBytes() ([]byte, error) {
-	p, err := capnp.Struct(s).Ptr(1)
-	return p.TextBytes(), err
+func (s ClientCallback_showPluginPopup_Params) SetItems(v PopupItem_List) error {
+	return capnp.Struct(s).SetPtr(1, v.ToPtr())
 }
 
-func (s ClientCallback_setBookmark_Params) SetNote(v string) error {
-	return capnp.Struct(s).SetText(1, v)
+// NewItems sets the items field to a newly
+// allocated PopupItem_List, preferring placement in s's segment.
+func (s ClientCallback_showPluginPopup_Params) NewItems(n int32) (PopupItem_List, error) {
+	l, err := NewPopupItem_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return PopupItem_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(1, l.ToPtr())
+	return l, err
 }
 
-func (s ClientCallback_setBookmark_Params) Marker() (string, error) {
-	p, err := capnp.Struct(s).Ptr(2)
-	return p.Text(), err
+// ClientCallback_showPluginPopup_Params_List is a list of ClientCallback_showPluginPopup_Params.
+type ClientCallback_showPluginPopup_Params_List = capnp.StructList[ClientCallback_showPluginPopup_Params]
+
+// NewClientCallback_showPluginPopup_Params creates a new list of ClientCallback_showPluginPopup_Params.
+func NewClientCallback_showPluginPopup_Params_List(s *capnp.Segment, sz int32) (ClientCallback_showPluginPopup_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return capnp.StructList[ClientCallback_showPluginPopup_Params](l), err
 }
 
-func (s ClientCallback_setBookmark_Params) HasMarker() bool {
-	return capnp.Struct(s).HasPtr(2)
-}
+// ClientCallback_showPluginPopup_Params_Future is a wrapper for a ClientCallback_showPluginPopup_Params promised by a client call.
+type ClientCallback_showPluginPopup_Params_Future struct{ *capnp.Future }
 
-func (s ClientCallback_setBookmark_Params) MarkerBytes() ([]byte, error) {
-	p, err := capnp.Struct(s).Ptr(2)
-	return p.TextBytes(), err
-}
-
-func (s ClientCallback_setBookmark_Params) SetMarker(v string) error {
-	return capnp.Struct(s).SetText(2, v)
-}
-
-// ClientCallback_setBookmark_Params_List is a list of ClientCallback_setBookmark_Params.
-type ClientCallback_setBookmark_Params_List = capnp.StructList[ClientCallback_setBookmark_Params]
-
-// NewClientCallback_setBookmark_Params creates a new list of ClientCallback_setBookmark_Params.
-func NewClientCallback_setBookmark_Params_List(s *capnp.Segment, sz int32) (ClientCallback_setBookmark_Params_List, error) {
-	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3}, sz)
-	return capnp.StructList[ClientCallback_setBookmark_Params](l), err
-}
-
-// ClientCallback_setBookmark_Params_Future is a wrapper for a ClientCallback_setBookmark_Params promised by a client call.
-type ClientCallback_setBookmark_Params_Future struct{ *capnp.Future }
-
-func (f ClientCallback_setBookmark_Params_Future) Struct() (ClientCallback_setBookmark_Params, error) {
+func (f ClientCallback_showPluginPopup_Params_Future) Struct() (ClientCallback_showPluginPopup_Params, error) {
 	p, err := f.Future.Ptr()
-	return ClientCallback_setBookmark_Params(p.Struct()), err
+	return ClientCallback_showPluginPopup_Params(p.Struct()), err
 }
 
-type ClientCallback_setBookmark_Results capnp.Struct
+type ClientCallback_showPluginPopup_Results capnp.Struct
 
-// ClientCallback_setBookmark_Results_TypeID is the unique identifier for the type ClientCallback_setBookmark_Results.
-const ClientCallback_setBookmark_Results_TypeID = 0xde8bf7328ffc37c3
+// ClientCallback_showPluginPopup_Results_TypeID is the unique identifier for the type ClientCallback_showPluginPopup_Results.
+const ClientCallback_showPluginPopup_Results_TypeID = 0xde8bf7328ffc37c3
 
-func NewClientCallback_setBookmark_Results(s *capnp.Segment) (ClientCallback_setBookmark_Results, error) {
+func NewClientCallback_showPluginPopup_Results(s *capnp.Segment) (ClientCallback_showPluginPopup_Results, error) {
 	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
-	return ClientCallback_setBookmark_Results(st), err
+	return ClientCallback_showPluginPopup_Results(st), err
 }
 
-func NewRootClientCallback_setBookmark_Results(s *capnp.Segment) (ClientCallback_setBookmark_Results, error) {
+func NewRootClientCallback_showPluginPopup_Results(s *capnp.Segment) (ClientCallback_showPluginPopup_Results, error) {
 	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
-	return ClientCallback_setBookmark_Results(st), err
+	return ClientCallback_showPluginPopup_Results(st), err
 }
 
-func ReadRootClientCallback_setBookmark_Results(msg *capnp.Message) (ClientCallback_setBookmark_Results, error) {
+func ReadRootClientCallback_showPluginPopup_Results(msg *capnp.Message) (ClientCallback_showPluginPopup_Results, error) {
 	root, err := msg.Root()
-	return ClientCallback_setBookmark_Results(root.Struct()), err
+	return ClientCallback_showPluginPopup_Results(root.Struct()), err
 }
 
-func (s ClientCallback_setBookmark_Results) String() string {
+func (s ClientCallback_showPluginPopup_Results) String() string {
 	str, _ := text.Marshal(0xde8bf7328ffc37c3, capnp.Struct(s))
 	return str
 }
 
-func (s ClientCallback_setBookmark_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+func (s ClientCallback_showPluginPopup_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
 	return capnp.Struct(s).EncodeAsPtr(seg)
 }
 
-func (ClientCallback_setBookmark_Results) DecodeFromPtr(p capnp.Ptr) ClientCallback_setBookmark_Results {
-	return ClientCallback_setBookmark_Results(capnp.Struct{}.DecodeFromPtr(p))
+func (ClientCallback_showPluginPopup_Results) DecodeFromPtr(p capnp.Ptr) ClientCallback_showPluginPopup_Results {
+	return ClientCallback_showPluginPopup_Results(capnp.Struct{}.DecodeFromPtr(p))
 }
 
-func (s ClientCallback_setBookmark_Results) ToPtr() capnp.Ptr {
+func (s ClientCallback_showPluginPopup_Results) ToPtr() capnp.Ptr {
 	return capnp.Struct(s).ToPtr()
 }
-func (s ClientCallback_setBookmark_Results) IsValid() bool {
+func (s ClientCallback_showPluginPopup_Results) IsValid() bool {
 	return capnp.Struct(s).IsValid()
 }
 
-func (s ClientCallback_setBookmark_Results) Message() *capnp.Message {
+func (s ClientCallback_showPluginPopup_Results) Message() *capnp.Message {
 	return capnp.Struct(s).Message()
 }
 
-func (s ClientCallback_setBookmark_Results) Segment() *capnp.Segment {
+func (s ClientCallback_showPluginPopup_Results) Segment() *capnp.Segment {
 	return capnp.Struct(s).Segment()
 }
 
-// ClientCallback_setBookmark_Results_List is a list of ClientCallback_setBookmark_Results.
-type ClientCallback_setBookmark_Results_List = capnp.StructList[ClientCallback_setBookmark_Results]
+// ClientCallback_showPluginPopup_Results_List is a list of ClientCallback_showPluginPopup_Results.
+type ClientCallback_showPluginPopup_Results_List = capnp.StructList[ClientCallback_showPluginPopup_Results]
 
-// NewClientCallback_setBookmark_Results creates a new list of ClientCallback_setBookmark_Results.
-func NewClientCallback_setBookmark_Results_List(s *capnp.Segment, sz int32) (ClientCallback_setBookmark_Results_List, error) {
+// NewClientCallback_showPluginPopup_Results creates a new list of ClientCallback_showPluginPopup_Results.
+func NewClientCallback_showPluginPopup_Results_List(s *capnp.Segment, sz int32) (ClientCallback_showPluginPopup_Results_List, error) {
 	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
-	return capnp.StructList[ClientCallback_setBookmark_Results](l), err
+	return capnp.StructList[ClientCallback_showPluginPopup_Results](l), err
 }
 
-// ClientCallback_setBookmark_Results_Future is a wrapper for a ClientCallback_setBookmark_Results promised by a client call.
-type ClientCallback_setBookmark_Results_Future struct{ *capnp.Future }
+// ClientCallback_showPluginPopup_Results_Future is a wrapper for a ClientCallback_showPluginPopup_Results promised by a client call.
+type ClientCallback_showPluginPopup_Results_Future struct{ *capnp.Future }
 
-func (f ClientCallback_setBookmark_Results_Future) Struct() (ClientCallback_setBookmark_Results, error) {
+func (f ClientCallback_showPluginPopup_Results_Future) Struct() (ClientCallback_showPluginPopup_Results, error) {
 	p, err := f.Future.Ptr()
-	return ClientCallback_setBookmark_Results(p.Struct()), err
+	return ClientCallback_showPluginPopup_Results(p.Struct()), err
 }
 
-type ClientCallback_showBookmarks_Params capnp.Struct
+type ClientCallback_hidePluginPopup_Params capnp.Struct
 
-// ClientCallback_showBookmarks_Params_TypeID is the unique identifier for the type ClientCallback_showBookmarks_Params.
-const ClientCallback_showBookmarks_Params_TypeID = 0xde81f4aed37797df
+// ClientCallback_hidePluginPopup_Params_TypeID is the unique identifier for the type ClientCallback_hidePluginPopup_Params.
+const ClientCallback_hidePluginPopup_Params_TypeID = 0xde81f4aed37797df
 
-func NewClientCallback_showBookmarks_Params(s *capnp.Segment) (ClientCallback_showBookmarks_Params, error) {
+func NewClientCallback_hidePluginPopup_Params(s *capnp.Segment) (ClientCallback_hidePluginPopup_Params, error) {
 	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
-	return ClientCallback_showBookmarks_Params(st), err
+	return ClientCallback_hidePluginPopup_Params(st), err
 }
 
-func NewRootClientCallback_showBookmarks_Params(s *capnp.Segment) (ClientCallback_showBookmarks_Params, error) {
+func NewRootClientCallback_hidePluginPopup_Params(s *capnp.Segment) (ClientCallback_hidePluginPopup_Params, error) {
 	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
-	return ClientCallback_showBookmarks_Params(st), err
+	return ClientCallback_hidePluginPopup_Params(st), err
 }
 
-func ReadRootClientCallback_showBookmarks_Params(msg *capnp.Message) (ClientCallback_showBookmarks_Params, error) {
+func ReadRootClientCallback_hidePluginPopup_Params(msg *capnp.Message) (ClientCallback_hidePluginPopup_Params, error) {
 	root, err := msg.Root()
-	return ClientCallback_showBookmarks_Params(root.Struct()), err
+	return ClientCallback_hidePluginPopup_Params(root.Struct()), err
 }
 
-func (s ClientCallback_showBookmarks_Params) String() string {
+func (s ClientCallback_hidePluginPopup_Params) String() string {
 	str, _ := text.Marshal(0xde81f4aed37797df, capnp.Struct(s))
 	return str
 }
 
-func (s ClientCallback_showBookmarks_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+func (s ClientCallback_hidePluginPopup_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
 	return capnp.Struct(s).EncodeAsPtr(seg)
 }
 
-func (ClientCallback_showBookmarks_Params) DecodeFromPtr(p capnp.Ptr) ClientCallback_showBookmarks_Params {
-	return ClientCallback_showBookmarks_Params(capnp.Struct{}.DecodeFromPtr(p))
+func (ClientCallback_hidePluginPopup_Params) DecodeFromPtr(p capnp.Ptr) ClientCallback_hidePluginPopup_Params {
+	return ClientCallback_hidePluginPopup_Params(capnp.Struct{}.DecodeFromPtr(p))
 }
 
-func (s ClientCallback_showBookmarks_Params) ToPtr() capnp.Ptr {
+func (s ClientCallback_hidePluginPopup_Params) ToPtr() capnp.Ptr {
 	return capnp.Struct(s).ToPtr()
 }
-func (s ClientCallback_showBookmarks_Params) IsValid() bool {
+func (s ClientCallback_hidePluginPopup_Params) IsValid() bool {
 	return capnp.Struct(s).IsValid()
 }
 
-func (s ClientCallback_showBookmarks_Params) Message() *capnp.Message {
+func (s ClientCallback_hidePluginPopup_Params) Message() *capnp.Message {
 	return capnp.Struct(s).Message()
 }
 
-func (s ClientCallback_showBookmarks_Params) Segment() *capnp.Segment {
+func (s ClientCallback_hidePluginPopup_Params) Segment() *capnp.Segment {
 	return capnp.Struct(s).Segment()
 }
 
-// ClientCallback_showBookmarks_Params_List is a list of ClientCallback_showBookmarks_Params.
-type ClientCallback_showBookmarks_Params_List = capnp.StructList[ClientCallback_showBookmarks_Params]
+// ClientCallback_hidePluginPopup_Params_List is a list of ClientCallback_hidePluginPopup_Params.
+type ClientCallback_hidePluginPopup_Params_List = capnp.StructList[ClientCallback_hidePluginPopup_Params]
 
-// NewClientCallback_showBookmarks_Params creates a new list of ClientCallback_showBookmarks_Params.
-func NewClientCallback_showBookmarks_Params_List(s *capnp.Segment, sz int32) (ClientCallback_showBookmarks_Params_List, error) {
+// NewClientCallback_hidePluginPopup_Params creates a new list of ClientCallback_hidePluginPopup_Params.
+func NewClientCallback_hidePluginPopup_Params_List(s *capnp.Segment, sz int32) (ClientCallback_hidePluginPopup_Params_List, error) {
 	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
-	return capnp.StructList[ClientCallback_showBookmarks_Params](l), err
+	return capnp.StructList[ClientCallback_hidePluginPopup_Params](l), err
 }
 
-// ClientCallback_showBookmarks_Params_Future is a wrapper for a ClientCallback_showBookmarks_Params promised by a client call.
-type ClientCallback_showBookmarks_Params_Future struct{ *capnp.Future }
+// ClientCallback_hidePluginPopup_Params_Future is a wrapper for a ClientCallback_hidePluginPopup_Params promised by a client call.
+type ClientCallback_hidePluginPopup_Params_Future struct{ *capnp.Future }
 
-func (f ClientCallback_showBookmarks_Params_Future) Struct() (ClientCallback_showBookmarks_Params, error) {
+func (f ClientCallback_hidePluginPopup_Params_Future) Struct() (ClientCallback_hidePluginPopup_Params, error) {
 	p, err := f.Future.Ptr()
-	return ClientCallback_showBookmarks_Params(p.Struct()), err
+	return ClientCallback_hidePluginPopup_Params(p.Struct()), err
 }
 
-type ClientCallback_showBookmarks_Results capnp.Struct
+type ClientCallback_hidePluginPopup_Results capnp.Struct
 
-// ClientCallback_showBookmarks_Results_TypeID is the unique identifier for the type ClientCallback_showBookmarks_Results.
-const ClientCallback_showBookmarks_Results_TypeID = 0xf356196210b50910
+// ClientCallback_hidePluginPopup_Results_TypeID is the unique identifier for the type ClientCallback_hidePluginPopup_Results.
+const ClientCallback_hidePluginPopup_Results_TypeID = 0xf356196210b50910
 
-func NewClientCallback_showBookmarks_Results(s *capnp.Segment) (ClientCallback_showBookmarks_Results, error) {
+func NewClientCallback_hidePluginPopup_Results(s *capnp.Segment) (ClientCallback_hidePluginPopup_Results, error) {
 	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
-	return ClientCallback_showBookmarks_Results(st), err
+	return ClientCallback_hidePluginPopup_Results(st), err
 }
 
-func NewRootClientCallback_showBookmarks_Results(s *capnp.Segment) (ClientCallback_showBookmarks_Results, error) {
+func NewRootClientCallback_hidePluginPopup_Results(s *capnp.Segment) (ClientCallback_hidePluginPopup_Results, error) {
 	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
-	return ClientCallback_showBookmarks_Results(st), err
+	return ClientCallback_hidePluginPopup_Results(st), err
 }
 
-func ReadRootClientCallback_showBookmarks_Results(msg *capnp.Message) (ClientCallback_showBookmarks_Results, error) {
+func ReadRootClientCallback_hidePluginPopup_Results(msg *capnp.Message) (ClientCallback_hidePluginPopup_Results, error) {
 	root, err := msg.Root()
-	return ClientCallback_showBookmarks_Results(root.Struct()), err
+	return ClientCallback_hidePluginPopup_Results(root.Struct()), err
 }
 
-func (s ClientCallback_showBookmarks_Results) String() string {
+func (s ClientCallback_hidePluginPopup_Results) String() string {
 	str, _ := text.Marshal(0xf356196210b50910, capnp.Struct(s))
 	return str
 }
 
-func (s ClientCallback_showBookmarks_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+func (s ClientCallback_hidePluginPopup_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
 	return capnp.Struct(s).EncodeAsPtr(seg)
 }
 
-func (ClientCallback_showBookmarks_Results) DecodeFromPtr(p capnp.Ptr) ClientCallback_showBookmarks_Results {
-	return ClientCallback_showBookmarks_Results(capnp.Struct{}.DecodeFromPtr(p))
+func (ClientCallback_hidePluginPopup_Results) DecodeFromPtr(p capnp.Ptr) ClientCallback_hidePluginPopup_Results {
+	return ClientCallback_hidePluginPopup_Results(capnp.Struct{}.DecodeFromPtr(p))
 }
 
-func (s ClientCallback_showBookmarks_Results) ToPtr() capnp.Ptr {
+func (s ClientCallback_hidePluginPopup_Results) ToPtr() capnp.Ptr {
 	return capnp.Struct(s).ToPtr()
 }
-func (s ClientCallback_showBookmarks_Results) IsValid() bool {
+func (s ClientCallback_hidePluginPopup_Results) IsValid() bool {
 	return capnp.Struct(s).IsValid()
 }
 
-func (s ClientCallback_showBookmarks_Results) Message() *capnp.Message {
+func (s ClientCallback_hidePluginPopup_Results) Message() *capnp.Message {
 	return capnp.Struct(s).Message()
 }
 
-func (s ClientCallback_showBookmarks_Results) Segment() *capnp.Segment {
+func (s ClientCallback_hidePluginPopup_Results) Segment() *capnp.Segment {
 	return capnp.Struct(s).Segment()
 }
 
-// ClientCallback_showBookmarks_Results_List is a list of ClientCallback_showBookmarks_Results.
-type ClientCallback_showBookmarks_Results_List = capnp.StructList[ClientCallback_showBookmarks_Results]
+// ClientCallback_hidePluginPopup_Results_List is a list of ClientCallback_hidePluginPopup_Results.
+type ClientCallback_hidePluginPopup_Results_List = capnp.StructList[ClientCallback_hidePluginPopup_Results]
 
-// NewClientCallback_showBookmarks_Results creates a new list of ClientCallback_showBookmarks_Results.
-func NewClientCallback_showBookmarks_Results_List(s *capnp.Segment, sz int32) (ClientCallback_showBookmarks_Results_List, error) {
+// NewClientCallback_hidePluginPopup_Results creates a new list of ClientCallback_hidePluginPopup_Results.
+func NewClientCallback_hidePluginPopup_Results_List(s *capnp.Segment, sz int32) (ClientCallback_hidePluginPopup_Results_List, error) {
 	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
-	return capnp.StructList[ClientCallback_showBookmarks_Results](l), err
+	return capnp.StructList[ClientCallback_hidePluginPopup_Results](l), err
 }
 
-// ClientCallback_showBookmarks_Results_Future is a wrapper for a ClientCallback_showBookmarks_Results promised by a client call.
-type ClientCallback_showBookmarks_Results_Future struct{ *capnp.Future }
+// ClientCallback_hidePluginPopup_Results_Future is a wrapper for a ClientCallback_hidePluginPopup_Results promised by a client call.
+type ClientCallback_hidePluginPopup_Results_Future struct{ *capnp.Future }
 
-func (f ClientCallback_showBookmarks_Results_Future) Struct() (ClientCallback_showBookmarks_Results, error) {
+func (f ClientCallback_hidePluginPopup_Results_Future) Struct() (ClientCallback_hidePluginPopup_Results, error) {
 	p, err := f.Future.Ptr()
-	return ClientCallback_showBookmarks_Results(p.Struct()), err
+	return ClientCallback_hidePluginPopup_Results(p.Struct()), err
 }
 
-type ClientCallback_promptBookmark_Params capnp.Struct
+type ClientCallback_showInputPrompt_Params capnp.Struct
 
-// ClientCallback_promptBookmark_Params_TypeID is the unique identifier for the type ClientCallback_promptBookmark_Params.
-const ClientCallback_promptBookmark_Params_TypeID = 0xd237a3498f2c196b
+// ClientCallback_showInputPrompt_Params_TypeID is the unique identifier for the type ClientCallback_showInputPrompt_Params.
+const ClientCallback_showInputPrompt_Params_TypeID = 0xd237a3498f2c196b
 
-func NewClientCallback_promptBookmark_Params(s *capnp.Segment) (ClientCallback_promptBookmark_Params, error) {
-	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2})
-	return ClientCallback_promptBookmark_Params(st), err
+func NewClientCallback_showInputPrompt_Params(s *capnp.Segment) (ClientCallback_showInputPrompt_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return ClientCallback_showInputPrompt_Params(st), err
 }
 
-func NewRootClientCallback_promptBookmark_Params(s *capnp.Segment) (ClientCallback_promptBookmark_Params, error) {
-	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2})
-	return ClientCallback_promptBookmark_Params(st), err
+func NewRootClientCallback_showInputPrompt_Params(s *capnp.Segment) (ClientCallback_showInputPrompt_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return ClientCallback_showInputPrompt_Params(st), err
 }
 
-func ReadRootClientCallback_promptBookmark_Params(msg *capnp.Message) (ClientCallback_promptBookmark_Params, error) {
+func ReadRootClientCallback_showInputPrompt_Params(msg *capnp.Message) (ClientCallback_showInputPrompt_Params, error) {
 	root, err := msg.Root()
-	return ClientCallback_promptBookmark_Params(root.Struct()), err
+	return ClientCallback_showInputPrompt_Params(root.Struct()), err
 }
 
-func (s ClientCallback_promptBookmark_Params) String() string {
+func (s ClientCallback_showInputPrompt_Params) String() string {
 	str, _ := text.Marshal(0xd237a3498f2c196b, capnp.Struct(s))
 	return str
 }
 
-func (s ClientCallback_promptBookmark_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+func (s ClientCallback_showInputPrompt_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
 	return capnp.Struct(s).EncodeAsPtr(seg)
 }
 
-func (ClientCallback_promptBookmark_Params) DecodeFromPtr(p capnp.Ptr) ClientCallback_promptBookmark_Params {
-	return ClientCallback_promptBookmark_Params(capnp.Struct{}.DecodeFromPtr(p))
+func (ClientCallback_showInputPrompt_Params) DecodeFromPtr(p capnp.Ptr) ClientCallback_showInputPrompt_Params {
+	return ClientCallback_showInputPrompt_Params(capnp.Struct{}.DecodeFromPtr(p))
 }
 
-func (s ClientCallback_promptBookmark_Params) ToPtr() capnp.Ptr {
+func (s ClientCallback_showInputPrompt_Params) ToPtr() capnp.Ptr {
 	return capnp.Struct(s).ToPtr()
 }
-func (s ClientCallback_promptBookmark_Params) IsValid() bool {
+func (s ClientCallback_showInputPrompt_Params) IsValid() bool {
 	return capnp.Struct(s).IsValid()
 }
 
-func (s ClientCallback_promptBookmark_Params) Message() *capnp.Message {
+func (s ClientCallback_showInputPrompt_Params) Message() *capnp.Message {
 	return capnp.Struct(s).Message()
 }
 
-func (s ClientCallback_promptBookmark_Params) Segment() *capnp.Segment {
+func (s ClientCallback_showInputPrompt_Params) Segment() *capnp.Segment {
 	return capnp.Struct(s).Segment()
 }
-func (s ClientCallback_promptBookmark_Params) FilePath() (string, error) {
+func (s ClientCallback_showInputPrompt_Params) Title() (string, error) {
 	p, err := capnp.Struct(s).Ptr(0)
 	return p.Text(), err
 }
 
-func (s ClientCallback_promptBookmark_Params) HasFilePath() bool {
+func (s ClientCallback_showInputPrompt_Params) HasTitle() bool {
 	return capnp.Struct(s).HasPtr(0)
 }
 
-func (s ClientCallback_promptBookmark_Params) FilePathBytes() ([]byte, error) {
+func (s ClientCallback_showInputPrompt_Params) TitleBytes() ([]byte, error) {
 	p, err := capnp.Struct(s).Ptr(0)
 	return p.TextBytes(), err
 }
 
-func (s ClientCallback_promptBookmark_Params) SetFilePath(v string) error {
+func (s ClientCallback_showInputPrompt_Params) SetTitle(v string) error {
 	return capnp.Struct(s).SetText(0, v)
 }
 
-func (s ClientCallback_promptBookmark_Params) Line() uint32 {
-	return capnp.Struct(s).Uint32(0)
-}
-
-func (s ClientCallback_promptBookmark_Params) SetLine(v uint32) {
-	capnp.Struct(s).SetUint32(0, v)
-}
-
-func (s ClientCallback_promptBookmark_Params) Col() uint32 {
-	return capnp.Struct(s).Uint32(4)
-}
-
-func (s ClientCallback_promptBookmark_Params) SetCol(v uint32) {
-	capnp.Struct(s).SetUint32(4, v)
-}
-
-func (s ClientCallback_promptBookmark_Params) Marker() (string, error) {
+func (s ClientCallback_showInputPrompt_Params) Placeholder() (string, error) {
 	p, err := capnp.Struct(s).Ptr(1)
 	return p.Text(), err
 }
 
-func (s ClientCallback_promptBookmark_Params) HasMarker() bool {
+func (s ClientCallback_showInputPrompt_Params) HasPlaceholder() bool {
 	return capnp.Struct(s).HasPtr(1)
 }
 
-func (s ClientCallback_promptBookmark_Params) MarkerBytes() ([]byte, error) {
+func (s ClientCallback_showInputPrompt_Params) PlaceholderBytes() ([]byte, error) {
 	p, err := capnp.Struct(s).Ptr(1)
 	return p.TextBytes(), err
 }
 
-func (s ClientCallback_promptBookmark_Params) SetMarker(v string) error {
+func (s ClientCallback_showInputPrompt_Params) SetPlaceholder(v string) error {
 	return capnp.Struct(s).SetText(1, v)
 }
 
-// ClientCallback_promptBookmark_Params_List is a list of ClientCallback_promptBookmark_Params.
-type ClientCallback_promptBookmark_Params_List = capnp.StructList[ClientCallback_promptBookmark_Params]
+// ClientCallback_showInputPrompt_Params_List is a list of ClientCallback_showInputPrompt_Params.
+type ClientCallback_showInputPrompt_Params_List = capnp.StructList[ClientCallback_showInputPrompt_Params]
 
-// NewClientCallback_promptBookmark_Params creates a new list of ClientCallback_promptBookmark_Params.
-func NewClientCallback_promptBookmark_Params_List(s *capnp.Segment, sz int32) (ClientCallback_promptBookmark_Params_List, error) {
-	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2}, sz)
-	return capnp.StructList[ClientCallback_promptBookmark_Params](l), err
+// NewClientCallback_showInputPrompt_Params creates a new list of ClientCallback_showInputPrompt_Params.
+func NewClientCallback_showInputPrompt_Params_List(s *capnp.Segment, sz int32) (ClientCallback_showInputPrompt_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return capnp.StructList[ClientCallback_showInputPrompt_Params](l), err
 }
 
-// ClientCallback_promptBookmark_Params_Future is a wrapper for a ClientCallback_promptBookmark_Params promised by a client call.
-type ClientCallback_promptBookmark_Params_Future struct{ *capnp.Future }
+// ClientCallback_showInputPrompt_Params_Future is a wrapper for a ClientCallback_showInputPrompt_Params promised by a client call.
+type ClientCallback_showInputPrompt_Params_Future struct{ *capnp.Future }
 
-func (f ClientCallback_promptBookmark_Params_Future) Struct() (ClientCallback_promptBookmark_Params, error) {
+func (f ClientCallback_showInputPrompt_Params_Future) Struct() (ClientCallback_showInputPrompt_Params, error) {
 	p, err := f.Future.Ptr()
-	return ClientCallback_promptBookmark_Params(p.Struct()), err
+	return ClientCallback_showInputPrompt_Params(p.Struct()), err
 }
 
-type ClientCallback_promptBookmark_Results capnp.Struct
+type ClientCallback_showInputPrompt_Results capnp.Struct
 
-// ClientCallback_promptBookmark_Results_TypeID is the unique identifier for the type ClientCallback_promptBookmark_Results.
-const ClientCallback_promptBookmark_Results_TypeID = 0xf3788f2570a1e84f
+// ClientCallback_showInputPrompt_Results_TypeID is the unique identifier for the type ClientCallback_showInputPrompt_Results.
+const ClientCallback_showInputPrompt_Results_TypeID = 0xf3788f2570a1e84f
 
-func NewClientCallback_promptBookmark_Results(s *capnp.Segment) (ClientCallback_promptBookmark_Results, error) {
+func NewClientCallback_showInputPrompt_Results(s *capnp.Segment) (ClientCallback_showInputPrompt_Results, error) {
 	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
-	return ClientCallback_promptBookmark_Results(st), err
+	return ClientCallback_showInputPrompt_Results(st), err
 }
 
-func NewRootClientCallback_promptBookmark_Results(s *capnp.Segment) (ClientCallback_promptBookmark_Results, error) {
+func NewRootClientCallback_showInputPrompt_Results(s *capnp.Segment) (ClientCallback_showInputPrompt_Results, error) {
 	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
-	return ClientCallback_promptBookmark_Results(st), err
+	return ClientCallback_showInputPrompt_Results(st), err
 }
 
-func ReadRootClientCallback_promptBookmark_Results(msg *capnp.Message) (ClientCallback_promptBookmark_Results, error) {
+func ReadRootClientCallback_showInputPrompt_Results(msg *capnp.Message) (ClientCallback_showInputPrompt_Results, error) {
 	root, err := msg.Root()
-	return ClientCallback_promptBookmark_Results(root.Struct()), err
+	return ClientCallback_showInputPrompt_Results(root.Struct()), err
 }
 
-func (s ClientCallback_promptBookmark_Results) String() string {
+func (s ClientCallback_showInputPrompt_Results) String() string {
 	str, _ := text.Marshal(0xf3788f2570a1e84f, capnp.Struct(s))
 	return str
 }
 
-func (s ClientCallback_promptBookmark_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+func (s ClientCallback_showInputPrompt_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
 	return capnp.Struct(s).EncodeAsPtr(seg)
 }
 
-func (ClientCallback_promptBookmark_Results) DecodeFromPtr(p capnp.Ptr) ClientCallback_promptBookmark_Results {
-	return ClientCallback_promptBookmark_Results(capnp.Struct{}.DecodeFromPtr(p))
+func (ClientCallback_showInputPrompt_Results) DecodeFromPtr(p capnp.Ptr) ClientCallback_showInputPrompt_Results {
+	return ClientCallback_showInputPrompt_Results(capnp.Struct{}.DecodeFromPtr(p))
 }
 
-func (s ClientCallback_promptBookmark_Results) ToPtr() capnp.Ptr {
+func (s ClientCallback_showInputPrompt_Results) ToPtr() capnp.Ptr {
 	return capnp.Struct(s).ToPtr()
 }
-func (s ClientCallback_promptBookmark_Results) IsValid() bool {
+func (s ClientCallback_showInputPrompt_Results) IsValid() bool {
 	return capnp.Struct(s).IsValid()
 }
 
-func (s ClientCallback_promptBookmark_Results) Message() *capnp.Message {
+func (s ClientCallback_showInputPrompt_Results) Message() *capnp.Message {
 	return capnp.Struct(s).Message()
 }
 
-func (s ClientCallback_promptBookmark_Results) Segment() *capnp.Segment {
+func (s ClientCallback_showInputPrompt_Results) Segment() *capnp.Segment {
 	return capnp.Struct(s).Segment()
 }
 
-// ClientCallback_promptBookmark_Results_List is a list of ClientCallback_promptBookmark_Results.
-type ClientCallback_promptBookmark_Results_List = capnp.StructList[ClientCallback_promptBookmark_Results]
+// ClientCallback_showInputPrompt_Results_List is a list of ClientCallback_showInputPrompt_Results.
+type ClientCallback_showInputPrompt_Results_List = capnp.StructList[ClientCallback_showInputPrompt_Results]
 
-// NewClientCallback_promptBookmark_Results creates a new list of ClientCallback_promptBookmark_Results.
-func NewClientCallback_promptBookmark_Results_List(s *capnp.Segment, sz int32) (ClientCallback_promptBookmark_Results_List, error) {
+// NewClientCallback_showInputPrompt_Results creates a new list of ClientCallback_showInputPrompt_Results.
+func NewClientCallback_showInputPrompt_Results_List(s *capnp.Segment, sz int32) (ClientCallback_showInputPrompt_Results_List, error) {
 	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
-	return capnp.StructList[ClientCallback_promptBookmark_Results](l), err
+	return capnp.StructList[ClientCallback_showInputPrompt_Results](l), err
 }
 
-// ClientCallback_promptBookmark_Results_Future is a wrapper for a ClientCallback_promptBookmark_Results promised by a client call.
-type ClientCallback_promptBookmark_Results_Future struct{ *capnp.Future }
+// ClientCallback_showInputPrompt_Results_Future is a wrapper for a ClientCallback_showInputPrompt_Results promised by a client call.
+type ClientCallback_showInputPrompt_Results_Future struct{ *capnp.Future }
 
-func (f ClientCallback_promptBookmark_Results_Future) Struct() (ClientCallback_promptBookmark_Results, error) {
+func (f ClientCallback_showInputPrompt_Results_Future) Struct() (ClientCallback_showInputPrompt_Results, error) {
 	p, err := f.Future.Ptr()
-	return ClientCallback_promptBookmark_Results(p.Struct()), err
+	return ClientCallback_showInputPrompt_Results(p.Struct()), err
+}
+
+type ClientCallback_hideInputPrompt_Params capnp.Struct
+
+// ClientCallback_hideInputPrompt_Params_TypeID is the unique identifier for the type ClientCallback_hideInputPrompt_Params.
+const ClientCallback_hideInputPrompt_Params_TypeID = 0xa387c781094c823c
+
+func NewClientCallback_hideInputPrompt_Params(s *capnp.Segment) (ClientCallback_hideInputPrompt_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_hideInputPrompt_Params(st), err
+}
+
+func NewRootClientCallback_hideInputPrompt_Params(s *capnp.Segment) (ClientCallback_hideInputPrompt_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_hideInputPrompt_Params(st), err
+}
+
+func ReadRootClientCallback_hideInputPrompt_Params(msg *capnp.Message) (ClientCallback_hideInputPrompt_Params, error) {
+	root, err := msg.Root()
+	return ClientCallback_hideInputPrompt_Params(root.Struct()), err
+}
+
+func (s ClientCallback_hideInputPrompt_Params) String() string {
+	str, _ := text.Marshal(0xa387c781094c823c, capnp.Struct(s))
+	return str
+}
+
+func (s ClientCallback_hideInputPrompt_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ClientCallback_hideInputPrompt_Params) DecodeFromPtr(p capnp.Ptr) ClientCallback_hideInputPrompt_Params {
+	return ClientCallback_hideInputPrompt_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ClientCallback_hideInputPrompt_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ClientCallback_hideInputPrompt_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ClientCallback_hideInputPrompt_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ClientCallback_hideInputPrompt_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// ClientCallback_hideInputPrompt_Params_List is a list of ClientCallback_hideInputPrompt_Params.
+type ClientCallback_hideInputPrompt_Params_List = capnp.StructList[ClientCallback_hideInputPrompt_Params]
+
+// NewClientCallback_hideInputPrompt_Params creates a new list of ClientCallback_hideInputPrompt_Params.
+func NewClientCallback_hideInputPrompt_Params_List(s *capnp.Segment, sz int32) (ClientCallback_hideInputPrompt_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[ClientCallback_hideInputPrompt_Params](l), err
+}
+
+// ClientCallback_hideInputPrompt_Params_Future is a wrapper for a ClientCallback_hideInputPrompt_Params promised by a client call.
+type ClientCallback_hideInputPrompt_Params_Future struct{ *capnp.Future }
+
+func (f ClientCallback_hideInputPrompt_Params_Future) Struct() (ClientCallback_hideInputPrompt_Params, error) {
+	p, err := f.Future.Ptr()
+	return ClientCallback_hideInputPrompt_Params(p.Struct()), err
+}
+
+type ClientCallback_hideInputPrompt_Results capnp.Struct
+
+// ClientCallback_hideInputPrompt_Results_TypeID is the unique identifier for the type ClientCallback_hideInputPrompt_Results.
+const ClientCallback_hideInputPrompt_Results_TypeID = 0x840627f737aed8e7
+
+func NewClientCallback_hideInputPrompt_Results(s *capnp.Segment) (ClientCallback_hideInputPrompt_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_hideInputPrompt_Results(st), err
+}
+
+func NewRootClientCallback_hideInputPrompt_Results(s *capnp.Segment) (ClientCallback_hideInputPrompt_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_hideInputPrompt_Results(st), err
+}
+
+func ReadRootClientCallback_hideInputPrompt_Results(msg *capnp.Message) (ClientCallback_hideInputPrompt_Results, error) {
+	root, err := msg.Root()
+	return ClientCallback_hideInputPrompt_Results(root.Struct()), err
+}
+
+func (s ClientCallback_hideInputPrompt_Results) String() string {
+	str, _ := text.Marshal(0x840627f737aed8e7, capnp.Struct(s))
+	return str
+}
+
+func (s ClientCallback_hideInputPrompt_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ClientCallback_hideInputPrompt_Results) DecodeFromPtr(p capnp.Ptr) ClientCallback_hideInputPrompt_Results {
+	return ClientCallback_hideInputPrompt_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ClientCallback_hideInputPrompt_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ClientCallback_hideInputPrompt_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ClientCallback_hideInputPrompt_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ClientCallback_hideInputPrompt_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// ClientCallback_hideInputPrompt_Results_List is a list of ClientCallback_hideInputPrompt_Results.
+type ClientCallback_hideInputPrompt_Results_List = capnp.StructList[ClientCallback_hideInputPrompt_Results]
+
+// NewClientCallback_hideInputPrompt_Results creates a new list of ClientCallback_hideInputPrompt_Results.
+func NewClientCallback_hideInputPrompt_Results_List(s *capnp.Segment, sz int32) (ClientCallback_hideInputPrompt_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[ClientCallback_hideInputPrompt_Results](l), err
+}
+
+// ClientCallback_hideInputPrompt_Results_Future is a wrapper for a ClientCallback_hideInputPrompt_Results promised by a client call.
+type ClientCallback_hideInputPrompt_Results_Future struct{ *capnp.Future }
+
+func (f ClientCallback_hideInputPrompt_Results_Future) Struct() (ClientCallback_hideInputPrompt_Results, error) {
+	p, err := f.Future.Ptr()
+	return ClientCallback_hideInputPrompt_Results(p.Struct()), err
 }
 
 type EditorService capnp.Client
@@ -2291,6 +2428,86 @@ func (c EditorService) GetPluginBindings(ctx context.Context, params func(Editor
 
 }
 
+func (c EditorService) PluginPopupSelected(ctx context.Context, params func(EditorService_pluginPopupSelected_Params) error) (EditorService_pluginPopupSelected_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      25,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "pluginPopupSelected",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_pluginPopupSelected_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_pluginPopupSelected_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) PluginPopupCancelled(ctx context.Context, params func(EditorService_pluginPopupCancelled_Params) error) (EditorService_pluginPopupCancelled_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      26,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "pluginPopupCancelled",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_pluginPopupCancelled_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_pluginPopupCancelled_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) PluginInputConfirmed(ctx context.Context, params func(EditorService_pluginInputConfirmed_Params) error) (EditorService_pluginInputConfirmed_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      27,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "pluginInputConfirmed",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_pluginInputConfirmed_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_pluginInputConfirmed_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) PluginInputCancelled(ctx context.Context, params func(EditorService_pluginInputCancelled_Params) error) (EditorService_pluginInputCancelled_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      28,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "pluginInputCancelled",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_pluginInputCancelled_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_pluginInputCancelled_Results_Future{Future: ans.Future()}, release
+
+}
+
 func (c EditorService) WaitStreaming() error {
 	return capnp.Client(c).WaitStreaming()
 }
@@ -2413,6 +2630,14 @@ type EditorService_Server interface {
 	ApplyPluginAction(context.Context, EditorService_applyPluginAction) error
 
 	GetPluginBindings(context.Context, EditorService_getPluginBindings) error
+
+	PluginPopupSelected(context.Context, EditorService_pluginPopupSelected) error
+
+	PluginPopupCancelled(context.Context, EditorService_pluginPopupCancelled) error
+
+	PluginInputConfirmed(context.Context, EditorService_pluginInputConfirmed) error
+
+	PluginInputCancelled(context.Context, EditorService_pluginInputCancelled) error
 }
 
 // EditorService_NewServer creates a new Server from an implementation of EditorService_Server.
@@ -2431,7 +2656,7 @@ func EditorService_ServerToClient(s EditorService_Server) EditorService {
 // This can be used to create a more complicated Server.
 func EditorService_Methods(methods []server.Method, s EditorService_Server) []server.Method {
 	if cap(methods) == 0 {
-		methods = make([]server.Method, 0, 25)
+		methods = make([]server.Method, 0, 29)
 	}
 
 	methods = append(methods, server.Method{
@@ -2731,6 +2956,54 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
 			return s.GetPluginBindings(ctx, EditorService_getPluginBindings{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      25,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "pluginPopupSelected",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.PluginPopupSelected(ctx, EditorService_pluginPopupSelected{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      26,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "pluginPopupCancelled",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.PluginPopupCancelled(ctx, EditorService_pluginPopupCancelled{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      27,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "pluginInputConfirmed",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.PluginInputConfirmed(ctx, EditorService_pluginInputConfirmed{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      28,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "pluginInputCancelled",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.PluginInputCancelled(ctx, EditorService_pluginInputCancelled{call})
 		},
 	})
 
@@ -3160,6 +3433,74 @@ func (c EditorService_getPluginBindings) Args() EditorService_getPluginBindings_
 func (c EditorService_getPluginBindings) AllocResults() (EditorService_getPluginBindings_Results, error) {
 	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
 	return EditorService_getPluginBindings_Results(r), err
+}
+
+// EditorService_pluginPopupSelected holds the state for a server call to EditorService.pluginPopupSelected.
+// See server.Call for documentation.
+type EditorService_pluginPopupSelected struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_pluginPopupSelected) Args() EditorService_pluginPopupSelected_Params {
+	return EditorService_pluginPopupSelected_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_pluginPopupSelected) AllocResults() (EditorService_pluginPopupSelected_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginPopupSelected_Results(r), err
+}
+
+// EditorService_pluginPopupCancelled holds the state for a server call to EditorService.pluginPopupCancelled.
+// See server.Call for documentation.
+type EditorService_pluginPopupCancelled struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_pluginPopupCancelled) Args() EditorService_pluginPopupCancelled_Params {
+	return EditorService_pluginPopupCancelled_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_pluginPopupCancelled) AllocResults() (EditorService_pluginPopupCancelled_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginPopupCancelled_Results(r), err
+}
+
+// EditorService_pluginInputConfirmed holds the state for a server call to EditorService.pluginInputConfirmed.
+// See server.Call for documentation.
+type EditorService_pluginInputConfirmed struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_pluginInputConfirmed) Args() EditorService_pluginInputConfirmed_Params {
+	return EditorService_pluginInputConfirmed_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_pluginInputConfirmed) AllocResults() (EditorService_pluginInputConfirmed_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginInputConfirmed_Results(r), err
+}
+
+// EditorService_pluginInputCancelled holds the state for a server call to EditorService.pluginInputCancelled.
+// See server.Call for documentation.
+type EditorService_pluginInputCancelled struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_pluginInputCancelled) Args() EditorService_pluginInputCancelled_Params {
+	return EditorService_pluginInputCancelled_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_pluginInputCancelled) AllocResults() (EditorService_pluginInputCancelled_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginInputCancelled_Results(r), err
 }
 
 // EditorService_List is a list of EditorService.
@@ -7398,6 +7739,550 @@ func (f EditorService_getPluginBindings_Results_Future) Struct() (EditorService_
 	return EditorService_getPluginBindings_Results(p.Struct()), err
 }
 
+type EditorService_pluginPopupSelected_Params capnp.Struct
+
+// EditorService_pluginPopupSelected_Params_TypeID is the unique identifier for the type EditorService_pluginPopupSelected_Params.
+const EditorService_pluginPopupSelected_Params_TypeID = 0xe2ee231a8661de38
+
+func NewEditorService_pluginPopupSelected_Params(s *capnp.Segment) (EditorService_pluginPopupSelected_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_pluginPopupSelected_Params(st), err
+}
+
+func NewRootEditorService_pluginPopupSelected_Params(s *capnp.Segment) (EditorService_pluginPopupSelected_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_pluginPopupSelected_Params(st), err
+}
+
+func ReadRootEditorService_pluginPopupSelected_Params(msg *capnp.Message) (EditorService_pluginPopupSelected_Params, error) {
+	root, err := msg.Root()
+	return EditorService_pluginPopupSelected_Params(root.Struct()), err
+}
+
+func (s EditorService_pluginPopupSelected_Params) String() string {
+	str, _ := text.Marshal(0xe2ee231a8661de38, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_pluginPopupSelected_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_pluginPopupSelected_Params) DecodeFromPtr(p capnp.Ptr) EditorService_pluginPopupSelected_Params {
+	return EditorService_pluginPopupSelected_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_pluginPopupSelected_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_pluginPopupSelected_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_pluginPopupSelected_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_pluginPopupSelected_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_pluginPopupSelected_Params) Index() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s EditorService_pluginPopupSelected_Params) SetIndex(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+// EditorService_pluginPopupSelected_Params_List is a list of EditorService_pluginPopupSelected_Params.
+type EditorService_pluginPopupSelected_Params_List = capnp.StructList[EditorService_pluginPopupSelected_Params]
+
+// NewEditorService_pluginPopupSelected_Params creates a new list of EditorService_pluginPopupSelected_Params.
+func NewEditorService_pluginPopupSelected_Params_List(s *capnp.Segment, sz int32) (EditorService_pluginPopupSelected_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_pluginPopupSelected_Params](l), err
+}
+
+// EditorService_pluginPopupSelected_Params_Future is a wrapper for a EditorService_pluginPopupSelected_Params promised by a client call.
+type EditorService_pluginPopupSelected_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_pluginPopupSelected_Params_Future) Struct() (EditorService_pluginPopupSelected_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_pluginPopupSelected_Params(p.Struct()), err
+}
+
+type EditorService_pluginPopupSelected_Results capnp.Struct
+
+// EditorService_pluginPopupSelected_Results_TypeID is the unique identifier for the type EditorService_pluginPopupSelected_Results.
+const EditorService_pluginPopupSelected_Results_TypeID = 0xd9f229db85377e2f
+
+func NewEditorService_pluginPopupSelected_Results(s *capnp.Segment) (EditorService_pluginPopupSelected_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginPopupSelected_Results(st), err
+}
+
+func NewRootEditorService_pluginPopupSelected_Results(s *capnp.Segment) (EditorService_pluginPopupSelected_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginPopupSelected_Results(st), err
+}
+
+func ReadRootEditorService_pluginPopupSelected_Results(msg *capnp.Message) (EditorService_pluginPopupSelected_Results, error) {
+	root, err := msg.Root()
+	return EditorService_pluginPopupSelected_Results(root.Struct()), err
+}
+
+func (s EditorService_pluginPopupSelected_Results) String() string {
+	str, _ := text.Marshal(0xd9f229db85377e2f, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_pluginPopupSelected_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_pluginPopupSelected_Results) DecodeFromPtr(p capnp.Ptr) EditorService_pluginPopupSelected_Results {
+	return EditorService_pluginPopupSelected_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_pluginPopupSelected_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_pluginPopupSelected_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_pluginPopupSelected_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_pluginPopupSelected_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// EditorService_pluginPopupSelected_Results_List is a list of EditorService_pluginPopupSelected_Results.
+type EditorService_pluginPopupSelected_Results_List = capnp.StructList[EditorService_pluginPopupSelected_Results]
+
+// NewEditorService_pluginPopupSelected_Results creates a new list of EditorService_pluginPopupSelected_Results.
+func NewEditorService_pluginPopupSelected_Results_List(s *capnp.Segment, sz int32) (EditorService_pluginPopupSelected_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_pluginPopupSelected_Results](l), err
+}
+
+// EditorService_pluginPopupSelected_Results_Future is a wrapper for a EditorService_pluginPopupSelected_Results promised by a client call.
+type EditorService_pluginPopupSelected_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_pluginPopupSelected_Results_Future) Struct() (EditorService_pluginPopupSelected_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_pluginPopupSelected_Results(p.Struct()), err
+}
+
+type EditorService_pluginPopupCancelled_Params capnp.Struct
+
+// EditorService_pluginPopupCancelled_Params_TypeID is the unique identifier for the type EditorService_pluginPopupCancelled_Params.
+const EditorService_pluginPopupCancelled_Params_TypeID = 0xd2088e6a5c8e7f15
+
+func NewEditorService_pluginPopupCancelled_Params(s *capnp.Segment) (EditorService_pluginPopupCancelled_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginPopupCancelled_Params(st), err
+}
+
+func NewRootEditorService_pluginPopupCancelled_Params(s *capnp.Segment) (EditorService_pluginPopupCancelled_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginPopupCancelled_Params(st), err
+}
+
+func ReadRootEditorService_pluginPopupCancelled_Params(msg *capnp.Message) (EditorService_pluginPopupCancelled_Params, error) {
+	root, err := msg.Root()
+	return EditorService_pluginPopupCancelled_Params(root.Struct()), err
+}
+
+func (s EditorService_pluginPopupCancelled_Params) String() string {
+	str, _ := text.Marshal(0xd2088e6a5c8e7f15, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_pluginPopupCancelled_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_pluginPopupCancelled_Params) DecodeFromPtr(p capnp.Ptr) EditorService_pluginPopupCancelled_Params {
+	return EditorService_pluginPopupCancelled_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_pluginPopupCancelled_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_pluginPopupCancelled_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_pluginPopupCancelled_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_pluginPopupCancelled_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// EditorService_pluginPopupCancelled_Params_List is a list of EditorService_pluginPopupCancelled_Params.
+type EditorService_pluginPopupCancelled_Params_List = capnp.StructList[EditorService_pluginPopupCancelled_Params]
+
+// NewEditorService_pluginPopupCancelled_Params creates a new list of EditorService_pluginPopupCancelled_Params.
+func NewEditorService_pluginPopupCancelled_Params_List(s *capnp.Segment, sz int32) (EditorService_pluginPopupCancelled_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_pluginPopupCancelled_Params](l), err
+}
+
+// EditorService_pluginPopupCancelled_Params_Future is a wrapper for a EditorService_pluginPopupCancelled_Params promised by a client call.
+type EditorService_pluginPopupCancelled_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_pluginPopupCancelled_Params_Future) Struct() (EditorService_pluginPopupCancelled_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_pluginPopupCancelled_Params(p.Struct()), err
+}
+
+type EditorService_pluginPopupCancelled_Results capnp.Struct
+
+// EditorService_pluginPopupCancelled_Results_TypeID is the unique identifier for the type EditorService_pluginPopupCancelled_Results.
+const EditorService_pluginPopupCancelled_Results_TypeID = 0x9dfaec51c4cecd46
+
+func NewEditorService_pluginPopupCancelled_Results(s *capnp.Segment) (EditorService_pluginPopupCancelled_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginPopupCancelled_Results(st), err
+}
+
+func NewRootEditorService_pluginPopupCancelled_Results(s *capnp.Segment) (EditorService_pluginPopupCancelled_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginPopupCancelled_Results(st), err
+}
+
+func ReadRootEditorService_pluginPopupCancelled_Results(msg *capnp.Message) (EditorService_pluginPopupCancelled_Results, error) {
+	root, err := msg.Root()
+	return EditorService_pluginPopupCancelled_Results(root.Struct()), err
+}
+
+func (s EditorService_pluginPopupCancelled_Results) String() string {
+	str, _ := text.Marshal(0x9dfaec51c4cecd46, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_pluginPopupCancelled_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_pluginPopupCancelled_Results) DecodeFromPtr(p capnp.Ptr) EditorService_pluginPopupCancelled_Results {
+	return EditorService_pluginPopupCancelled_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_pluginPopupCancelled_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_pluginPopupCancelled_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_pluginPopupCancelled_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_pluginPopupCancelled_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// EditorService_pluginPopupCancelled_Results_List is a list of EditorService_pluginPopupCancelled_Results.
+type EditorService_pluginPopupCancelled_Results_List = capnp.StructList[EditorService_pluginPopupCancelled_Results]
+
+// NewEditorService_pluginPopupCancelled_Results creates a new list of EditorService_pluginPopupCancelled_Results.
+func NewEditorService_pluginPopupCancelled_Results_List(s *capnp.Segment, sz int32) (EditorService_pluginPopupCancelled_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_pluginPopupCancelled_Results](l), err
+}
+
+// EditorService_pluginPopupCancelled_Results_Future is a wrapper for a EditorService_pluginPopupCancelled_Results promised by a client call.
+type EditorService_pluginPopupCancelled_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_pluginPopupCancelled_Results_Future) Struct() (EditorService_pluginPopupCancelled_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_pluginPopupCancelled_Results(p.Struct()), err
+}
+
+type EditorService_pluginInputConfirmed_Params capnp.Struct
+
+// EditorService_pluginInputConfirmed_Params_TypeID is the unique identifier for the type EditorService_pluginInputConfirmed_Params.
+const EditorService_pluginInputConfirmed_Params_TypeID = 0xeeeecebae311ba53
+
+func NewEditorService_pluginInputConfirmed_Params(s *capnp.Segment) (EditorService_pluginInputConfirmed_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_pluginInputConfirmed_Params(st), err
+}
+
+func NewRootEditorService_pluginInputConfirmed_Params(s *capnp.Segment) (EditorService_pluginInputConfirmed_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_pluginInputConfirmed_Params(st), err
+}
+
+func ReadRootEditorService_pluginInputConfirmed_Params(msg *capnp.Message) (EditorService_pluginInputConfirmed_Params, error) {
+	root, err := msg.Root()
+	return EditorService_pluginInputConfirmed_Params(root.Struct()), err
+}
+
+func (s EditorService_pluginInputConfirmed_Params) String() string {
+	str, _ := text.Marshal(0xeeeecebae311ba53, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_pluginInputConfirmed_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_pluginInputConfirmed_Params) DecodeFromPtr(p capnp.Ptr) EditorService_pluginInputConfirmed_Params {
+	return EditorService_pluginInputConfirmed_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_pluginInputConfirmed_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_pluginInputConfirmed_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_pluginInputConfirmed_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_pluginInputConfirmed_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_pluginInputConfirmed_Params) Text() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s EditorService_pluginInputConfirmed_Params) HasText() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_pluginInputConfirmed_Params) TextBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_pluginInputConfirmed_Params) SetText(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+// EditorService_pluginInputConfirmed_Params_List is a list of EditorService_pluginInputConfirmed_Params.
+type EditorService_pluginInputConfirmed_Params_List = capnp.StructList[EditorService_pluginInputConfirmed_Params]
+
+// NewEditorService_pluginInputConfirmed_Params creates a new list of EditorService_pluginInputConfirmed_Params.
+func NewEditorService_pluginInputConfirmed_Params_List(s *capnp.Segment, sz int32) (EditorService_pluginInputConfirmed_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_pluginInputConfirmed_Params](l), err
+}
+
+// EditorService_pluginInputConfirmed_Params_Future is a wrapper for a EditorService_pluginInputConfirmed_Params promised by a client call.
+type EditorService_pluginInputConfirmed_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_pluginInputConfirmed_Params_Future) Struct() (EditorService_pluginInputConfirmed_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_pluginInputConfirmed_Params(p.Struct()), err
+}
+
+type EditorService_pluginInputConfirmed_Results capnp.Struct
+
+// EditorService_pluginInputConfirmed_Results_TypeID is the unique identifier for the type EditorService_pluginInputConfirmed_Results.
+const EditorService_pluginInputConfirmed_Results_TypeID = 0xcfeb047b0e4b2758
+
+func NewEditorService_pluginInputConfirmed_Results(s *capnp.Segment) (EditorService_pluginInputConfirmed_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginInputConfirmed_Results(st), err
+}
+
+func NewRootEditorService_pluginInputConfirmed_Results(s *capnp.Segment) (EditorService_pluginInputConfirmed_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginInputConfirmed_Results(st), err
+}
+
+func ReadRootEditorService_pluginInputConfirmed_Results(msg *capnp.Message) (EditorService_pluginInputConfirmed_Results, error) {
+	root, err := msg.Root()
+	return EditorService_pluginInputConfirmed_Results(root.Struct()), err
+}
+
+func (s EditorService_pluginInputConfirmed_Results) String() string {
+	str, _ := text.Marshal(0xcfeb047b0e4b2758, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_pluginInputConfirmed_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_pluginInputConfirmed_Results) DecodeFromPtr(p capnp.Ptr) EditorService_pluginInputConfirmed_Results {
+	return EditorService_pluginInputConfirmed_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_pluginInputConfirmed_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_pluginInputConfirmed_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_pluginInputConfirmed_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_pluginInputConfirmed_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// EditorService_pluginInputConfirmed_Results_List is a list of EditorService_pluginInputConfirmed_Results.
+type EditorService_pluginInputConfirmed_Results_List = capnp.StructList[EditorService_pluginInputConfirmed_Results]
+
+// NewEditorService_pluginInputConfirmed_Results creates a new list of EditorService_pluginInputConfirmed_Results.
+func NewEditorService_pluginInputConfirmed_Results_List(s *capnp.Segment, sz int32) (EditorService_pluginInputConfirmed_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_pluginInputConfirmed_Results](l), err
+}
+
+// EditorService_pluginInputConfirmed_Results_Future is a wrapper for a EditorService_pluginInputConfirmed_Results promised by a client call.
+type EditorService_pluginInputConfirmed_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_pluginInputConfirmed_Results_Future) Struct() (EditorService_pluginInputConfirmed_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_pluginInputConfirmed_Results(p.Struct()), err
+}
+
+type EditorService_pluginInputCancelled_Params capnp.Struct
+
+// EditorService_pluginInputCancelled_Params_TypeID is the unique identifier for the type EditorService_pluginInputCancelled_Params.
+const EditorService_pluginInputCancelled_Params_TypeID = 0xb836a9d8467afbd9
+
+func NewEditorService_pluginInputCancelled_Params(s *capnp.Segment) (EditorService_pluginInputCancelled_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginInputCancelled_Params(st), err
+}
+
+func NewRootEditorService_pluginInputCancelled_Params(s *capnp.Segment) (EditorService_pluginInputCancelled_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginInputCancelled_Params(st), err
+}
+
+func ReadRootEditorService_pluginInputCancelled_Params(msg *capnp.Message) (EditorService_pluginInputCancelled_Params, error) {
+	root, err := msg.Root()
+	return EditorService_pluginInputCancelled_Params(root.Struct()), err
+}
+
+func (s EditorService_pluginInputCancelled_Params) String() string {
+	str, _ := text.Marshal(0xb836a9d8467afbd9, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_pluginInputCancelled_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_pluginInputCancelled_Params) DecodeFromPtr(p capnp.Ptr) EditorService_pluginInputCancelled_Params {
+	return EditorService_pluginInputCancelled_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_pluginInputCancelled_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_pluginInputCancelled_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_pluginInputCancelled_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_pluginInputCancelled_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// EditorService_pluginInputCancelled_Params_List is a list of EditorService_pluginInputCancelled_Params.
+type EditorService_pluginInputCancelled_Params_List = capnp.StructList[EditorService_pluginInputCancelled_Params]
+
+// NewEditorService_pluginInputCancelled_Params creates a new list of EditorService_pluginInputCancelled_Params.
+func NewEditorService_pluginInputCancelled_Params_List(s *capnp.Segment, sz int32) (EditorService_pluginInputCancelled_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_pluginInputCancelled_Params](l), err
+}
+
+// EditorService_pluginInputCancelled_Params_Future is a wrapper for a EditorService_pluginInputCancelled_Params promised by a client call.
+type EditorService_pluginInputCancelled_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_pluginInputCancelled_Params_Future) Struct() (EditorService_pluginInputCancelled_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_pluginInputCancelled_Params(p.Struct()), err
+}
+
+type EditorService_pluginInputCancelled_Results capnp.Struct
+
+// EditorService_pluginInputCancelled_Results_TypeID is the unique identifier for the type EditorService_pluginInputCancelled_Results.
+const EditorService_pluginInputCancelled_Results_TypeID = 0x999035a33d479906
+
+func NewEditorService_pluginInputCancelled_Results(s *capnp.Segment) (EditorService_pluginInputCancelled_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginInputCancelled_Results(st), err
+}
+
+func NewRootEditorService_pluginInputCancelled_Results(s *capnp.Segment) (EditorService_pluginInputCancelled_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_pluginInputCancelled_Results(st), err
+}
+
+func ReadRootEditorService_pluginInputCancelled_Results(msg *capnp.Message) (EditorService_pluginInputCancelled_Results, error) {
+	root, err := msg.Root()
+	return EditorService_pluginInputCancelled_Results(root.Struct()), err
+}
+
+func (s EditorService_pluginInputCancelled_Results) String() string {
+	str, _ := text.Marshal(0x999035a33d479906, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_pluginInputCancelled_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_pluginInputCancelled_Results) DecodeFromPtr(p capnp.Ptr) EditorService_pluginInputCancelled_Results {
+	return EditorService_pluginInputCancelled_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_pluginInputCancelled_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_pluginInputCancelled_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_pluginInputCancelled_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_pluginInputCancelled_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// EditorService_pluginInputCancelled_Results_List is a list of EditorService_pluginInputCancelled_Results.
+type EditorService_pluginInputCancelled_Results_List = capnp.StructList[EditorService_pluginInputCancelled_Results]
+
+// NewEditorService_pluginInputCancelled_Results creates a new list of EditorService_pluginInputCancelled_Results.
+func NewEditorService_pluginInputCancelled_Results_List(s *capnp.Segment, sz int32) (EditorService_pluginInputCancelled_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_pluginInputCancelled_Results](l), err
+}
+
+// EditorService_pluginInputCancelled_Results_Future is a wrapper for a EditorService_pluginInputCancelled_Results promised by a client call.
+type EditorService_pluginInputCancelled_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_pluginInputCancelled_Results_Future) Struct() (EditorService_pluginInputCancelled_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_pluginInputCancelled_Results(p.Struct()), err
+}
+
 type PluginEdit capnp.Struct
 
 // PluginEdit_TypeID is the unique identifier for the type PluginEdit.
@@ -7519,10 +8404,11 @@ const PluginDecorationKind_TypeID = 0xeda78d81b6beef42
 
 // Values of PluginDecorationKind.
 const (
-	PluginDecorationKind_gutter    PluginDecorationKind = 0
-	PluginDecorationKind_overlay   PluginDecorationKind = 1
-	PluginDecorationKind_statusBar PluginDecorationKind = 2
-	PluginDecorationKind_underline PluginDecorationKind = 3
+	PluginDecorationKind_gutter     PluginDecorationKind = 0
+	PluginDecorationKind_overlay    PluginDecorationKind = 1
+	PluginDecorationKind_statusBar  PluginDecorationKind = 2
+	PluginDecorationKind_underline  PluginDecorationKind = 3
+	PluginDecorationKind_leftGutter PluginDecorationKind = 4
 )
 
 // String returns the enum's constant name.
@@ -7536,6 +8422,8 @@ func (c PluginDecorationKind) String() string {
 		return "statusBar"
 	case PluginDecorationKind_underline:
 		return "underline"
+	case PluginDecorationKind_leftGutter:
+		return "leftGutter"
 
 	default:
 		return ""
@@ -7554,6 +8442,8 @@ func PluginDecorationKindFromString(c string) PluginDecorationKind {
 		return PluginDecorationKind_statusBar
 	case "underline":
 		return PluginDecorationKind_underline
+	case "leftGutter":
+		return PluginDecorationKind_leftGutter
 
 	default:
 		return 0
@@ -7564,6 +8454,124 @@ type PluginDecorationKind_List = capnp.EnumList[PluginDecorationKind]
 
 func NewPluginDecorationKind_List(s *capnp.Segment, sz int32) (PluginDecorationKind_List, error) {
 	return capnp.NewEnumList[PluginDecorationKind](s, sz)
+}
+
+type PopupItem capnp.Struct
+
+// PopupItem_TypeID is the unique identifier for the type PopupItem.
+const PopupItem_TypeID = 0xaefab5c32445e49b
+
+func NewPopupItem(s *capnp.Segment) (PopupItem, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 3})
+	return PopupItem(st), err
+}
+
+func NewRootPopupItem(s *capnp.Segment) (PopupItem, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 3})
+	return PopupItem(st), err
+}
+
+func ReadRootPopupItem(msg *capnp.Message) (PopupItem, error) {
+	root, err := msg.Root()
+	return PopupItem(root.Struct()), err
+}
+
+func (s PopupItem) String() string {
+	str, _ := text.Marshal(0xaefab5c32445e49b, capnp.Struct(s))
+	return str
+}
+
+func (s PopupItem) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (PopupItem) DecodeFromPtr(p capnp.Ptr) PopupItem {
+	return PopupItem(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s PopupItem) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s PopupItem) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s PopupItem) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s PopupItem) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s PopupItem) Label() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s PopupItem) HasLabel() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s PopupItem) LabelBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s PopupItem) SetLabel(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s PopupItem) Sublabel() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s PopupItem) HasSublabel() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s PopupItem) SublabelBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s PopupItem) SetSublabel(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+func (s PopupItem) Data() (string, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.Text(), err
+}
+
+func (s PopupItem) HasData() bool {
+	return capnp.Struct(s).HasPtr(2)
+}
+
+func (s PopupItem) DataBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.TextBytes(), err
+}
+
+func (s PopupItem) SetData(v string) error {
+	return capnp.Struct(s).SetText(2, v)
+}
+
+// PopupItem_List is a list of PopupItem.
+type PopupItem_List = capnp.StructList[PopupItem]
+
+// NewPopupItem creates a new list of PopupItem.
+func NewPopupItem_List(s *capnp.Segment, sz int32) (PopupItem_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 3}, sz)
+	return capnp.StructList[PopupItem](l), err
+}
+
+// PopupItem_Future is a wrapper for a PopupItem promised by a client call.
+type PopupItem_Future struct{ *capnp.Future }
+
+func (f PopupItem_Future) Struct() (PopupItem, error) {
+	p, err := f.Future.Ptr()
+	return PopupItem(p.Struct()), err
 }
 
 type PluginUnderlineStyle uint16
@@ -9301,359 +10309,384 @@ func NewEditOp_OpType_List(s *capnp.Segment, sz int32) (EditOp_OpType_List, erro
 	return capnp.NewEnumList[EditOp_OpType](s, sz)
 }
 
-const schema_d75b3b54eb3ed6a2 = "x\xda\xcc[}xT\xd5\x99?\xef\xbdIn\xa0j" +
-	"2\xdc \xc2\xe2\x06\x12\x142\x10>\x02V\x08\xb03" +
-	"\xf9 \x90\x08%7A\xaa\xa9<\xeb\xcd\xccI20" +
-	"\x99;\xde{\x03\xa4\x8a\x01Jv\x05\xa5@W\xaa\xec" +
-	"\x96*~U\xbb~Q\xc5*+\x16li\x85-m" +
-	"Q\xa9\xe2G[?\xd8\x165Z\xda\xa2\xa5]\x9c}" +
-	"\xdes\xbf\xceL&0\x13\xf6\xd9\xee\x93\x7fr\xcf=" +
-	"\xf7\x9c\xf7\xbc\xdf\xef\xef\xbc3U\xbb4\x983\xed\xe2" +
-	"\xd7f\x13\xa1\xf9Y!7/\xb1~\xc5\x8c'7\xff" +
-	"i\xe3Z\xe2\xf3\x03!9\x12!\xd3\x8f^\xbe\x17H" +
-	"N\xe2\xbd\xb6-\xb7\xbf\x9e7\x7f\x1dQF\x83\x90\xb8" +
-	"\xef\x97\xff\xf0\xe1\x92\xd9_y\x8d\xe4\x8a8\xe7\xc0\xe5" +
-	"\xcbA>v\xb95}\x0b\x10H\xdcz\xdf\xf2\x8fK" +
-	"\x9f8\xb3\x8e(~\x10\x08\xc9\x05|\xa7\x16\x1f\x06\x02" +
-	"rW\xf1\x13\x04~\xfd\x02\xbd.\xf4\xfe\xfe\xf5\x8a\x1f" +
-	"\x80\x90\\\x01\xdf\x0f\x1f#\x08\x04\xe4\xb21O\x10H" +
-	"\x14\xe74?\xf5wo\xfe\xf0k\xb8!p\x1b\xb2\x95" +
-	"\x0e\x8e\xa9\x06\xf9\xd8\x18\x89\x10\xf9\xe8\x98U\x04\x12\x1d" +
-	"w\x0a[\xa7\xfe\xeb}\x1b8\xc2\xa7\x8d\x1d* \xe1" +
-	"\xb7\xbe2\xac~\xf2\x94\xde\xd4u\x18\xe1ec\x9b@" +
-	"\x9e;\x16\xd7\x995\xf6\xb7\x04\x12\xca\xdd\x85\xb9\x81\xfd" +
-	"k{m\xba\xd9Be%/#\xd9sK\x90\xack" +
-	"\xf6\xfe\xec\xd7-s\x87\xde\xc6O8V\xf2\x17\x9cp" +
-	"\x92Mx\xea\x8d\xb1\xb7\xc6\xbfTw\x9bE\x89E\xee" +
-	"\xba\xd2ax\xb0\x1d\xa5\x01\x02\x89\x86\x7f~m\xf7\x92" +
-	"\xbfV~\x9d\xf8F\xf7;\xd7s\xa5- \x1f)E" +
-	"z\x0e\xb1\xc9\xb7\x0d{\xa0\xed\xaa\x0fZ\xb6q\xe7:" +
-	"Y:\x0a\xcf\xf5\xe0S\xeb\xf6o\xdd\x95\xf3\x0d<W" +
-	"^\xea:\xef\x94\x8e\x02\xf9T\xe9\x08B\xa6\x9f)\xbd" +
-	"Z \x90xf\xe8\"\xe5\x87\xab\x96\x7f\x93'\xab\xfe" +
-	"J\xc6\xefeW\xe2N%\xffV\xd6\xbd\xec\xe9uw" +
-	"'Il\xf3\x95o\xe0\xc9v]\x89\xbc\xf9\xc1\xad\xbf" +
-	"\xda^Q\xfc\xc8\x0e~\x895\xe3Kp\x89\xed\xe3q" +
-	"\x89\x9c#\xf7\xfdRi\xdc\xbf\x03I\x129\x92\x98p" +
-	"\x0f\x8do\x02\xf9\xed\xf1\xf8\xef\xf1\xf1LG\xf4\xb2\xef" +
-	"\x1ch\xbd\xeb\xf4=\xf6zl\x16-c$u\x97\xa1" +
-	"P\xbb\xef\xf8\xc5t3W\xbd7\x85SLr\xc7\xcb" +
-	"\x9a@\xee+CN\x9d,C\xbe\x97~y{\xf4\x99" +
-	"\x87F\xef\"\xbe\x89\x0e\xa76\xfa\xff\x82\xaa{\xc9\xd6" +
-	"W\xeb\x86\x8d\x9a\xb4\x8b\x17\xd9\x1a?\x93\xc8v?~" +
-	"\xdaW\xb4\xe6\xf6\x0fv-\xdfE|\xa39\xb2\x09L" +
-	"/\x9f\xd8\x02r\xd5D\xfc`\xeeDI\x90wN\x92" +
-	"\x08I\xf8~s\xf8u\xba\xf4\x89\xa4\xf5z'U\xe0" +
-	"z;'!\xdd\xb7\xfc\xf4\x8e\x8f\x02\xf9\xd3\x1e\xe2\x84" +
-	"vv\x12#\xa5\xf6p\xc3\xa8\xeb\x97v<\xc4\xb3\xf0" +
-	"\xd4\xa4J\xfctH9\xb2\xf0_\x8e|\xff7\xb3\x17" +
-	"\x07\x1f\xe6N1\xb7\xfc\x0f\xf8\xa9\xfc\xf15\x9f_\xb7" +
-	"\xaa\xeb\xbb\xbc\x86\x97\x1f\xc67\xda\x987\x9e}r\xcc" +
-	"\xfe\xef\xf2\x8b^Q>\x0a\x17\x9d\xcb\x16\xfd\xda=\xe5" +
-	"\xeb\x8e\xe6\xbd\xfa8Opg\xf9P\x9c\xd0[\x8e\x04" +
-	"\x8fxi\xbc<\xa7g\xc3n~\xc2\xc9r&\x89\xb3" +
-	"\xe5\xc8\xa1m\xa5=\x9bw\xde\xfb\xd2S8A\xb4'" +
-	"\xec\x98\xfc.\xea\xc6c\x93q\xc2G\x0dym\xf7O" +
-	"m\xde\xc3Q\xa7LA\xfb\xfbA\xcd\x89\xbe\xed\xd7\xf7" +
-	"<\x97\xa2\x12\xb9L\xff\xa6,\x07y\xd9\x14\xfc\xf7\xfa" +
-	")\x1aj\xe9\xd6\x11?>\xf8h\xd5\x86\xbd\xa9^\xc6" +
-	"R\xeai\xcbA>=\x0dE~j\x1a*\xe4\xfdk" +
-	"O\x8c}\xa1\xe7\xbd\xbd\x16\xb3l\xcfP\xc1\xc8>^" +
-	"\x81\x07\x7f\xe9\xf1\xbd/\x7f^\xf9\xcd\xe79\xaa\xceT" +
-	"0n\xf6\xec\xd9\xb7\xfb\xdd\x7f:\xfa<\xc7\xe7\xbe\x0a" +
-	"\xe6/\x0a}\xb7\xdf\xb7\xcd\x1f\xde\x97\x96\x84\x13\x15\x95" +
-	" \x9f\xae`b\xab(F%\xdes\xf8\x86Q\x13?" +
-	"\xfd\xfd\x0b\xc4rdl\xa5\xdc\x19\xcca\x8c\x9c\x814" +
-	"\x9c\xdet\xe9\xc9O\xef\x9fp \xc9\xaef\xcdx\x11" +
-	"g\xd4\xcf@\xde\xdd\xd8^:q\xef\x90g\x0e\x10e" +
-	"\xa2\xbb\xc4\xc9\x19\x7f\xc0\x09gg\xa0x\xee\xb8\xf3\xc5" +
-	"\x8fN\x7f\xf3\x86\x17m\xee[\x96r\xfdU(\xc0\xe9" +
-	"7]\xf5e$c\xe9g\xcb\x1e.\x1e\xff\xc9O\x92" +
-	"v9\xf4ET\x82\xe9\xef|\x91Q\xdaw\xd7?\xee" +
-	"|\xe7\xef\xf3\x0f\xa5X\x13[\xec\xf4\xd5M \x0f\x99" +
-	"\x89\xac\xcd\x9d\x89[>\xf41\xfd\xb8\xea\xe1\xea\xc3\xbc" +
-	"F\xa83?`\xee\x9bM(\xff\xf6\xd9S5\xc1\xce" +
-	"#\xf6\xb9\xad\x0d\x8f\xcfd\x07\xefc3\xd4;\xff\x0c" +
-	"\xa3\xce~t\x84\xe7\xcc\xa2Y\xcc]\xd0Y\xc8\x99\xcb" +
-	"\xde\xdc{\xf6\xe6-k\x7fF|\xa5\x82\xe7\xce\x08L" +
-	"\xef\x9d\xd5\x04\xf2\x8eYH\xcd\xf6Y\x8b\x09$\xf2\xd7" +
-	".Y\xb2\xa1\xf4\xc0\xcfy\x0d\x7fd\x16S\xe0\x03l" +
-	"\xa9\xdb\x83g\xdf\x9f\xbdN=\xca\x93{j\x16\xd3\xcf" +
-	"\xdcJ\xe4\xf1\x87\xf3\xf3\x16W\xfdd\xc2\xcbi\xa3\xc0" +
-	"\xce\xca\x16\x90wW\xe2~\x8fU\xa2b\xad\x189i" +
-	"K\xfd\xfdW\xbflK\xc4\xe2Q\xefl\xb6\xe1\xce\xd9" +
-	"8\x03\xee\xd1\xb6N?\xb5\xee\xe5~.\xa3kN\x13" +
-	"\xc8\x1b\xe7\xb0\x0f\xe6\xcc\xcf\x93\x8f\x04\xd1e\xd4\xdc|" +
-	"\xcf[\xb1\x12\xff+\xfc\x01\xf6\x04\x19;\x0f\x05\xf1\x00" +
-	"\xf7\x8eh\xbb\xfb\x9e\xdf\xee{5\xc9\x02\x83{q\xc2" +
-	"\x99 \x1e\xa0j\xc1\x9d\xbb\xe6}\x08\xaf\xf3+l\xab" +
-	"b\xde\xf9\xc1*\\A<q\xf8?\x87?s\xc3\x9b" +
-	"i\xf5\xf6XU\x13\xc8'\xab\xf0\x84'\xaa\x90\xfe\x9b" +
-	"\x97\xdd\xbc\xf0\x89\xb7.}\x8b\x17\xce\xb1j\xa6\x94'" +
-	"\xaaq\xb9\xad\x9f\x1b\xef\x1c8;\xf2\xad$\xf9\xe6\xd6" +
-	"0\x92G\xd6\xa0|'\xde6\xf3\xf8\xb0M#\xdeN" +
-	"r\x835\xdf\xc3\x09\xdb\xd9\x84_\xdf\xb5\xea\x95\xc7\xff" +
-	"\xb4\xeeW\x9c\x8d\x9d\xa9\x11\xd0\xc6~x\xf5\x7fo\xa9" +
-	"\xf8\xecv\xfeM_\x0ds\x90\xf3k}\x9b6\x87\x9f" +
-	"\xe7\xdf\xbcc\xbdy\xfa\xf3O\xd6l\xda\xf3\xf6{I" +
-	"\x04\x1d\xaba\x19\xc5\xc9\x1ad\xd1\xf7\xc6]\xde;a" +
-	"c\xd5\xfb<\x8bzk\xd9\x84\x1d\xb5x\xa6\x07\xbe\xf4" +
-	"\xedC\xadz\xf1\x7f%-\xb1\xaf\x96\x89\xf5X-K" +
-	"#\xde\xf8\xfa\x1f\x7f\xfb\xfd\x7f\xff\x1d\xcf\x96y\xf3\x98" +
-	"+]6\x8fy\x94\xc7\xde|\xfa[_)>\x99\x14" +
-	"\xdd\xe7Y\xd1\x9dM\x08LY8m\xe1w\xde\xff\x90" +
-	"_\xe1\xb9y\xcc'\x1da\x13\xaa?y\xe1\x99u\x9b" +
-	"\xbf\xd3G|\xa3\x85$\xcd\xe9\x9b\xb7\x09\xe4\xdc:\x94" +
-	"\x11\xd4\xb5\x13H\xec}\xe0\xd9eK\xb7\xbd\xdb\xe7h" +
-	"!\xdb\xac\xbc\x8e\xc9\xbc\xaa\x0e\xc9\xfdI\xd5\xf0\xd8\xfd" +
-	"k\xab?\xe6\xa9\xd9Y\xc76\xdb]\x87\x9b}Z\xd2" +
-	":\xfa\x0b\xbd\xf7}\x82K82:Z\xc7\x84x\xa2" +
-	"\x0eyv\xef\xfb\xfa\x0f\xbe}\xe3_?\xe1]\xe8\x9a" +
-	"\xf9\xcc\xf7l\x9b\xcfV\xd8\xdd\xf7\xc6\xe2E\x9f\xfc\x9e" +
-	"\xdfb\xf7|\xa6(\x07\xd8\x84\xc2!{\x0a[G." +
-	"\xfd#/\xb1\xf9\xcc\x93.\xfe\xdd\xae\xf8\x15[V\xf3" +
-	"o\x8e\xcf\x1f\x86o>\xac\xaf\xfa\xf9\x8f'n\xf8#" +
-	"\x9ff\xce\xff\x00H\xce\xd9\xbc\x09mw\xfd\x87\xf2\xa9" +
-	"}bf\x9d\x07\x199\xd3\x8f\xcfg^,\xbe\xeb\x95" +
-	"\x91#\x1e\xfd\xe2gi\xd5\xbcoA+\xc8P\xcf\x02" +
-	"\xee\x02\xe6\x17\xcf\xac\xff\xe0`Y\xd9u\x9f\xf5\xe3v" +
-	"\xa4a\x13\xc8\xeb\x1a\x90\xdbk\x1a\xd0\xc7\xc0\x8b\x0f\xcc" +
-	"\x1e\xff\xde\xd5\x7f\xe6\x05\xb7\xbd\x81\xf9\xb3G\x1a\xf0\xa0" +
-	"\x07\xabK_;\xdc\xb8\xe7\x0cG\xf4\x91\x86\x12<\xce" +
-	"\xaa\x8a\xf7_\xe8\xa8x\xe8\xaf\xdcA\x0f6\xbc\x8bJ" +
-	"\x9b\xf8^\xe1\x96\xc9\xcf<~6I\x1b\x1a\x98_:" +
-	"\xd2\x10 \x09\xf6\xf7j\"\x123\xa9\x1eS\xa3\xb9S" +
-	"\xe2\xbafjSh8bj\xfa\xe4\x90\x1a\x8f\xc5+" +
-	"\xe7\xb1\x87f\xaa\xaf\x8c\x84\xe8dC]I\xc75\x05" +
-	"\xa8\xd1\x155\x0d\xf7\xc3\x9ct\x1f6F\xbb\xda#\xb1" +
-	"\xaa\x90\x19\xd1b\x05\xf5&\xedl\x04PF\x8b9\x84" +
-	"\xe4\x00!\xbe=\x15\x84(O\x8a\xa0</\x80\x0f\xa0" +
-	"\x08\x09\xf4=WM\x88\xf2\xb4\x08\xca~\x01@(B" +
-	"\xa5\xf1\xedk Dy^\x04\xe5%\x01|\"\x14a" +
-	"\x0c\xf2\x1d\xc4\x89\xfbEP~*\x80/G(\x82\x1c" +
-	"B|\x87*\x09Q~$\x82\xf2\x0b\x01|\xb9b\x11" +
-	"\xe4\x12\xe2;\x82\xfb\xbc$\x82\xf2\xaa\x00\xbe<\xa1\x08" +
-	"\xf2\x08\xf1\x1dm!D\xf9\x85\x08\xca[\x02\x14G\xd5" +
-	"V\x1a\x85\x8b\x88\x00\x17\x11\xe8\xd1i<\xaa\x86\xa8\xf3" +
-	"\x9ch\xd3\xb5\xce\x85\x91\x18%\x84@>\x11 \x9f@" +
-	"\x0f\x8e\xd5hQ\xe79`j8\xc3y,65\xee" +
-	"e\"\xce\xf8\xf0%\x95\x88\x9d\xde\xaa\x0e\xe7\xf2\xce\xcf" +
-	"r5\x1e\x8fv/\x8e\x8fkTu\xb5\xd3 D\xb9" +
-	"\xc8\xe5\xe1<dM\xad\x08J#\xf2P\xb0x\xb8\x08" +
-	"\x07\x17\x8a\xa0\\\xe7\xf1\xf0\xdaQ\x84(\x8d\"(7" +
-	"\x08\x90\x08E#4f\xd6\x87\xf1DC\x88\x00C\x08" +
-	"$Z\xbb\xda\xda\xa8n\x8d\xd9\x84\x8bZ\x1c\x0a\xf9\xc0" +
-	"\x08\x85\x1c\xe1R\x86\x84[ZP\x17Y\xed\xd0\xcf\x93" +
-	"\xdf\xc2\x93o\xab\xc0\"\x94\xec\x02\x11\x94%\x1e\xf9J" +
-	"\x85w\xa4\xb4\xfc\xeci\x8b\xac\xaeUM\xd5y.\x8e" +
-	"\xc4\xc2t\xb5+\x82s\xea\xe9\x02m%\xd5\x9b\x98F" +
-	"\x13T\xd1|\x97\xbe2\xe4\xe4\x04\x11\x94\x19\x028\xe4" +
-	"MCR&\x89\xa0\xccDNj1\x93\xc6L\x03\xb9" +
-	"\xe6\xec\xdc\xa6u\xc5\xc2\x00D\x00\xb8 vY\x14\x19" +
-	"\x84\x9c\x9b\xfa\xe6H{L5\xbbtZ\x1fk\x03\x0d" +
-	"\xe9/t\xe9W\x91\xd6\x1bDP:8\xfeR\x9d\x10" +
-	"%,\x82\x12\x17\xc0'\xd8\x0c\xeeDIDEPn" +
-	"\x13\x00D\xcb\xc4z\xd7\x13\xa2l\x10A\xd9\x9aj#" +
-	"\x89\xb0\x16\xea\xea\xa41\x93\x14\xabh\xdd\xeex\x1cE" +
-	"LMJD\xdd\x80K\x084\x8a\x00\x85^\xc5I\x00" +
-	"\x07\x13j\xc8\x8c\xac\xa4\x8d*X\x93u\xd2ON\x19" +
-	"XEH\xeb\x8cG\xa9I-\xb5\x02\x83W+<v" +
-	"P\x04e!w\xecz?\xa7k\xce\xb1\x17\x95x\xba" +
-	"V\xdc\xda\xd5V\x1fvH)\x88r\x06-\x858s" +
-	"\xce\x82F\xc3\x91\xcd\x02\x1a\x8d\x8f\x0bX\x06\xf0\x7fN" +
-	"h\x06\xaa\x17\x8e\x18!U\x0f7\xd1\x10\xdaB\xb7\xad" +
-	"{`(9.\xad\x17\xa3Y\xe6\x8b\xa0\x14\x09\xd0c" +
-	"\xeb}?ovn\x0dmTuQeQ\x80[\xb6" +
-	"\xc2[6E\xc9\xb2\xa0\xbf\x9d\x9a\x96\xe1TGb\xe1" +
-	"H\xac\xdd`Z!vz\x11J\x1ch\x11qq\\" +
-	"\xc9\x01\xbe\x1a\x80\xca\xc0\xe2\xf8\x92\xee8U&8d" +
-	"\xcaC\xa0\x81\x90\xe6|\x10\xa1\xb9\x08<a\xc9>\xa8" +
-	"&\xa4\xf9\"\x1c\xbf\x0c\xc7\x85|&/y8\xf8\x09" +
-	"i.\xc4\xf1\xd18.\xe62\x9b\x92GB\x0b!\xcd" +
-	"\x97\xe1\xf88\x1c\xcf\xc9c\x91K\x1e\x0bM\x844\x8f" +
-	"\xc1\xf1I \x00\xe4\xb2\xd8%\x97\xb1\xe9\x13px\x06" +
-	"N\xcf\x93X\xf8\x92\xa71r\xa6\xe2\xf8\x1c\x1c\x97\xf2" +
-	"\x8b\x80\x81H\x8c\x9c\x198\x1e\xc4\xf1\xfc!E\x90O" +
-	"\x88<\x17*\x09i\x9e\x89\xe3\xb58>dh\x11\x0c" +
-	"!D\xae\x82\x0aB\x9a\xe7\xe0\xf8\x02H\x1f\x19zV" +
-	"R\xdd@\x1b\xb7\x9f\x0b\xcc\xee8\x85\x02\x8f_\x04\xa0" +
-	"\x80I\xcb\xa0\xba\xb90BDO\x1d\xed\xc1\x1a\x8d@" +
-	"4el\x09%\xe2j\xf3\x7f/\xc8\x0eFY\xae\xa1" +
-	"\xdd\x86\xebfy\x9d\xf4\xdb:9N\x80\x82\x15\xb4\xdb" +
-	"ueH\xed%\xd9\xb9\x00-Ncu\x91(\xb5\xf6" +
-	"\x11M\x83w\xcf\x18^n\x14A\x89z\xe1%R\xcd" +
-	"{g\xb0\xbd3\x0ev\x88\xa0\x98\xa8Jc,\xf7|" +
-	"\xd3rB\x94\xb8\x08\xca-B\xda\xf0\x9dj\xa4\xa9\x82" +
-	"d<G\x8b'\x05h\xf3\x83\x89X\xfd\xcd\x0eO)" +
-	"E\xcd$\xc7\xd1\xc0R\x16P& \x9d\xf6D\xa4\xd3" +
-	"\x8d\x0f.\xcef\xc7\x87sz\x93\x85F\xbc6\xa2\xb6" +
-	"\xc74\xc3\x8c@(%\xa5\xf4\xa7K)K\xbc\x94\xd2" +
-	"\xf5\xa7\xfb\x90\xa3\xcf\x8a\xa0\xfc\x089j\x07\xbc\x03\x95" +
-	"\\\xa2\x99Sh\xe5\x94\x07\x1b\xbc\x9c\xd26K\xdf\x91" +
-	"j>\xa5\x04;\xa5\xc4\xaf\x7f*\x82\xf2\xba0\xb0S" +
-	"\xee\xa1\xb10\xaf\xc5\x01\x1a\x0b\xf3jl\xd0\x95T\x8f" +
-	"\x98\xdd\xc8\x9f<\"@\x1e\x81\x9eNj\x18j\xbb\x9b" +
-	"\xea\x04\x0c\xadK\x0f\xd1\x0br\x93u\x91\xd5\xd4p\x13" +
-	"2.\xe1i\xf1\x12\x1e\x97\x81\xd3\xaa\xb9\x8c'\x93\xe4" +
-	"+\x93\xb2\xc0\xd2\x18hG\x01\x9e/!\xe4b\x9f+" +
-	"@\xa5\x95Kh\xd3\x11%\xad\xa0\xdd^\xbeB\x8d\x90" +
-	"\x1e\x89\x9bD\xe2\xb3\x95s\x9aq\x0ds\x855j4" +
-	"\xda\xaa\x86VLn\x8bDiM\x87\x1ak\xa7\xe1\xfe" +
-	"\xe5O6\xac\xb7\xea!\xe3o\x96\xb6\xe4\x9c\xef\xb0b" +
-	"h\x05\x0ae\x8c\x98K\x88[\x9f\x83\x03\x8c\xf8N\xb5" +
-	"\x12\xc1wR\x02\xaf\xb8\x07\x074\xf6\xbd\xddB\x04\xdf" +
-	"1\x09\x04\x17;\x00\xa76\xf5\x1dj \x82\xef\x80\x04" +
-	"\xa2\x0b\x9b\x82\x03\x82\xfa\xf6\xe8D\xf0=&A\x8e\x8b" +
-	"E\x82\x03\xa7\xfbv\xe1~;$\xc8ujs\x0e\xbd" +
-	"\xd9\x8c\xefz%\xc8s\xb1\x1ep\xe0\x00_7\xaey" +
-	"\x93\x04\x92\x8b\xa6\x81\x03\x08\xf8\xe8W\x89\xe0[&%" +
-	"\x8c\x0em\xd5\"j\x18DR\xdbi\x10\x12\x9d\xdaJ" +
-	"Z\xd3\xa5\x1bD\xd4\xf4 $\x1c\xdfM\x08\x09Bb" +
-	"\x05\xedn\xa2\xed\x11\x83\x14\x9bT\xa7\xe1 $\x1c\x9d" +
-	" R;{6\xa8Y\xadi+:\x89\xa4\xea+\xf0" +
-	"\xb9C[\x85\x03\xa4\xb8S\xd5W\x18AH\xc4u\xad" +
-	"3nVk$\xa0\xad\xe8d\x93\x1aap\x16\\K" +
-	"C\x9a\xae\xda\xaaTl%\x96\xe9\x0b\x17\xb7.L\xae" +
-	"\\\xfaG\xfadM\xca&\xc8%GT;\xcf\xbd\xe0" +
-	"c9f\xc6\xc7\x92V.\x96\x84\xed\xb9D\xd2b^" +
-	"\xb5\xe1\x00\xfe)\xb1$\x13\x1bw\xc4\xaf\xe9\xe3\x9ah" +
-	"q\xb2\x89\xe7e\x06\x8dT\x19i\xea\xb6\xc1\xb8\x077" +
-	"]H\x93*\x8f\x13\xa08b\xd2N\xae\xc4r\xafG" +
-	"S\x8e=\x88\xdc\xdf\x85\x19\xce\xa7N88U\x04e" +
-	"N\xe6\x90B6tu\xc5\xc3\xaaI\x97F\xe8\xaa\xb8" +
-	"\xa6\x9b\xe9\xd0\x83\xb4\xe0G5\x1f,D;XTr" +
-	"\xf0A\xba\x1c\xd7\xd4\xe2IQ\xb9\x83F\xda;\xccA" +
-	"\x9a\xc2\xb5\x8cp\xe6\xe1\xa5\x94z\xef|p\x8d\xeb\xe1" +
-	"\xaf\xc5\xe4n\x89\x08\xca\x8dY0\xd7\x88\xc4Bt)" +
-	"\xd5IAR\x9e7x\x9eg\x08A\xf0\xa6[\x80\xea" +
-	"\x8b\xf1c\x92[;]\xc1j!\xb7\xb6qk\xa72" +
-	"(!\xa4y\x1c\x8eO\x05\x17\xeb\x91\xcb\xd9t\xaf\xe6" +
-	"\x11s\xac\xd2i\x1a\x1b\x9f\x84\xe33Y\xe9$Z\xa5" +
-	"\xd3U\xac\xb6\xf1j\xa1\\\xbbv\x9a\x05_M\xaay" +
-	"\xec<M\xaeb\xe3A\x1c_\xc8j\xa7\xb5V\xedT" +
-	"\xcfj\xa7Z\x1cod\xb5\x93`\xd5N\x8b\xd8\xf8\x02" +
-	"\x1c_\xc2j'\xd1\xaa\x9d\x14V\x9b5\xe2\xf8\x0d8" +
-	">4\xa7\x08\x86\x12\"_\xcfJ\xb9\xebp<\x0c\xe7" +
-	"H\x05\x0bL\xea\x15@\x05+\"\xb10\x14x\xe8\xbc" +
-	"UU\xa5\xa6\x87]\xb10\xd5\xa3\x91\x18\x09\xd0f\xb3" +
-	";\x8au\x98\x8b0\xdbu\x187\xa5F\x8bj:\x9f" +
-	"\xa4\xa9\xadQ\xea\xe4\xf9\xfd\x92\xb6\xb40%\xd2\x88\xcb" +
-	"\x10\xd03\xcb\xeeji[$\x16A%h\xa2\x05\xa8" +
-	"=\x03#R. \xe5\xf7\xca \xb7\xe4\x89\xf8\xb9:" +
-	"H\x14\xac\x04\xbd\xb3\xc4\xab\x83\x92q\xb6\x82\xb8jv" +
-	"\xb8\xcc\x1c\x1c$\x92\x12\x0d\x9cx\xcf\xa2\xbd\xeb~\x06" +
-	"\x00DL=\xd2\xdeN\xf5\xc1\xc0\xbb\xa1\xa8f\xd0j" +
-	"f\xce\xfd\xc3N\xf6\x84\xf6\xb7Yq \x9b\x0dDb" +
-	"H\x0aJ\xa8\xc8=\xd6\x1atG\xb7XH\xa0\x9b\x85" +
-	"\xf6\xe2Y\xd7\x8a\xa0\xdc\xc1\xf9\xa8\x8d\x95\x1e>\xe8\xd6" +
-	"P\x9bQ\xc0\xb7\x89\xa0\xdc)\x00\xe4X%\xd46\xfc" +
-	"\xfa\x0e\x11\x94\xbb\x85\x0b\xaf\xf4{bt\xd5\x12\xcer" +
-	"\x06\x83\xa4\x9f\x0f\xdeJ\xad\x94\xb3O\x022\x8dV\xe9" +
-	"\xa0z\x7f\xf6P}\x92\xfa\x0f\xba\xaeI\x93G\xa24" +
-	"\xc7\x89\xa0LE\xa2\xc7XD\x97Wx\xd9@r\xce" +
-	"X\x1c\x8e\xe8\xe6\xa0\x90\x84\x0e5\x16\x8eR7\x89\xf4" +
-	"\x92\x90\xcb\\Zv \xaf\xee\x16Ay\x80c\xe0." +
-	"\xa4\xe5[\"(\x0f{\x0c|\x10\xbd\xc4\xbd\"(\x8f" +
-	"r\xf7E\x8f W\x1f\x10Ay\xd2\x0b\x1d\xbe\xc7\xb0" +
-	"\xdc|T\x04\xe5Y\x8c\x1b9Vq\xbf\xa7\xc9\xc3\x0b" +
-	"\xce\x9f&\xf3efA\xa7\x16\xf6\\g\x88e\x92)" +
-	"\x80\x985\x98\x0a\x88\x0d\xe6\x8a\xc0J\x14\x1d\x9c\x937" +
-	"\xe0\x16\xcf\x80]\xfb\xad\xe0\xed\xd7v\xb1\x1b\xfd\xbc\xfd" +
-	"\xda.vs\x89g\xbf.\x9f\xb6Up\x06\x9c.N" +
-	"dX\x84fs+\xe3\x02\x15\xf5&\x85\xce\x94{\x99" +
-	"$\xb5\xb4\xcfX^\xcd\xa9\xe5\xb9\xaf\xf4\x06\xe9\x9d\x1b" +
-	"\xd5\x82\x8c\xea\xac\x0bI\x8c\xb3\x81\x14\x1d\x08\xe1<\x17" +
-	"V\xfes\x97}\xe9}G\x06\xcah\x1d\xc3\xf6'Z" +
-	"W\xccL\x8b\xfe\xf1\xf8~\x08ge&~\xdcjq" +
-	"|2\x03\xe2\x812\x94\x88)\xed\xe5~Lt|\xc3" +
-	"+\x09\x01\xc1wq%!\x051M\x8b\x07,T9" +
-	"\x10\xa6Qj\xd2\x0b\xc0\xc4\xdc\xf0\x99a\xe1\xe5v5" +
-	"eRo\xa6\x14^n\xaa\x94\xaeT\xf8\x1b\x82A\xd6" +
-	"\xcdZD\x8b\xd5\x9b\xa2uk?\x98\x04\xae2]\x02" +
-	"\xe7\\3\xaeN\xb5Q+\x01\xb6!\xcf@\x98\x9aj" +
-	"\x84\xbf\x09Jse\x90M\x8a\xe4\xe0.\x16\xea\xe2E" +
-	"\x97\xf3`\xf1\xfetX|\x09\x8f\xc5\xdb\xd1\xe5\xa6J" +
-	"\xef\\\x0c\x16jT\xcd\x0e\xeeRx@I\x04\x90\x1e" +
-	"\x9aan\xcd\xab\x8fe\x13a\x06\xd29\x8dG\xe0\xf4" +
-	"\x90\xc8>\xb1\x9a\x08r\xae(\x01\xb8= \xe0t\xbd" +
-	"\xc8g\x84\x16\"\xc8\xa7\x04\x09\x04\xb7\x8f\x0e\x9c\xfe[" +
-	"\xf9\x84\xd0@\x04\xf9mA\x02\xd1\xed\xbb\x04\xa7\x1dK" +
-	">\xca\xbe=$H\x90\xe36Y\x83\xd3\x84(\xef\x13" +
-	"p\xdf\xdd\x82\x04\xb9n\x7f\x168M\xdd\xf2\x83\x82\x9f" +
-	"\x08\xf2\x0eA\x82<\xb7\xc1\x0f\x9c\x1eIy\xb3\xd0J" +
-	"\x04\xb9W\x90@r\xfb\xa0\xc0i\xe2\x93\xbb\x85o\x10" +
-	"A\xee\x12$\xc8w\xfbI\xc1\xe9u\x96#\xc2z\"" +
-	"\xc8\xaa \xc1\x10\xb7\x03\x0a\x9cv+\xf9Z\xe1\xabD" +
-	"\x90\x17\x09\x12\x0cu\x1b\xdd\xc0i,\x92\xab\x84\x0a\"" +
-	"\xc8W\x09\x12|\xc1\xed\xae\x06\xa7\xb3I.\x13t\"" +
-	"\xc8c\x05\x09.r\x9b\xb3\xc1i\x86\x93\x873^]" +
-	",Hp\xb1\xdb\x03\x08N\xb3\x9d\x0c\x8cWg@\x82" +
-	"K\xdc\x867p\xfa\xc8\xe4>\xa8$\x82\xfc\x0eHP" +
-	"\xe0vX\x82\xd3\xdf%\x1f\x03<\xd1\x11\x90\xa0\xd0m" +
-	"\x8f\x05\xa7\xcbU>\x00x\xa2\xe7@\x02\x9f\xdb\x0e\x0c" +
-	"Ns\xaf\xfc\x18|\x97\x08\xf2# \xc10\xb7\x17\x18" +
-	"\x9c\x06ly'\xe0\x89\xb6\x83\x04Ens(8\xdd" +
-	"\xbd\xf2FF\xd5\x1a\x90`\xb8\xdb \x0dN\xff\xa3|" +
-	"\x13\xdb7\x02\x12\\\xea4\xd0{\xad\xef\xf22\xf6\xf6" +
-	"Z\x90`\x84\xdb\xf4\x0cNw\xb0\\\x0f\x9b\x88 \xcf" +
-	"\x03\x09.s\xdbE\xc1ij\x92g\x01\xca\xf7*\x90" +
-	"@v\x9b\xce\xc1\xe9\xf8\x96\xcb\xd8\xdb+@\xea\x09i" +
-	"\xb1\x18\x0d\x99AH\x84#\x06{ \"{L\x06k" +
-	"\x1d\x18\x86\x88\xd4\x08B\x8f\x9d\xf8\x07\xa1\x00\xf3\xf3 " +
-	"\xc6A+\xac\x13\xa9\x8d\xeaA'$\xd7D\xc1\x09f" +
-	"\xe0l\xa1\xea\xe1&\xb0\xb11{ev\xffD\x02\x9a" +
-	"aFBF\x10\x8a;\xf0e\x10\x12\xceu?)f" +
-	"\x17\xfe\xb8\x8d\xdd\xa4`\x11\xe58|\"j\xb1 \x04" +
-	"\xda4\xbdS\xc5m\x9c\xe4\x17\xec\xec\x17\xe7:H\x0c" +
-	"\x09XX\x8c\xb53\x8bT\xe0\xa0\xa4\x05\x11-fp" +
-	"/H1\x03`\x83\x10\xb0\xaa\x10\xfeU\xc0\x8aoA" +
-	"H89$\x09XA/ie\x1b~d\xe4:\x13" +
-	"\xc1\xc96!\x964\xd7\xbe\xf4\x03#\x19\xc5\xce.\xf2" +
-	"5Q\xa3 \x15\xe4\xad\xf4R\x86\x80n\x95j\x85^" +
-	"kvJ\x1fR\x06=kL>\x7f\xb3\xf6\x8blz" +
-	"Y\xb2D}\xdd\xae\xe2L.N\x9b\xb9f\x14\x88\xa7" +
-	"D\xf5\x16;\xfa\xdd\xe2E\xbf\xee\xf5\x84(\xabEP" +
-	"6p\xd1o\xddz\xae\x90\x10\x83V\xf4\xdbX\xe1\x15" +
-	"\x12\x9e\x11\x88\x94\xc7\xa7\x9d_\xc1$\xb5\x005G\xc0" +
-	"\xa6\xc9K\x84\x07l\x0e\x1a\xa0\xb1*\x03\xf6Z\x86\x96" +
-	"\x0e\xc2\xe1\x93\xd3\x0b\xb9\xfdp _W\x9b\xb9\x94\xbc" +
-	"\xc4\xaeU\x82\x1ek\xe7b\xa92S\x04\xa5V\x00I" +
-	"\x8bs|\xe2\xbb\xed.!\x03#\x11\x99vjfz" +
-	"5t!%\xcb%\x19$`\xceU\x18\xbb\x08s$" +
-	"\xe1,\x90\xc9\xf7\xd4\xcb\xde\xfa]\xbf\xe6eH\xc0\"" +
-	"\xeb\"=\xc3\x05\xd2\xea\x90W\x1epn\xa4\xdas#" +
-	"\xae\x17\xa9\xe6\xbd\x88m<\x8bZ=\xb4\xa7_wF" +
-	"\xc8\x02a\\\xfd\x8eiulK\"\x99T\x1f\x8c\xd6" +
-	"\xdb\x91\xd2Kv\xd3\xb4d\\\x86\xe2\xb6Y\x84\xa2\xf5" +
-	"y\xbfE\xc2*+\xeb\xee\x02\xb73#\xc4WRi" +
-	"\x0aw\xde\x18\x90\x989\"(\x0b\xfa;8\xf7\x17]" +
-	"\xb6\xdb\x88\x1a\xf1&\xaa\x86Y{\xc4 P\xa6\xfe\x15" +
-	"\xab\x03\x9f\x0c\xc0\x9b\x0b\xbc\xc2JE\xb5\xd2\xe1\x8ei" +
-	"\x83\x9d\xdbe\x9e}\xd3m\x8a\x14\x06\xe5\xf4r\xcfw" +
-	"\xcb\x83\xa1\xfb\x9aH,LX\xc3l!\xd3\xee\xb2J" +
-	"\xa63c\xabYe>\xb2\x89\x10\x10}\xc3\x9b\x08\x09" +
-	"\xb4w\x99&\xd5{0\x0aG\xd5\xee\x84a\xaaf\x97" +
-	"Q\xad\x12\xd0\xbd\xdb\x0a\xa0Y\x99s\x12\x06\"&;" +
-	"8\xbf\x07\x0e\xb9\xd8\x90\xdfsz\x03_\x15d\xc3\xe6" +
-	"\xe4\xd6\xcetMdi\x05\xeb\xfeJ&E\xb0Y^" +
-	"O;H\xd4\xff\x8b\\\xe6\x1c\x9e\xd6\x09?iz\xeb" +
-	"\x8a\x84\xe4\x1b\xb0l\\\x9b\x95\xd0e\xcct\xf7\xa7\xbc" +
-	"\x99X\xd39\x03W\x86w\xfb\xe7F\x1f\x1c/\x90U" +
-	"\xc6l\x17;!\xd3\xcd1\xb2\x13\x0a\x17?\x1d\xa1\xa4" +
-	"\xbf\xf3q!c\x7f:\xc8\xb8\x84\x87\x8cm\xf0c\xb3" +
-	"\x9f\x87\x8c\xed\x9fbl\xab\xe4\xef|\xb2@D\x0ab" +
-	"\x9a\xe9\xf5\xbae\x03\x8f\xb8~\xb6\x89\x1a\x92}\xf3\xc8" +
-	"]\x1f`D\xbeS\x04\xe5^\xef\x8c;+\xec+\x85" +
-	"\xa7\xb93\xeen\xe1\x9a\x08\x1d\xe0\xea\xb9&\xae_0" +
-	"\x07\xac3\x1eh\xe2~\x83\xe2\xfc\xdc\xe4P\xab\xd7\x1b" +
-	"\xd8c\x05\x007\xa8\x17#\xbd\\xs\x7f\xebi\x87" +
-	"\xb7\x8c\xaf\x0c:T\x83y\x02\x02^j\x10R\xe3\xe8" +
-	"\x8f\xae!\x12\xed6\xb2q\xe9\xd7\xda>\xd8\xbaR\xb6" +
-	"\\z2\xd8\xda\xc0\\\xba\xaf\x82\x81\xad1\x9a0L" +
-	"]\x8d\xb4w\x98\x84\x90\xe2P\x97\x1e\xed\x1eL^\x92" +
-	".\x18&\xe5%i\xd2\xd0\x0b\xba*q\xd0\xe9\xc1\x05" +
-	"\x9a\xcc\xbe\x1e\xd0j\x1d\x847\xf3\xc3\xfeO\x00\x00\x00" +
-	"\xff\xff\xa15\x83\xac"
+const schema_d75b3b54eb3ed6a2 = "x\xda\xcc|{|\x14\xd5\xbd\xf8\xf9\xcel2\x81\x8a" +
+	"a\x9cP\x1e\x85_$\x84\x12\x02\x01\x12P \x02\xbb" +
+	"\x09\xcf\x84\xc4d\x12\xa0\x9a\xc2\xe7\xe7f\xf7$\x19\xd8" +
+	"\xec\xae\xbb\xb3@\xaa\x18B\xa1\x15\x14\x81^\xa9r[" +
+	"\xab\x01\xb5\xda+>\xaaX\xe1\x8a%Z\xaap\x8b-" +
+	">Z_\xb4U\xe1ZT\xb0\xb6E\xab\xde\xb8\xf7\xf3" +
+	"=\xf3:\xbbY\xc8&\xf4s\xdb\x0f\x7f\xc0\x9e9s" +
+	"\xce\xf7\xfd\x1e\xa6L\x1c\xe6q\x15\x0f\x0a\xcd#B\xfd" +
+	"H1#3\xbea\xd5\xb4G\xb7\xfem\xf3z\"\x17" +
+	"\x02!.\x89\x90\xa9\xa3\xf2\x0e\x00q\xc5\xdfm\xdav" +
+	"\xcbk\x99\x0b;\x88:\x12\x84\xf8\xee\xdf\xce\xf9`\xc9" +
+	"U\xdf\xfc\x1d\xc9\x10q\xcf\xa0\xbc\x95\xa0\x8c\xce3\xb6" +
+	"o\x03\x02\xf1\x9bv\xaf<;\xe6\x91\xcf:\x88Z\x08" +
+	"\x02!\x19\x80\xcf\xf6\x8e9\x0a\x04\x94\xae1\x8f\x10\xf8" +
+	"\xc33\xf4\x1a\xdf\xc9C\x1b\xd4B\x00B2\x04|\xee" +
+	"\xcd\x17\x04\x02J,\xff\x11\x02\xf1\\W\xfd\xe3_{" +
+	"\xf3\xb9o\xe3\x85\xc0]\xc8N\x92\xc7\x96\x832z\xac" +
+	"D\x882j\xec\x1a\x02\xf1\xf7^{x\xfa\xa7\xe32" +
+	"7\x12y\x82\x05\xf8\xba\xb1#\x04\xe2\x8a\xb7\xdc.l" +
+	"\x9f\xf2\xef\xbb7r(\xc5\xc6\x0e\xc4'\xef\xde\xf4\xf2" +
+	"e\x15\x93&oJ\xbe\x81\xa1\xd4:\xb6\x0e\x94\x0ev" +
+	"\xc3\xba\xb1\xef\x11\x88\xabw\x0e\xcep\x1fZ\xbf\xc9\xc4" +
+	"\x88\x1d\xd4\xfa\xf5\x97\x10\xa1\x8e\xaf#\xc0\x8b\x0f\xbc\xf8" +
+	"\x87\x86\xd9\x03o\xe67\x0c\x1f\xf79n(\x1a\x87\x1b" +
+	"\x1e\x7fc\xf4M\xe1\xab\x17\xdcl@b rx\xdc" +
+	"e\x88\xf2\x89qn\x02\xf1\xca\xef\xfe\xee\xb1%_\x94" +
+	"\xdeF\xe4\x91=0\xee\x1e\xd7\x00\x8a\\\x80\xf0\x0c*" +
+	"\xc0\xcd7_vo\xd3\x15\xef7\xec\xe0\xf0**`" +
+	"\x18\xdf\xf7x\xc7\xa1\xed\x9d\xae\xef!^\x99\xc9\xe7\x8c" +
+	"-\x18\x01\xca\x15\x05C\x09\x99:\xbb`\xba@ \xfe" +
+	"\xe4\xc0j\xf5\xb95+\xbf\xcf\x83\xb5\xb5\x90q\xa2\xb3" +
+	"\x10o\xca\xfb\xc1\xf8\xb6\x15Ot\xdc\x99\xc0\xcb\xe3\x85" +
+	"o f\xa7\x0a\x916\x99\xbb\x16\xce\xdes\xc5\xf6]" +
+	"\x1c,]\x13J\x11\x96\x9f\xdf\xf4\xfb\x9d%\xb9\x0f\xee" +
+	"\xe2\x0f\xdf?!\x0f\x0f?>\x01\x0fw\x1d\xdb\xfd[" +
+	"\xb5\xf6\xd0.\x04V\xe4\x80e\x02\x911\xb1\x0e\x94\xe1" +
+	"\x13\xf1\x9fC&2\xb9Zp\xec\xc5_\xa8\x1f~~" +
+	"\x17wSg\x11\xbb)2\xfe\xc7]\x8dw\x9c\xbb\xdb" +
+	"\xbc\x89\xbd\xbf\xab\x88\xa1\xb1\xb7\x08E\xa4\xed\xd6\xdfL" +
+	"\xd53\xbc\xf7$Q\xd7\x10\xe0Iu\xa0\x8c\x9e\xc4\xe4" +
+	"i\x12\xf2j\xcc7v\x06\x9e\xbc\x7fd''O\x07" +
+	"'}\x8e\x8ap\xe9\xf6W\x16\\6bb'\xcf\xe6" +
+	"\xc7&1.\x1ea\xaf\x9e\xc9Yw\xcb\xfb\x9d+;" +
+	"\x89<\x92C\x88\xc0T\xef\xe4\x06Pb\x93\xf1\x85\xeb" +
+	"'/\x14\x94\xee)\x12!q\xf9\x8fG_\xa3\xcb\x1e" +
+	"I8\xef\xd4\x94\x12<\xaf{\x0a\xc2=kC\xd5\x80" +
+	"\x8e\xe7\xbf\xbb\x87\x03eE\xf1e\x88\xf2\x8d\xbf\xba\xf5" +
+	"CwV\xf1\xfd\x1c1\x96\x163 \xe7\x1d\xad\x1cq" +
+	"\xed\xb2\x96\xfby\xb2W\x14\x97\xe2\xa1\xdeb$\xfb\xbf" +
+	"\x1d\xfb\xd9\x1f\xaf\xaa\xf1<\xc0\x1d\xba\xb3\xf8/\xf8\xaa" +
+	"rv\xf1\x97\xd7\xac\x89\xfd\x84;ts\xf1Q|\x12" +
+	"\xba\xfc\x8d\xa7\x1e\xbd\xfc\xd0O\xf8C\xd7\x15\x8f\xc0C" +
+	"w\xb2C\xbf}wQ\xc7\xf1\xccW\x1e\xe6Q9\\" +
+	"<\x90\x09x1\xa2\xf2\x83\x93\xf3\xf3\x9f\xdb\xf7\xf9\xc3" +
+	"\xa9XPVR\x02\x8aZ\x82,\xa8.A:\x0e}" +
+	"a\x9c2\xab}\xe3c\xfci\xa7K\x18C\xbb\xd9\x86" +
+	"\x1dc\xda\xb7\xdeu\xcf\x0b\x8f\xe3\x06\xd1\xdc\xb0k\xea" +
+	";(\x96{\xa7\xe2\x86\x0f+3\x9b\xf6L\xa9\xdf\xc7" +
+	"\xa1\xa2Nc\xaa\xff\xfa\x17\xdfZ\xf0\xda\x83W>\xc5" +
+	"=\xa9\x98V\"\x10\xd7\xcf\xe7\x9e:\xb3\xf3\xda\xf6\xfd" +
+	"I\xd2\x98\xc1 \x9c\xb6\x12\x94\xa5\xd3\x8ccB\xa8:" +
+	"\xdb\x87\xfe\xf2\xf0Ce\x1b\x0f$\x1bEF\x9a\xd7\xaf" +
+	"\\\x09\xca\x99+\x11\xa1\xd3W\xa2\x96\xecY\x7fj\xf4" +
+	"3\xed\xef\x1e0hnl:8\x9d!t|:\xd2" +
+	"\xef\x85\x87\x0f\xbc\xf4e\xe9\xf7\x9f\xe6\xa0\xfax:c" +
+	"J\xfb\xbe\x83\x8f\xbd\xf3\x9d\xe3Os\xec:5\x9da" +
+	"2X\xbee\xf7\x8eB\xff\xc1\x94 \x9c\x98^\x0a\xca" +
+	"\x99\xe9\x8cr\xd3sQ\x7f\xf6\x1d]>b\xc2'\x7f" +
+	"~\x86\x18v\x97\x9d\xd4=\x83Y1y&\xc2pn" +
+	"\xcbWO\x7f\xb2\xa7\xa0+A\xd9\x8bg>\x8b;\xca" +
+	"f\"U\xafk\x1e3\xe1\xc0\x80'\xbb\x88:\xc1>" +
+	"\xe2\xed\x99\x7f\xc1\x0d\xe7f\"\x97o\xbd\xfd\xd9\x0f\xcf" +
+	"}\x7f\xf9\xb3&_\x0cUTKQ\x0e\xa6j\xa5\xdf" +
+	"@0\x96}\xba\xe2\x81\xdcq\x1f=\x9fpK\xd7U" +
+	"(KS_\xbf\x8aAz\xe6\x8e\xff\x7f\xd7\xdb\xff/" +
+	"\xebH\x92\xac\xb0\xc3\xce\xcc\xaa\x03\x05f#i\xbbg" +
+	"\xe1\x95\xf7\x9f\xa5g\xcb\x1e(?\xca\xcb\xca\xb5\xb3\xdf" +
+	"G\x98Zg\xe3\x86\xa2\x1fu\x7f<\xd7\xd3z\xcc\xc4" +
+	"\xdb\xb4a\xb3\x19\xe2\xa7\xd8\x0e\xef\xed\x7f\x87\x11\xdd\x1f" +
+	"\x1e\xe3)3\x7f\x0e\xb3T+\xe6 e\x86\xbdy\xa0" +
+	"\xfb\x86m\xeb_$\xf2\x18\xc1\xb1\xb1\x04\xa6\xae\x9bS" +
+	"\x07\xca\x8e9\x08\xcd\xd695\x04\xe2Y\xeb\x97,\xd9" +
+	"8\xa6\xeb\xd7\xbc\xa2t\xceaz\xb0\x9f\x1du\xcd\xb8" +
+	"\xc5\x97\xde\xe0\xfa\xe0\xd7\x1c\xa3O\xcfaV\xec\x16O" +
+	"\xf7\xc9\xab:\xbc\xc7yD\xde\x9e\xc3d\xfa\xdc\x1c\xa4" +
+	"\xfe\x90\xf6\xdb\x96\xaf\xbc-\xeb%\xee\xd5\xadn\x94\xdc" +
+	"\xf8\x07\x0b3k\xca\x9e/x)\xa5;\xdb\xe4n\x00" +
+	"e\x97\x1ba\xdc\xe9Fa\\5|\xe2\xb6\x8a=\xd3" +
+	"_2\x85\x91\x91\xb5\xd5\xc3\xcc\xd8&\x0f\xd2\x03\xee\x0e" +
+	"m\x9f\xfaq\xc7K=\xcc\xd8)O\x1d(\x9fy\xf0" +
+	"\x85s\x9e\x85\x92\xd2=\x1f\xcd\xd8\xdc\x1b\xee~+\x98" +
+	"W\xf82\x8f\xf3\xa9\xf9\x8c\x03\x9f\xcdG\x9c\xef\x19\xda" +
+	"t\xe7\xdd\xef\x1d|%\xc1=.8\x80\x1b\xc6/@" +
+	"\xcc\xca\x16\xdd\xde9\xff\x03x\x8d?\xa1k\x01\xf32" +
+	"\xaf.\xc0\x13&\xdf4}\xd3\x9b\xe3\xff\xf2:\x87z" +
+	"\xc6B\x86\xbax\xea\xe8\x7f\x0dyr\xf9\x9b)\x95\xa0" +
+	"{A\x1d(\xf2B\xe69\x17\"\xea7\xac\xb8\xa1\xea" +
+	"\x91\xb7\xbe\xfaV\x82\x0e,d\x12>h\x11^\xb4\xfd" +
+	"\xcb\xe8\xdb]\xdd\xc3\xdfJ\x10\x96\xa2E\x0c\x99\xb2E" +
+	"H\x9c\x097\xcfx\xfd\xb2-CO\xf0\xc8\xec]\xf4" +
+	"S\xdcp\x90m\xf8\xc3\x1dk^~\xf8o\x1d\xbf\xe7" +
+	"\x14vt\x053\xda\xcfM\xff\x9fm%\x9f\xde\xc2?" +
+	"\x19^\xc1\xfc\xf6\xc2y\xf2\x96\xad\xfe\xa7\xf9'r\x05" +
+	"3\xe73~\xef\xfd\xce\x881g\xdf\xe1!\xce\xa8(" +
+	"Df\x8d\xaa@\x88\x9f\xf8\xf2\xa3u[\xf6\x9dx7" +
+	"\x01\xe2\xd9\x15,\xdcR+\x90\xba?\xcd\x1f\xb5\xa9`" +
+	"s\xd9I\x9e\xbag\x8c\x0dP\x89G\xdc{\xf5\x8f\x8e" +
+	"4Fr\xff;\xe1\x88\xb1\x95LjgW\"N-" +
+	"o\xdc\xf6\xd7\xf7~\xf6\x1f\x7f\xe2\xa1\xd8[\xc9\xec\xff" +
+	"av\xc4\x0b{\xdf|\xe2\x87\xdf\xcc=\xcd\xdfq\xba" +
+	"\x92\xc9\x14,\xc6\x0d\xee\xc9U\xc5U?>\xf9\x01\x7f" +
+	"\xc2\xe8\xc5\xcc\x02^\xc16\x94\x7f\xf4\xcc\x93\x1d[\x7f" +
+	"|\x86\xc8#\x85\x04\xa1[\xbax\x0b(\xad\x8b\x91\x89" +
+	"\xda\xe2v\x02\xf1\x03\xf7>\xb5b\xd9\x8ew\xce\x98V" +
+	"\xc8\xb8\xec\xc1\xc5L\\\x0e.Fp\x9f/\x1b\x12\xdc" +
+	"\xb3\xbe\xfc,\x0f\xcd\xf0*vYQ\x15^V\x7f@" +
+	"~\xf7\xc0\x8bg\x136TW1\xcfK\xd9\x86O\xf2" +
+	"\x1aG~e\xd3\xee\x8f\xf0\x0e\x8b\xcb\x9b\xaa\x98\x18\xec" +
+	"\xaaB\xa2\xdes2\xf2\xf3\x1f]\xf7\xc5G\xbcE/" +
+	"\xaef\xa6p~5;\xe1\xb13o\xd4T\x7f\xf4g" +
+	"\xfe\x0aZ\xcdD-\xc66\x0c\x1e\xb0op\xe3\xf0e" +
+	"\x7f\xe5\xfdp5\x93\x86\x9a?u\x86\xc7n[\xcb?" +
+	"\xd9j<\xf9\xa0\xa2\xec\xd7\xbf\x9c\xb0\xf1\xaf\x9c\x1el" +
+	"\xaa~\x1f\x88\xab;\xb3\xa0\xe9\x8e\xffT?\xe1T\xba" +
+	"\xad\x9a\x91\x7fG5R$\xdc\xf9\xf2\xf0\xa1\x0f]\xf9" +
+	"ij5\xa9n\x04E\xbe\x9aECW3#\xfd\xd9" +
+	"\x86\xf7\x0f\x8f\x1f\x7f\xcd\xa7=\x98\xd1V\xb3\x05\x94\x1d" +
+	"5\xcc\xe0\xd5\xa0\xc1\x83g\xef\xbdj\xdc\xbb\xd3\xff\xce" +
+	"\xf3\xf5\xbe\x1af\\\xf7\xd7 \x9a\x87\xcb\xc7\xfc\xeeh" +
+	"\xed\xbe\xcf8\x90O\xd4\xe4!2kJN>\xd3R" +
+	"r\xff\x17\x1c\x9a\xaf\xd6\xbc\x83B\x1f\xff\xe9\xe0m\x93" +
+	"\x9e|\xb8\x9b?\xf4H\x0d3\x85'j\xdc$n\xfe" +
+	"\x09\xc6\xb5\xa0N#Ao cr8\x12\xd2C\x93" +
+	"\xa9_\xd3C\x91I>o8\x18.\x9d\xcf~\xd4\xd3" +
+	"\xc8j\xcdG'E\xbd\xabi~\x9d\x9bFc\x01=" +
+	"j\xbf\xe8J\xf5bm \xd6\xac\x05\xcb|\xba\x16\x0a" +
+	"fW\xe8\xb4\xb5\x16@\x1d)\xba\x08q\x01!\xf2\xbe" +
+	"\x12B\xd4GEP\x9f\x16@\x06\xc8A\x10\xe5\xfd\xe5" +
+	"\x84\xa8O\x88\xa0\x1e\x12\x00\x84\x1c\x14\x1a\xf9`%!" +
+	"\xea\xd3\"\xa8/\x08 \x8b\x90\x83.Q>\x8c\x1b\x0f" +
+	"\x89\xa0\xfeJ\x00\xd9%\xe4\x80\x8b\x10\xf9H)!\xea" +
+	"/DP\x7f#\x80\x9c!\xe6@\x06!\xf21\xbc\xe7" +
+	"\x05\x11\xd4W\x04\x903\x85\x1c\xc8$D>\xde@\x88" +
+	"\xfa\x1b\x11\xd4\xb7\x04\xc8\x0dx\x1bi\x00.!\x02\\" +
+	"B\xa0=B\xc3\x01\xaf\x8fZ\xbf\xe3M\x91Pk\x95" +
+	"\x16\xa4\x84\x10\xc8\"\x02d\x11h\xc7\xb5\xb9\xa1\x80\xf5" +
+	"\xdb\xad\x87p\x87\xf53W\x0fq\x0f\xe3aF\x87\xab" +
+	"\xbdDluN\xb5(\x97\xd9;\xc9\xbd\xe1p\xa0\xad" +
+	"&\x9c_\xeb\x8dx[\xa3\x84\xa8\x97\xd84\x9c\x8f\xa4" +
+	"\x99'\x82Z\x8b4\x14\x0c\x1aV\xe3b\x95\x08\xea5" +
+	"\x0e\x0d\x97\x8e D\xad\x15A].@\xdc\x17\xd0h" +
+	"P\xaf\xf0#F\x03\x88\x00\x03\x08\xc4\x1bcMM4" +
+	"b\xac\x99\x80\x8b\xa10\x0c\xe6\xfd4\x0c\xe6\x00\x97\xd2" +
+	"\x04\xdc\x90\x82\x05\xdaZ\x0b~\x1e\xfc\x06\x1e|S\x04" +
+	"\xaa\x91\xb3\x8bDP\x978\xe0\xab%\x0eJ)\xe9\xd9" +
+	"\xde\xa4\xad\x9d\xe7\xd5\xbd\xd6\xef\\-\xe8\xa7km\x16" +
+	"\\PN\x17\x85V\xd3H\x1d\x93h\x82\"\x9ae\xc3" +
+	"7\x1e)Y \x82:M\x00\x0b\xbcb\x04e\xa2\x08" +
+	"\xea\x0c\xa4d(\xa8\xd3\xa0\x1eE\xaaY77\x85b" +
+	"A?\x00\x11\x00z#\xd7\\\xc6\x88\xb9\xde@\xa0\xd1" +
+	"\xeb[5\xa9E\xf3\xd3\x8a`8\xa6\xd7FB\xada" +
+	"=\x9f\xc1$rj\xd6w\x9a\x1bhE\x09\xb90\x09" +
+	"\xea\xb5\xe6\xa0W\x8fEhE\xb0\x09BH\x84\xc16" +
+	"\x11\xbc\x88\xf0r\x11\xd4\x16\x8eI4B\x88\xea\x17A" +
+	"\x0d\x0b \x0b&\x97Z\x91\x9d\x01\x11\xd4\x9b\x05\x00\xd1" +
+	"\xd0\xd3M\x1b\x08Q7\x8a\xa0nOV\xb4\xb8?\xe4" +
+	"\x8b\xb5\xd2\xa0Nr\xbdh\"\xec\xf50\xca\x09\xd5)" +
+	"\x11#Q\xb8\x94@\xad\x080\xd8I\xed\x09\xe0b\xdc" +
+	"\xeb\xd3\xb5\xd5\xb4\xd6\x0b\xc6\xe6\x08\xe9\xc1\xec4T\xcb" +
+	"\x17j\x0d\x07\xa8N\x0d\xd9\x84(/\x9b\x88\xb6G\x04" +
+	"\xb5\x8aC\xbb\xa2\x90\x13X\x0b\xed\xea<G`s\x1b" +
+	"cM\x15~\x0b\x94\xec\x00g\x15$\x1fg\x13\xfa\x00" +
+	"c\xd4\xe2\xcd\"\x1a\x08\xe7\xbb\x0d-\xfa?\x074\x0d" +
+	"\xd1\xf3kQ\x9f7\xe2\xaf\xa3>T\xa86S\xf6 " +
+	"\xaa\xbalX\x07\xa1ng\x89\xa0\xe6\x08\xd0n*O" +
+	"\x0f\x93xa\x09\xad\xf5FD/s%\xdc\xb1%\xce" +
+	"\xb1IB\xd6\x07\xf8\x9b\xa9n(N\xb9\x16\xf4k\xc1" +
+	"\xe6(\x93\x0a\xb1\xd5\xd1?\xf1|\x87\x885a\xd5\x05" +
+	"|\x86\x03\xa5\xee\x9a\xf0\x92\xb60U\x0b,0\x95\x01" +
+	"PIH}\x16\x88P\x9f\x03\x0e\xb3\x14\x19\xca\x09\xa9" +
+	"\xbf\x04\xd7\x87\xe1\xba\x90\xc5\xf8\xa5\x0c\x81BB\xea\x07" +
+	"\xe3\xfaH\\\x173\x98N)\xc3\xa1\x81\x90\xfaa\xb8" +
+	"\x9e\x8f\xeb\xaeL\xe6\xfe\x94\xd1PGH\xfd\xe5\xb8>" +
+	"\x11\x04\x80\x0c\xe6\x00\x95\xf1l{\x01.O\xc3\xed\x99" +
+	"\x12\xf3\x81J1\x03g\x0a\xae\xcf\xc2u)+\x07\xe3" +
+	"\x18e&\x03g\x1a\xae{p=k@\x0ed\x11\xa2" +
+	"\xcc\x86RB\xeag\xe0\xfa<\\\x1f00\x07\x06\x10" +
+	"\xa2\x94A\x09!\xf5\xb3p}\x11\xa4v/\xed\xabi" +
+	"$\x8a:n\xfe\xce\xd6\xdb\xc2\x14\xb2\x1dz\x11\x80l" +
+	"\xc6\xad(\x8d\xe8U\x1a\x11\x1dq4\x17\xe7\x86\x08\x04" +
+	"\x92\xd6\x96P\"\xae\xd5\xffq\x9e\xba?\xc2\xb2\x98\xb6" +
+	"Em3\xcb\xcbd\xa1)\x93\xf9\x02d\xaf\xa2m\xb6" +
+	")Ch/\xed\x9b\x09\x08\x85ip\x81\x16\xa0\xb6G" +
+	"\xe0\xcd3\xfa\xa8\xebDP\x03\x8e\x8f\xd2\xcay\xeb\x0c" +
+	"\xa6u\xc6\xc5\x16\x11T\x1dE\xe9r\xc3<_\xbf\x92" +
+	"\x105,\x82z\xa3\x902\x06HV\xd2dF2\x9a" +
+	"\xa3\xc6\x93l\xd4\xf9\xf4\xdc^\"r\x86;g~o" +
+	"\xae7\xe8\xa3\x81\x00\xf5\xf7\x8c0\xfb\xa5\xbfH.)" +
+	"\xa0'X\xa0J\x16@\x81Z\x80\x08\x9b\x1b\x11a\xdb" +
+	"\xd1\xd8UN\xd3\xd1\\\xd0,UE\xc3\xf34os" +
+	"0\x14\xd55\xf0%\x05\xb8\x85\xa9\x02\xdc<'\xc0\xb5" +
+	"\x0d\xf3Ad\xcdS\"\xa8\xbf@\xd6\x98\x9e\xb3\xab\x94" +
+	"\x0b{]\x83\x8d\x08\xf7p\xa5\x13\xe1\x9a\xfa-\x1f+" +
+	"\xe7\x03\\0\x03\\|\xfbW\"\xa8\xaf\x09\xe7\xb7\xee" +
+	"\xed4\xe8\xe7\xd5\xc1M\x83~^\x1f\xa2t5\x8dh" +
+	"z\x1b\xd2'\x93\x08\x90I\xa0\xbd\x95F\xa3\xdef;" +
+	"\xf0rGC\xb1\x88\x8f\xf6\xc7\xde\x1a\x8c\xaf\x0d\x85c" +
+	"\xe1\x7f\x10\xe3\x17hki\xd4\x8e3\xb98\xae\xc1\x89" +
+	"\xe3lN\x14\x97s\x81\\:1e:\xd9\x8e!z" +
+	"\xd0\x8c\x92\xd0[\x9c\xcbyc[\x12\xd4F.NO" +
+	"\x05\x94\xb4\x8a\xb69\x11\x14\x8d\xfa\"ZX'\x12\x1f" +
+	"?]\xd0\xb0$\x85\x9cMZ\x80\xcem\xf1\x06\x9b/" +
+	"\x96\xf4F\x9a\x17\xfd\xa7\x05R\xae\xde\x90\x15}\xab\x90" +
+	")\xf9b\x06!v\xd9\x01\xac\x8a\x91\"C#\x11\x94" +
+	"\x01 \x81S\xb5\x00\xab\xc6/w7\x10A>'\x81" +
+	"`WM\xc0J\xbb\xe5\xd3\x95D\x90\xdf\x96@\xb4\xcb" +
+	"\xd3`\x15\x9b\xe5W#D\x90\x8fI\xe0\xb2k\xbe`" +
+	"\xf5E\xe4\xaeF\"\xc8\xfb%\xc8\xb0\x8a\x0e\\ak" +
+	"\xef\x06\"\xc8\xf7I\x90i\x97\xc1\xc0\xaas\xc8\xbb\xf0" +
+	"\xd9\x0e\x09$\xbb\x02\x09V\xa5\x03\xa3mA^'A" +
+	"\x96\xdd\xf3\x00\xab\xaf'_\x8f\xcf4)\x1em\x09\xad" +
+	"\xa9\xa6\xd1(\x91\xbc\xcd\xd4\x03\xf1\xd6\xd0j:7\x16" +
+	"\x89\x121\x14\xf1@\xdc\xf25\x84\x10\x0f\xc4W\xd1\xb6" +
+	":\xda\xacEI\xaeN#\xd4\xef\x81\xb8%1Dj" +
+	"f\xbf\xf18\x14\x010U\x19\xdf\xc2D&y\x0d\xf7" +
+	"\xa1\x91\x073\xbb\xb1\xf6%\xad\xd5B\xff\xdc\xf0<\xea" +
+	"\x0bE\xbc\xa6\x0c\xe6\x1a1r\xeaD\xce\xce\x93\x133" +
+	"\xb9\x9eAK\xa2\x08^T&gjE_|~b" +
+	"\x80a\x86\xfd\x17M\x1aK\xc7y\x8f\xd8\xc8yD\xbf" +
+	"\xb9\x97H\xa1\xa0\x93|Y=\x9d$\x8f\x98\x8e\x81\xb1" +
+	"\xa4+\x14\xc9\xaf\xa3\xb9\x89\xf6%3\xbdrSY4" +
+	"E\x1a\xdb\x1f\xdbdGO)2\x87|\x01r5\x9d" +
+	"\xb6r\x19\xa7\xdd\xb0OB\xbb\x1f\xa9\x90]\xba\xe9M" +
+	"$qq\x8a\x08\xea\xac\xf4\xcb4\x17\xceNP\xffr" +
+	"\xc3V\xf5\xad7\xab\\\x99\xca%\x15:\xb5\x97\xa4\xe4" +
+	"*\x1akd\x0b\\\xf9#\xdb\x9f\xcac\xa6A\xb2X" +
+	"\xd8\xef\xd5\xe92\x8d\xae\x09\x87\"z\xaabQ\xcaZ" +
+	"W9\x0f\xb1hB\\\xcaU\x8bRe#z(\x9c" +
+	"\x10\xf6\xb4P\xad\xb9E\xefOr\xdeL\xf5\xa5\x0cp" +
+	"\xe6\xf9\xa4\xa4\xcc\xbc\xb7\xea\x9cM\xe3\xa5\x18\x86/\x11" +
+	"A\xbd\xae\x0f|\x8fjA\x1f]F#$;!\"" +
+	"\xef?\xcd\xfb\xa5e)\xc3w\xd3\x02\xa7\x131\x19\xd6" +
+	")\x1b5\x14%t\xa2\x9d-\x8fe\xd9\xaf\x9d\xcd\xda" +
+	"\xd9\xf2x\xc8#\xa4>\x1f\xd7\xa7\x80]\"T\x8a\xd8" +
+	"v'\xcb\x15]F\xb2\\\xcc\xd6'\xe2\xfa\x0c\x96," +
+	"\x8bF\xb2|\x05\xcbf\x9d\xec7\xc3\xcc\x96g\xc2\xb7" +
+	"\x12\xb2\\3\xa0V\xca\xd8\xba\x07\xd7\xabX\xb6\xbc\xde" +
+	"\xc8\x96+X\xb6<\x0f\xd7kY\xb6,\x18\xd9r5" +
+	"[_\x84\xebKX\xb6,\x1a\xd9\xb2\xca\xb2\xf1Z\\" +
+	"_\x8e\xeb\x03]90\x90\x10\xe5Z\x96\xbc_\x83\xeb" +
+	"~\xb8@\xcc\x9e\xadS'\xe5\xcd^\xa5\x05\xfd\x90\xed" +
+	"t}\x8c<:9\x8e\x8f\x05\xfd4\x12\xd0\x82\xc4M" +
+	"\xeb\xf5\xb6\x00f\xdevk\xc2\xcc\xbc\xb9-sC\x81" +
+	"P\x84\x0f\x82\xbd\x8d\x01jev=\x82\xe2\x94\xd5m" +
+	"\x84\x11\x8f!\x10I/z\x9eG\x9b\xb4\xa0\x86BP" +
+	"G\xb3Q\x0a\xcf_\x83\xb4K\x90\x85N\xe2k'\xb9" +
+	"Z!\x97\xf9\x8a\x82\x91I\xb5\xe69\x99oby6" +
+	";\xec\xd5[lb\xf6\xaf\x08\x96\xe4\xf0\xac\x88\x89\xc5" +
+	"K\xb6\x19;O\x09L\x8fh\xcd\xcd4\xd2\x9f\xae\x80" +
+	"/\x10\x8a\xd2rf\x16zz\xd6\xbe\x03\xdaS\xf7\xc5" +
+	"\xf3\xe9\xac[\x0b\"(\xc8\xa1\x1c\x1b\xaduh\xd6n" +
+	"4j\xbf\xb6?\xd9\x84\xb8\xae\x17A\xbd\x95\xb3u\x9b" +
+	"K\x9d\x8a\xb0\x9d\xecnE\x06\xdf,\x82z\xbb\x00\xe0" +
+	"2r\xdd\x1d\xf8\xf6\xad\"\xa8w\x0a\x17_\xdbi\x0f" +
+	"\xd25K8\xcd\xe9O\x03\xa6\xb7\x82frm\xa4\xef" +
+	"qN\xba^/U\x87\xa7\xb0\xef\x1d\x9e\x04\xf1\xefw" +
+	"\xde\x98\"\xdcFn\xe6\x8b\xa0NA\xa0/7\x80." +
+	"*q\x02\x9e\xc4\xd0:\xd7\xafE\xf4~\xd5\x8eZ\xbc" +
+	"A\x7f\x80\xdaq\xb2\x13g\x0d\xb3a\xd9\x85\xb4\xbaS" +
+	"\x04\xf5^\x8e\x80\x9d\x08\xcb\x0fEP\x1fp\x08x\x1f" +
+	"Z\x89{DP\x1f\xe2\xda\x8c\x0f\"U\xef\x15A}" +
+	"\xd4q\x1d\xf2^L\xe7\x1f\x12A}\x0a\xfd\x86\xcb\xa8" +
+	"\xc2\xec\xabs\x0a;\xbdg\x13|\x1a\x9f\xdd\x1a\xf2;" +
+	"\xa6\xd3\xc7\x82\xe5\xa4\x12\xa8\xb1\x98\\\x02\xedOS\xc8" +
+	"\x88\x85\xad\xca6\xaf\xc0\x0d\x8e\x02\xdb\xfa[\xc2\xeb\xaf" +
+	"ib7\x17\xf2\xfak\x9a\xd8\xady\x8e\xfe\xdat\xda" +
+	"Q\xc2)p*?\x91f\x92\xdf\x97f\x9e]\x08\xaa" +
+	"\xd0)\xb4&\xb5\xf3\x12\xc4\xd2\xc4\xb1\xa8\x9c\x13\xcb\x0b" +
+	"w\x82\xfbi\x9dk\xbd\xd9i\xa5\xa3\x17\x13\xfb\xf7\xa5" +
+	"\x88l\x95hz\xe9s\x16^8;Nm;\xd2\x10" +
+	"F\x03\x0d\xd3\x9e\x84bA=e\x99\x96\xef\xe8\xf8p" +
+	"Wz\xec\xc7\xabj\xc2\x93X\xeb\x05(Ky\x98\xd0" +
+	"\x8e*\xc4@G\x1eRJ\x08\x08\xf2\xa0RB\xb2\x83" +
+	"\xa1P\xd8m\xf4\x11\xdc~\x1a\xa0:\xbd\x88\x9a\xa3\xed" +
+	">\xd3\xcc-\xed\xd9\xbc\xbe\xe7\x96|\xc0\x1d\x0a6i" +
+	"\x91\xd6T\xb5\xbb4\x04\xc2o\xc7\\\xa9r\x97\x7f\x95" +
+	"\xaeb\xca*qZ\xf9\xc5\\\xa3\xb9\xab\x85\x82\x15\xba" +
+	"h\xe4\xbf\xfd\x89(KSE\x94V\xa7{m\xb2\xd1" +
+	"0\"r\xb3X\xee\xf6S\xdd\xab\xf1\xcd\xc8\x14]\xab" +
+	"\xbe\xc4lV\x11-\xa9\xae\xd4\xab\x8dktt9W" +
+	"\xd7\xf4\x00\xe5\xc2w\xaf\x8f\xb6\x84\x02D\xf2\xd34c" +
+	"u\x9e?\x86\x8e\xe9\xac\xa8j\x0d\xc8\x815\xcc\xa4\xec" +
+	"\x10\xcb\x89\xa0l\x12%\x00{\x18\x09\xac\xe1+\xa5M" +
+	"l \x82r\xbd(\x81`O\x97\x825*\xafP\xb1" +
+	"\x92\x08\xca\x0aQ\x02\xd1\x9eS\x06k\xaePQ\xd9\xbb" +
+	"\x15\xa2\x04.\xfbK\x09\xb0Fs\x95\xd9\xec\xdebQ" +
+	"\x82\x0c{\xd0\x10\xac/3\x94\xb1b!\x11\x94\xe1\xa2" +
+	"\x04\x99\xf6\xd8+X\x93\xc3\xca \xb1\x91\x08J\x86(" +
+	"\x81d\xcf\xeb\x815\xda\xaa|&|\x8f\x08\xca9A" +
+	"\x82,{X\x1b\xac\xcf\x12\x94\xd3\xc2\x06\"(o\x0b" +
+	"\x12\x0c\xb0'\xf5\xc0\x1a\x0bT^\x15\xbeE\x04\xe5\x98" +
+	" \xc1@{\x96\x13\xac\xf96\xa5K(!\x82\xb2O" +
+	"\x90\xe0+\xf6\x87\x10`M\xe0)\x0f\x0a\x11\"(\x9d" +
+	"\x82\x04\x97\xd8\xdfQ\x805\xef\xa9\xec\x14\x90V[\x05" +
+	"\x09\x06\xd9\xf3\xaf`\xcd\x93*\x1d\x02\xd2\xaaM\x90\xe0" +
+	"R{r\x13\xacyG\xa5U(%\x82\xe2\x15$\xc8" +
+	"\xb6\xe7\x8e\xc1\x9aCT\x962\x8c\xaa\x05\x09\x06\xdb\xe3" +
+	"\xe4`M\x85+e\x0c\xa3\x99\x82\x04\xb2=\x85\x0f\xd6" +
+	"\xe4\xbcR$\xfc\x84\x08\xcaxA\x82\xcb\xecA{\xb0" +
+	"\xbe\x95PF1\x8c\x86\x08\x12\xe4\xd8#\xd3`\x8d\xce" +
+	"+\x03\x18T\xdd \xc1\x10\xfb\xbb\x04\xb0\xa6\x82\x95\x8f" +
+	"\x01\xef=\x0d\x12|\xd5\xfa\x0a\xc6\xf9JE9\xc1\x9e" +
+	"\xbe\x0a\x12\x0c\xb5\xbf5\x00k\xf4^9\x02[\x88\xa0" +
+	"\x1c\x06\x09\x86\xd9C\xd4`M\xd7)\xfb\x01\xf9\xbb\x0f" +
+	"$P\xec\xefC\xc0\xfa\x04Cy\x90=\xbd\x0f$\x18" +
+	"nO\x94\x825T\xab\xec\x82\xddDPv\x82\x04#" +
+	"\xec!c\xb0>\xb7P6\x03Rc\x13H\xf05{" +
+	"n\x12\xac1f\xa5\x8d=\x8d\x81\x04#\xed\xd1z\xb0" +
+	">\x0aQ4\xf6\x94\x82\xd4\xee\x0b\x05\x83\xd4\xa7{ " +
+	"\xee\xd7\xa2\xec\x07\x11\xd9\xcf\xc4\xb2\xbdU\x96\"\"\x8d" +
+	"z\xa0\xddL`<\x90\x8dy\x86\x07\xfd\xb9\x11\x9e\x10" +
+	"\xa9\x89F<Vh17\x00\x96S\x06\xeb\x0ao\xc4" +
+	"_\x07f\x19\xd3<\x995<\x89;\x14\xd55_\xd4" +
+	"\x03\xb9-\xf8\xd0\x03qkP\x85\xe4\xb2Q\x15\xbc\xc6" +
+	"\x1c\xaf1\x80\xb2\xfc\x0d\x11CA\x0f\xb8\x9bB\x91V" +
+	"/^c\x05\xf1`F\xf1\xb8\xd7\xaaL\x11\xb7Q\x9b" +
+	"2nf\x1e\x17\xac\x82v\xb6\x16\x0aF\xb9\x07$\x97" +
+	"\xd5\xca=\xe06\xb2)\xfe\x91\xdb\xf0\xd3\x1e\x88[\xb1" +
+	"0q\x1b\xce;\xe1d\xb3R\xcc\xc0\xb56\x82\x155" +
+	"C0a\xaf\xd9e\x06<\xd4rR\x10\x8e\x85\xebi" +
+	"\x80\xfa$\x9d5G\xf8u\xe6\xbd\xb2\xd1}\xd9\x0f*" +
+	"\x82`y\xf1lt\xe3\xc9\x0f\xb87\xf8\xbeH\xdf|" +
+	"{\x1d\x8df'\x97\xfcK\x9d\xe8\xca\x1d1\xb2\xda\xc1" +
+	"\xce\xb7\x18I\x93~iL\x852\x11\xf8\xa7\xcd&\xf5" +
+	"e\xd0\xab\x8f=\x00\xfb\x93\x80\xfe\xc6i,pa\"" +
+	"\xa1\xb3*Kn\x1a\x83\xb3\xf5\xdc\xc4\x17\x84\x93\xe2\x96" +
+	"\x063F\xb9\xd1\x89[\xda6\x10\xa2\xae\x15A\xdd\xc8" +
+	"\xc5-\x1d\x1b\xb8\xdcM\xf4\x18q\xcb\xe6\x12'ws" +
+	"\xf4U\xa4|\xd7\xc3\xfa\xa6/a\xce\xae^\x03\x13&" +
+	"'\xf78\xef\x04\xdeyF \xd3`\x93a\x13RU" +
+	"\xcd\xf8| u_\xaeo\xd5z[+\xb8\xd0)\xcf" +
+	"\x0c\x9d<\x0eigcv8C\x04u\x9e\x00R(" +
+	"\xcc\xd1\x89\x9f\x8b\xbd\x94\x9c\xbf\xf8\x93\xeeLu\xbaM" +
+	"\xcb\x8b\xc9\x12\xd3m]\xd6:\xa2\xdb\xa3u\x99n\x98" +
+	"\xca\x9f\xd1c\x9053\xcdC\xaa\x8da\x93~\x8d&" +
+	"\xa4\xd2?+\x15?\x8f`\xa5\xae3\xa4/\xb7N\x16" +
+	"\xc8\x99\xc0r\xc7\x04\xda\x16\xb0\x9c\xb7\x80\xa6\xc2V7" +
+	":E\xbd\x1ecW>\xa3\xd6f\xebT0\xb4\x80]" +
+	"I$\x9dF\xfa\xa3if \xe1T\xccR\x8cH\x0d" +
+	"C\x113\xd9\x81\xe2$;_fb2\xdd\xe7\x819" +
+	"{R\xca\xc7'\xcc)r\x17^\x01\x11\x98Y\"\xa8" +
+	"\x8bz\x1ag\xfb\xcbW\xd3T\x05\xa2\xe1:\xea\xf5\xb3" +
+	"q\xa5~\x14\x13{\x16&\xac*\xd9yh\xd3gU" +
+	"\xbbp\xf12Uy9\xa5\xa3\xb6\xbfB\xe9\xfbH~" +
+	"\x12\x17\xfaeh3zk\xe6a\xd8\xb1X\x0b\xfa\x09" +
+	"\x1b\xa77\xa4\xfb\x8aR&3E\xe5\xac\x003\xb6\x8e" +
+	"\x10\x10\xe5\xd1\xf8\x97K\x1e\xd5@\x88\xbb9\xa6\xeb4" +
+	"\xd2\x8e\x81D\xc0\xdb\x16\x8f\xea^=\x16-\xf7\x12\x88" +
+	"8\xbd)\xa0\xf1\x00m\xd2\x17\xc6t\x8cl#}2" +
+	"'\x09\xe5/1\xd1\xd0\x16:9\xb3\x9d2\x17:\xc6" +
+	"\xf7\xfc]\xa2\xbe\x90>q\x8e;\xd5\xc4hJf\xdb" +
+	"_\xe6\xf5\x9d\xd9)+E\x96\x9fI1\xa9\x9a#$" +
+	"v\x17\xfb;\xe8aY\xd9\x7f\x898\xf0\x02^\xe5\x1f" +
+	"F\x8aT\xc1p\xda\x0c\xb6\xff\x9b\x86t\x18\xdc\x8b\xb3" +
+	"N\xef\x8b\x91^\x8aJ\xe9y\xeb\x9e\x03/\xa6G\xb1" +
+	"\"\xab\x8b\x8a\x18\xd2-lY=\xa5y\xc9\x85\xadd" +
+	"_a\x7f8\x9f\xceT\xafm\x93\xebhT2\x9b\xd1" +
+	"\\G\x09\xbd\xf7\xed\"\xa8\xf78\xe6\xe2\xae\x12\xb3\xcb" +
+	"\xf4\x04\xe7\xd1\x1fk\xe0\x06\x80\xad\xd2\xe1\xfe:n\xd6" +
+	"\xd7\x05F\xa7\xa4\xab\x8e\xfb\x9a\xcd\xfap\xedH\xa33" +
+	"\xd7\xdbn8\x0b;\x00\xc8Ex9\xf4\xec\x8f\xd8M" +
+	"\xf4\xd2\xee\"\xb5x\xa3Lk\x098a\x84\xcf\x1bF" +
+	";\xb5\x98H\xb4-\xda\x17\xf3\xbf\xd44\xd4\xc6\x94\x81" +
+	"a\xfe\x13\xeb\xef\x95\xcc\xfc\xcb%\xac\xfe\x1e\xa4\xf1\xa8" +
+	"\x1e\xf1j\xcd-:!$\xd7\x17\x8b\x04\xda\xfa\x13\xc3" +
+	"\xa4r\x9c\x091L\x8a0\xf9\xa2\xbagV\xc3\xa2\x7f" +
+	"\x0e(\xbd\xb7\xcf\xab_V\xad>}d\xff7\x00\x00" +
+	"\xff\xffi\x93f\x10"
 
 func RegisterSchema(reg *schemas.Registry) {
 	reg.Register(&schemas.Schema{
@@ -9664,6 +10697,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0x81f9af23ee6aa27e,
 			0x82c000e4635865be,
 			0x83c3db1bb353041f,
+			0x840627f737aed8e7,
 			0x84a29a3090029468,
 			0x852f2e4912d37ee3,
 			0x8580c03f05109851,
@@ -9674,23 +10708,28 @@ func RegisterSchema(reg *schemas.Registry) {
 			0x9204a190c081b3a5,
 			0x966a77c3514d0ab6,
 			0x9881b45d79299b22,
+			0x999035a33d479906,
 			0x99a91f3295de7ebf,
 			0x99c05051d6a2cd04,
+			0x9dfaec51c4cecd46,
 			0x9ff59762c1a72972,
 			0xa061057433d08c79,
 			0xa11ca6b66c955723,
 			0xa12c1a1246d4900e,
 			0xa16aa1ea8b7d14ed,
 			0xa1af5665d8cae011,
+			0xa387c781094c823c,
 			0xa631083fec8ccc7c,
 			0xa66856591a4aca44,
 			0xa8404f3be0b7cd93,
 			0xaa757758fe4bee13,
 			0xaac020b0b8da206f,
 			0xaed406d1812d9f83,
+			0xaefab5c32445e49b,
 			0xb1847f3c1327c817,
 			0xb3c8a09d8d7f2391,
 			0xb55330a366064aec,
+			0xb836a9d8467afbd9,
 			0xb9007f5995ede543,
 			0xba8441acc5c61790,
 			0xbae37fbe21e580a3,
@@ -9708,13 +10747,16 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xcdecfd1a01f89461,
 			0xce808f7bfdbadb18,
 			0xcfc1238454548008,
+			0xcfeb047b0e4b2758,
 			0xd161813be4fd408b,
+			0xd2088e6a5c8e7f15,
 			0xd228c7414f0647eb,
 			0xd237a3498f2c196b,
 			0xd281f133906f9f01,
 			0xd32a226edc9f7b43,
 			0xd4bde79f986617a0,
 			0xd801eb45a1944841,
+			0xd9f229db85377e2f,
 			0xdb5cb615cbcae503,
 			0xdc16dcaf4c7b5d7b,
 			0xdc19fdc1e173fe90,
@@ -9722,6 +10764,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xde81f4aed37797df,
 			0xde8bf7328ffc37c3,
 			0xdebc648d8a114447,
+			0xe2ee231a8661de38,
 			0xe3ddb58a7deffeb4,
 			0xe4418928851d24b2,
 			0xe61f7262c99e4ea4,
@@ -9731,6 +10774,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xeda78d81b6beef42,
 			0xede291565db8a4ba,
 			0xee4280a36e1541c7,
+			0xeeeecebae311ba53,
 			0xefa2850b1c6222f6,
 			0xeffb609ebf72e4a0,
 			0xf0ef4d4fdaedb1f6,

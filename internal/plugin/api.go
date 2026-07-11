@@ -411,43 +411,90 @@ func (s *editorApiServer) VisibleRange(_ context.Context, call pluginproto.Edito
 	return nil
 }
 
-func (s *editorApiServer) SetBookmark(_ context.Context, call pluginproto.EditorApi_setBookmark) error {
+func (s *editorApiServer) ShowPopup(_ context.Context, call pluginproto.EditorApi_showPopup) error {
 	if s.bridge == nil {
 		return fmt.Errorf("no server bridge")
 	}
 	args := call.Args()
-	note, err := args.Note()
+	title, err := args.Title()
 	if err != nil {
 		return err
 	}
-	marker, err := args.Marker()
+	rawItems, err := args.Items()
 	if err != nil {
 		return err
 	}
-	s.bridge.PluginSetBookmark(args.BufId(), args.Line(), args.Col(), note, marker)
+	items := make([]PluginPopupItem, rawItems.Len())
+	for i := range items {
+		it := rawItems.At(i)
+		label, _ := it.Label()
+		sublabel, _ := it.Sublabel()
+		data, _ := it.Data()
+		items[i] = PluginPopupItem{Label: label, Sublabel: sublabel, Data: data}
+	}
+	// Keep the handler capability alive past this call by adding a reference.
+	handler := args.Handler().AddRef()
+	onSelect := func(data string) {
+		fut, rel := handler.Selected(context.Background(), func(p pluginproto.PopupHandler_selected_Params) error {
+			return p.SetData(data)
+		})
+		fut.Struct() //nolint:errcheck
+		rel()
+		handler.Release()
+	}
+	onCancel := func() {
+		fut, rel := handler.Cancelled(context.Background(), nil)
+		fut.Struct() //nolint:errcheck
+		rel()
+		handler.Release()
+	}
+	s.bridge.PluginShowPopup(title, items, onSelect, onCancel)
 	_, err = call.AllocResults()
 	return err
 }
 
-func (s *editorApiServer) ShowBookmarks(_ context.Context, call pluginproto.EditorApi_showBookmarks) error {
-	if s.bridge == nil {
-		return fmt.Errorf("no server bridge")
+func (s *editorApiServer) RegisterEditHandler(_ context.Context, call pluginproto.EditorApi_registerEditHandler) error {
+	handler := call.Args().Handler()
+	if !handler.IsValid() {
+		return fmt.Errorf("invalid edit handler")
 	}
-	s.bridge.PluginShowBookmarks()
+	s.reg.mu.Lock()
+	s.reg.editHandler.Release()
+	s.reg.editHandler = handler.AddRef()
+	s.reg.mu.Unlock()
 	_, err := call.AllocResults()
 	return err
 }
 
-func (s *editorApiServer) PromptBookmark(_ context.Context, call pluginproto.EditorApi_promptBookmark) error {
+func (s *editorApiServer) ShowInputPrompt(_ context.Context, call pluginproto.EditorApi_showInputPrompt) error {
 	if s.bridge == nil {
 		return fmt.Errorf("no server bridge")
 	}
 	args := call.Args()
-	marker, err := args.Marker()
+	title, err := args.Title()
 	if err != nil {
 		return err
 	}
-	s.bridge.PluginPromptBookmark(args.BufId(), args.Line(), args.Col(), marker)
+	placeholder, err := args.Placeholder()
+	if err != nil {
+		return err
+	}
+	handler := args.Handler().AddRef()
+	onConfirm := func(text string) {
+		fut, rel := handler.Confirmed(context.Background(), func(p pluginproto.InputPromptHandler_confirmed_Params) error {
+			return p.SetText(text)
+		})
+		fut.Struct() //nolint:errcheck
+		rel()
+		handler.Release()
+	}
+	onCancel := func() {
+		fut, rel := handler.Cancelled(context.Background(), nil)
+		fut.Struct() //nolint:errcheck
+		rel()
+		handler.Release()
+	}
+	s.bridge.PluginShowInputPrompt(title, placeholder, onConfirm, onCancel)
 	_, err = call.AllocResults()
 	return err
 }

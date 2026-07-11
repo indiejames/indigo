@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -90,6 +91,15 @@ type editorService struct {
 	watcher      *fsnotify.Watcher
 	savingMu     sync.Mutex
 	savingPaths  map[string]time.Time // paths currently being saved by indigo
+
+	// Plugin-driven popup state. Stored while a popup is visible on clients.
+	popupOnSelect func(data string)
+	popupOnCancel func()
+	popupItems    []plugin.PluginPopupItem
+
+	// Plugin-driven input prompt state.
+	inputOnConfirm func(text string)
+	inputOnCancel  func()
 
 	// shutdown is called when the last client disconnects (cleanly or not).
 	shutdown        func()
@@ -505,6 +515,27 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	content := entry.buf.Content()
 	go s.lspMgr.DidChange(path, content)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
+
+	// Notify edit-event handlers when the line count changed.
+	var lineDelta int32
+	var atLine uint32
+	switch op.Type {
+	case document.OpInsert:
+		delta := int32(strings.Count(op.InsertText, "\n"))
+		if delta != 0 {
+			lineDelta = delta
+			atLine = uint32(op.InsertLine)
+		}
+	case document.OpDelete:
+		delta := int32(op.FromLine - op.ToLine) // negative: lines removed
+		if delta != 0 {
+			lineDelta = delta
+			atLine = uint32(op.FromLine)
+		}
+	}
+	if lineDelta != 0 {
+		go s.pluginMgr.DispatchEditEvent(context.Background(), bufID, path, atLine, lineDelta)
+	}
 
 	return nil
 }
@@ -1040,6 +1071,103 @@ func (s *editorService) ApplyPluginAction(ctx context.Context, call proto.Editor
 		return err
 	}
 	_, err = call.AllocResults()
+	return err
+}
+
+// PluginPopupSelected implements proto.EditorService_Server.
+// The focused client selected an item in the plugin popup at the given index.
+func (s *editorService) PluginPopupSelected(_ context.Context, call proto.EditorService_pluginPopupSelected) error {
+	index := call.Args().Index()
+	s.mu.Lock()
+	fn := s.popupOnSelect
+	items := s.popupItems
+	s.popupOnSelect = nil
+	s.popupOnCancel = nil
+	s.popupItems = nil
+	callbacks := s.allCallbacks()
+	s.mu.Unlock()
+
+	if fn != nil && int(index) < len(items) {
+		go fn(items[index].Data)
+	}
+	ctx := context.Background()
+	for _, cb := range callbacks {
+		fut, rel := cb.HidePluginPopup(ctx, nil)
+		fut.Struct() //nolint:errcheck
+		rel()
+	}
+	_, err := call.AllocResults()
+	return err
+}
+
+// PluginPopupCancelled implements proto.EditorService_Server.
+func (s *editorService) PluginPopupCancelled(_ context.Context, call proto.EditorService_pluginPopupCancelled) error {
+	s.mu.Lock()
+	fn := s.popupOnCancel
+	s.popupOnSelect = nil
+	s.popupOnCancel = nil
+	s.popupItems = nil
+	callbacks := s.allCallbacks()
+	s.mu.Unlock()
+
+	if fn != nil {
+		go fn()
+	}
+	ctx := context.Background()
+	for _, cb := range callbacks {
+		fut, rel := cb.HidePluginPopup(ctx, nil)
+		fut.Struct() //nolint:errcheck
+		rel()
+	}
+	_, err := call.AllocResults()
+	return err
+}
+
+// PluginInputConfirmed implements proto.EditorService_Server.
+func (s *editorService) PluginInputConfirmed(_ context.Context, call proto.EditorService_pluginInputConfirmed) error {
+	text, err := call.Args().Text()
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	fn := s.inputOnConfirm
+	s.inputOnConfirm = nil
+	s.inputOnCancel = nil
+	callbacks := s.allCallbacks()
+	s.mu.Unlock()
+
+	if fn != nil {
+		go fn(text)
+	}
+	ctx := context.Background()
+	for _, cb := range callbacks {
+		fut, rel := cb.HideInputPrompt(ctx, nil)
+		fut.Struct() //nolint:errcheck
+		rel()
+	}
+	_, err = call.AllocResults()
+	return err
+}
+
+// PluginInputCancelled implements proto.EditorService_Server.
+func (s *editorService) PluginInputCancelled(_ context.Context, call proto.EditorService_pluginInputCancelled) error {
+	s.mu.Lock()
+	fn := s.inputOnCancel
+	s.inputOnConfirm = nil
+	s.inputOnCancel = nil
+	callbacks := s.allCallbacks()
+	s.mu.Unlock()
+
+	if fn != nil {
+		go fn()
+	}
+	ctx := context.Background()
+	for _, cb := range callbacks {
+		fut, rel := cb.HideInputPrompt(ctx, nil)
+		fut.Struct() //nolint:errcheck
+		rel()
+	}
+	_, err := call.AllocResults()
 	return err
 }
 

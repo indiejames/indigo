@@ -40,10 +40,9 @@ type ServerBridge interface {
 	PluginShowMessage(text string)
 	PluginRunProcess(cmd string, args []string) (stdout, stderr string, exitCode int32, err error)
 
-	// Bookmark operations.
-	PluginSetBookmark(bufID uint32, line, col uint32, note, marker string)
-	PluginShowBookmarks()
-	PluginPromptBookmark(bufID uint32, line, col uint32, marker string)
+	// Plugin-driven UI — generic popup and text-input overlays.
+	PluginShowPopup(title string, items []PluginPopupItem, onSelect func(data string), onCancel func())
+	PluginShowInputPrompt(title, placeholder string, onConfirm func(text string), onCancel func())
 
 	// Key registration notification — called so the server can push to clients.
 	PluginKeyRegistered(trigger string)
@@ -63,11 +62,19 @@ type PluginBufferRef struct {
 type PluginDecorationKind int
 
 const (
-	DecorationKindGutter    PluginDecorationKind = 0
-	DecorationKindOverlay   PluginDecorationKind = 1
-	DecorationKindStatusBar PluginDecorationKind = 2
-	DecorationKindUnderline PluginDecorationKind = 3
+	DecorationKindGutter     PluginDecorationKind = 0
+	DecorationKindOverlay    PluginDecorationKind = 1
+	DecorationKindStatusBar  PluginDecorationKind = 2
+	DecorationKindUnderline  PluginDecorationKind = 3
+	DecorationKindLeftGutter PluginDecorationKind = 4
 )
+
+// PluginPopupItem is one entry in a plugin-driven list popup.
+type PluginPopupItem struct {
+	Label    string
+	Sublabel string
+	Data     string // opaque token returned to the plugin on selection
+}
 
 // PluginUnderlineStyle mirrors the capnp UnderlineStyle enum.
 type PluginUnderlineStyle int
@@ -142,6 +149,7 @@ type registeredPlugin struct {
 	bufHandler     pluginproto.BufferEventHandler
 	decorProvider  pluginproto.DecorationProvider
 	actionProvider pluginproto.ActionProvider
+	editHandler    pluginproto.EditEventHandler
 }
 
 func (p *registeredPlugin) release() {
@@ -159,6 +167,7 @@ func (p *registeredPlugin) release() {
 	p.bufHandler.Release()
 	p.decorProvider.Release()
 	p.actionProvider.Release()
+	p.editHandler.Release()
 }
 
 // Manager discovers plugins in the user's plugins directory and manages their
@@ -625,6 +634,35 @@ func (m *Manager) ApplyAction(ctx context.Context, pluginName string, bufID, lin
 	defer rel()
 	_, err := fut.Struct()
 	return err
+}
+
+// DispatchEditEvent fires linesChanged on all plugins that registered an edit handler.
+// Called after any op that changes the document line count (lineDelta != 0).
+func (m *Manager) DispatchEditEvent(ctx context.Context, bufID uint32, filePath string, atLine uint32, lineDelta int32) {
+	m.mu.Lock()
+	plugins := m.plugins
+	m.mu.Unlock()
+	for _, p := range plugins {
+		p.mu.RLock()
+		h := p.editHandler
+		p.mu.RUnlock()
+		if !h.IsValid() {
+			continue
+		}
+		go func(h pluginproto.EditEventHandler) {
+			fut, rel := h.LinesChanged(ctx, func(ps pluginproto.EditEventHandler_linesChanged_Params) error {
+				ps.SetBufId(bufID)
+				if err := ps.SetFilePath(filePath); err != nil {
+					return err
+				}
+				ps.SetAtLine(atLine)
+				ps.SetLineDelta(lineDelta)
+				return nil
+			})
+			defer rel()
+			fut.Struct() //nolint:errcheck
+		}(h)
+	}
 }
 
 // Shutdown cleanly stops all plugin processes.

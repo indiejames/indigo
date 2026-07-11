@@ -371,74 +371,61 @@ func (s *editorService) PluginOpenBuffers() []plugin.PluginBufferRef {
 	return refs
 }
 
-// PluginSetBookmark implements plugin.ServerBridge.
-// Looks up the file path for bufID and pushes a setBookmark notification to all clients.
-func (s *editorService) PluginSetBookmark(bufID uint32, line, col uint32, note, marker string) {
+// PluginShowPopup implements plugin.ServerBridge.
+// Stores the selection callbacks and pushes showPluginPopup to all clients.
+func (s *editorService) PluginShowPopup(title string, items []plugin.PluginPopupItem, onSelect func(data string), onCancel func()) {
 	s.mu.Lock()
-	entry, ok := s.buffers[bufID]
-	if !ok {
-		s.mu.Unlock()
-		return
-	}
-	filePath := entry.buf.Path()
+	s.popupOnSelect = onSelect
+	s.popupOnCancel = onCancel
+	s.popupItems = items
 	callbacks := s.allCallbacks()
 	s.mu.Unlock()
 
 	ctx := context.Background()
 	for _, cb := range callbacks {
-		fut, rel := cb.SetBookmark(ctx, func(p proto.ClientCallback_setBookmark_Params) error {
-			p.SetLine(line)
-			p.SetCol(col)
-			if err := p.SetFilePath(filePath); err != nil {
+		fut, rel := cb.ShowPluginPopup(ctx, func(p proto.ClientCallback_showPluginPopup_Params) error {
+			if err := p.SetTitle(title); err != nil {
 				return err
 			}
-			if err := p.SetMarker(marker); err != nil {
+			list, err := p.NewItems(int32(len(items)))
+			if err != nil {
 				return err
 			}
-			return p.SetNote(note)
+			for i, item := range items {
+				pi := list.At(i)
+				if err := pi.SetLabel(item.Label); err != nil {
+					return err
+				}
+				if err := pi.SetSublabel(item.Sublabel); err != nil {
+					return err
+				}
+				if err := pi.SetData(item.Data); err != nil {
+					return err
+				}
+			}
+			return nil
 		})
 		fut.Struct() //nolint:errcheck
 		rel()
 	}
 }
 
-// PluginShowBookmarks implements plugin.ServerBridge.
-// Pushes a showBookmarks notification to all clients.
-func (s *editorService) PluginShowBookmarks() {
+// PluginShowInputPrompt implements plugin.ServerBridge.
+// Stores the confirm/cancel callbacks and pushes showInputPrompt to all clients.
+func (s *editorService) PluginShowInputPrompt(title, placeholder string, onConfirm func(text string), onCancel func()) {
 	s.mu.Lock()
+	s.inputOnConfirm = onConfirm
+	s.inputOnCancel = onCancel
 	callbacks := s.allCallbacks()
 	s.mu.Unlock()
 
 	ctx := context.Background()
 	for _, cb := range callbacks {
-		fut, rel := cb.ShowBookmarks(ctx, nil)
-		fut.Struct() //nolint:errcheck
-		rel()
-	}
-}
-
-// PluginPromptBookmark implements plugin.ServerBridge.
-// Pushes a promptBookmark notification so the client shows a name-input prompt.
-func (s *editorService) PluginPromptBookmark(bufID uint32, line, col uint32, marker string) {
-	s.mu.Lock()
-	entry, ok := s.buffers[bufID]
-	if !ok {
-		s.mu.Unlock()
-		return
-	}
-	filePath := entry.buf.Path()
-	callbacks := s.allCallbacks()
-	s.mu.Unlock()
-
-	ctx := context.Background()
-	for _, cb := range callbacks {
-		fut, rel := cb.PromptBookmark(ctx, func(p proto.ClientCallback_promptBookmark_Params) error {
-			p.SetLine(line)
-			p.SetCol(col)
-			if err := p.SetFilePath(filePath); err != nil {
+		fut, rel := cb.ShowInputPrompt(ctx, func(p proto.ClientCallback_showInputPrompt_Params) error {
+			if err := p.SetTitle(title); err != nil {
 				return err
 			}
-			return p.SetMarker(marker)
+			return p.SetPlaceholder(placeholder)
 		})
 		fut.Struct() //nolint:errcheck
 		rel()

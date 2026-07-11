@@ -19,26 +19,30 @@ type PluginMoveCursorMsg struct {
 	Col   uint32
 }
 
-// SetBookmarkMsg is sent when a plugin sets a bookmark at the given position.
-type SetBookmarkMsg struct {
-	FilePath string
-	Line     int
-	Col      int
-	Note     string
-	Marker   string
+// ClientPopupItem is one entry in a plugin-driven list popup.
+type ClientPopupItem struct {
+	Label    string
+	Sublabel string
+	Data     string // opaque token; sent back to server on selection via index
 }
 
-// ShowBookmarksMsg is sent when a plugin requests the bookmark picker popup.
-type ShowBookmarksMsg struct{}
-
-// PromptBookmarkMsg is sent when a plugin requests a name-input prompt before
-// creating a bookmark at the given position.
-type PromptBookmarkMsg struct {
-	FilePath string
-	Line     int
-	Col      int
-	Marker   string
+// ShowPluginPopupMsg is sent when a plugin requests an interactive list popup.
+type ShowPluginPopupMsg struct {
+	Title string
+	Items []ClientPopupItem
 }
+
+// HidePluginPopupMsg is sent when the server dismisses the plugin popup.
+type HidePluginPopupMsg struct{}
+
+// ShowInputPromptMsg is sent when a plugin requests a text-input dialog.
+type ShowInputPromptMsg struct {
+	Title       string
+	Placeholder string
+}
+
+// HideInputPromptMsg is sent when the server dismisses the input prompt.
+type HideInputPromptMsg struct{}
 
 // callbackServer implements proto.ClientCallback_Server.
 // It is created in Dial and holds a send function that routes
@@ -112,60 +116,53 @@ func (s *callbackServer) KeyRegistered(_ context.Context, call proto.ClientCallb
 	return err
 }
 
-func (s *callbackServer) SetBookmark(_ context.Context, call proto.ClientCallback_setBookmark) error {
+func (s *callbackServer) ShowPluginPopup(_ context.Context, call proto.ClientCallback_showPluginPopup) error {
 	args := call.Args()
-	filePath, err := args.FilePath()
+	title, err := args.Title()
 	if err != nil {
 		return err
 	}
-	note, err := args.Note()
+	rawItems, err := args.Items()
 	if err != nil {
 		return err
 	}
-	marker, err := args.Marker()
-	if err != nil {
-		return err
+	items := make([]ClientPopupItem, rawItems.Len())
+	for i := range items {
+		it := rawItems.At(i)
+		label, _ := it.Label()
+		sublabel, _ := it.Sublabel()
+		data, _ := it.Data()
+		items[i] = ClientPopupItem{Label: label, Sublabel: sublabel, Data: data}
 	}
-	if marker == "" {
-		marker = "▶"
-	}
-	s.dispatch(SetBookmarkMsg{
-		FilePath: filePath,
-		Line:     int(args.Line()),
-		Col:      int(args.Col()),
-		Note:     note,
-		Marker:   marker,
-	})
+	s.dispatch(ShowPluginPopupMsg{Title: title, Items: items})
 	_, err = call.AllocResults()
 	return err
 }
 
-func (s *callbackServer) ShowBookmarks(_ context.Context, call proto.ClientCallback_showBookmarks) error {
-	s.dispatch(ShowBookmarksMsg{})
+func (s *callbackServer) HidePluginPopup(_ context.Context, call proto.ClientCallback_hidePluginPopup) error {
+	s.dispatch(HidePluginPopupMsg{})
 	_, err := call.AllocResults()
 	return err
 }
 
-func (s *callbackServer) PromptBookmark(_ context.Context, call proto.ClientCallback_promptBookmark) error {
+func (s *callbackServer) ShowInputPrompt(_ context.Context, call proto.ClientCallback_showInputPrompt) error {
 	args := call.Args()
-	filePath, err := args.FilePath()
+	title, err := args.Title()
 	if err != nil {
 		return err
 	}
-	marker, err := args.Marker()
+	placeholder, err := args.Placeholder()
 	if err != nil {
 		return err
 	}
-	if marker == "" {
-		marker = "▶"
-	}
-	s.dispatch(PromptBookmarkMsg{
-		FilePath: filePath,
-		Line:     int(args.Line()),
-		Col:      int(args.Col()),
-		Marker:   marker,
-	})
+	s.dispatch(ShowInputPromptMsg{Title: title, Placeholder: placeholder})
 	_, err = call.AllocResults()
+	return err
+}
+
+func (s *callbackServer) HideInputPrompt(_ context.Context, call proto.ClientCallback_hideInputPrompt) error {
+	s.dispatch(HideInputPromptMsg{})
+	_, err := call.AllocResults()
 	return err
 }
 

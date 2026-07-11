@@ -265,18 +265,54 @@ func (m Model) gutterDecorAt(lineNum int) *ClientDecoration {
 	return nil
 }
 
-// gutterWidth returns the number of columns reserved for line numbers (and plugin markers).
-func (m Model) gutterWidth() int {
-	hasExtraGutter := m.mark != nil || m.reservePluginGutter || m.hasGutterDecorations()
-	if m.cfg == nil || !m.cfg.LineNumbers {
-		if hasExtraGutter {
-			return 3 // space + up to 2 chars
+// hasLeftGutterDecorations reports whether any plugin decoration uses the leftGutter kind.
+func (m Model) hasLeftGutterDecorations() bool {
+	for _, d := range m.decorations {
+		if d.Kind == ClientDecorationLeftGutter {
+			return true
 		}
-		return 0
 	}
-	w := len(fmt.Sprint(m.displayLineCount())) + 1
-	if hasExtraGutter {
-		w += 3 // space + up to 2 chars
+	return false
+}
+
+// leftGutterDecorAt returns the leftGutter ClientDecoration for lineNum, or nil.
+func (m Model) leftGutterDecorAt(lineNum int) *ClientDecoration {
+	for i := range m.decorations {
+		if m.decorations[i].Kind == ClientDecorationLeftGutter && int(m.decorations[i].Line) == lineNum {
+			return &m.decorations[i]
+		}
+	}
+	return nil
+}
+
+// gutterWidth returns the number of columns reserved for line numbers and gutter markers.
+//
+// Layout (when line numbers are enabled):
+//
+//	[2-cell left gutter][line-number + space][2-cell right gutter (optional)]
+//
+// The left gutter is always present when line numbers are enabled, so line
+// numbers never shift when bookmarks or marks appear or disappear.
+// The right gutter reserves space for plugin decorations (LSP, etc.).
+func (m Model) gutterWidth() int {
+	const leftW = 2 // bookmark / Vim-mark column; always stable
+	hasRightGutter := m.reservePluginGutter || m.hasGutterDecorations()
+	if m.cfg == nil || !m.cfg.LineNumbers {
+		// No line numbers: fall back to minimal — only show gutters when needed.
+		hasLeftContent := m.mark != nil || m.hasLeftGutterDecorations()
+		if !hasLeftContent && !hasRightGutter {
+			return 0
+		}
+		w := leftW
+		if hasRightGutter {
+			w += 2
+		}
+		return w
+	}
+	// Line numbers enabled: left gutter is always present.
+	w := leftW + len(fmt.Sprint(m.displayLineCount())) + 1
+	if hasRightGutter {
+		w += 2 // narrower than the old 3-cell right gutter
 	}
 	return w
 }
@@ -496,11 +532,28 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 	}
 
 	if gutterW > 0 {
-		hasExtraGutter := m.mark != nil || m.hasGutterDecorations()
+		const leftW = 2
+		hasRightGutter := m.reservePluginGutter || m.hasGutterDecorations()
 		if chunk == 0 {
-			numW := gutterW
-			if hasExtraGutter {
-				numW -= 3
+			// Left gutter: Vim mark (◆) takes priority over plugin markers; blank otherwise.
+			if m.mark != nil && lineNum == m.mark.Line {
+				markGutterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00"))
+				sb.WriteString(markGutterStyle.Render("◆ "))
+			} else if lm := m.leftGutterDecorAt(lineNum); lm != nil {
+				color := lm.TextColor
+				if color == "" {
+					color = "#5588FF"
+				}
+				lmStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+				sb.WriteString(lmStyle.Render(lm.Text + " "))
+			} else {
+				sb.WriteString(gutterStyle.Render("  "))
+			}
+
+			// Line number (gutterW minus the fixed left and optional right columns).
+			numW := gutterW - leftW
+			if hasRightGutter {
+				numW -= 2
 			}
 			if numW > 0 {
 				numStr := fmt.Sprintf("%*d ", numW-1, lineNum+1)
@@ -510,28 +563,23 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 					sb.WriteString(gutterStyle.Render(numStr))
 				}
 			}
-			if hasExtraGutter {
-				if m.mark != nil && lineNum == m.mark.Line {
-					markGutterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00"))
-					sb.WriteString(markGutterStyle.Render(" ◆ "))
+
+			// Right gutter: plugin decorations (2 cells — 1 space + 1 marker).
+			if hasRightGutter {
+				decor := m.gutterDecorAt(lineNum)
+				if decor == nil || decor.Text == "" {
+					sb.WriteString(gutterStyle.Render("  "))
+				} else if decor.TextColor != "" {
+					barStyle := lipgloss.NewStyle().Background(lipgloss.Color(decor.TextColor))
+					sb.WriteString(" ")
+					sb.WriteString(barStyle.Render(" "))
 				} else {
-					decor := m.gutterDecorAt(lineNum)
-					if decor == nil || decor.Text == "" {
-						sb.WriteString(gutterStyle.Render("   "))
-					} else if decor.TextColor != "" {
-						// Solid 1-cell colored bar: wider than a thin │ line, narrower than a 2-cell block.
-						barStyle := lipgloss.NewStyle().Background(lipgloss.Color(decor.TextColor))
-						sb.WriteString(" ")
-						sb.WriteString(barStyle.Render(" "))
-						sb.WriteString(" ")
-					} else {
-						label := decor.Text
-						if len([]rune(label)) > 2 {
-							label = string([]rune(label)[:2])
-						}
-						sb.WriteString(" ")
-						sb.WriteString(decorOverlayStyle.Render(fmt.Sprintf("%-2s", label)))
+					label := decor.Text
+					if len([]rune(label)) > 1 {
+						label = string([]rune(label)[:1])
 					}
+					sb.WriteString(" ")
+					sb.WriteString(decorOverlayStyle.Render(label))
 				}
 			}
 		} else {

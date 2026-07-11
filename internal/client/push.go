@@ -19,6 +19,31 @@ type PluginMoveCursorMsg struct {
 	Col   uint32
 }
 
+// ClientPopupItem is one entry in a plugin-driven list popup.
+type ClientPopupItem struct {
+	Label    string
+	Sublabel string
+	Data     string // opaque token; sent back to server on selection via index
+}
+
+// ShowPluginPopupMsg is sent when a plugin requests an interactive list popup.
+type ShowPluginPopupMsg struct {
+	Title string
+	Items []ClientPopupItem
+}
+
+// HidePluginPopupMsg is sent when the server dismisses the plugin popup.
+type HidePluginPopupMsg struct{}
+
+// ShowInputPromptMsg is sent when a plugin requests a text-input dialog.
+type ShowInputPromptMsg struct {
+	Title       string
+	Placeholder string
+}
+
+// HideInputPromptMsg is sent when the server dismisses the input prompt.
+type HideInputPromptMsg struct{}
+
 // callbackServer implements proto.ClientCallback_Server.
 // It is created in Dial and holds a send function that routes
 // server push calls into the Bubble Tea program.
@@ -88,6 +113,56 @@ func (s *callbackServer) KeyRegistered(_ context.Context, call proto.ClientCallb
 		r.addPluginKey(trigger)
 	}
 	_, err = call.AllocResults()
+	return err
+}
+
+func (s *callbackServer) ShowPluginPopup(_ context.Context, call proto.ClientCallback_showPluginPopup) error {
+	args := call.Args()
+	title, err := args.Title()
+	if err != nil {
+		return err
+	}
+	rawItems, err := args.Items()
+	if err != nil {
+		return err
+	}
+	items := make([]ClientPopupItem, rawItems.Len())
+	for i := range items {
+		it := rawItems.At(i)
+		label, _ := it.Label()
+		sublabel, _ := it.Sublabel()
+		data, _ := it.Data()
+		items[i] = ClientPopupItem{Label: label, Sublabel: sublabel, Data: data}
+	}
+	s.dispatch(ShowPluginPopupMsg{Title: title, Items: items})
+	_, err = call.AllocResults()
+	return err
+}
+
+func (s *callbackServer) HidePluginPopup(_ context.Context, call proto.ClientCallback_hidePluginPopup) error {
+	s.dispatch(HidePluginPopupMsg{})
+	_, err := call.AllocResults()
+	return err
+}
+
+func (s *callbackServer) ShowInputPrompt(_ context.Context, call proto.ClientCallback_showInputPrompt) error {
+	args := call.Args()
+	title, err := args.Title()
+	if err != nil {
+		return err
+	}
+	placeholder, err := args.Placeholder()
+	if err != nil {
+		return err
+	}
+	s.dispatch(ShowInputPromptMsg{Title: title, Placeholder: placeholder})
+	_, err = call.AllocResults()
+	return err
+}
+
+func (s *callbackServer) HideInputPrompt(_ context.Context, call proto.ClientCallback_hideInputPrompt) error {
+	s.dispatch(HideInputPromptMsg{})
+	_, err := call.AllocResults()
 	return err
 }
 

@@ -1,20 +1,80 @@
 // Package sdk provides a clean Go interface for writing indigo plugins.
 //
-// Plugin authors implement the [Plugin] interface and call [Run] from main.
-// The SDK handles all Cap'n Proto plumbing; plugin code never touches capnp directly.
+// # Quick start
 //
-// Basic usage:
+// Implement [Plugin], call [Run] from main. The SDK handles all Cap'n Proto
+// plumbing; plugin code never touches capnp directly.
 //
 //	type MyPlugin struct{}
 //
 //	func (p *MyPlugin) Init(api *sdk.Api) sdk.Info {
 //	    api.OnKey("f", func(key string, ctx sdk.KeyContext) sdk.KeyResponse {
-//	        return sdk.KeyResponse{Handled: true, CaptureKeys: 2}
+//	        return sdk.KeyResponse{Handled: true}
 //	    })
 //	    return sdk.Info{Name: "myplugin", Version: "0.1.0"}
 //	}
 //
 //	func main() { sdk.Run(&MyPlugin{}) }
+//
+// # Capabilities
+//
+// Registration (called from Init, results are permanent for the plugin lifetime):
+//   - [Api.OnKey] — handle a normal-mode key binding
+//   - [Api.OnInsert] — handle a character typed in insert mode
+//   - [Api.OnCommand] — add an ex command (`:name`)
+//   - [Api.HandleBufferEvents] — react to buffer open/change/save/close
+//   - [Api.Decorations] / [Api.DecorationsFull] — provide gutter/overlay/status-bar decorations
+//   - [Api.RegisterActionProvider] — contribute items to the F-key action popup
+//   - [Api.OnEditEvent] — track line-count-changing edits for position maintenance
+//
+// Editor effects (may be called at any time, including from callbacks):
+//   - [Api.ApplyEdit] — apply text edits to a buffer
+//   - [Api.MoveCursor] — move the cursor
+//   - [Api.OpenFile] — tell the editor to open a file
+//   - [Api.ShowMessage] — display text in the status bar
+//   - [Api.RunProcess] — run an external command
+//   - [Api.ShowPopup] — show a modal list popup and receive the selection
+//   - [Api.ShowInputPrompt] — show a modal text-input dialog and receive the text
+//
+// Document queries (safe to call from any goroutine):
+//   - [Api.ReadBuffer], [Api.ReadLines], [Api.ReadRange]
+//   - [Api.WordAt], [Api.BufferInfo], [Api.VisibleRange]
+//
+// # Decorations
+//
+// A decoration provider ([Api.Decorations]) returns a slice of [Decoration] values
+// each time a client polls for the current buffer/viewport. Use [DecorationKind]
+// to choose where each decoration appears:
+//   - [DecorationGutter] — right gutter next to line numbers (2 cells wide)
+//   - [DecorationLeftGutter] — left gutter before line numbers (2 cells wide)
+//   - [DecorationOverlay] — drawn over text at the given (Line, Col) position
+//   - [DecorationStatusBar] — centered in the status bar
+//   - [DecorationUnderline] — underlines the span [Col, EndCol) on the given line
+//
+// # Plugin-driven popups
+//
+// [Api.ShowPopup] displays a scrollable list of [PopupItem] values. The user
+// navigates with j/k or arrow keys and confirms with Enter. The onSelect
+// callback is called with the Data field of the selected item; onCancel is
+// called when the user presses Esc.
+//
+// [Api.ShowInputPrompt] displays a single-line text-input dialog. The user
+// types text and presses Enter to confirm or Esc to cancel. The onConfirm
+// callback receives the text; onCancel is called on dismissal.
+//
+// Both callbacks run on the server after the popup is hidden. They may safely
+// call other Api methods (e.g. OpenFile, ShowPopup, ShowMessage).
+//
+// # Line tracking with OnEditEvent
+//
+// [Api.OnEditEvent] registers a handler called after every edit that changes
+// a buffer's line count. This lets plugins adjust saved line numbers (e.g.
+// bookmark positions) as the buffer is edited without polling.
+//
+//	api.OnEditEvent(func(bufID uint32, filePath string, atLine uint32, lineDelta int32) {
+//	    // lineDelta > 0: lines were inserted after atLine
+//	    // lineDelta < 0: lines were deleted starting at atLine
+//	})
 package sdk
 
 import (
@@ -42,9 +102,11 @@ type Info struct {
 
 // KeyContext is the context passed to key and insert handlers.
 type KeyContext struct {
-	BufID    uint32
-	Mode     string // "normal", "insert", or "capture"
-	ClientID uint64
+	BufID      uint32
+	Mode       string // "normal", "insert", or "capture"
+	ClientID   uint64
+	CursorLine uint32
+	CursorCol  uint32
 }
 
 // KeyResponse is returned by key and insert handlers.
@@ -85,10 +147,11 @@ type Range struct {
 type DecorationKind int
 
 const (
-	DecorationGutter    DecorationKind = 0 // rendered in the line number gutter
-	DecorationOverlay   DecorationKind = 1 // rendered over text at (Line, Col)
-	DecorationStatusBar DecorationKind = 2 // rendered in the status bar center
-	DecorationUnderline DecorationKind = 3 // underlines the span [Col, EndCol) on Line
+	DecorationGutter     DecorationKind = 0 // rendered in the line number gutter
+	DecorationOverlay    DecorationKind = 1 // rendered over text at (Line, Col)
+	DecorationStatusBar  DecorationKind = 2 // rendered in the status bar center
+	DecorationUnderline  DecorationKind = 3 // underlines the span [Col, EndCol) on Line
+	DecorationLeftGutter DecorationKind = 4 // rendered in the 2-cell left gutter (before line numbers)
 )
 
 // UnderlineStyle selects the underline rendering mode.
@@ -573,7 +636,7 @@ func (s *keyHandlerServer) Handle(_ context.Context, call pluginproto.KeyHandler
 	kctx, _ := call.Args().Ctx()
 	mode, _ := kctx.Mode()
 
-	resp := s.fn(key, KeyContext{BufID: kctx.BufId(), Mode: mode, ClientID: kctx.ClientId()})
+	resp := s.fn(key, KeyContext{BufID: kctx.BufId(), Mode: mode, ClientID: kctx.ClientId(), CursorLine: kctx.CursorLine(), CursorCol: kctx.CursorCol()})
 
 	res, err := call.AllocResults()
 	if err != nil {
@@ -801,6 +864,155 @@ func (s *decorProviderServer) ApplyFix(_ context.Context, call pluginproto.Decor
 	index := call.Args().Index()
 	if s.h.ApplyFix != nil {
 		s.h.ApplyFix(fixData, index)
+	}
+	_, err := call.AllocResults()
+	return err
+}
+
+// PopupItem is one entry in a plugin-driven list popup shown by ShowPopup.
+type PopupItem struct {
+	// Label is the primary display text shown in the popup row.
+	Label string
+	// Sublabel is secondary text shown alongside the label (e.g. a file path or description).
+	Sublabel string
+	// Data is an opaque token passed back to onSelect when this item is chosen.
+	// Use it to identify which item was selected without relying on the label text.
+	Data string
+}
+
+// ShowPopup displays a modal list popup with the given title and items.
+// onSelect is called with the Data field of the chosen item; onCancel is called
+// if the user dismisses the popup with Esc. Both callbacks execute on the server
+// after the user interacts; the popup is automatically hidden before they fire.
+func (a *Api) ShowPopup(title string, items []PopupItem, onSelect func(data string), onCancel func()) error {
+	handler := pluginproto.PopupHandler_ServerToClient(&popupHandlerServer{
+		onSelect: onSelect,
+		onCancel: onCancel,
+	})
+	fut, rel := a.api.ShowPopup(context.Background(), func(p pluginproto.EditorApi_showPopup_Params) error {
+		if err := p.SetTitle(title); err != nil {
+			return err
+		}
+		list, err := p.NewItems(int32(len(items)))
+		if err != nil {
+			return err
+		}
+		for i, it := range items {
+			pi := list.At(i)
+			if err := pi.SetLabel(it.Label); err != nil {
+				return err
+			}
+			if err := pi.SetSublabel(it.Sublabel); err != nil {
+				return err
+			}
+			if err := pi.SetData(it.Data); err != nil {
+				return err
+			}
+		}
+		return p.SetHandler(handler)
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
+// ShowInputPrompt displays a modal text-input dialog with the given title and
+// placeholder text. onConfirm is called with the text the user typed; onCancel
+// is called if the user dismisses with Esc. The prompt is automatically hidden
+// before the callback fires.
+func (a *Api) ShowInputPrompt(title, placeholder string, onConfirm func(text string), onCancel func()) error {
+	handler := pluginproto.InputPromptHandler_ServerToClient(&inputPromptHandlerServer{
+		onConfirm: onConfirm,
+		onCancel:  onCancel,
+	})
+	fut, rel := a.api.ShowInputPrompt(context.Background(), func(p pluginproto.EditorApi_showInputPrompt_Params) error {
+		if err := p.SetTitle(title); err != nil {
+			return err
+		}
+		if err := p.SetPlaceholder(placeholder); err != nil {
+			return err
+		}
+		return p.SetHandler(handler)
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
+// OnEditEvent registers handler to be called after every edit that changes the
+// line count of a buffer. This lets plugins track line numbers of saved
+// positions (e.g. bookmarks) as the buffer is edited.
+//
+// Parameters passed to handler:
+//   - bufID: the affected buffer
+//   - filePath: absolute path of the buffer's file
+//   - atLine: the first line that was affected (0-based)
+//   - lineDelta: positive = lines were inserted, negative = lines were deleted
+func (a *Api) OnEditEvent(handler func(bufID uint32, filePath string, atLine uint32, lineDelta int32)) error {
+	srv := pluginproto.EditEventHandler_ServerToClient(&editEventHandlerServer{fn: handler})
+	fut, rel := a.api.RegisterEditHandler(context.Background(), func(p pluginproto.EditorApi_registerEditHandler_Params) error {
+		return p.SetHandler(srv)
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
+// -- Popup / input prompt / edit event capnp server implementations --
+
+type popupHandlerServer struct {
+	onSelect func(data string)
+	onCancel func()
+}
+
+func (s *popupHandlerServer) Selected(_ context.Context, call pluginproto.PopupHandler_selected) error {
+	data, _ := call.Args().Data()
+	if s.onSelect != nil {
+		s.onSelect(data)
+	}
+	_, err := call.AllocResults()
+	return err
+}
+
+func (s *popupHandlerServer) Cancelled(_ context.Context, call pluginproto.PopupHandler_cancelled) error {
+	if s.onCancel != nil {
+		s.onCancel()
+	}
+	_, err := call.AllocResults()
+	return err
+}
+
+type inputPromptHandlerServer struct {
+	onConfirm func(text string)
+	onCancel  func()
+}
+
+func (s *inputPromptHandlerServer) Confirmed(_ context.Context, call pluginproto.InputPromptHandler_confirmed) error {
+	text, _ := call.Args().Text()
+	if s.onConfirm != nil {
+		s.onConfirm(text)
+	}
+	_, err := call.AllocResults()
+	return err
+}
+
+func (s *inputPromptHandlerServer) Cancelled(_ context.Context, call pluginproto.InputPromptHandler_cancelled) error {
+	if s.onCancel != nil {
+		s.onCancel()
+	}
+	_, err := call.AllocResults()
+	return err
+}
+
+type editEventHandlerServer struct {
+	fn func(bufID uint32, filePath string, atLine uint32, lineDelta int32)
+}
+
+func (s *editEventHandlerServer) LinesChanged(_ context.Context, call pluginproto.EditEventHandler_linesChanged) error {
+	args := call.Args()
+	filePath, _ := args.FilePath()
+	if s.fn != nil {
+		s.fn(args.BufId(), filePath, args.AtLine(), args.LineDelta())
 	}
 	_, err := call.AllocResults()
 	return err

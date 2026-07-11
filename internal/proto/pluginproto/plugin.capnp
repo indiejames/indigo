@@ -22,6 +22,17 @@ interface EditorApi {
   registerDecorations   @4 (provider :DecorationProvider)                 -> ();
   registerActionProvider @16 (provider :ActionProvider)                    -> ();
 
+  # -- Plugin-driven UI --
+  # showPopup displays an interactive list; the handler is called when the user
+  # selects an item (with the item's opaque data field) or cancels.
+  showPopup          @17 (title :Text, items :List(PopupItem), handler :PopupHandler)         -> ();
+  # registerEditHandler receives a linesChanged call after every edit that changes
+  # the line count, letting the plugin track line-indexed data (e.g. bookmarks).
+  registerEditHandler @18 (handler :EditEventHandler)                                          -> ();
+  # showInputPrompt shows a single-line text input dialog; handler is called on
+  # confirm (with the entered text) or cancel.
+  showInputPrompt    @19 (title :Text, placeholder :Text, handler :InputPromptHandler)         -> ();
+
   # -- Editor effects --
   applyEdit    @5 (bufId :UInt32, edits :List(TextEdit))                  -> ();
   moveCursor   @6 (bufId :UInt32, pos :PluginPosition)                    -> ();
@@ -154,14 +165,45 @@ struct FixItem {
 }
 
 enum DecorationKind {
-  gutter    @0;
-  overlay   @1;
-  statusBar @2;
-  underline @3; # applies underlineStyle/underlineColor to the span [col, endCol)
+  gutter     @0;
+  overlay    @1;
+  statusBar  @2;
+  underline  @3; # applies underlineStyle/underlineColor to the span [col, endCol)
+  leftGutter @4; # 2-cell left gutter slot (left of line numbers); text = single char
 }
 
 enum UnderlineStyle {
   none     @0;
   straight @1;
   curly    @2; # undercurl / wavy — terminals that don't support it show straight
+}
+
+# PopupItem is one entry in a plugin-driven list popup.
+struct PopupItem {
+  label    @0 :Text;  # primary label (shown prominently)
+  sublabel @1 :Text;  # secondary label (dimmed, shown to the right)
+  data     @2 :Text;  # opaque token returned to the plugin on selection
+}
+
+# PopupHandler is implemented by the plugin and called by the editor when the
+# user interacts with a popup opened via showPopup.
+interface PopupHandler {
+  selected  @0 (data :Text) -> ();  # user picked an item; data = item.data
+  cancelled @1 ()           -> ();  # user dismissed without selecting
+}
+
+# InputPromptHandler is implemented by the plugin and called by the editor when
+# the user interacts with a prompt opened via showInputPrompt.
+interface InputPromptHandler {
+  confirmed @0 (text :Text) -> ();  # user confirmed; text = entered value
+  cancelled @1 ()           -> ();  # user pressed Esc
+}
+
+# EditEventHandler is implemented by the plugin and called after every edit
+# that changes the document's line count, so the plugin can keep line-indexed
+# data (such as bookmark positions) in sync.
+interface EditEventHandler {
+  # linesChanged is fired after an edit at atLine that shifted the line count
+  # by lineDelta (positive = lines inserted, negative = lines deleted).
+  linesChanged @0 (bufId :UInt32, filePath :Text, atLine :UInt32, lineDelta :Int32) -> ();
 }

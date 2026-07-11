@@ -96,6 +96,28 @@ type App struct {
 	// Edit jump list (ctrl+o / Tab).
 	jumpList []jumpEntry
 	jumpIdx  int // index of last jumped-to entry; -1 = at head (not navigating)
+
+	// Plugin-driven UI overlays.
+	pluginPopup *appPluginPopup // non-nil when a plugin popup is visible
+	pluginInput *appPluginInput // non-nil when a plugin input prompt is visible
+}
+
+// appPluginPopup holds state for a plugin-driven interactive list overlay.
+type appPluginPopup struct {
+	title  string
+	items  []client.ClientPopupItem
+	idx    int
+	width  int
+	height int
+}
+
+// appPluginInput holds state for a plugin-driven text-input overlay.
+type appPluginInput struct {
+	title       string
+	placeholder string
+	text        string
+	width       int
+	height      int
 }
 
 // configPathAndMtime returns the config file path and its current mtime.
@@ -223,6 +245,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.bufPicker != nil {
 			a.bufPicker.width = msg.Width
 			a.bufPicker.height = msg.Height
+		}
+		if a.pluginPopup != nil {
+			a.pluginPopup.width = msg.Width
+			a.pluginPopup.height = msg.Height
+		}
+		if a.pluginInput != nil {
+			a.pluginInput.width = msg.Width
+			a.pluginInput.height = msg.Height
 		}
 		// Resize all buffers with the correct height (minus tab bar if shown).
 		bufMsg := tea.WindowSizeMsg{Width: msg.Width, Height: a.bufHeight()}
@@ -431,6 +461,34 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.handleUndoJump(msg)
 		return a, nil
 
+	// ---- plugin-driven UI ----
+	case client.ShowPluginPopupMsg:
+		a.pluginPopup = &appPluginPopup{
+			title:  msg.Title,
+			items:  msg.Items,
+			idx:    0,
+			width:  a.width,
+			height: a.height,
+		}
+		return a, nil
+
+	case client.HidePluginPopupMsg:
+		a.pluginPopup = nil
+		return a, nil
+
+	case client.ShowInputPromptMsg:
+		a.pluginInput = &appPluginInput{
+			title:       msg.Title,
+			placeholder: msg.Placeholder,
+			width:       a.width,
+			height:      a.height,
+		}
+		return a, nil
+
+	case client.HideInputPromptMsg:
+		a.pluginInput = nil
+		return a, nil
+
 	// ---- server push (plugin effects) ----
 	case client.PluginShowMsgMsg:
 		// Plugins are not allowed to write to the tab bar.
@@ -489,6 +547,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if a.bufPicker != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handleBufPickerKey(km)
+		}
+	}
+	if a.pluginInput != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handlePluginInputKey(km)
+		}
+	}
+	if a.pluginPopup != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handlePluginPopupKey(km)
 		}
 	}
 
@@ -557,6 +625,81 @@ func (a App) handleBufPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.bufPicker.moveUp()
 	case "down", "j":
 		a.bufPicker.moveDown()
+	}
+	return a, nil
+}
+
+// handlePluginPopupKey routes key events to the plugin-driven list popup.
+func (a App) handlePluginPopupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		a.pluginPopup = nil
+		rpc := a.rpc
+		return a, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = rpc.PluginPopupCancelled(ctx)
+			return nil
+		}
+	case "enter":
+		if a.pluginPopup != nil && len(a.pluginPopup.items) > 0 {
+			idx := uint32(a.pluginPopup.idx)
+			a.pluginPopup = nil
+			rpc := a.rpc
+			return a, func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				_ = rpc.PluginPopupSelected(ctx, idx)
+				return nil
+			}
+		}
+	case "up", "k":
+		if a.pluginPopup != nil && a.pluginPopup.idx > 0 {
+			a.pluginPopup.idx--
+		}
+	case "down", "j":
+		if a.pluginPopup != nil && a.pluginPopup.idx < len(a.pluginPopup.items)-1 {
+			a.pluginPopup.idx++
+		}
+	}
+	return a, nil
+}
+
+// handlePluginInputKey routes key events to the plugin-driven text-input overlay.
+func (a App) handlePluginInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		a.pluginInput = nil
+		rpc := a.rpc
+		return a, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = rpc.PluginInputCancelled(ctx)
+			return nil
+		}
+	case "enter":
+		if a.pluginInput != nil {
+			text := a.pluginInput.text
+			a.pluginInput = nil
+			rpc := a.rpc
+			return a, func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				_ = rpc.PluginInputConfirmed(ctx, text)
+				return nil
+			}
+		}
+	case "backspace":
+		if a.pluginInput != nil {
+			runes := []rune(a.pluginInput.text)
+			if len(runes) > 0 {
+				a.pluginInput.text = string(runes[:len(runes)-1])
+			}
+		}
+	default:
+		if len(msg.Runes) > 0 && a.pluginInput != nil {
+			a.pluginInput.text += string(msg.Runes)
+		}
 	}
 	return a, nil
 }
@@ -1008,7 +1151,143 @@ func (a App) View() string {
 	if a.bufPicker != nil {
 		return overlayCenter(base, a.bufPicker.render(), a.width, a.height)
 	}
+	if a.pluginPopup != nil {
+		return overlayCenter(base, a.pluginPopup.render(), a.width, a.height)
+	}
+	if a.pluginInput != nil {
+		return overlayCenter(base, a.pluginInput.render(), a.width, a.height)
+	}
 	return base
+}
+
+const pluginPopupMaxVisible = 14
+
+var (
+	pluginPopupBg = lipgloss.Color("#1E2A38")
+
+	pluginPopupBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#4488CC")).
+				Background(pluginPopupBg)
+
+	pluginPopupTitleStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#0D1B2A")).
+				Foreground(lipgloss.Color("#88BBEE")).
+				Bold(true).
+				Padding(0, 1)
+
+	pluginPopupItemStyle = lipgloss.NewStyle().
+				Background(pluginPopupBg).
+				Foreground(lipgloss.Color("#AABBCC")).
+				Padding(0, 1)
+
+	pluginPopupSelStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#2D5F8A")).
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Padding(0, 1)
+
+	pluginInputBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#44AA88")).
+				Background(lipgloss.Color("#1E2A38"))
+
+	pluginInputTitleStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#0D1B2A")).
+				Foreground(lipgloss.Color("#88DDAA")).
+				Bold(true).
+				Padding(0, 1)
+
+	pluginInputFieldStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#0D1B2A")).
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Padding(0, 1)
+
+	pluginInputPlaceholderStyle = lipgloss.NewStyle().
+					Background(lipgloss.Color("#0D1B2A")).
+					Foreground(lipgloss.Color("#445566")).
+					Padding(0, 1)
+)
+
+func (p *appPluginPopup) render() string {
+	innerW := lipgloss.Width(p.title)
+	for _, item := range p.items {
+		n := len(item.Label)
+		if item.Sublabel != "" {
+			n += len(item.Sublabel) + 2
+		}
+		if n > innerW {
+			innerW = n
+		}
+	}
+	innerW += 4
+	if p.width > 0 {
+		innerW = min(innerW, p.width*2/3)
+	}
+	innerW = max(innerW, 30)
+
+	vis := min(len(p.items), pluginPopupMaxVisible)
+	if vis == 0 {
+		vis = 1
+	}
+	start := max(0, min(p.idx-vis/2, len(p.items)-vis))
+	end := min(start+vis, len(p.items))
+
+	var rows []string
+	rows = append(rows, pluginPopupTitleStyle.Width(innerW).Render(p.title))
+	rows = append(rows, lipgloss.NewStyle().
+		Background(pluginPopupBg).
+		Foreground(lipgloss.Color("#4488CC")).
+		Render(strings.Repeat("─", innerW)))
+
+	if start > 0 {
+		rows = append(rows, pluginPopupItemStyle.Width(innerW).Render("  ↑ more"))
+	}
+	for i := start; i < end; i++ {
+		item := p.items[i]
+		label := item.Label
+		if item.Sublabel != "" {
+			label += "  " + item.Sublabel
+		}
+		maxW := innerW - 2
+		if len([]rune(label)) > maxW && maxW > 0 {
+			label = string([]rune(label)[:maxW-1]) + "…"
+		}
+		label = "  " + label
+		if i == p.idx {
+			rows = append(rows, pluginPopupSelStyle.Width(innerW).Render(label))
+		} else {
+			rows = append(rows, pluginPopupItemStyle.Width(innerW).Render(label))
+		}
+	}
+	if end < len(p.items) {
+		rows = append(rows, pluginPopupItemStyle.Width(innerW).Render("  ↓ more"))
+	}
+
+	return pluginPopupBorderStyle.Render(strings.Join(rows, "\n"))
+}
+
+func (p *appPluginInput) render() string {
+	innerW := max(lipgloss.Width(p.title), lipgloss.Width(p.placeholder))
+	innerW += 4
+	if p.width > 0 {
+		innerW = min(innerW, p.width*2/3)
+	}
+	innerW = max(innerW, 30)
+
+	var rows []string
+	rows = append(rows, pluginInputTitleStyle.Width(innerW).Render(p.title))
+	rows = append(rows, lipgloss.NewStyle().
+		Background(lipgloss.Color("#1E2A38")).
+		Foreground(lipgloss.Color("#44AA88")).
+		Render(strings.Repeat("─", innerW)))
+
+	if p.text == "" && p.placeholder != "" {
+		rows = append(rows, pluginInputPlaceholderStyle.Width(innerW).Render(p.placeholder))
+	} else {
+		rows = append(rows, pluginInputFieldStyle.Width(innerW).Render(p.text+"█"))
+	}
+
+	return pluginInputBorderStyle.Render(strings.Join(rows, "\n"))
 }
 
 func renderFileChangedPrompt(w, sel int) string {

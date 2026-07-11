@@ -771,7 +771,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.decorations = msg.items
 		if !m.reservePluginGutter {
 			for _, d := range msg.items {
-				if d.Kind == ClientDecorationGutter {
+				if d.Kind == ClientDecorationGutter || d.Kind == ClientDecorationLeftGutter {
 					m.reservePluginGutter = true
 					break
 				}

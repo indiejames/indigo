@@ -371,6 +371,67 @@ func (s *editorService) PluginOpenBuffers() []plugin.PluginBufferRef {
 	return refs
 }
 
+// PluginShowPopup implements plugin.ServerBridge.
+// Stores the selection callbacks and pushes showPluginPopup to all clients.
+func (s *editorService) PluginShowPopup(title string, items []plugin.PluginPopupItem, onSelect func(data string), onCancel func()) {
+	s.mu.Lock()
+	s.popupOnSelect = onSelect
+	s.popupOnCancel = onCancel
+	s.popupItems = items
+	callbacks := s.allCallbacks()
+	s.mu.Unlock()
+
+	ctx := context.Background()
+	for _, cb := range callbacks {
+		fut, rel := cb.ShowPluginPopup(ctx, func(p proto.ClientCallback_showPluginPopup_Params) error {
+			if err := p.SetTitle(title); err != nil {
+				return err
+			}
+			list, err := p.NewItems(int32(len(items)))
+			if err != nil {
+				return err
+			}
+			for i, item := range items {
+				pi := list.At(i)
+				if err := pi.SetLabel(item.Label); err != nil {
+					return err
+				}
+				if err := pi.SetSublabel(item.Sublabel); err != nil {
+					return err
+				}
+				if err := pi.SetData(item.Data); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		fut.Struct() //nolint:errcheck
+		rel()
+	}
+}
+
+// PluginShowInputPrompt implements plugin.ServerBridge.
+// Stores the confirm/cancel callbacks and pushes showInputPrompt to all clients.
+func (s *editorService) PluginShowInputPrompt(title, placeholder string, onConfirm func(text string), onCancel func()) {
+	s.mu.Lock()
+	s.inputOnConfirm = onConfirm
+	s.inputOnCancel = onCancel
+	callbacks := s.allCallbacks()
+	s.mu.Unlock()
+
+	ctx := context.Background()
+	for _, cb := range callbacks {
+		fut, rel := cb.ShowInputPrompt(ctx, func(p proto.ClientCallback_showInputPrompt_Params) error {
+			if err := p.SetTitle(title); err != nil {
+				return err
+			}
+			return p.SetPlaceholder(placeholder)
+		})
+		fut.Struct() //nolint:errcheck
+		rel()
+	}
+}
+
 // PluginRunProcess implements plugin.ServerBridge.
 func (s *editorService) PluginRunProcess(cmdStr string, args []string) (stdout, stderr string, exitCode int32, err error) {
 	cmd := exec.Command(cmdStr, args...)

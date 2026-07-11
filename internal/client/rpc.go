@@ -49,10 +49,11 @@ type PluginKeyResult struct {
 type ClientDecorationKind int
 
 const (
-	ClientDecorationGutter    ClientDecorationKind = 0
-	ClientDecorationOverlay   ClientDecorationKind = 1
-	ClientDecorationStatusBar ClientDecorationKind = 2
-	ClientDecorationUnderline ClientDecorationKind = 3
+	ClientDecorationGutter     ClientDecorationKind = 0
+	ClientDecorationOverlay    ClientDecorationKind = 1
+	ClientDecorationStatusBar  ClientDecorationKind = 2
+	ClientDecorationUnderline  ClientDecorationKind = 3
+	ClientDecorationLeftGutter ClientDecorationKind = 4
 )
 
 // ClientUnderlineStyle mirrors the server-side enum.
@@ -470,6 +471,43 @@ func (r *RPC) ApplyPluginAction(ctx context.Context, pluginName string, bufID, l
 		p.SetIndex(index)
 		return nil
 	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
+// PluginPopupSelected tells the server the user picked item at index in the active plugin popup.
+func (r *RPC) PluginPopupSelected(ctx context.Context, index uint32) error {
+	fut, rel := r.svc.PluginPopupSelected(ctx, func(p proto.EditorService_pluginPopupSelected_Params) error {
+		p.SetIndex(index)
+		return nil
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
+// PluginPopupCancelled tells the server the user dismissed the plugin popup without selecting.
+func (r *RPC) PluginPopupCancelled(ctx context.Context) error {
+	fut, rel := r.svc.PluginPopupCancelled(ctx, nil)
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
+// PluginInputConfirmed tells the server the user confirmed the input prompt with text.
+func (r *RPC) PluginInputConfirmed(ctx context.Context, text string) error {
+	fut, rel := r.svc.PluginInputConfirmed(ctx, func(p proto.EditorService_pluginInputConfirmed_Params) error {
+		return p.SetText(text)
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
+// PluginInputCancelled tells the server the user dismissed the input prompt.
+func (r *RPC) PluginInputCancelled(ctx context.Context) error {
+	fut, rel := r.svc.PluginInputCancelled(ctx, nil)
 	defer rel()
 	_, err := fut.Struct()
 	return err

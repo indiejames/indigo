@@ -371,6 +371,80 @@ func (s *editorService) PluginOpenBuffers() []plugin.PluginBufferRef {
 	return refs
 }
 
+// PluginSetBookmark implements plugin.ServerBridge.
+// Looks up the file path for bufID and pushes a setBookmark notification to all clients.
+func (s *editorService) PluginSetBookmark(bufID uint32, line, col uint32, note, marker string) {
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+	filePath := entry.buf.Path()
+	callbacks := s.allCallbacks()
+	s.mu.Unlock()
+
+	ctx := context.Background()
+	for _, cb := range callbacks {
+		fut, rel := cb.SetBookmark(ctx, func(p proto.ClientCallback_setBookmark_Params) error {
+			p.SetLine(line)
+			p.SetCol(col)
+			if err := p.SetFilePath(filePath); err != nil {
+				return err
+			}
+			if err := p.SetMarker(marker); err != nil {
+				return err
+			}
+			return p.SetNote(note)
+		})
+		fut.Struct() //nolint:errcheck
+		rel()
+	}
+}
+
+// PluginShowBookmarks implements plugin.ServerBridge.
+// Pushes a showBookmarks notification to all clients.
+func (s *editorService) PluginShowBookmarks() {
+	s.mu.Lock()
+	callbacks := s.allCallbacks()
+	s.mu.Unlock()
+
+	ctx := context.Background()
+	for _, cb := range callbacks {
+		fut, rel := cb.ShowBookmarks(ctx, nil)
+		fut.Struct() //nolint:errcheck
+		rel()
+	}
+}
+
+// PluginPromptBookmark implements plugin.ServerBridge.
+// Pushes a promptBookmark notification so the client shows a name-input prompt.
+func (s *editorService) PluginPromptBookmark(bufID uint32, line, col uint32, marker string) {
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+	filePath := entry.buf.Path()
+	callbacks := s.allCallbacks()
+	s.mu.Unlock()
+
+	ctx := context.Background()
+	for _, cb := range callbacks {
+		fut, rel := cb.PromptBookmark(ctx, func(p proto.ClientCallback_promptBookmark_Params) error {
+			p.SetLine(line)
+			p.SetCol(col)
+			if err := p.SetFilePath(filePath); err != nil {
+				return err
+			}
+			return p.SetMarker(marker)
+		})
+		fut.Struct() //nolint:errcheck
+		rel()
+	}
+}
+
 // PluginRunProcess implements plugin.ServerBridge.
 func (s *editorService) PluginRunProcess(cmdStr string, args []string) (stdout, stderr string, exitCode int32, err error) {
 	cmd := exec.Command(cmdStr, args...)

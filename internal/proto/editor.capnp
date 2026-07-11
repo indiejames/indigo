@@ -10,6 +10,9 @@ interface ClientCallback {
   openFile      @2 (path :Text, line :UInt32)                  -> ();
   keyRegistered @3 (trigger :Text)                             -> ();
   fileChanged   @4 (bufId :UInt32, dirty :Bool)                -> ();
+  setBookmark    @5 (filePath :Text, line :UInt32, col :UInt32, note :Text, marker :Text) -> ();
+  showBookmarks  @6 () -> ();
+  promptBookmark @7 (filePath :Text, line :UInt32, col :UInt32, marker :Text) -> ();
 }
 
 interface EditorService {

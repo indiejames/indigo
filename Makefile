@@ -89,9 +89,26 @@ install-git: build-git
 uninstall-git:
 	rm -rf $(GIT_INSTALL)
 
-build-plugins: build-jumpy build-spell build-git
+BOOKMARKS_DIR     := $(PLUGINS_DIR)/bookmarks
+BOOKMARKS_OUT     := $(BOOKMARKS_DIR)/bookmarks-$(GOOS)-$(GOARCH)
+BOOKMARKS_INSTALL := $(HOME)/.config/indigo/plugins/bookmarks
+
+build-bookmarks:
+	go build -o $(BOOKMARKS_OUT) ./$(BOOKMARKS_DIR)
+
+install-bookmarks: build-bookmarks
+	mkdir -p $(BOOKMARKS_INSTALL)
+	mv $(BOOKMARKS_OUT) $(BOOKMARKS_INSTALL)/
+	cp $(BOOKMARKS_DIR)/plugin.toml $(BOOKMARKS_INSTALL)/
+
+uninstall-bookmarks:
+	rm -rf $(BOOKMARKS_INSTALL)
+
+build-plugins: build-jumpy build-spell build-git build-bookmarks
 
 .PHONY: build build-release build-minimal build-no-heavy build-custom install test vet lint clean \
         build-jumpy install-jumpy uninstall-jumpy \
         build-spell install-spell uninstall-spell \
-        build-git install-git uninstall-git build-plugins
+        build-git install-git uninstall-git \
+        build-bookmarks install-bookmarks uninstall-bookmarks \
+        build-plugins

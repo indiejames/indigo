@@ -42,9 +42,11 @@ type Info struct {
 
 // KeyContext is the context passed to key and insert handlers.
 type KeyContext struct {
-	BufID    uint32
-	Mode     string // "normal", "insert", or "capture"
-	ClientID uint64
+	BufID      uint32
+	Mode       string // "normal", "insert", or "capture"
+	ClientID   uint64
+	CursorLine uint32
+	CursorCol  uint32
 }
 
 // KeyResponse is returned by key and insert handlers.
@@ -573,7 +575,7 @@ func (s *keyHandlerServer) Handle(_ context.Context, call pluginproto.KeyHandler
 	kctx, _ := call.Args().Ctx()
 	mode, _ := kctx.Mode()
 
-	resp := s.fn(key, KeyContext{BufID: kctx.BufId(), Mode: mode, ClientID: kctx.ClientId()})
+	resp := s.fn(key, KeyContext{BufID: kctx.BufId(), Mode: mode, ClientID: kctx.ClientId(), CursorLine: kctx.CursorLine(), CursorCol: kctx.CursorCol()})
 
 	res, err := call.AllocResults()
 	if err != nil {
@@ -803,5 +805,45 @@ func (s *decorProviderServer) ApplyFix(_ context.Context, call pluginproto.Decor
 		s.h.ApplyFix(fixData, index)
 	}
 	_, err := call.AllocResults()
+	return err
+}
+
+// SetBookmark sets (or clears, if already set) a bookmark at the given position in bufID.
+// note is optional; pass "" for a plain bookmark.
+func (a *Api) SetBookmark(bufID, line, col uint32, note, marker string) error {
+	fut, rel := a.api.SetBookmark(context.Background(), func(p pluginproto.EditorApi_setBookmark_Params) error {
+		p.SetBufId(bufID)
+		p.SetLine(line)
+		p.SetCol(col)
+		if err := p.SetNote(note); err != nil {
+			return err
+		}
+		return p.SetMarker(marker)
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
+// ShowBookmarks asks the editor to open the bookmark picker popup.
+func (a *Api) ShowBookmarks() error {
+	fut, rel := a.api.ShowBookmarks(context.Background(), nil)
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
+// PromptBookmarkName asks the editor to show a name-input prompt before
+// creating a bookmark at (bufID, line, col). The editor collects the name and
+// then creates the bookmark; the plugin does not need to call SetBookmark.
+func (a *Api) PromptBookmarkName(bufID, line, col uint32, marker string) error {
+	fut, rel := a.api.PromptBookmark(context.Background(), func(p pluginproto.EditorApi_promptBookmark_Params) error {
+		p.SetBufId(bufID)
+		p.SetLine(line)
+		p.SetCol(col)
+		return p.SetMarker(marker)
+	})
+	defer rel()
+	_, err := fut.Struct()
 	return err
 }

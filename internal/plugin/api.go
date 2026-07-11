@@ -410,3 +410,44 @@ func (s *editorApiServer) VisibleRange(_ context.Context, call pluginproto.Edito
 	res.SetEndLine(endLine)
 	return nil
 }
+
+func (s *editorApiServer) SetBookmark(_ context.Context, call pluginproto.EditorApi_setBookmark) error {
+	if s.bridge == nil {
+		return fmt.Errorf("no server bridge")
+	}
+	args := call.Args()
+	note, err := args.Note()
+	if err != nil {
+		return err
+	}
+	marker, err := args.Marker()
+	if err != nil {
+		return err
+	}
+	s.bridge.PluginSetBookmark(args.BufId(), args.Line(), args.Col(), note, marker)
+	_, err = call.AllocResults()
+	return err
+}
+
+func (s *editorApiServer) ShowBookmarks(_ context.Context, call pluginproto.EditorApi_showBookmarks) error {
+	if s.bridge == nil {
+		return fmt.Errorf("no server bridge")
+	}
+	s.bridge.PluginShowBookmarks()
+	_, err := call.AllocResults()
+	return err
+}
+
+func (s *editorApiServer) PromptBookmark(_ context.Context, call pluginproto.EditorApi_promptBookmark) error {
+	if s.bridge == nil {
+		return fmt.Errorf("no server bridge")
+	}
+	args := call.Args()
+	marker, err := args.Marker()
+	if err != nil {
+		return err
+	}
+	s.bridge.PluginPromptBookmark(args.BufId(), args.Line(), args.Col(), marker)
+	_, err = call.AllocResults()
+	return err
+}

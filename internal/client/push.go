@@ -19,6 +19,27 @@ type PluginMoveCursorMsg struct {
 	Col   uint32
 }
 
+// SetBookmarkMsg is sent when a plugin sets a bookmark at the given position.
+type SetBookmarkMsg struct {
+	FilePath string
+	Line     int
+	Col      int
+	Note     string
+	Marker   string
+}
+
+// ShowBookmarksMsg is sent when a plugin requests the bookmark picker popup.
+type ShowBookmarksMsg struct{}
+
+// PromptBookmarkMsg is sent when a plugin requests a name-input prompt before
+// creating a bookmark at the given position.
+type PromptBookmarkMsg struct {
+	FilePath string
+	Line     int
+	Col      int
+	Marker   string
+}
+
 // callbackServer implements proto.ClientCallback_Server.
 // It is created in Dial and holds a send function that routes
 // server push calls into the Bubble Tea program.
@@ -87,6 +108,63 @@ func (s *callbackServer) KeyRegistered(_ context.Context, call proto.ClientCallb
 	if r != nil {
 		r.addPluginKey(trigger)
 	}
+	_, err = call.AllocResults()
+	return err
+}
+
+func (s *callbackServer) SetBookmark(_ context.Context, call proto.ClientCallback_setBookmark) error {
+	args := call.Args()
+	filePath, err := args.FilePath()
+	if err != nil {
+		return err
+	}
+	note, err := args.Note()
+	if err != nil {
+		return err
+	}
+	marker, err := args.Marker()
+	if err != nil {
+		return err
+	}
+	if marker == "" {
+		marker = "▶"
+	}
+	s.dispatch(SetBookmarkMsg{
+		FilePath: filePath,
+		Line:     int(args.Line()),
+		Col:      int(args.Col()),
+		Note:     note,
+		Marker:   marker,
+	})
+	_, err = call.AllocResults()
+	return err
+}
+
+func (s *callbackServer) ShowBookmarks(_ context.Context, call proto.ClientCallback_showBookmarks) error {
+	s.dispatch(ShowBookmarksMsg{})
+	_, err := call.AllocResults()
+	return err
+}
+
+func (s *callbackServer) PromptBookmark(_ context.Context, call proto.ClientCallback_promptBookmark) error {
+	args := call.Args()
+	filePath, err := args.FilePath()
+	if err != nil {
+		return err
+	}
+	marker, err := args.Marker()
+	if err != nil {
+		return err
+	}
+	if marker == "" {
+		marker = "▶"
+	}
+	s.dispatch(PromptBookmarkMsg{
+		FilePath: filePath,
+		Line:     int(args.Line()),
+		Col:      int(args.Col()),
+		Marker:   marker,
+	})
 	_, err = call.AllocResults()
 	return err
 }

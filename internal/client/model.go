@@ -367,6 +367,13 @@ type undoEntry struct {
 	before cursorSnapshot
 }
 
+// LeftGutterMarker is a single-character marker rendered in the 2-cell left
+// gutter slot (e.g. a bookmark indicator). Plugins provide these via the App.
+type LeftGutterMarker struct {
+	Text  string // single character to display
+	Color string // hex color, e.g. "#FFAA44"; empty = default
+}
+
 // Model is the Bubble Tea model for a single buffer view.
 type Model struct {
 	rpc            *RPC
@@ -413,6 +420,10 @@ type Model struct {
 	decorTick          int  // poll every 3 ticks (~360ms)
 	reservePluginGutter bool // latched true once gutter decorations have been seen; never resets
 
+	// Left-gutter markers injected by the App (keyed by 0-based line number).
+	// Each value is the text+color to render in the 2-cell left gutter slot.
+	LeftGutterMarkers map[int]LeftGutterMarker
+
 	// Capture mode: plugin owns the next N keypresses.
 	captureMode      bool
 	captureRemaining uint32
@@ -456,6 +467,13 @@ type Model struct {
 // Used for hot-reloading preferences at runtime.
 func (m Model) WithConfig(cfg *config.Config) Model {
 	m.cfg = cfg
+	return m
+}
+
+// WithLeftGutterMarkers sets the plugin-provided left-gutter markers keyed by
+// 0-based line number. The App calls this whenever the bookmark list changes.
+func (m Model) WithLeftGutterMarkers(markers map[int]LeftGutterMarker) Model {
+	m.LeftGutterMarkers = markers
 	return m
 }
 

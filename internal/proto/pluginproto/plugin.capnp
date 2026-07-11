@@ -21,6 +21,9 @@ interface EditorApi {
   registerBufferHandler @3 (handler :BufferEventHandler)                  -> ();
   registerDecorations   @4 (provider :DecorationProvider)                 -> ();
   registerActionProvider @16 (provider :ActionProvider)                    -> ();
+  setBookmark     @17 (bufId :UInt32, line :UInt32, col :UInt32, note :Text, marker :Text) -> ();
+  showBookmarks   @18 () -> ();
+  promptBookmark  @19 (bufId :UInt32, line :UInt32, col :UInt32, marker :Text) -> ();
 
   # -- Editor effects --
   applyEdit    @5 (bufId :UInt32, edits :List(TextEdit))                  -> ();

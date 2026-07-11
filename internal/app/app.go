@@ -96,6 +96,11 @@ type App struct {
 	// Edit jump list (ctrl+o / Tab).
 	jumpList []jumpEntry
 	jumpIdx  int // index of last jumped-to entry; -1 = at head (not navigating)
+
+	// Bookmarks (set by the bookmark plugin).
+	bookmarks       []bookmark
+	bmarkPicker     *bookmarkPicker     // non-nil when bookmark picker popup is open
+	bmarkNamePrompt *bookmarkNamePrompt // non-nil when name-input overlay is shown
 }
 
 // configPathAndMtime returns the config file path and its current mtime.
@@ -146,6 +151,7 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 		m = m.AtLine(startLine)
 	}
 	cfgPath, cfgMod := configPathAndMtime()
+	bmarks := loadSavedBookmarks()
 	a := &App{
 		rpc:            rpc,
 		cfg:            cfg,
@@ -155,6 +161,7 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 		jumpIdx:        -1,
 		configPath:     cfgPath,
 		configModTime:  cfgMod,
+		bookmarks:      bmarks,
 	}
 	// Pre-seed terminal size so the first View() renders the editor layout
 	// immediately rather than a "loading…" placeholder.
@@ -162,6 +169,7 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 		a.width, a.height = w, h
 		a.resizeAllBuffers()
 	}
+	a.updateBookmarkDecorations()
 	return a
 }
 
@@ -177,6 +185,7 @@ func NewWithPicker(rpc *client.RPC, cfg *config.Config, workDir string) *App {
 		jumpIdx:        -1,
 		configPath:     cfgPath,
 		configModTime:  cfgMod,
+		bookmarks:      loadSavedBookmarks(),
 	}
 }
 
@@ -223,6 +232,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.bufPicker != nil {
 			a.bufPicker.width = msg.Width
 			a.bufPicker.height = msg.Height
+		}
+		if a.bmarkPicker != nil {
+			a.bmarkPicker.width = msg.Width
+			a.bmarkPicker.height = msg.Height
+		}
+		if a.bmarkNamePrompt != nil {
+			a.bmarkNamePrompt.width = msg.Width
+			a.bmarkNamePrompt.height = msg.Height
 		}
 		// Resize all buffers with the correct height (minus tab bar if shown).
 		bufMsg := tea.WindowSizeMsg{Width: msg.Width, Height: a.bufHeight()}
@@ -347,6 +364,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Resize ALL buffers — the tab bar may have just become visible,
 		// which changes the available height for every buffer.
 		resizeCmd := a.resizeAllBuffers()
+		a.updateBookmarkDecorations()
 		return a, tea.Batch(m.Init(), resizeCmd)
 
 	case errorOpenMsg:
@@ -429,6 +447,83 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case client.UndoMsg:
 		a.handleUndoJump(msg)
+		a.updateBookmarkDecorations()
+		return a, nil
+
+	case client.SetBookmarkMsg:
+		a.toggleBookmark(msg.FilePath, msg.Line, msg.Col, msg.Note, msg.Marker)
+		return a, nil
+
+	case client.ShowBookmarksMsg:
+		active := 0
+		for _, b := range a.bookmarks {
+			if b.active {
+				active++
+			}
+		}
+		if active == 0 {
+			a.status = "No bookmarks"
+			return a, nil
+		}
+		a.bmarkPicker = newBookmarkPicker(a.bookmarks, a.width, a.height)
+		return a, nil
+
+	case bmarkPickedMsg:
+		if msg.bmarkIdx >= 0 && msg.bmarkIdx < len(a.bookmarks) {
+			b := a.bookmarks[msg.bmarkIdx]
+			a.bmarkPicker = nil
+			return a.jumpToEntry(jumpEntry{filePath: b.filePath, line: b.line, col: b.col})
+		}
+		a.bmarkPicker = nil
+		return a, nil
+
+	case bmarkPickerCancelledMsg:
+		a.bmarkPicker = nil
+		return a, nil
+
+	case bmarkDeletedMsg:
+		if msg.bmarkIdx >= 0 && msg.bmarkIdx < len(a.bookmarks) {
+			a.bookmarks = append(a.bookmarks[:msg.bmarkIdx], a.bookmarks[msg.bmarkIdx+1:]...)
+		}
+		persistBookmarks(a.bookmarks)
+		a.updateBookmarkDecorations()
+		active := 0
+		for _, b := range a.bookmarks {
+			if b.active {
+				active++
+			}
+		}
+		if active == 0 {
+			a.bmarkPicker = nil
+		} else {
+			a.bmarkPicker = newBookmarkPicker(a.bookmarks, a.width, a.height)
+		}
+		return a, nil
+
+	case bmarkRenameMsg:
+		if msg.bmarkIdx >= 0 && msg.bmarkIdx < len(a.bookmarks) {
+			a.bmarkPicker = nil
+			a.bmarkNamePrompt = newBookmarkRenamePrompt(a.bookmarks[msg.bmarkIdx], msg.bmarkIdx, a.width, a.height)
+		}
+		return a, nil
+
+	case client.PromptBookmarkMsg:
+		a.bmarkNamePrompt = newBookmarkNamePrompt(msg.FilePath, msg.Line, msg.Col, msg.Marker, a.width, a.height)
+		return a, nil
+
+	case bmarkNameConfirmedMsg:
+		if msg.renameIdx >= 0 && msg.renameIdx < len(a.bookmarks) {
+			a.bookmarks[msg.renameIdx].note = msg.name
+			persistBookmarks(a.bookmarks)
+			a.updateBookmarkDecorations()
+		} else {
+			a.toggleBookmark(msg.filePath, msg.line, msg.col, msg.name, msg.marker)
+		}
+		a.bmarkNamePrompt = nil
+		return a, nil
+
+	case bmarkNameCancelledMsg:
+		a.bmarkNamePrompt = nil
 		return a, nil
 
 	// ---- server push (plugin effects) ----
@@ -489,6 +584,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if a.bufPicker != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handleBufPickerKey(km)
+		}
+	}
+	if a.bmarkNamePrompt != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleBmarkNamePromptKey(km)
+		}
+	}
+	if a.bmarkPicker != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleBmarkPickerKey(km)
 		}
 	}
 
@@ -559,6 +664,164 @@ func (a App) handleBufPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.bufPicker.moveDown()
 	}
 	return a, nil
+}
+
+// handleBmarkPickerKey routes key events to the bookmark picker popup.
+func (a App) handleBmarkPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		return a, func() tea.Msg { return bmarkPickerCancelledMsg{} }
+	case "enter":
+		idx := a.bmarkPicker.selectedBmarkIdx()
+		if idx >= 0 {
+			return a, func() tea.Msg { return bmarkPickedMsg{bmarkIdx: idx} }
+		}
+	case "d":
+		idx := a.bmarkPicker.selectedBmarkIdx()
+		if idx >= 0 {
+			return a, func() tea.Msg { return bmarkDeletedMsg{bmarkIdx: idx} }
+		}
+	case "r":
+		idx := a.bmarkPicker.selectedBmarkIdx()
+		if idx >= 0 {
+			return a, func() tea.Msg { return bmarkRenameMsg{bmarkIdx: idx} }
+		}
+	case "up", "k":
+		a.bmarkPicker.moveUp()
+	case "down", "j":
+		a.bmarkPicker.moveDown()
+	}
+	return a, nil
+}
+
+// handleBmarkNamePromptKey routes key events to the bookmark name-input overlay.
+func (a App) handleBmarkNamePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	p := a.bmarkNamePrompt
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		return a, func() tea.Msg { return bmarkNameCancelledMsg{} }
+	case "enter":
+		confirmed := bmarkNameConfirmedMsg{
+			filePath:  p.filePath,
+			line:      p.line,
+			col:       p.col,
+			marker:    p.marker,
+			name:      p.name,
+			renameIdx: p.renameIdx,
+		}
+		return a, func() tea.Msg { return confirmed }
+	case "backspace":
+		runes := []rune(p.name)
+		if len(runes) > 0 {
+			a.bmarkNamePrompt.name = string(runes[:len(runes)-1])
+		}
+	default:
+		if len(msg.Runes) > 0 {
+			a.bmarkNamePrompt.name += string(msg.Runes)
+		}
+	}
+	return a, nil
+}
+
+// toggleBookmark sets or removes a bookmark at the given position.
+// If an active bookmark already exists at (filePath, line), it is removed.
+func (a *App) toggleBookmark(filePath string, line, col int, note, marker string) {
+	if marker == "" {
+		marker = "▶"
+	}
+	for i, b := range a.bookmarks {
+		if b.filePath == filePath && b.line == line && b.active {
+			a.bookmarks = append(a.bookmarks[:i], a.bookmarks[i+1:]...)
+			persistBookmarks(a.bookmarks)
+			a.updateBookmarkDecorations()
+			return
+		}
+	}
+	a.bookmarks = append(a.bookmarks, bookmark{
+		filePath: filePath,
+		line:     line,
+		col:      col,
+		note:     note,
+		marker:   marker,
+		active:   true,
+	})
+	persistBookmarks(a.bookmarks)
+	a.updateBookmarkDecorations()
+}
+
+// updateBookmarkDecorations pushes the current active bookmark lines for each
+// open buffer into its client Model so the gutter markers stay in sync.
+func (a *App) updateBookmarkDecorations() {
+	for i, buf := range a.buffers {
+		fp := buf.FilePath()
+		markers := make(map[int]client.LeftGutterMarker)
+		for _, b := range a.bookmarks {
+			if b.active && b.filePath == fp {
+				m := b.marker
+				if m == "" {
+					m = "▶"
+				}
+				markers[b.line] = client.LeftGutterMarker{Text: m, Color: "#5588FF"}
+			}
+		}
+		a.buffers[i] = buf.WithLeftGutterMarkers(markers)
+	}
+}
+
+// applyBookmarkLineShift adjusts bookmark line numbers when lines are inserted
+// or deleted. Uses the same suspend/reactivate logic as the jump list.
+func (a *App) applyBookmarkLineShift(filePath string, atLine, delta, undoDepth int) {
+	if delta == 0 || filePath == "" {
+		return
+	}
+	for i := range a.bookmarks {
+		b := &a.bookmarks[i]
+		if b.filePath != filePath {
+			continue
+		}
+		if delta < 0 {
+			deletedTo := atLine - delta
+			if b.line >= deletedTo {
+				b.line += delta
+			} else if b.line >= atLine && b.active {
+				b.active = false
+				b.deactivatedDepth = undoDepth
+			}
+		} else {
+			if b.line > atLine {
+				b.line += delta
+			}
+		}
+	}
+}
+
+// applyBookmarkUndo reverses the line-tracking effect of an undo operation.
+// Mirrors handleUndoJump but for bookmarks. Bookmarks are never pruned by undo
+// (they persist until explicitly deleted), only adjusted or reactivated.
+func (a *App) applyBookmarkUndo(msg client.UndoMsg) {
+	atLine := msg.AtLine
+	delta := msg.LineDelta
+	deletedTo := atLine - delta
+	for i := range a.bookmarks {
+		b := &a.bookmarks[i]
+		if b.filePath != msg.FilePath {
+			continue
+		}
+		if !b.active && b.deactivatedDepth > msg.NewDepth {
+			b.active = true
+			b.deactivatedDepth = 0
+			continue
+		}
+		if delta < 0 {
+			if b.line >= deletedTo {
+				b.line += delta
+			}
+		} else {
+			if b.line >= atLine {
+				b.line += delta
+			}
+		}
+	}
 }
 
 // handleGrepKey routes key events to the workspace search picker.
@@ -751,6 +1014,8 @@ func (a *App) applyEditRecord(msg client.EditRecordMsg) {
 		a.jumpList = a.jumpList[:n]
 	}
 	a.recordEdit(msg.FilePath, msg.Line, msg.Col, msg.UndoDepth)
+	a.applyBookmarkLineShift(msg.FilePath, msg.AtLine, msg.LineDelta, msg.UndoDepth)
+	a.updateBookmarkDecorations()
 }
 
 // recordEdit appends {filePath, line, col, undoDepth} to the jump list.
@@ -836,6 +1101,7 @@ func (a *App) handleUndoJump(msg client.UndoMsg) {
 	// the oldest entry and do nothing. Starting fresh from -1 lets the next
 	// jump-back find the most recent surviving active entry.
 	a.jumpIdx = -1
+	a.applyBookmarkUndo(msg)
 }
 
 func (a App) doJumpBack() (tea.Model, tea.Cmd) {
@@ -1007,6 +1273,12 @@ func (a App) View() string {
 	}
 	if a.bufPicker != nil {
 		return overlayCenter(base, a.bufPicker.render(), a.width, a.height)
+	}
+	if a.bmarkNamePrompt != nil {
+		return overlayCenter(base, a.bmarkNamePrompt.render(), a.width, a.height)
+	}
+	if a.bmarkPicker != nil {
+		return overlayCenter(base, a.bmarkPicker.render(), a.width, a.height)
 	}
 	return base
 }

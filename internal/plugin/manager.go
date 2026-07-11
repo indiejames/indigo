@@ -40,6 +40,11 @@ type ServerBridge interface {
 	PluginShowMessage(text string)
 	PluginRunProcess(cmd string, args []string) (stdout, stderr string, exitCode int32, err error)
 
+	// Bookmark operations.
+	PluginSetBookmark(bufID uint32, line, col uint32, note, marker string)
+	PluginShowBookmarks()
+	PluginPromptBookmark(bufID uint32, line, col uint32, marker string)
+
 	// Key registration notification — called so the server can push to clients.
 	PluginKeyRegistered(trigger string)
 

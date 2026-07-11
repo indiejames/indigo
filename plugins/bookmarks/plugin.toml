@@ -1,0 +1,12 @@
+name        = "bookmarks"
+version     = "0.1.0"
+sdk_version = "0.1.0"
+description     = "Set bookmarks with alt+m, open the bookmark list with alt+b."
+trigger_key     = "alt+m"
+key_description = "Toggle bookmark at current line (prompts for name)"
+
+[binaries]
+"darwin/arm64" = "bookmarks-darwin-arm64"
+"darwin/amd64" = "bookmarks-darwin-amd64"
+"linux/amd64"  = "bookmarks-linux-amd64"
+"linux/arm64"  = "bookmarks-linux-arm64"

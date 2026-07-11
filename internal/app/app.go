@@ -45,10 +45,12 @@ type switchBufferMsg struct {
 
 // jumpEntry records a single position in the edit jump list.
 type jumpEntry struct {
-	filePath  string
-	line      int
-	col       int
-	undoDepth int // undo stack depth when this entry was created
+	filePath         string
+	line             int
+	col              int
+	undoDepth        int  // undo stack depth when this entry was created
+	active           bool // false when the entry's line has been deleted
+	deactivatedDepth int  // undoDepth of the delete that deactivated this entry
 }
 
 // App is the top-level Bubble Tea model. It owns a list of editor buffers,
@@ -727,16 +729,18 @@ func (a *App) applyEditRecord(msg client.EditRecordMsg) {
 				deletedTo := atLine - delta
 				if e.line >= deletedTo {
 					e.line += delta // shift back
-					a.jumpList[n] = e
-					n++
-				} else if e.line >= atLine {
-					// Entry was inside the deleted range — drop it.
-				} else {
-					a.jumpList[n] = e
-					n++
+				} else if e.line >= atLine && e.active {
+					// Active entry inside the deleted range: suspend it rather
+					// than discarding. It will be restored if the delete is undone.
+					e.active = false
+					e.deactivatedDepth = msg.UndoDepth
 				}
+				// Inactive entries in the range keep their stored position and
+				// deactivatedDepth; they're already suspended by an earlier delete.
+				a.jumpList[n] = e
+				n++
 			} else {
-				// Lines were inserted after atLine.
+				// Lines were inserted; shift entries that follow the insertion point.
 				if e.line > atLine {
 					e.line += delta
 				}
@@ -745,9 +749,6 @@ func (a *App) applyEditRecord(msg client.EditRecordMsg) {
 			}
 		}
 		a.jumpList = a.jumpList[:n]
-		if a.jumpIdx >= n {
-			a.jumpIdx = n - 1
-		}
 	}
 	a.recordEdit(msg.FilePath, msg.Line, msg.Col, msg.UndoDepth)
 }
@@ -764,99 +765,106 @@ func (a *App) recordEdit(filePath string, line, col, undoDepth int) {
 		a.jumpList = a.jumpList[:a.jumpIdx+1]
 		a.jumpIdx = -1
 	}
-	if n := len(a.jumpList); n > 0 {
-		last := a.jumpList[n-1]
-		if last.filePath == filePath && last.line == line {
-			a.jumpList[n-1].col = col
-			a.jumpList[n-1].undoDepth = undoDepth
-			return
-		}
-	}
-	a.jumpList = append(a.jumpList, jumpEntry{filePath: filePath, line: line, col: col, undoDepth: undoDepth})
+	a.jumpList = append(a.jumpList, jumpEntry{filePath: filePath, line: line, col: col, undoDepth: undoDepth, active: true})
 	if len(a.jumpList) > 100 {
 		a.jumpList = a.jumpList[len(a.jumpList)-100:]
 	}
 }
 
-// handleUndoJump reverses the line-shift caused by the undone operation and
-// removes jump entries that no longer exist (their undoDepth > newDepth).
+// handleUndoJump processes a single undo in a single pass over the jump list:
+//
+//  1. Active entries created by the undone edit (undoDepth > newDepth) are
+//     dropped — those edits no longer exist.
+//
+//  2. Inactive entries that were suspended by the undone edit
+//     (deactivatedDepth > newDepth) are reactivated. Their stored line number
+//     is already correct (it was frozen at the time they were suspended), so no
+//     line adjustment is applied to them.
+//
+//  3. All other entries (both active and inactive) have their line numbers
+//     adjusted to account for the buffer change the undo caused. Inactive
+//     entries need this too so their positions stay valid when reactivated by a
+//     future undo.
 func (a *App) handleUndoJump(msg client.UndoMsg) {
-	// Step 1: re-adjust line numbers for entries that were shifted when the
-	// undone edit was originally recorded.
-	if msg.LineDelta != 0 {
-		atLine := msg.AtLine
-		delta := msg.LineDelta
-		n := 0
-		for _, e := range a.jumpList {
-			if e.filePath != msg.FilePath {
+	atLine := msg.AtLine
+	delta := msg.LineDelta
+	deletedTo := atLine - delta // only meaningful when delta < 0
+
+	n := 0
+	for _, e := range a.jumpList {
+		if e.filePath == msg.FilePath {
+			// Rule 1: drop active entries whose creating edit is now gone.
+			if e.active && e.undoDepth > msg.NewDepth {
+				continue
+			}
+			// Rule 2: reactivate inactive entries suspended by the undone edit.
+			// Skip line adjustment — the stored position is already correct.
+			if !e.active && e.deactivatedDepth > msg.NewDepth {
+				e.active = true
+				e.deactivatedDepth = 0
 				a.jumpList[n] = e
 				n++
 				continue
 			}
+			// Rule 3: adjust line numbers for everything else.
 			if delta < 0 {
-				// Undo of a forward insert: delete the inserted lines.
-				deletedTo := atLine - delta
+				// Undo of a forward insert: the inserted lines are being removed.
 				if e.line >= deletedTo {
 					e.line += delta
-					a.jumpList[n] = e
-					n++
-				} else if e.line >= atLine {
-					// inside deleted range — drop
-				} else {
-					a.jumpList[n] = e
-					n++
 				}
+				// Entries in [atLine, deletedTo) are inserted-content entries;
+				// they were already dropped by Rule 1 (undoDepth > newDepth).
+				// Inactive entries from prior deletes that happen to sit in this
+				// range keep their position — their deactivatedDepth is older and
+				// will be handled by a future undo.
 			} else {
-				// Undo of a forward delete: re-insert the deleted lines.
-				// Entries at >= atLine were shifted here from higher lines; use
-				// >= (not >) so entries that landed exactly at atLine are restored.
+				// Undo of a forward delete: the deleted lines are being restored.
+				// Use >= so entries that landed exactly at atLine (shifted from
+				// deletedTo by the original delete) are correctly restored.
 				if e.line >= atLine {
 					e.line += delta
 				}
-				a.jumpList[n] = e
-				n++
 			}
-		}
-		a.jumpList = a.jumpList[:n]
-	}
-	// Step 2: prune entries created by edits that are now undone.
-	n := 0
-	for _, e := range a.jumpList {
-		if e.filePath == msg.FilePath && e.undoDepth > msg.NewDepth {
-			continue
 		}
 		a.jumpList[n] = e
 		n++
 	}
 	a.jumpList = a.jumpList[:n]
-	// Reset navigation state: the cursor is now at the undo-restored position,
-	// not at any known jump entry. Clamping jumpIdx to n-1 when entries were
-	// removed causes doJumpBack to believe we're already at the oldest entry
-	// (jumpIdx==0) and silently do nothing. Resetting to -1 lets the next
-	// jump-back start fresh from the end of the surviving list.
+	// Reset navigation state. After an undo the cursor is at the undo-restored
+	// position, not at any known jump entry. Leaving jumpIdx set (possibly
+	// clamped by earlier pruning) causes doJumpBack to think we're already at
+	// the oldest entry and do nothing. Starting fresh from -1 lets the next
+	// jump-back find the most recent surviving active entry.
 	a.jumpIdx = -1
 }
 
 func (a App) doJumpBack() (tea.Model, tea.Cmd) {
-	if len(a.jumpList) == 0 {
-		return a, nil
+	// Search backward from one before the current position (or from the end
+	// if not navigating) for the nearest active entry.
+	start := len(a.jumpList) - 1
+	if a.jumpIdx >= 0 {
+		start = a.jumpIdx - 1
 	}
-	if a.jumpIdx == -1 {
-		a.jumpIdx = len(a.jumpList) - 1
-	} else if a.jumpIdx > 0 {
-		a.jumpIdx--
-	} else {
-		return a, nil // already at the oldest entry
+	for i := start; i >= 0; i-- {
+		if a.jumpList[i].active {
+			a.jumpIdx = i
+			return a.jumpToEntry(a.jumpList[i])
+		}
 	}
-	return a.jumpToEntry(a.jumpList[a.jumpIdx])
+	return a, nil
 }
 
 func (a App) doJumpForward() (tea.Model, tea.Cmd) {
-	if a.jumpIdx < 0 || a.jumpIdx >= len(a.jumpList)-1 {
+	if a.jumpIdx < 0 {
 		return a, nil
 	}
-	a.jumpIdx++
-	return a.jumpToEntry(a.jumpList[a.jumpIdx])
+	for i := a.jumpIdx + 1; i < len(a.jumpList); i++ {
+		if a.jumpList[i].active {
+			a.jumpIdx = i
+			return a.jumpToEntry(a.jumpList[i])
+		}
+	}
+	return a, nil
 }
 
 // jumpToEntry switches to (or opens) the buffer for e and positions the cursor.

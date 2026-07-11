@@ -1397,7 +1397,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "-":
 		return m, func() tea.Msg { return JumpBackMsg{} }
 
-	case "+":
+	case "=", "+":
 		return m, func() tea.Msg { return JumpForwardMsg{} }
 
 	default:

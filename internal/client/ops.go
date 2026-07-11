@@ -31,39 +31,95 @@ func (m Model) sendToServer(op document.Op) tea.Cmd {
 	}
 }
 
+// opLineDelta returns the first affected line and the net line-count change
+// produced by applying op. Insert ops that add newlines return a positive delta;
+// deletes that span multiple lines return a negative delta.
+func opLineDelta(op document.Op) (atLine, delta int) {
+	switch op.Type {
+	case document.OpInsert:
+		return op.InsertLine, strings.Count(op.InsertText, "\n")
+	case document.OpDelete:
+		return op.FromLine, -(op.ToLine - op.FromLine)
+	}
+	return 0, 0
+}
+
+// minAffectedLine returns the smallest line number referenced by any op in the
+// slice (which holds inverse ops from an insert session). Inverse ops reference
+// the same line numbers as the corresponding forward ops.
+func minAffectedLine(ops []document.Op) int {
+	min := -1
+	for _, op := range ops {
+		l := op.InsertLine
+		if op.Type == document.OpDelete {
+			l = op.FromLine
+		}
+		if min < 0 || l < min {
+			min = l
+		}
+	}
+	if min < 0 {
+		return 0
+	}
+	return min
+}
+
 // applyOp records the inverse of op for undo, then applies op locally and
 // queues an async send to the server.
 //
 // If m.currentGroup is non-nil (i.e. we are inside an Insert session), the
 // inverse is appended to the group instead of pushed immediately; the group is
 // committed to undoStack when the user presses ESC.
+// In normal mode (currentGroup == nil) an EditRecordMsg is also emitted so the
+// App can adjust existing jump entries and add a new one.
 func applyOp(m Model, op document.Op) (Model, tea.Cmd) {
 	inv := inverseOp(m, op)
+	var recordCmd tea.Cmd
 	if m.currentGroup != nil {
 		m.currentGroup = append(m.currentGroup, inv)
 	} else {
 		m.undoStack = append(m.undoStack, undoEntry{ops: []document.Op{inv}, before: m.cursorSnap()})
+		atLine, delta := opLineDelta(op)
+		fp, line, col := m.filePath, m.cursor.Line, m.cursor.Col
+		depth := len(m.undoStack)
+		recordCmd = func() tea.Msg {
+			return EditRecordMsg{FilePath: fp, Line: line, Col: col, AtLine: atLine, LineDelta: delta, UndoDepth: depth}
+		}
 	}
 	m.redoStack = nil // any new edit invalidates the redo history
-	return m, tea.Batch(m.sendOp(op), m.reparseHighlight())
+	return m, tea.Batch(m.sendOp(op), m.reparseHighlight(), recordCmd)
 }
 
 // applyBatch applies a slice of ops as a single undoable action.
 // Inverses are computed before each apply, so the ops must not share lines.
+// Always emits an EditRecordMsg so the App can update the jump list.
 func applyBatch(m Model, ops []document.Op) (Model, tea.Cmd) {
 	if len(ops) == 0 {
 		return m, nil
 	}
 	before := m.cursorSnap()
 	inverses := make([]document.Op, len(ops))
-	cmds := make([]tea.Cmd, 0, len(ops)+1)
+	cmds := make([]tea.Cmd, 0, len(ops)+2)
+	atLine, delta := -1, 0
 	for i, op := range ops {
 		inverses[i] = inverseOp(m, op) // must be before Apply
 		cmds = append(cmds, m.sendOp(op))
+		al, d := opLineDelta(op)
+		if atLine < 0 || al < atLine {
+			atLine = al
+		}
+		delta += d
+	}
+	if atLine < 0 {
+		atLine = 0
 	}
 	m.undoStack = append(m.undoStack, undoEntry{ops: inverses, before: before})
 	m.redoStack = nil
-	cmds = append(cmds, m.reparseHighlight())
+	fp, line, col := m.filePath, m.cursor.Line, m.cursor.Col
+	depth := len(m.undoStack)
+	cmds = append(cmds, m.reparseHighlight(), func() tea.Msg {
+		return EditRecordMsg{FilePath: fp, Line: line, Col: col, AtLine: atLine, LineDelta: delta, UndoDepth: depth}
+	})
 	return m, tea.Batch(cmds...)
 }
 

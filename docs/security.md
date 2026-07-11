@@ -109,12 +109,12 @@ write access to your home directory.
 
 ## Coverage summary
 
-| Threat | Status |
-|--------|--------|
-| Different user connecting to server socket | Blocked — `0700` directory |
-| Different user impersonating a plugin | Blocked — `0700` directory |
-| Accidental plugin binary corruption | Detected — SHA-256 hash check (when hash is in manifest) |
-| Deliberate plugin binary replacement | Not blocked — attacker can update the manifest hash too |
-| Same-user rogue process connecting to socket | Not blocked — OS allows same-UID access to same-UID sockets |
-| Network-based attacks | Not applicable — sockets are local-only Unix sockets |
-| Plugin escaping sandbox | Not applicable — plugins run as the same user with no additional sandbox |
+| Threat                                       | Status                                                                   |
+|----------------------------------------------|--------------------------------------------------------------------------|
+| Different user connecting to server socket   | Blocked — `0700` directory                                               |
+| Different user impersonating a plugin        | Blocked — `0700` directory                                               |
+| Accidental plugin binary corruption          | Detected — SHA-256 hash check (when hash is in manifest)                 |
+| Deliberate plugin binary replacement         | Not blocked — attacker can update the manifest hash too                  |
+| Same-user rogue process connecting to socket | Not blocked — OS allows same-UID access to same-UID sockets              |
+| Network-based attacks                        | Not applicable — sockets are local-only Unix sockets                     |
+| Plugin escaping sandbox                      | Not applicable — plugins run as the same user with no additional sandbox |

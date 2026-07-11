@@ -1045,6 +1045,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.groupBefore = m.cursorSnap()
+		m.insertLineCount = m.buf.LineCount()
 		m.mode = ModeInsert
 
 	case "a":
@@ -1052,6 +1053,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.groupBefore = m.cursorSnap()
+		m.insertLineCount = m.buf.LineCount()
 		m.mode = ModeInsert
 		m.cursor.Col++
 
@@ -1060,6 +1062,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.groupBefore = m.cursorSnap()
+		m.insertLineCount = m.buf.LineCount()
 		m.mode = ModeInsert
 		m.cursor.Col = m.buf.LineLen(m.cursor.Line)
 
@@ -1068,6 +1071,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.groupBefore = m.cursorSnap()
+		m.insertLineCount = m.buf.LineCount()
 		m.mode = ModeInsert
 		line := m.cursor.Line
 		op := document.Op{
@@ -1085,6 +1089,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sel = nil
 		m.currentGroup = []document.Op{}
 		m.groupBefore = m.cursorSnap()
+		m.insertLineCount = m.buf.LineCount()
 		m.mode = ModeInsert
 		col := 0
 		if m.cursor.Line > 0 {
@@ -1140,7 +1145,26 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(m.undoStack) == m.savedUndoDepth {
 				m.buf.SetClean()
 			}
-			return m, tea.Sequence(append(cmds, m.reparseHighlight())...)
+			fp := m.filePath
+			newDepth := len(m.undoStack)
+			// Compute the net line delta produced by the inverse ops that were
+			// just applied — this lets the App reverse any line-shift it made
+			// when those edits were originally recorded.
+			atLine, lineDelta := -1, 0
+			for _, inv := range entry.ops {
+				al, d := opLineDelta(inv)
+				if atLine < 0 || al < atLine {
+					atLine = al
+				}
+				lineDelta += d
+			}
+			if atLine < 0 {
+				atLine = 0
+			}
+			undoCmd := func() tea.Msg {
+				return UndoMsg{FilePath: fp, NewDepth: newDepth, AtLine: atLine, LineDelta: lineDelta}
+			}
+			return m, tea.Sequence(append(cmds, m.reparseHighlight(), undoCmd)...)
 		}
 
 	case "U":
@@ -1218,6 +1242,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.withClearedSearch()
 		m.currentGroup = []document.Op{}
 		m.groupBefore = m.cursorSnap()
+		m.insertLineCount = m.buf.LineCount()
 		if len(m.extraCursors) > 0 {
 			m2, cmd := deleteAllCursorSelections(m)
 			m2.mode = ModeInsert
@@ -1368,6 +1393,13 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "<":
 		return executeUnindent(m)
 
+	// Jump list navigation.
+	case "-":
+		return m, func() tea.Msg { return JumpBackMsg{} }
+
+	case "+":
+		return m, func() tea.Msg { return JumpForwardMsg{} }
+
 	default:
 		// Check whether this key starts a prefix command sequence.
 		if len(msg.Runes) > 0 {
@@ -1417,11 +1449,28 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor.Col--
 		}
 		// Commit the undo group accumulated during this Insert session.
+		var recordCmd tea.Cmd
 		if len(m.currentGroup) > 0 {
 			m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: m.groupBefore})
+			fp := m.filePath
+			atLine := minAffectedLine(m.currentGroup)
+			lineDelta := m.buf.LineCount() - m.insertLineCount
+			startLine := m.groupBefore.cursor.Line
+			startCol := m.groupBefore.cursor.Col
+			depth := len(m.undoStack)
+			recordCmd = func() tea.Msg {
+				return EditRecordMsg{
+					FilePath:  fp,
+					Line:      startLine,
+					Col:       startCol,
+					AtLine:    atLine,
+					LineDelta: lineDelta,
+					UndoDepth: depth,
+				}
+			}
 		}
 		m.currentGroup = nil
-		return m, nil
+		return m, recordCmd
 
 	case "ctrl+c":
 		return m, m.doCloseBuffer()

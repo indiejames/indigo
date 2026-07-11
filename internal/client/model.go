@@ -105,6 +105,36 @@ type OpenFileAtMsg struct {
 // OpenPickerMsg signals the App to open the file picker.
 type OpenPickerMsg struct{}
 
+// JumpBackMsg signals the App to jump to the previous edit position in the jump list.
+type JumpBackMsg struct{}
+
+// JumpForwardMsg signals the App to jump to the next edit position in the jump list.
+type JumpForwardMsg struct{}
+
+// EditRecordMsg signals the App to (a) adjust existing jump entries shifted by
+// this edit and (b) add a new entry at {Line, Col}.
+// AtLine / LineDelta describe the line-shift effect (LineDelta == 0 → no adjustment).
+// UndoDepth is len(undoStack) after this edit is committed; used to prune entries on undo.
+type EditRecordMsg struct {
+	FilePath  string
+	Line, Col int // new jump entry position
+	AtLine    int // adjustment boundary
+	LineDelta int // net lines added (>0) or removed (<0)
+	UndoDepth int // undo stack depth at which this entry was created
+}
+
+// UndoMsg signals the App that an undo was performed in the given buffer.
+// NewDepth is len(undoStack) after the undo; all jump entries with
+// undoDepth > NewDepth are removed.
+// AtLine and LineDelta describe the net line-count change caused by the undo
+// operation itself (so existing jump entries can be re-adjusted).
+type UndoMsg struct {
+	FilePath  string
+	NewDepth  int
+	AtLine    int
+	LineDelta int
+}
+
 // GrepMsg signals the App to open the workspace search picker.
 // Pattern uses the same syntax as within-buffer search: plain text for
 // literal (smart-case), or \expr\ for Go regexp.
@@ -359,8 +389,9 @@ type Model struct {
 	lastClickPos   document.Pos
 	undoStack      []undoEntry   // each entry is inverse ops + pre-edit cursor snapshot
 	redoStack      []undoEntry   // mirrors undoStack; cleared on any new edit
-	currentGroup   []document.Op // non-nil while accumulating ops for the current Insert session
-	groupBefore    cursorSnapshot // cursor state when currentGroup was opened
+	currentGroup    []document.Op  // non-nil while accumulating ops for the current Insert session
+	groupBefore     cursorSnapshot // cursor state when currentGroup was opened
+	insertLineCount int            // buf line count at the start of the insert session
 	savedUndoDepth int           // len(undoStack) at the time of the last save
 	cmdBuf             string // text typed after ':' while in ModeCommand
 	cmdCompletionIdx   int    // selected item in command completion popup (−1 = none)
@@ -483,6 +514,15 @@ func (m Model) BufID() uint32 { return m.bufID }
 func (m Model) AtLine(line int) Model {
 	line = max(0, min(line, m.buf.LineCount()-1))
 	m.cursor = document.Pos{Line: line, Col: 0}
+	m.scrollToCursor()
+	return m
+}
+
+// AtPos moves the cursor to the given 0-based (line, col) and scrolls to it.
+func (m Model) AtPos(line, col int) Model {
+	line = max(0, min(line, m.buf.LineCount()-1))
+	col = max(0, min(col, m.buf.LineLen(line)))
+	m.cursor = document.Pos{Line: line, Col: col}
 	m.scrollToCursor()
 	return m
 }

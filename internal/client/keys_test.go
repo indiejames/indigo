@@ -274,6 +274,35 @@ func TestHandleInsertEscCommitsUndoGroup(t *testing.T) {
 	}
 }
 
+// TestJumpListRecordsInsertStart is a regression test: the EditRecordMsg emitted
+// when leaving insert mode must carry the cursor line where insert mode was
+// entered, not the line where the cursor ended up after typing.
+func TestJumpListRecordsInsertStart(t *testing.T) {
+	m := newTestModel("line0\nline1\nline2\nline3\nline4\n")
+	m.cursor = document.Pos{Line: 2, Col: 0}
+	m.mode = ModeInsert
+	m.currentGroup = []document.Op{}
+	m.groupBefore = m.cursorSnap() // start of insert session: line 2
+	m.insertLineCount = m.buf.LineCount()
+
+	// Simulate typing that advanced the cursor to line 4 (e.g. newlines inserted).
+	m.cursor = document.Pos{Line: 4, Col: 3}
+	m.currentGroup = append(m.currentGroup, document.Op{Type: document.OpInsert})
+
+	_, cmd := m.handleInsert(fakeKey("esc"))
+	if cmd == nil {
+		t.Fatal("expected recordCmd, got nil")
+	}
+	msg := cmd()
+	rec, ok := msg.(EditRecordMsg)
+	if !ok {
+		t.Fatalf("cmd() returned %T, want EditRecordMsg", msg)
+	}
+	if rec.Line != 2 {
+		t.Errorf("EditRecordMsg.Line = %d, want 2 (insert session start line)", rec.Line)
+	}
+}
+
 func TestHandleInsertMoveRight(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.mode = ModeInsert

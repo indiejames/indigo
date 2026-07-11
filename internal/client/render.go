@@ -1323,6 +1323,8 @@ var helpEntries = []helpEntry{
 	{key: "G", desc: "End of file"},
 	{key: "Ctrl+f / PgDn", desc: "Page down"},
 	{key: "Ctrl+b / PgUp", desc: "Page up"},
+	{key: "-", desc: "Jump to previous edit location"},
+	{key: "+", desc: "Jump to next edit location"},
 	{key: ""},
 	{key: "Go to (g…)"},
 	{key: "gg", desc: "Top of file"},

@@ -35,12 +35,20 @@ type openFileMsg struct{ absPath string }
 
 // switchBufferMsg asks the App to switch to an already-open buffer by index,
 // optionally scrolling to a 0-based line number (-1 = don't scroll).
-// col >= 0 and matchLen > 0 trigger AtMatch instead of AtLine.
+// col >= 0 and matchLen > 0 trigger AtMatch; col >= 0 and matchLen == 0 trigger AtPos.
 type switchBufferMsg struct {
 	idx      int
 	line     int
 	col      int
 	matchLen int
+}
+
+// jumpEntry records a single position in the edit jump list.
+type jumpEntry struct {
+	filePath  string
+	line      int
+	col       int
+	undoDepth int // undo stack depth when this entry was created
 }
 
 // App is the top-level Bubble Tea model. It owns a list of editor buffers,
@@ -82,6 +90,10 @@ type App struct {
 
 	configPath    string    // path to config.toml; empty means watch is disabled
 	configModTime time.Time // mtime of last observed config file
+
+	// Edit jump list (ctrl+o / Tab).
+	jumpList []jumpEntry
+	jumpIdx  int // index of last jumped-to entry; -1 = at head (not navigating)
 }
 
 // configPathAndMtime returns the config file path and its current mtime.
@@ -138,6 +150,7 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 		workDir:        workDir,
 		buffers:        []client.Model{m},
 		fileChangedIdx: -1,
+		jumpIdx:        -1,
 		configPath:     cfgPath,
 		configModTime:  cfgMod,
 	}
@@ -159,6 +172,7 @@ func NewWithPicker(rpc *client.RPC, cfg *config.Config, workDir string) *App {
 		cfg:            cfg,
 		workDir:        workDir,
 		fileChangedIdx: -1,
+		jumpIdx:        -1,
 		configPath:     cfgPath,
 		configModTime:  cfgMod,
 	}
@@ -305,6 +319,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.line >= 0 {
 				if msg.col >= 0 && msg.matchLen > 0 {
 					a.buffers[a.active] = a.buffers[a.active].AtMatch(msg.line, msg.col, msg.matchLen, a.bufHeight())
+				} else if msg.col >= 0 {
+					a.buffers[a.active] = a.buffers[a.active].AtPos(msg.line, msg.col)
 				} else {
 					a.buffers[a.active] = a.buffers[a.active].AtLine(msg.line)
 				}
@@ -318,6 +334,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.line >= 0 {
 			if msg.col >= 0 && msg.matchLen > 0 {
 				m = m.AtMatch(msg.line, msg.col, msg.matchLen, a.bufHeight())
+			} else if msg.col >= 0 {
+				m = m.AtPos(msg.line, msg.col)
 			} else {
 				m = m.AtLine(msg.line)
 			}
@@ -394,6 +412,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, msg.model.Init()
 		}
+		return a, nil
+
+	// ---- edit jump list ----
+	case client.EditRecordMsg:
+		a.applyEditRecord(msg)
+		return a, nil
+
+	case client.JumpBackMsg:
+		return a.doJumpBack()
+
+	case client.JumpForwardMsg:
+		return a.doJumpForward()
+
+	case client.UndoMsg:
+		a.handleUndoJump(msg)
 		return a, nil
 
 	// ---- server push (plugin effects) ----
@@ -618,7 +651,7 @@ func (a App) showTabBar() bool {
 type bufferOpenedMsg struct {
 	model    client.Model
 	line     int // 0-based target line; -1 = no jump
-	col      int // -1 = use AtLine; >= 0 with matchLen > 0 = use AtMatch
+	col      int // -1 = use AtLine; >= 0 with matchLen > 0 = AtMatch; >= 0 with matchLen == 0 = AtPos
 	matchLen int
 }
 type errorOpenMsg struct{ err error }
@@ -670,6 +703,187 @@ func (a App) doOpenFileAtMatch(absPath string, line, col, matchLen int) tea.Cmd 
 		}
 		m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
 		return bufferOpenedMsg{model: m, line: line, col: col, matchLen: matchLen}
+	}
+}
+
+// applyEditRecord adjusts existing jump entries that were shifted by the edit
+// described in msg, then adds a new entry for msg.{Line,Col}.
+func (a *App) applyEditRecord(msg client.EditRecordMsg) {
+	if msg.FilePath == "" {
+		return
+	}
+	if msg.LineDelta != 0 {
+		atLine := msg.AtLine
+		delta := msg.LineDelta
+		n := 0
+		for _, e := range a.jumpList {
+			if e.filePath != msg.FilePath {
+				a.jumpList[n] = e
+				n++
+				continue
+			}
+			if delta < 0 {
+				// Lines [atLine, atLine-delta) were deleted.
+				deletedTo := atLine - delta
+				if e.line >= deletedTo {
+					e.line += delta // shift back
+					a.jumpList[n] = e
+					n++
+				} else if e.line >= atLine {
+					// Entry was inside the deleted range — drop it.
+				} else {
+					a.jumpList[n] = e
+					n++
+				}
+			} else {
+				// Lines were inserted after atLine.
+				if e.line > atLine {
+					e.line += delta
+				}
+				a.jumpList[n] = e
+				n++
+			}
+		}
+		a.jumpList = a.jumpList[:n]
+		if a.jumpIdx >= n {
+			a.jumpIdx = n - 1
+		}
+	}
+	a.recordEdit(msg.FilePath, msg.Line, msg.Col, msg.UndoDepth)
+}
+
+// recordEdit appends {filePath, line, col, undoDepth} to the jump list.
+// A new edit invalidates forward history; consecutive edits on the same
+// file+line collapse into one entry (updating col and undoDepth in-place).
+func (a *App) recordEdit(filePath string, line, col, undoDepth int) {
+	if filePath == "" {
+		return
+	}
+	if a.jumpIdx >= 0 {
+		// Truncate any forward entries — a new edit rewrites the future.
+		a.jumpList = a.jumpList[:a.jumpIdx+1]
+		a.jumpIdx = -1
+	}
+	if n := len(a.jumpList); n > 0 {
+		last := a.jumpList[n-1]
+		if last.filePath == filePath && last.line == line {
+			a.jumpList[n-1].col = col
+			a.jumpList[n-1].undoDepth = undoDepth
+			return
+		}
+	}
+	a.jumpList = append(a.jumpList, jumpEntry{filePath: filePath, line: line, col: col, undoDepth: undoDepth})
+	if len(a.jumpList) > 100 {
+		a.jumpList = a.jumpList[len(a.jumpList)-100:]
+	}
+}
+
+// handleUndoJump reverses the line-shift caused by the undone operation and
+// removes jump entries that no longer exist (their undoDepth > newDepth).
+func (a *App) handleUndoJump(msg client.UndoMsg) {
+	// Step 1: re-adjust line numbers for entries that were shifted when the
+	// undone edit was originally recorded.
+	if msg.LineDelta != 0 {
+		atLine := msg.AtLine
+		delta := msg.LineDelta
+		n := 0
+		for _, e := range a.jumpList {
+			if e.filePath != msg.FilePath {
+				a.jumpList[n] = e
+				n++
+				continue
+			}
+			if delta < 0 {
+				// Undo of a forward insert: delete the inserted lines.
+				deletedTo := atLine - delta
+				if e.line >= deletedTo {
+					e.line += delta
+					a.jumpList[n] = e
+					n++
+				} else if e.line >= atLine {
+					// inside deleted range — drop
+				} else {
+					a.jumpList[n] = e
+					n++
+				}
+			} else {
+				// Undo of a forward delete: re-insert the deleted lines.
+				// Entries at >= atLine were shifted here from higher lines; use
+				// >= (not >) so entries that landed exactly at atLine are restored.
+				if e.line >= atLine {
+					e.line += delta
+				}
+				a.jumpList[n] = e
+				n++
+			}
+		}
+		a.jumpList = a.jumpList[:n]
+	}
+	// Step 2: prune entries created by edits that are now undone.
+	n := 0
+	for _, e := range a.jumpList {
+		if e.filePath == msg.FilePath && e.undoDepth > msg.NewDepth {
+			continue
+		}
+		a.jumpList[n] = e
+		n++
+	}
+	a.jumpList = a.jumpList[:n]
+	// Reset navigation state: the cursor is now at the undo-restored position,
+	// not at any known jump entry. Clamping jumpIdx to n-1 when entries were
+	// removed causes doJumpBack to believe we're already at the oldest entry
+	// (jumpIdx==0) and silently do nothing. Resetting to -1 lets the next
+	// jump-back start fresh from the end of the surviving list.
+	a.jumpIdx = -1
+}
+
+func (a App) doJumpBack() (tea.Model, tea.Cmd) {
+	if len(a.jumpList) == 0 {
+		return a, nil
+	}
+	if a.jumpIdx == -1 {
+		a.jumpIdx = len(a.jumpList) - 1
+	} else if a.jumpIdx > 0 {
+		a.jumpIdx--
+	} else {
+		return a, nil // already at the oldest entry
+	}
+	return a.jumpToEntry(a.jumpList[a.jumpIdx])
+}
+
+func (a App) doJumpForward() (tea.Model, tea.Cmd) {
+	if a.jumpIdx < 0 || a.jumpIdx >= len(a.jumpList)-1 {
+		return a, nil
+	}
+	a.jumpIdx++
+	return a.jumpToEntry(a.jumpList[a.jumpIdx])
+}
+
+// jumpToEntry switches to (or opens) the buffer for e and positions the cursor.
+func (a App) jumpToEntry(e jumpEntry) (tea.Model, tea.Cmd) {
+	for i, m := range a.buffers {
+		if m.FilePath() == e.filePath {
+			a.active = i
+			a.buffers[i] = m.AtPos(e.line, e.col)
+			return a, nil
+		}
+	}
+	return a, a.doOpenFileAtPos(e.filePath, e.line, e.col)
+}
+
+// doOpenFileAtPos opens absPath in a new buffer positioned at (line, col).
+func (a App) doOpenFileAtPos(absPath string, line, col int) tea.Cmd {
+	rpc := a.rpc
+	cfg := a.cfg
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, absPath)
+		if err != nil {
+			return errorOpenMsg{err}
+		}
+		m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
+		return bufferOpenedMsg{model: m, line: line, col: col}
 	}
 }
 

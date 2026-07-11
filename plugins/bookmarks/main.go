@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/indiejames/indigo/sdk"
@@ -130,19 +131,10 @@ func (b *Bookmarks) onAltB(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
 	}
 
 	b.api.ShowPopup("Bookmarks", items, func(data string) { //nolint:errcheck
-		// Parse "filePath\x00line" from data.
-		var fp string
+		fp, lineStr, _ := strings.Cut(data, "\x00")
 		var line uint32
-		fmt.Sscanf(data, "%s", &fp) // fallback
-		// Use the NUL separator we embedded.
-		for i, c := range data {
-			if c == 0 {
-				fp = data[:i]
-				fmt.Sscanf(data[i+1:], "%d", &line)
-				break
-			}
-		}
-		b.api.OpenFile(fp, line) //nolint:errcheck
+		fmt.Sscanf(lineStr, "%d", &line) //nolint:errcheck
+		b.api.OpenFile(fp, line)         //nolint:errcheck
 	}, nil)
 
 	return sdk.KeyResponse{Handled: true}

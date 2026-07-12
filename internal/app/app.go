@@ -162,7 +162,7 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 	absPath string, cfg *config.Config, fromRecovery bool,
 	workDir string, startLine int) *App {
 
-	m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
+	m := client.New(rpc, bufID, content, version, absPath, workDir, cfg, fromRecovery)
 	if startLine > 0 {
 		m = m.AtLine(startLine)
 	}

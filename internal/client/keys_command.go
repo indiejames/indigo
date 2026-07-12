@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/highlight"
 )
 
 func (m Model) handleCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -217,6 +218,22 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, m.doSaveAsNow(newPath, true)
+		}
+		if rest, ok := strings.CutPrefix(cmd, "set ft="); ok {
+			lang := strings.TrimSpace(rest)
+			if lang == "" {
+				m.status = "E: usage: set ft=<lang>"
+				return m, nil
+			}
+			hlr := highlight.NewForKey(lang)
+			if hlr == nil {
+				m.status = fmt.Sprintf("E: unknown file type: %s", lang)
+				return m, nil
+			}
+			m.hlr = hlr
+			m.hlSpans = nil
+			m.status = fmt.Sprintf("File type: %s", lang)
+			return m, m.reparseHighlight()
 		}
 		m.status = fmt.Sprintf("E: unknown command: %s", cmd)
 	}

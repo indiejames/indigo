@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/highlight"
 )
 
 // sendOp applies the op locally and sends it to the server.
@@ -257,9 +258,16 @@ func (m Model) reparseHighlight() tea.Cmd {
 	}
 	content := []byte(m.buf.Content())
 	hlr := m.hlr
+	bracketColors := m.cfg != nil && m.cfg.BracketColors
 	return func() tea.Msg {
 		start := time.Now()
 		spans := hlr.Highlight(content)
+		if bracketColors {
+			// Prepend bracket spans so they win over punctuation.bracket.
+			for ln, bs := range highlight.BracketSpans(content) {
+				spans[ln] = append(bs, spans[ln]...)
+			}
+		}
 		return highlightMsg{spans: spans, duration: time.Since(start)}
 	}
 }

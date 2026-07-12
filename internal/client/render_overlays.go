@@ -623,6 +623,56 @@ func (m Model) buildSearchOverlays(layout []layoutEntry, cw int) [][]lineOverlay
 	return rows
 }
 
+// buildIndentGuideOverlays returns per-row overlays that draw a dim vertical
+// bar (│) at each tab-stop in the leading whitespace of lines.
+// Only rows whose buffer line has actual non-whitespace content are decorated.
+func (m Model) buildIndentGuideOverlays(layout []layoutEntry, cw int) [][]lineOverlay {
+	if m.cfg == nil || !m.cfg.IndentGuides {
+		return nil
+	}
+	vis := len(layout)
+	rows := make([][]lineOverlay, vis)
+	guideText := indentGuideStyle.Render("▏")
+	for row, entry := range layout {
+		bufLine := entry.bufLine
+		if bufLine >= m.buf.LineCount() {
+			continue
+		}
+		runes := []rune(m.buf.Line(bufLine))
+		expandedRunes, _ := expandTabsRemap(runes)
+
+		// Find the first non-whitespace visual column.
+		contentStart := -1
+		for i, r := range expandedRunes {
+			if r != ' ' {
+				contentStart = i
+				break
+			}
+		}
+		// Skip empty or all-whitespace lines.
+		if contentStart <= 0 {
+			continue
+		}
+
+		chunkStart := entry.chunkStart
+
+		// Draw one guide at each tab-stop from 0 up to (but not including) contentStart.
+		// Col 0 marks the outermost indent level, col 4 marks the next, etc.
+		for guideCol := 0; guideCol < contentStart; guideCol += tabWidth {
+			if guideCol < chunkStart || guideCol >= chunkStart+cw {
+				continue
+			}
+			rows[row] = append(rows[row], lineOverlay{
+				col:  guideCol - chunkStart,
+				text: guideText,
+				w:    1,
+			})
+		}
+		// Overlays are added in ascending column order already; no sort needed.
+	}
+	return rows
+}
+
 // mergeOverlays combines two sorted overlay slices into one sorted slice.
 func mergeOverlays(a, b []lineOverlay) []lineOverlay {
 	out := make([]lineOverlay, 0, len(a)+len(b))

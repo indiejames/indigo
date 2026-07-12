@@ -13,10 +13,31 @@ func (a App) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		return a, func() tea.Msg { return pickerCancelledMsg{} }
+
 	case "enter":
-		path := a.picker.selected()
-		if path == "" {
-			// No filtered match — treat the query as a direct (possibly relative) path.
+		if a.picker.browseMode() {
+			e := a.picker.selectedEntry()
+			if e == nil {
+				return a, nil
+			}
+			if e.name == ".." {
+				a.picker.navigateUp()
+				return a, nil
+			}
+			if e.isDir {
+				a.picker.navigateInto(e.name)
+				return a, nil
+			}
+			// File selected in browse mode.
+			if path := a.picker.selectedPath(); path != "" {
+				return a, func() tea.Msg { return pickedMsg{absPath: path} }
+			}
+		} else {
+			// Search mode.
+			if path := a.picker.selectedPath(); path != "" {
+				return a, func() tea.Msg { return pickedMsg{absPath: path} }
+			}
+			// No match — treat the raw query as a direct path.
 			q := strings.TrimSpace(a.picker.query)
 			if q == "" {
 				return a, nil
@@ -26,16 +47,21 @@ func (a App) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return a, func() tea.Msg { return pickedMsg{absPath: q} }
 		}
-		return a, func() tea.Msg { return pickedMsg{absPath: path} }
+
 	case "up", "ctrl+p":
 		a.picker.moveUp()
 	case "down", "ctrl+n":
 		a.picker.moveDown()
+
 	case "backspace":
 		q := []rune(a.picker.query)
 		if len(q) > 0 {
 			a.picker.setQuery(string(q[:len(q)-1]))
+		} else {
+			// Query already empty: go up one directory level.
+			a.picker.navigateUp()
 		}
+
 	default:
 		if len(msg.Runes) > 0 {
 			a.picker.setQuery(a.picker.query + string(msg.Runes))

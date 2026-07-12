@@ -40,7 +40,7 @@ func (a App) doOpenFileAt(absPath string, line int) tea.Cmd {
 		if err != nil {
 			return errorOpenMsg{err}
 		}
-		m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
+		m := client.New(rpc, bufID, content, version, absPath, a.workDir, cfg, fromRecovery)
 		return bufferOpenedMsg{model: m, line: line, col: -1}
 	}
 }
@@ -64,7 +64,7 @@ func (a App) doOpenFileAtMatch(absPath string, line, col, matchLen int) tea.Cmd 
 		if err != nil {
 			return errorOpenMsg{err}
 		}
-		m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
+		m := client.New(rpc, bufID, content, version, absPath, a.workDir, cfg, fromRecovery)
 		return bufferOpenedMsg{model: m, line: line, col: col, matchLen: matchLen}
 	}
 }
@@ -251,7 +251,7 @@ func (a App) doOpenFileAtPos(absPath string, line, col int) tea.Cmd {
 		if err != nil {
 			return errorOpenMsg{err}
 		}
-		m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
+		m := client.New(rpc, bufID, content, version, absPath, a.workDir, cfg, fromRecovery)
 		return bufferOpenedMsg{model: m, line: line, col: col}
 	}
 }
@@ -283,7 +283,7 @@ func (a App) doReloadBuffer(idx int) tea.Cmd {
 			return errorOpenMsg{err}
 		}
 		appLog("doReloadBuffer: OpenFile done, new bufID=%d contentLen=%d", bufID, len(content))
-		newModel := client.New(rpc, bufID, content, version, path, cfg, fromRecovery)
+		newModel := client.New(rpc, bufID, content, version, path, a.workDir, cfg, fromRecovery)
 		return bufferReloadedMsg{idx: idx, model: newModel}
 	}
 }

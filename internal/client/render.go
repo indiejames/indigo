@@ -405,8 +405,14 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 	i := 0
 	for i < n {
 		// Drain and inject overlays whose column ≤ i (handles skipped positions too).
+		// Skip any overlay that lands exactly on the cursor column so the cursor
+		// renders on top rather than being hidden by the overlay.
 		for oi < len(overlays) && overlays[oi].col <= i {
 			if overlays[oi].col == i {
+				if hasCursor && i == curCol {
+					oi++
+					continue
+				}
 				sb.WriteString(overlays[oi].text)
 				i += overlays[oi].w
 				if i > n {

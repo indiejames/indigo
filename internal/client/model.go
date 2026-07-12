@@ -232,10 +232,11 @@ var (
 	popupKeyStyle    lipgloss.Style
 	popupTextStyle   lipgloss.Style
 
-	selectionStyle  lipgloss.Style
-	gutterStyle     lipgloss.Style
-	gutterCurStyle  lipgloss.Style
+	selectionStyle   lipgloss.Style
+	gutterStyle      lipgloss.Style
+	gutterCurStyle   lipgloss.Style
 	flashGutterStyle lipgloss.Style
+	indentGuideStyle lipgloss.Style
 	flashPadStyle    lipgloss.Style
 
 	diagErrorStyle lipgloss.Style
@@ -291,6 +292,7 @@ func ApplyTheme(t *theme.Theme) {
 	gutterCurStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.GutterCurFg))
 	flashGutterStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
 	flashPadStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8"))
+	indentGuideStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#404040"))
 
 	diagErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.DiagErrorFg))
 	diagWarnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.DiagWarnFg))
@@ -345,6 +347,7 @@ func applyDefaultDark() {
 	gutterCurStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
 	flashGutterStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
 	flashPadStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8"))
+	indentGuideStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#404040"))
 
 	diagErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555"))
 	diagWarnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFDD44"))
@@ -411,6 +414,7 @@ type Model struct {
 	width          int
 	height         int
 	filePath       string
+	workDir        string // project root, used for display-path shortening
 	status         string // transient error message shown in modeline
 	warnQuit       bool   // showing unsaved-changes warning
 	checkingQuit   bool // client-count RPC in flight
@@ -495,22 +499,24 @@ func (m Model) WithConfig(cfg *config.Config) Model {
 }
 
 // New creates a Model after the buffer is already open with the server.
-func New(rpc *RPC, bufID uint32, content string, version uint64, filePath string, cfg *config.Config, fromRecovery bool) Model {
+func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workDir string, cfg *config.Config, fromRecovery bool) Model {
 	buf := document.New(filePath, content)
 	if fromRecovery {
 		buf.MarkDirty()
 	}
 	return Model{
-		rpc:            rpc,
-		buf:            buf,
-		cfg:            cfg,
-		bufID:          bufID,
-		version:        version,
-		filePath:       filePath,
-		hlr:            highlight.New(filePath),
-		metrics:        &metricsData{},
-		recoveryPrompt: fromRecovery,
-		pluginBindings: rpc.PluginBindings(),
+		rpc:                 rpc,
+		buf:                 buf,
+		cfg:                 cfg,
+		bufID:               bufID,
+		version:             version,
+		filePath:            filePath,
+		workDir:             workDir,
+		hlr:                 highlight.New(filePath),
+		metrics:             &metricsData{},
+		recoveryPrompt:      fromRecovery,
+		pluginBindings:      rpc.PluginBindings(),
+		reservePluginGutter: rpc != nil,
 	}
 }
 
@@ -739,6 +745,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.fixItems = msg.items
 			m.fixDecor = msg.decor
 			m.fixIdx = 0
+		} else {
+			m.status = "No fixes available"
 		}
 		return m, nil
 

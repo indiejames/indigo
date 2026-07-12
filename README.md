@@ -2,10 +2,6 @@
 
 A terminal text editor with modal editing and built-in language server support. Inspired by [Vim](https://www.vim.org/), [Kakoune](https://kakoune.org/), and [Helix](https://helix-editor.com/).
 
-**Note:** indigo is early-stage software — expect rough edges.
-
-**Caveat:** While indigo currently does not provide support for using AI tools like [GitHub CoPilot](https://github.com/features/copilot) or [Claude.AI](https://claude.ai/new), Claude.AI _was_ used in the development of indigo. If you are opposed to the use of AI tools in software development then you might want to look elsewhere.
-
 ## Who it's for
 
 indigo is for developers who:

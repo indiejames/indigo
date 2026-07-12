@@ -235,6 +235,11 @@ func loadAndApplyTheme(cfg *config.Config) {
 		hl[scope] = highlight.SyntaxStyle{Fg: s.Fg, Bold: s.Bold, Italic: s.Italic}
 	}
 	highlight.ApplyTheme(hl)
+
+	// Register user-defined file type aliases (e.g. ".myext" → "go").
+	for from, to := range cfg.FileTypes {
+		highlight.RegisterAlias(from, to)
+	}
 }
 
 func fatalf(format string, args ...any) {

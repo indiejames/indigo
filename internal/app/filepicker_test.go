@@ -137,21 +137,30 @@ func TestSetQueryFuzzy(t *testing.T) {
 	}
 }
 
-// TestSetQueryEmptyReturnsAll checks that an empty query always returns all files.
-func TestSetQueryEmptyReturnsAll(t *testing.T) {
+// TestSetQueryEmptyRestoresBrowse checks that clearing the query returns to
+// browse mode and restores fp.filtered to fp.all.
+func TestSetQueryEmptyRestoresBrowse(t *testing.T) {
 	files := []string{"a.go", "b.go", "c.go"}
 	fp := newTestPicker(files, false)
 	fp.setQuery("a")
+	if fp.browseMode() {
+		t.Fatal("expected search mode after non-empty query")
+	}
 	fp.setQuery("")
-	if len(fp.filtered) != 3 {
-		t.Errorf("empty query after non-empty: got %d files, want 3", len(fp.filtered))
+	if !fp.browseMode() {
+		t.Error("expected browse mode after clearing query")
+	}
+	if len(fp.filtered) != len(files) {
+		t.Errorf("filtered after clear: got %d, want %d", len(fp.filtered), len(files))
 	}
 }
 
 // TestMoveUpDown checks cursor movement stays in bounds.
+// The picker must be in search mode (non-empty query) so moveDown uses fp.filtered.
 func TestMoveUpDown(t *testing.T) {
 	files := []string{"a.go", "b.go", "c.go"}
 	fp := newTestPicker(files, false)
+	fp.query = "go" // search mode: moveDown/Up use fp.filtered (len 3)
 
 	fp.moveUp() // should be no-op at top
 	if fp.cursor != 0 {
@@ -166,24 +175,32 @@ func TestMoveUpDown(t *testing.T) {
 	}
 }
 
-// TestSelectedPath verifies that selected() returns the correct absolute path.
+// TestSelectedPath verifies that selectedPath() returns the correct absolute path
+// in search mode (non-empty query).
 func TestSelectedPath(t *testing.T) {
 	fp := &filePicker{
 		workDir:  "/workspace",
 		all:      []string{"cmd/main.go"},
 		filtered: []string{"cmd/main.go"},
+		query:    "main", // search mode
 	}
-	got := fp.selected()
+	got := fp.selectedPath()
 	want := "/workspace/cmd/main.go"
 	if got != want {
-		t.Errorf("selected() = %q, want %q", got, want)
+		t.Errorf("selectedPath() = %q, want %q", got, want)
 	}
 }
 
-// TestSelectedEmpty verifies that selected() returns "" when filtered is empty.
+// TestSelectedEmpty verifies that selectedPath() returns "" when no file is highlighted.
 func TestSelectedEmpty(t *testing.T) {
+	// Browse mode with no entries returns "".
 	fp := &filePicker{workDir: "/workspace"}
-	if got := fp.selected(); got != "" {
-		t.Errorf("selected() on empty picker = %q, want empty string", got)
+	if got := fp.selectedPath(); got != "" {
+		t.Errorf("selectedPath() on empty browse picker = %q, want empty string", got)
+	}
+	// Search mode with empty filtered also returns "".
+	fp2 := &filePicker{workDir: "/workspace", query: "x"}
+	if got := fp2.selectedPath(); got != "" {
+		t.Errorf("selectedPath() on empty search picker = %q, want empty string", got)
 	}
 }

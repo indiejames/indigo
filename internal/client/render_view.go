@@ -9,6 +9,32 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// displayPath returns a project-relative path for status bar display.
+// Falls back to the base name if Rel fails (e.g. file outside the project).
+func displayPath(workDir, filePath string) string {
+	if workDir != "" && filePath != "" {
+		if rel, err := filepath.Rel(workDir, filePath); err == nil {
+			return rel
+		}
+	}
+	return filepath.Base(filePath)
+}
+
+// truncateCenter clamps s to width runes, adding "…" if cut.
+func truncateCenter(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	return string(r[:width-1]) + "…"
+}
+
 func (m Model) View() string {
 	if m.width == 0 {
 		return "loading…"
@@ -33,6 +59,13 @@ func (m Model) View() string {
 	layout := m.buildScreenLayout(vis, cw)
 	lines := make([]string, vis)
 	rowOverlays := m.buildRowOverlays(layout, cw)
+	if guideOverlays := m.buildIndentGuideOverlays(layout, cw); guideOverlays != nil {
+		for i := range vis {
+			if len(guideOverlays[i]) > 0 {
+				rowOverlays[i] = mergeOverlays(guideOverlays[i], rowOverlays[i])
+			}
+		}
+	}
 	if searchOverlays := m.buildSearchOverlays(layout, cw); searchOverlays != nil {
 		for i := range vis {
 			if len(searchOverlays[i]) > 0 {
@@ -475,6 +508,12 @@ func (m Model) renderStatusBar() string {
 
 	rightW := lipgloss.Width(right)
 
+	dp := displayPath(m.workDir, m.filePath)
+	dirtyMark := ""
+	if m.buf.Dirty() {
+		dirtyMark = " [+]"
+	}
+
 	var centerContent string
 	switch {
 	case m.recoveryPrompt:
@@ -482,15 +521,9 @@ func (m Model) renderStatusBar() string {
 	case m.warnQuit:
 		centerContent = "Unsaved changes!   Save [s]   Discard [q]   Cancel [esc]"
 	case m.status != "":
-		centerContent = m.filePath + "   " + m.status
-		if m.buf.Dirty() {
-			centerContent = m.filePath + " [+]   " + m.status
-		}
+		centerContent = dp + dirtyMark + "   " + m.status
 	default:
-		centerContent = m.filePath
-		if m.buf.Dirty() {
-			centerContent += " [+]"
-		}
+		centerContent = dp + dirtyMark
 		if len(m.searchMatches) > 0 {
 			centerContent += fmt.Sprintf("   [%d/%d]", m.searchIdx+1, len(m.searchMatches))
 		}
@@ -500,6 +533,7 @@ func (m Model) renderStatusBar() string {
 	}
 
 	centerW := max(0, m.width-leftW-rightW)
+	centerContent = truncateCenter(centerContent, centerW)
 	center := barStyle.Width(centerW).Align(lipgloss.Center).Render(centerContent)
 
 	return left + center + right

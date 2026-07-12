@@ -71,6 +71,13 @@ type Config struct {
 	FormatOnSave         bool              `toml:"format_on_save"`
 	Formatters           []FormatterConfig `toml:"formatter"`
 	Theme                string            `toml:"theme"`
+	BracketColors        bool              `toml:"bracket_colors"`
+	IndentGuides         bool              `toml:"indent_guides"`
+	// FileTypes maps file extensions or filenames to a syntax language key.
+	// Keys are extensions (with or without leading dot) or bare filenames.
+	// Values are a registered language key such as "sh", "go", ".md", etc.
+	// Example: {".env" = "sh", ".mdx" = "md"}
+	FileTypes map[string]string `toml:"file_types"`
 }
 
 func defaults() *Config {
@@ -79,6 +86,8 @@ func defaults() *Config {
 		RecoveryMaxBytes:     100 * 1024 * 1024,
 		RecoveryIntervalSecs: 5,
 		FuzzySearch:          true,
+		BracketColors:        true,
+		IndentGuides:         true,
 	}
 }
 
@@ -180,6 +189,12 @@ const defaultConfigTemplate = `# Indigo editor configuration
 # Custom themes go in ~/.config/indigo/themes/<name>.toml.
 # theme = "default-dark"
 
+# Colorize matching bracket pairs with cycling colors based on nesting depth.
+# bracket_colors = true
+
+# Draw indent guide lines at each tab-stop in the leading whitespace of lines.
+# indent_guides = true
+
 # ---------------------------------------------------------------------------
 # Language servers
 #
@@ -195,6 +210,19 @@ const defaultConfigTemplate = `# Indigo editor configuration
 # [[language_server]]
 # extensions = ["rs"]
 # command    = "rust-analyzer"
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# File type aliases
+#
+# Map file extensions or filenames to a syntax-highlighting language.
+# The key is the extension (with or without leading dot) or a bare filename.
+# The value is a recognized language key such as "sh", "go", "md", etc.
+# Built-in aliases already defined: .env→sh, .envrc→sh, .mdx→md, .jsonc→json.
+#
+# [file_types]
+# ".myext" = "go"
+# "Jenkinsfile" = "sh"
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------

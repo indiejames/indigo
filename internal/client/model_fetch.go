@@ -238,9 +238,6 @@ func (m Model) fetchFixes() tea.Cmd {
 			}
 		}
 
-		if len(items) == 0 {
-			return nil
-		}
 		return fixItemsMsg{items: items, decor: decor}
 	}
 }

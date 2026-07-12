@@ -632,7 +632,7 @@ func (m Model) buildIndentGuideOverlays(layout []layoutEntry, cw int) [][]lineOv
 	}
 	vis := len(layout)
 	rows := make([][]lineOverlay, vis)
-	guideText := indentGuideStyle.Render("│")
+	guideText := indentGuideStyle.Render("▏")
 	for row, entry := range layout {
 		bufLine := entry.bufLine
 		if bufLine >= m.buf.LineCount() {

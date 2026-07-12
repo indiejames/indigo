@@ -272,6 +272,93 @@ func (c *Client) Definition(path string, line, col int) ([]Location, error) {
 	return nil, nil
 }
 
+// WorkspaceSymbols queries the language server for symbols matching query.
+func (c *Client) WorkspaceSymbols(query string) ([]SymbolInformation, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	raw, err := c.conn.Call(ctx, "workspace/symbol", WorkspaceSymbolParams{Query: query})
+	if err != nil {
+		return nil, err
+	}
+	if string(raw) == "null" {
+		return nil, nil
+	}
+	var syms []SymbolInformation
+	if err := json.Unmarshal(raw, &syms); err != nil {
+		return nil, err
+	}
+	return syms, nil
+}
+
+// DocumentSymbols returns symbols in path, flattened to a list.
+// The server may return []DocumentSymbol (hierarchical) or []SymbolInformation (flat).
+func (c *Client) DocumentSymbols(path string) ([]SymbolInformation, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	raw, err := c.conn.Call(ctx, "textDocument/documentSymbol", DocumentSymbolParams{
+		TextDocument: TextDocumentIdentifier{URI: pathToURI(path)},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if string(raw) == "null" {
+		return nil, nil
+	}
+	// Try flat SymbolInformation first.
+	var flat []SymbolInformation
+	if err := json.Unmarshal(raw, &flat); err == nil && len(flat) > 0 && flat[0].Location.URI != "" {
+		return flat, nil
+	}
+	// Fall back to hierarchical DocumentSymbol.
+	var hier []DocumentSymbol
+	if err := json.Unmarshal(raw, &hier); err != nil {
+		return nil, err
+	}
+	uri := pathToURI(path)
+	var result []SymbolInformation
+	var flatten func(syms []DocumentSymbol)
+	flatten = func(syms []DocumentSymbol) {
+		for _, s := range syms {
+			result = append(result, SymbolInformation{
+				Name: s.Name,
+				Kind: s.Kind,
+				Location: Location{
+					URI:   uri,
+					Range: s.SelectionRange,
+				},
+			})
+			flatten(s.Children)
+		}
+	}
+	flatten(hier)
+	return result, nil
+}
+
+// References returns all reference locations for the symbol at (line, col) in path.
+func (c *Client) References(path string, line, col int) ([]Location, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	raw, err := c.conn.Call(ctx, "textDocument/references", ReferenceParams{
+		TextDocument: TextDocumentIdentifier{URI: pathToURI(path)},
+		Position:     Position{Line: line, Character: col},
+		Context:      ReferenceContext{IncludeDeclaration: false},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if string(raw) == "null" {
+		return nil, nil
+	}
+	var locs []Location
+	if err := json.Unmarshal(raw, &locs); err != nil {
+		return nil, err
+	}
+	return locs, nil
+}
+
 // GetDiagnostics returns the most recent diagnostics for path.
 func (c *Client) GetDiagnostics(path string) []Diagnostic {
 	c.diagMu.RLock()

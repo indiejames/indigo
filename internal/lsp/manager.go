@@ -203,6 +203,32 @@ func (m *Manager) Complete(path string, line, col int) ([]CompletionItem, error)
 	return nil, nil
 }
 
+// WorkspaceSymbols queries the language server for path's workspace for symbols matching query.
+func (m *Manager) WorkspaceSymbols(path, query string) ([]SymbolInformation, error) {
+	if c := m.clientForPath(path); c != nil {
+		return c.WorkspaceSymbols(query)
+	}
+	return nil, nil
+}
+
+// DocumentSymbols returns flattened symbols for path.
+func (m *Manager) DocumentSymbols(path string) ([]SymbolInformation, error) {
+	if c := m.clientForPath(path); c != nil {
+		m.ensureOpened(c, path)
+		return c.DocumentSymbols(path)
+	}
+	return nil, nil
+}
+
+// References returns all reference locations for the symbol at (line, col) in path.
+func (m *Manager) References(path string, line, col int) ([]Location, error) {
+	if c := m.clientForPath(path); c != nil {
+		m.ensureOpened(c, path)
+		return c.References(path, line, col)
+	}
+	return nil, nil
+}
+
 // Format requests formatting for path from its language server.
 // Returns (content, false, nil) when no server is configured or formatting is unsupported.
 func (m *Manager) Format(path, content string) (string, bool, error) {

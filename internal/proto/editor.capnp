@@ -46,6 +46,9 @@ interface EditorService {
   pluginPopupCancelled @26 ()               -> ();
   pluginInputConfirmed @27 (text :Text)     -> ();
   pluginInputCancelled @28 ()               -> ();
+  references       @29 (bufId :UInt32, line :UInt32, col :UInt32) -> (locations :List(FileLocation));
+  workspaceSymbols @30 (bufId :UInt32, query :Text)               -> (symbols :List(SymbolResult));
+  documentSymbols  @31 (bufId :UInt32)                            -> (symbols :List(SymbolResult));
 }
 
 struct PluginEdit {
@@ -125,6 +128,22 @@ struct DefinitionResult {
   path  @1 :Text;
   line  @2 :UInt32;
   col   @3 :UInt32;
+}
+
+struct FileLocation {
+  path    @0 :Text;
+  line    @1 :UInt32;
+  col     @2 :UInt32;
+  preview @3 :Text;
+}
+
+struct SymbolResult {
+  name          @0 :Text;
+  kind          @1 :UInt8;
+  containerName @2 :Text;
+  path          @3 :Text;
+  line          @4 :UInt32;
+  col           @5 :UInt32;
 }
 
 struct LspDiagnostic {

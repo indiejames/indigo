@@ -363,7 +363,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if msg.col >= 0 && msg.matchLen > 0 {
 					a.buffers[a.active] = a.buffers[a.active].AtMatch(msg.line, msg.col, msg.matchLen, a.bufHeight())
 				} else if msg.col >= 0 {
-					a.buffers[a.active] = a.buffers[a.active].AtPos(msg.line, msg.col)
+					a.buffers[a.active] = a.buffers[a.active].AtPos(msg.line, msg.col, a.bufHeight())
 				} else {
 					a.buffers[a.active] = a.buffers[a.active].AtLine(msg.line)
 				}
@@ -378,7 +378,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.col >= 0 && msg.matchLen > 0 {
 				m = m.AtMatch(msg.line, msg.col, msg.matchLen, a.bufHeight())
 			} else if msg.col >= 0 {
-				m = m.AtPos(msg.line, msg.col)
+				m = m.AtPos(msg.line, msg.col, a.bufHeight())
 			} else {
 				m = m.AtLine(msg.line)
 			}

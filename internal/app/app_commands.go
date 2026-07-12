@@ -233,7 +233,7 @@ func (a App) jumpToEntry(e jumpEntry) (tea.Model, tea.Cmd) {
 	for i, m := range a.buffers {
 		if m.FilePath() == e.filePath {
 			a.active = i
-			a.buffers[i] = m.AtPos(e.line, e.col)
+			a.buffers[i] = m.AtPos(e.line, e.col, a.bufHeight())
 			return a, nil
 		}
 	}

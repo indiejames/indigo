@@ -136,7 +136,7 @@ func (a App) handleDocSymbolPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.docSymbolPicker = nil
 			// Same buffer — just move cursor.
 			if len(a.buffers) > 0 {
-				a.buffers[a.active] = a.buffers[a.active].AtPos(sym.Line, sym.Col)
+				a.buffers[a.active] = a.buffers[a.active].AtPos(sym.Line, sym.Col, a.bufHeight())
 			}
 			return a, nil
 		}

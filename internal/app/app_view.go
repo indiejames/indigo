@@ -53,6 +53,15 @@ func (a App) View() string {
 	if a.pluginInput != nil {
 		return overlayCenter(base, a.pluginInput.render(), a.width, a.height)
 	}
+	if a.symbolPicker != nil {
+		return overlayCenter(base, a.symbolPicker.render(), a.width, a.height)
+	}
+	if a.docSymbolPicker != nil {
+		return overlayCenter(base, a.docSymbolPicker.render(), a.width, a.height)
+	}
+	if a.refPicker != nil {
+		return overlayCenter(base, a.refPicker.render(), a.width, a.height)
+	}
 	return base
 }
 

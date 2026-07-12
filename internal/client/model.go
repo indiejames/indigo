@@ -541,12 +541,14 @@ func (m Model) AtLine(line int) Model {
 	return m
 }
 
-// AtPos moves the cursor to the given 0-based (line, col) and scrolls to it.
-func (m Model) AtPos(line, col int) Model {
+// AtPos moves the cursor to the given 0-based (line, col) and scrolls so the
+// target line sits ~25% down from the top of the visible area.
+func (m Model) AtPos(line, col, bufHeight int) Model {
 	line = max(0, min(line, m.buf.LineCount()-1))
 	col = max(0, min(col, m.buf.LineLen(line)))
 	m.cursor = document.Pos{Line: line, Col: col}
-	m.scrollToCursor()
+	quarter := max(1, bufHeight/4)
+	m.topLine = max(0, line-quarter)
 	return m
 }
 

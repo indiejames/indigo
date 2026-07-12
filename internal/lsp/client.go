@@ -359,6 +359,30 @@ func (c *Client) References(path string, line, col int) ([]Location, error) {
 	return locs, nil
 }
 
+// CodeActions returns quick-fix and refactor actions for the given cursor position.
+// The server's cached diagnostics for the file are included in the request context
+// so that diagnostic-driven fixes (e.g. "remove unused import") are surfaced.
+func (c *Client) CodeActions(path string, line, col int) ([]CodeAction, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	pos := Position{Line: line, Character: col}
+	diags := c.GetDiagnostics(path)
+	raw, err := c.conn.Call(ctx, "textDocument/codeAction", CodeActionParams{
+		TextDocument: TextDocumentIdentifier{URI: pathToURI(path)},
+		Range:        Range{Start: pos, End: pos},
+		Context:      CodeActionContext{Diagnostics: diags},
+	})
+	if err != nil || string(raw) == "null" {
+		return nil, err
+	}
+	var actions []CodeAction
+	if err := json.Unmarshal(raw, &actions); err != nil {
+		return nil, err
+	}
+	return actions, nil
+}
+
 // GetDiagnostics returns the most recent diagnostics for path.
 func (c *Client) GetDiagnostics(path string) []Diagnostic {
 	c.diagMu.RLock()

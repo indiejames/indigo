@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"strings"
 	"time"
 	"unicode"
 
@@ -226,11 +227,51 @@ func (m Model) fetchFixes() tea.Cmd {
 			items = append(items, actions...)
 		}
 
+		// LSP code actions (quick-fixes from the language server).
+		lspActions, err := m.rpc.LspCodeActions(ctx, bufID, int(line), int(col))
+		if err == nil {
+			for _, a := range lspActions {
+				items = append(items, ClientFixItem{
+					Label:    a.Title,
+					LspEdits: a.Edits,
+				})
+			}
+		}
+
 		if len(items) == 0 {
 			return nil
 		}
 		return fixItemsMsg{items: items, decor: decor}
 	}
+}
+
+// applyLspEditsToContent applies LSP edits (in reverse order to preserve positions) to a
+// content string and returns the result.
+func applyLspEditsToContent(content string, edits []ClientLspEdit) string {
+	lines := strings.Split(content, "\n")
+	for i := len(edits) - 1; i >= 0; i-- {
+		e := edits[i]
+		if e.FromLine >= len(lines) {
+			continue
+		}
+		toLine := e.ToLine
+		if toLine >= len(lines) {
+			toLine = len(lines) - 1
+		}
+		startRunes := []rune(lines[e.FromLine])
+		endRunes := []rune(lines[toLine])
+		sc := min(e.FromCol, len(startRunes))
+		ec := min(e.ToCol, len(endRunes))
+		prefix := string(startRunes[:sc])
+		suffix := string(endRunes[ec:])
+		replacement := strings.Split(prefix+e.NewText+suffix, "\n")
+		updated := make([]string, 0, len(lines)-(toLine-e.FromLine+1)+len(replacement))
+		updated = append(updated, lines[:e.FromLine]...)
+		updated = append(updated, replacement...)
+		updated = append(updated, lines[toLine+1:]...)
+		lines = updated
+	}
+	return strings.Join(lines, "\n")
 }
 
 // applyFixCmd applies the selected fix: either a direct text replacement or a plugin callback.
@@ -239,6 +280,46 @@ func (m Model) applyFixCmd(idx int) tea.Cmd {
 		return nil
 	}
 	item := m.fixItems[idx]
+	if len(item.LspEdits) > 0 {
+		edits := item.LspEdits
+		bufID := m.bufID
+		newContent := applyLspEditsToContent(m.buf.Content(), edits)
+		clientID := m.rpc.ClientID()
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			// Apply in reverse order so earlier edits don't shift later line numbers.
+			for i := len(edits) - 1; i >= 0; i-- {
+				e := edits[i]
+				if e.FromLine != e.ToLine || e.FromCol != e.ToCol {
+					delOp := document.Op{
+						Type:     document.OpDelete,
+						FromLine: e.FromLine,
+						FromCol:  e.FromCol,
+						ToLine:   e.ToLine,
+						ToCol:    e.ToCol,
+						ClientID: clientID,
+					}
+					if _, err := m.rpc.ApplyOp(ctx, bufID, delOp); err != nil {
+						return errorMsg{err}
+					}
+				}
+				if e.NewText != "" {
+					insOp := document.Op{
+						Type:       document.OpInsert,
+						InsertLine: e.FromLine,
+						InsertCol:  e.FromCol,
+						InsertText: e.NewText,
+						ClientID:   clientID,
+					}
+					if _, err := m.rpc.ApplyOp(ctx, bufID, insOp); err != nil {
+						return errorMsg{err}
+					}
+				}
+			}
+			return formatResultMsg{content: newContent, changed: true}
+		}
+	}
 	if item.Replace != "" {
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

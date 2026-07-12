@@ -484,3 +484,41 @@ type ReferenceParams struct {
 	Position     Position               `json:"position"`
 	Context      ReferenceContext       `json:"context"`
 }
+
+// ---- textDocument/codeAction ----
+
+type CodeActionContext struct {
+	Diagnostics []Diagnostic `json:"diagnostics"`
+}
+
+type CodeActionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
+	Context      CodeActionContext       `json:"context"`
+}
+
+// TextDocumentEdit is a versioned document edit (used in documentChanges).
+type TextDocumentEdit struct {
+	TextDocument struct {
+		URI string `json:"uri"`
+	} `json:"textDocument"`
+	Edits []TextEdit `json:"edits"`
+}
+
+// WorkspaceEdit holds per-file text edits returned by a code action.
+// gopls uses documentChanges; legacy servers use changes.
+type WorkspaceEdit struct {
+	Changes         map[string][]TextEdit `json:"changes,omitempty"`
+	DocumentChanges []TextDocumentEdit    `json:"documentChanges,omitempty"`
+}
+
+// CodeAction is a single action returned by textDocument/codeAction.
+// The server may return either WorkspaceEdit-style actions or Command-style
+// actions. We surface only WorkspaceEdit actions (the common case for
+// quick-fixes like "remove unused import" or "add missing import").
+type CodeAction struct {
+	Title       string         `json:"title"`
+	Kind        string         `json:"kind,omitempty"`
+	IsPreferred bool           `json:"isPreferred,omitempty"`
+	Edit        *WorkspaceEdit `json:"edit,omitempty"`
+}

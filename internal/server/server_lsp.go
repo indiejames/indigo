@@ -380,3 +380,87 @@ func (s *editorService) Format(_ context.Context, call proto.EditorService_forma
 	res.SetNoFormatter(noFormatter)
 	return nil
 }
+
+// lspEditsForURI extracts the TextEdits for uri from a WorkspaceEdit,
+// checking documentChanges (used by gopls) before the legacy changes map.
+func lspEditsForURI(edit *lsp.WorkspaceEdit, uri string) []lsp.TextEdit {
+	if edit == nil {
+		return nil
+	}
+	for _, dc := range edit.DocumentChanges {
+		if dc.TextDocument.URI == uri {
+			return dc.Edits
+		}
+	}
+	return edit.Changes[uri]
+}
+
+func (s *editorService) LspCodeActions(_ context.Context, call proto.EditorService_lspCodeActions) error {
+	args := call.Args()
+	bufID := args.BufId()
+	line := int(args.Line())
+	col := int(args.Col())
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+	s.mu.Unlock()
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+
+	actions, err := s.lspMgr.CodeActions(path, line, col)
+	if err != nil || len(actions) == 0 {
+		return err
+	}
+
+	// Collect edits from either the legacy changes map or documentChanges array.
+	uri := "file://" + path
+	type actionEdits struct {
+		action lsp.CodeAction
+		edits  []lsp.TextEdit
+	}
+	var applicable []actionEdits
+	for _, a := range actions {
+		edits := lspEditsForURI(a.Edit, uri)
+		if len(edits) > 0 {
+			applicable = append(applicable, actionEdits{a, edits})
+		}
+	}
+	if len(applicable) == 0 {
+		return nil
+	}
+
+	list, err := res.NewActions(int32(len(applicable)))
+	if err != nil {
+		return err
+	}
+	for i, ae := range applicable {
+		item := list.At(i)
+		if err := item.SetTitle(ae.action.Title); err != nil {
+			return err
+		}
+		edits := ae.edits
+		el, err := item.NewEdits(int32(len(edits)))
+		if err != nil {
+			return err
+		}
+		for j, e := range edits {
+			ev := el.At(j)
+			ev.SetFromLine(uint32(e.Range.Start.Line))
+			ev.SetFromCol(uint32(e.Range.Start.Character))
+			ev.SetToLine(uint32(e.Range.End.Line))
+			ev.SetToCol(uint32(e.Range.End.Character))
+			if err := ev.SetNewText(e.NewText); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

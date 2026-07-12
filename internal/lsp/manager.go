@@ -229,6 +229,15 @@ func (m *Manager) References(path string, line, col int) ([]Location, error) {
 	return nil, nil
 }
 
+// CodeActions returns quick-fix and refactor actions for the cursor position.
+func (m *Manager) CodeActions(path string, line, col int) ([]CodeAction, error) {
+	if c := m.clientForPath(path); c != nil {
+		m.ensureOpened(c, path)
+		return c.CodeActions(path, line, col)
+	}
+	return nil, nil
+}
+
 // Format requests formatting for path from its language server.
 // Returns (content, false, nil) when no server is configured or formatting is unsupported.
 func (m *Manager) Format(path, content string) (string, bool, error) {

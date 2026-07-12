@@ -49,6 +49,7 @@ interface EditorService {
   references       @29 (bufId :UInt32, line :UInt32, col :UInt32) -> (locations :List(FileLocation));
   workspaceSymbols @30 (bufId :UInt32, query :Text)               -> (symbols :List(SymbolResult));
   documentSymbols  @31 (bufId :UInt32)                            -> (symbols :List(SymbolResult));
+  lspCodeActions   @32 (bufId :UInt32, line :UInt32, col :UInt32) -> (actions :List(LspCodeAction));
 }
 
 struct PluginEdit {
@@ -57,6 +58,11 @@ struct PluginEdit {
   toLine   @2 :UInt32;
   toCol    @3 :UInt32;
   newText  @4 :Text;
+}
+
+struct LspCodeAction {
+  title       @0 :Text;
+  edits       @1 :List(PluginEdit);
 }
 
 enum PluginDecorationKind {

@@ -505,17 +505,18 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 		buf.MarkDirty()
 	}
 	return Model{
-		rpc:            rpc,
-		buf:            buf,
-		cfg:            cfg,
-		bufID:          bufID,
-		version:        version,
-		filePath:       filePath,
-		workDir:        workDir,
-		hlr:            highlight.New(filePath),
-		metrics:        &metricsData{},
-		recoveryPrompt: fromRecovery,
-		pluginBindings: rpc.PluginBindings(),
+		rpc:                 rpc,
+		buf:                 buf,
+		cfg:                 cfg,
+		bufID:               bufID,
+		version:             version,
+		filePath:            filePath,
+		workDir:             workDir,
+		hlr:                 highlight.New(filePath),
+		metrics:             &metricsData{},
+		recoveryPrompt:      fromRecovery,
+		pluginBindings:      rpc.PluginBindings(),
+		reservePluginGutter: rpc != nil,
 	}
 }
 

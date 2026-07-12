@@ -73,11 +73,14 @@ type ClientFixItem struct {
 	FromLine, FromCol int
 	ToLine, ToCol     int
 
-	// Callback info (used when Replace == "").
+	// Callback info (used when Replace == "" and LspEdits == nil).
 	Plugin    string // plugin name
 	FixData   string // opaque token for decoration-based fixes; "" for action provider items
 	OrigIndex int    // original index within the plugin's fix/action list
 	IsAction  bool   // true = call ApplyPluginAction; false = call ApplyPluginFix
+
+	// LspEdits is set for LSP code actions; applied in reverse order to preserve offsets.
+	LspEdits []ClientLspEdit
 }
 
 // ClientDecoration is one decoration item returned by a plugin provider.

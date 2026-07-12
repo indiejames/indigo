@@ -388,3 +388,56 @@ func (r *RPC) Format(ctx context.Context, bufID uint32) (content string, changed
 	}
 	return content, res.Changed(), res.NoFormatter(), nil
 }
+
+// ClientLspEdit is a single text replacement from an LSP code action.
+type ClientLspEdit struct {
+	FromLine, FromCol int
+	ToLine, ToCol     int
+	NewText           string
+}
+
+// ClientLspCodeAction is a code action returned by the LSP server.
+type ClientLspCodeAction struct {
+	Title string
+	Edits []ClientLspEdit
+}
+
+// LspCodeActions fetches quick-fix and refactor actions for the cursor position.
+func (r *RPC) LspCodeActions(ctx context.Context, bufID uint32, line, col int) ([]ClientLspCodeAction, error) {
+	fut, rel := r.svc.LspCodeActions(ctx, func(p proto.EditorService_lspCodeActions_Params) error {
+		p.SetBufId(bufID)
+		p.SetLine(uint32(line))
+		p.SetCol(uint32(col))
+		return nil
+	})
+	defer rel()
+
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, err
+	}
+	list, err := res.Actions()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ClientLspCodeAction, list.Len())
+	for i := range out {
+		item := list.At(i)
+		title, _ := item.Title()
+		edits, _ := item.Edits()
+		editList := make([]ClientLspEdit, edits.Len())
+		for j := range editList {
+			e := edits.At(j)
+			nt, _ := e.NewText()
+			editList[j] = ClientLspEdit{
+				FromLine: int(e.FromLine()),
+				FromCol:  int(e.FromCol()),
+				ToLine:   int(e.ToLine()),
+				ToCol:    int(e.ToCol()),
+				NewText:  nt,
+			}
+		}
+		out[i] = ClientLspCodeAction{Title: title, Edits: editList}
+	}
+	return out, nil
+}

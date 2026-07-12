@@ -22,7 +22,7 @@ func (c ClientCallback) ShowMessage(ctx context.Context, params func(ClientCallb
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      0,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "showMessage",
 		},
 	}
@@ -42,7 +42,7 @@ func (c ClientCallback) MoveCursor(ctx context.Context, params func(ClientCallba
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      1,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "moveCursor",
 		},
 	}
@@ -62,7 +62,7 @@ func (c ClientCallback) OpenFile(ctx context.Context, params func(ClientCallback
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      2,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "openFile",
 		},
 	}
@@ -82,7 +82,7 @@ func (c ClientCallback) KeyRegistered(ctx context.Context, params func(ClientCal
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      3,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "keyRegistered",
 		},
 	}
@@ -102,7 +102,7 @@ func (c ClientCallback) FileChanged(ctx context.Context, params func(ClientCallb
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      4,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "fileChanged",
 		},
 	}
@@ -122,7 +122,7 @@ func (c ClientCallback) ShowPluginPopup(ctx context.Context, params func(ClientC
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      5,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "showPluginPopup",
 		},
 	}
@@ -142,7 +142,7 @@ func (c ClientCallback) HidePluginPopup(ctx context.Context, params func(ClientC
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      6,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "hidePluginPopup",
 		},
 	}
@@ -162,7 +162,7 @@ func (c ClientCallback) ShowInputPrompt(ctx context.Context, params func(ClientC
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      7,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "showInputPrompt",
 		},
 	}
@@ -182,7 +182,7 @@ func (c ClientCallback) HideInputPrompt(ctx context.Context, params func(ClientC
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      8,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "hideInputPrompt",
 		},
 	}
@@ -311,7 +311,7 @@ func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      0,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "showMessage",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -323,7 +323,7 @@ func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      1,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "moveCursor",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -335,7 +335,7 @@ func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      2,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "openFile",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -347,7 +347,7 @@ func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      3,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "keyRegistered",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -359,7 +359,7 @@ func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      4,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "fileChanged",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -371,7 +371,7 @@ func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      5,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "showPluginPopup",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -383,7 +383,7 @@ func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      6,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "hidePluginPopup",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -395,7 +395,7 @@ func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      7,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "showInputPrompt",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -407,7 +407,7 @@ func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []
 		Method: capnp.Method{
 			InterfaceID:   0xa16aa1ea8b7d14ed,
 			MethodID:      8,
-			InterfaceName: "internal/proto/editor.capnp:ClientCallback",
+			InterfaceName: "editor.capnp:ClientCallback",
 			MethodName:    "hideInputPrompt",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -1934,7 +1934,7 @@ func (c EditorService) Connect(ctx context.Context, params func(EditorService_co
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      0,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "connect",
 		},
 	}
@@ -1954,7 +1954,7 @@ func (c EditorService) Disconnect(ctx context.Context, params func(EditorService
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      1,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "disconnect",
 		},
 	}
@@ -1974,7 +1974,7 @@ func (c EditorService) OpenFile(ctx context.Context, params func(EditorService_o
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      2,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "openFile",
 		},
 	}
@@ -1994,7 +1994,7 @@ func (c EditorService) GetUpdates(ctx context.Context, params func(EditorService
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      3,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getUpdates",
 		},
 	}
@@ -2014,7 +2014,7 @@ func (c EditorService) ApplyOp(ctx context.Context, params func(EditorService_ap
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      4,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "applyOp",
 		},
 	}
@@ -2034,7 +2034,7 @@ func (c EditorService) Save(ctx context.Context, params func(EditorService_save_
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      5,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "save",
 		},
 	}
@@ -2054,7 +2054,7 @@ func (c EditorService) CloseBuffer(ctx context.Context, params func(EditorServic
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      6,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "closeBuffer",
 		},
 	}
@@ -2074,7 +2074,7 @@ func (c EditorService) BufferClientCount(ctx context.Context, params func(Editor
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      7,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "bufferClientCount",
 		},
 	}
@@ -2094,7 +2094,7 @@ func (c EditorService) DiscardRecovery(ctx context.Context, params func(EditorSe
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      8,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "discardRecovery",
 		},
 	}
@@ -2114,7 +2114,7 @@ func (c EditorService) GetDiagnostics(ctx context.Context, params func(EditorSer
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      9,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getDiagnostics",
 		},
 	}
@@ -2134,7 +2134,7 @@ func (c EditorService) Hover(ctx context.Context, params func(EditorService_hove
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      10,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "hover",
 		},
 	}
@@ -2154,7 +2154,7 @@ func (c EditorService) SignatureHelp(ctx context.Context, params func(EditorServ
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      11,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "signatureHelp",
 		},
 	}
@@ -2174,7 +2174,7 @@ func (c EditorService) Complete(ctx context.Context, params func(EditorService_c
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      12,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "complete",
 		},
 	}
@@ -2194,7 +2194,7 @@ func (c EditorService) Definition(ctx context.Context, params func(EditorService
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      13,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "definition",
 		},
 	}
@@ -2214,7 +2214,7 @@ func (c EditorService) Format(ctx context.Context, params func(EditorService_for
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      14,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "format",
 		},
 	}
@@ -2234,7 +2234,7 @@ func (c EditorService) HandlePluginKey(ctx context.Context, params func(EditorSe
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      15,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "handlePluginKey",
 		},
 	}
@@ -2254,7 +2254,7 @@ func (c EditorService) UpdateViewport(ctx context.Context, params func(EditorSer
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      16,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "updateViewport",
 		},
 	}
@@ -2274,7 +2274,7 @@ func (c EditorService) GetPluginDecorations(ctx context.Context, params func(Edi
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      17,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getPluginDecorations",
 		},
 	}
@@ -2294,7 +2294,7 @@ func (c EditorService) GetPluginKeys(ctx context.Context, params func(EditorServ
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      18,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getPluginKeys",
 		},
 	}
@@ -2314,7 +2314,7 @@ func (c EditorService) SaveAs(ctx context.Context, params func(EditorService_sav
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      19,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "saveAs",
 		},
 	}
@@ -2334,7 +2334,7 @@ func (c EditorService) GetPluginFixes(ctx context.Context, params func(EditorSer
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      20,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getPluginFixes",
 		},
 	}
@@ -2354,7 +2354,7 @@ func (c EditorService) ApplyPluginFix(ctx context.Context, params func(EditorSer
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      21,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "applyPluginFix",
 		},
 	}
@@ -2374,7 +2374,7 @@ func (c EditorService) GetPluginActions(ctx context.Context, params func(EditorS
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      22,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getPluginActions",
 		},
 	}
@@ -2394,7 +2394,7 @@ func (c EditorService) ApplyPluginAction(ctx context.Context, params func(Editor
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      23,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "applyPluginAction",
 		},
 	}
@@ -2414,7 +2414,7 @@ func (c EditorService) GetPluginBindings(ctx context.Context, params func(Editor
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      24,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getPluginBindings",
 		},
 	}
@@ -2434,7 +2434,7 @@ func (c EditorService) PluginPopupSelected(ctx context.Context, params func(Edit
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      25,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "pluginPopupSelected",
 		},
 	}
@@ -2454,7 +2454,7 @@ func (c EditorService) PluginPopupCancelled(ctx context.Context, params func(Edi
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      26,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "pluginPopupCancelled",
 		},
 	}
@@ -2474,7 +2474,7 @@ func (c EditorService) PluginInputConfirmed(ctx context.Context, params func(Edi
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      27,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "pluginInputConfirmed",
 		},
 	}
@@ -2494,7 +2494,7 @@ func (c EditorService) PluginInputCancelled(ctx context.Context, params func(Edi
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      28,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "pluginInputCancelled",
 		},
 	}
@@ -2514,7 +2514,7 @@ func (c EditorService) References(ctx context.Context, params func(EditorService
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      29,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "references",
 		},
 	}
@@ -2534,7 +2534,7 @@ func (c EditorService) WorkspaceSymbols(ctx context.Context, params func(EditorS
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      30,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "workspaceSymbols",
 		},
 	}
@@ -2554,7 +2554,7 @@ func (c EditorService) DocumentSymbols(ctx context.Context, params func(EditorSe
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      31,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "documentSymbols",
 		},
 	}
@@ -2565,6 +2565,26 @@ func (c EditorService) DocumentSymbols(ctx context.Context, params func(EditorSe
 
 	ans, release := capnp.Client(c).SendCall(ctx, s)
 	return EditorService_documentSymbols_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) LspCodeActions(ctx context.Context, params func(EditorService_lspCodeActions_Params) error) (EditorService_lspCodeActions_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      32,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "lspCodeActions",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 16, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_lspCodeActions_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_lspCodeActions_Results_Future{Future: ans.Future()}, release
 
 }
 
@@ -2704,6 +2724,8 @@ type EditorService_Server interface {
 	WorkspaceSymbols(context.Context, EditorService_workspaceSymbols) error
 
 	DocumentSymbols(context.Context, EditorService_documentSymbols) error
+
+	LspCodeActions(context.Context, EditorService_lspCodeActions) error
 }
 
 // EditorService_NewServer creates a new Server from an implementation of EditorService_Server.
@@ -2722,14 +2744,14 @@ func EditorService_ServerToClient(s EditorService_Server) EditorService {
 // This can be used to create a more complicated Server.
 func EditorService_Methods(methods []server.Method, s EditorService_Server) []server.Method {
 	if cap(methods) == 0 {
-		methods = make([]server.Method, 0, 32)
+		methods = make([]server.Method, 0, 33)
 	}
 
 	methods = append(methods, server.Method{
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      0,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "connect",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2741,7 +2763,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      1,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "disconnect",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2753,7 +2775,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      2,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "openFile",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2765,7 +2787,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      3,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getUpdates",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2777,7 +2799,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      4,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "applyOp",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2789,7 +2811,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      5,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "save",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2801,7 +2823,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      6,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "closeBuffer",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2813,7 +2835,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      7,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "bufferClientCount",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2825,7 +2847,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      8,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "discardRecovery",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2837,7 +2859,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      9,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getDiagnostics",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2849,7 +2871,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      10,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "hover",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2861,7 +2883,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      11,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "signatureHelp",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2873,7 +2895,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      12,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "complete",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2885,7 +2907,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      13,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "definition",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2897,7 +2919,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      14,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "format",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2909,7 +2931,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      15,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "handlePluginKey",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2921,7 +2943,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      16,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "updateViewport",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2933,7 +2955,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      17,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getPluginDecorations",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2945,7 +2967,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      18,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getPluginKeys",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2957,7 +2979,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      19,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "saveAs",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2969,7 +2991,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      20,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getPluginFixes",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2981,7 +3003,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      21,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "applyPluginFix",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -2993,7 +3015,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      22,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getPluginActions",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -3005,7 +3027,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      23,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "applyPluginAction",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -3017,7 +3039,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      24,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "getPluginBindings",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -3029,7 +3051,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      25,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "pluginPopupSelected",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -3041,7 +3063,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      26,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "pluginPopupCancelled",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -3053,7 +3075,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      27,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "pluginInputConfirmed",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -3065,7 +3087,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      28,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "pluginInputCancelled",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -3077,7 +3099,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      29,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "references",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -3089,7 +3111,7 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      30,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "workspaceSymbols",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
@@ -3101,11 +3123,23 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		Method: capnp.Method{
 			InterfaceID:   0xd281f133906f9f01,
 			MethodID:      31,
-			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			InterfaceName: "editor.capnp:EditorService",
 			MethodName:    "documentSymbols",
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
 			return s.DocumentSymbols(ctx, EditorService_documentSymbols{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      32,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "lspCodeActions",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.LspCodeActions(ctx, EditorService_lspCodeActions{call})
 		},
 	})
 
@@ -3654,6 +3688,23 @@ func (c EditorService_documentSymbols) Args() EditorService_documentSymbols_Para
 func (c EditorService_documentSymbols) AllocResults() (EditorService_documentSymbols_Results, error) {
 	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
 	return EditorService_documentSymbols_Results(r), err
+}
+
+// EditorService_lspCodeActions holds the state for a server call to EditorService.lspCodeActions.
+// See server.Call for documentation.
+type EditorService_lspCodeActions struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_lspCodeActions) Args() EditorService_lspCodeActions_Params {
+	return EditorService_lspCodeActions_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_lspCodeActions) AllocResults() (EditorService_lspCodeActions_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_lspCodeActions_Results(r), err
 }
 
 // EditorService_List is a list of EditorService.
@@ -8950,6 +9001,182 @@ func (f EditorService_documentSymbols_Results_Future) Struct() (EditorService_do
 	return EditorService_documentSymbols_Results(p.Struct()), err
 }
 
+type EditorService_lspCodeActions_Params capnp.Struct
+
+// EditorService_lspCodeActions_Params_TypeID is the unique identifier for the type EditorService_lspCodeActions_Params.
+const EditorService_lspCodeActions_Params_TypeID = 0xdcfd762e01d8b969
+
+func NewEditorService_lspCodeActions_Params(s *capnp.Segment) (EditorService_lspCodeActions_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0})
+	return EditorService_lspCodeActions_Params(st), err
+}
+
+func NewRootEditorService_lspCodeActions_Params(s *capnp.Segment) (EditorService_lspCodeActions_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0})
+	return EditorService_lspCodeActions_Params(st), err
+}
+
+func ReadRootEditorService_lspCodeActions_Params(msg *capnp.Message) (EditorService_lspCodeActions_Params, error) {
+	root, err := msg.Root()
+	return EditorService_lspCodeActions_Params(root.Struct()), err
+}
+
+func (s EditorService_lspCodeActions_Params) String() string {
+	str, _ := text.Marshal(0xdcfd762e01d8b969, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_lspCodeActions_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_lspCodeActions_Params) DecodeFromPtr(p capnp.Ptr) EditorService_lspCodeActions_Params {
+	return EditorService_lspCodeActions_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_lspCodeActions_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_lspCodeActions_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_lspCodeActions_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_lspCodeActions_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_lspCodeActions_Params) BufId() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s EditorService_lspCodeActions_Params) SetBufId(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+func (s EditorService_lspCodeActions_Params) Line() uint32 {
+	return capnp.Struct(s).Uint32(4)
+}
+
+func (s EditorService_lspCodeActions_Params) SetLine(v uint32) {
+	capnp.Struct(s).SetUint32(4, v)
+}
+
+func (s EditorService_lspCodeActions_Params) Col() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s EditorService_lspCodeActions_Params) SetCol(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+// EditorService_lspCodeActions_Params_List is a list of EditorService_lspCodeActions_Params.
+type EditorService_lspCodeActions_Params_List = capnp.StructList[EditorService_lspCodeActions_Params]
+
+// NewEditorService_lspCodeActions_Params creates a new list of EditorService_lspCodeActions_Params.
+func NewEditorService_lspCodeActions_Params_List(s *capnp.Segment, sz int32) (EditorService_lspCodeActions_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_lspCodeActions_Params](l), err
+}
+
+// EditorService_lspCodeActions_Params_Future is a wrapper for a EditorService_lspCodeActions_Params promised by a client call.
+type EditorService_lspCodeActions_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_lspCodeActions_Params_Future) Struct() (EditorService_lspCodeActions_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_lspCodeActions_Params(p.Struct()), err
+}
+
+type EditorService_lspCodeActions_Results capnp.Struct
+
+// EditorService_lspCodeActions_Results_TypeID is the unique identifier for the type EditorService_lspCodeActions_Results.
+const EditorService_lspCodeActions_Results_TypeID = 0xf15d73ce429a8956
+
+func NewEditorService_lspCodeActions_Results(s *capnp.Segment) (EditorService_lspCodeActions_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_lspCodeActions_Results(st), err
+}
+
+func NewRootEditorService_lspCodeActions_Results(s *capnp.Segment) (EditorService_lspCodeActions_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_lspCodeActions_Results(st), err
+}
+
+func ReadRootEditorService_lspCodeActions_Results(msg *capnp.Message) (EditorService_lspCodeActions_Results, error) {
+	root, err := msg.Root()
+	return EditorService_lspCodeActions_Results(root.Struct()), err
+}
+
+func (s EditorService_lspCodeActions_Results) String() string {
+	str, _ := text.Marshal(0xf15d73ce429a8956, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_lspCodeActions_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_lspCodeActions_Results) DecodeFromPtr(p capnp.Ptr) EditorService_lspCodeActions_Results {
+	return EditorService_lspCodeActions_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_lspCodeActions_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_lspCodeActions_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_lspCodeActions_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_lspCodeActions_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_lspCodeActions_Results) Actions() (LspCodeAction_List, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return LspCodeAction_List(p.List()), err
+}
+
+func (s EditorService_lspCodeActions_Results) HasActions() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_lspCodeActions_Results) SetActions(v LspCodeAction_List) error {
+	return capnp.Struct(s).SetPtr(0, v.ToPtr())
+}
+
+// NewActions sets the actions field to a newly
+// allocated LspCodeAction_List, preferring placement in s's segment.
+func (s EditorService_lspCodeActions_Results) NewActions(n int32) (LspCodeAction_List, error) {
+	l, err := NewLspCodeAction_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return LspCodeAction_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, l.ToPtr())
+	return l, err
+}
+
+// EditorService_lspCodeActions_Results_List is a list of EditorService_lspCodeActions_Results.
+type EditorService_lspCodeActions_Results_List = capnp.StructList[EditorService_lspCodeActions_Results]
+
+// NewEditorService_lspCodeActions_Results creates a new list of EditorService_lspCodeActions_Results.
+func NewEditorService_lspCodeActions_Results_List(s *capnp.Segment, sz int32) (EditorService_lspCodeActions_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_lspCodeActions_Results](l), err
+}
+
+// EditorService_lspCodeActions_Results_Future is a wrapper for a EditorService_lspCodeActions_Results promised by a client call.
+type EditorService_lspCodeActions_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_lspCodeActions_Results_Future) Struct() (EditorService_lspCodeActions_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_lspCodeActions_Results(p.Struct()), err
+}
+
 type PluginEdit capnp.Struct
 
 // PluginEdit_TypeID is the unique identifier for the type PluginEdit.
@@ -9062,6 +9289,112 @@ type PluginEdit_Future struct{ *capnp.Future }
 func (f PluginEdit_Future) Struct() (PluginEdit, error) {
 	p, err := f.Future.Ptr()
 	return PluginEdit(p.Struct()), err
+}
+
+type LspCodeAction capnp.Struct
+
+// LspCodeAction_TypeID is the unique identifier for the type LspCodeAction.
+const LspCodeAction_TypeID = 0xfc4caa313c2f7632
+
+func NewLspCodeAction(s *capnp.Segment) (LspCodeAction, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return LspCodeAction(st), err
+}
+
+func NewRootLspCodeAction(s *capnp.Segment) (LspCodeAction, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return LspCodeAction(st), err
+}
+
+func ReadRootLspCodeAction(msg *capnp.Message) (LspCodeAction, error) {
+	root, err := msg.Root()
+	return LspCodeAction(root.Struct()), err
+}
+
+func (s LspCodeAction) String() string {
+	str, _ := text.Marshal(0xfc4caa313c2f7632, capnp.Struct(s))
+	return str
+}
+
+func (s LspCodeAction) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (LspCodeAction) DecodeFromPtr(p capnp.Ptr) LspCodeAction {
+	return LspCodeAction(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s LspCodeAction) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s LspCodeAction) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s LspCodeAction) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s LspCodeAction) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s LspCodeAction) Title() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s LspCodeAction) HasTitle() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s LspCodeAction) TitleBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s LspCodeAction) SetTitle(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s LspCodeAction) Edits() (PluginEdit_List, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return PluginEdit_List(p.List()), err
+}
+
+func (s LspCodeAction) HasEdits() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s LspCodeAction) SetEdits(v PluginEdit_List) error {
+	return capnp.Struct(s).SetPtr(1, v.ToPtr())
+}
+
+// NewEdits sets the edits field to a newly
+// allocated PluginEdit_List, preferring placement in s's segment.
+func (s LspCodeAction) NewEdits(n int32) (PluginEdit_List, error) {
+	l, err := NewPluginEdit_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return PluginEdit_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(1, l.ToPtr())
+	return l, err
+}
+
+// LspCodeAction_List is a list of LspCodeAction.
+type LspCodeAction_List = capnp.StructList[LspCodeAction]
+
+// NewLspCodeAction creates a new list of LspCodeAction.
+func NewLspCodeAction_List(s *capnp.Segment, sz int32) (LspCodeAction_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return capnp.StructList[LspCodeAction](l), err
+}
+
+// LspCodeAction_Future is a wrapper for a LspCodeAction promised by a client call.
+type LspCodeAction_Future struct{ *capnp.Future }
+
+func (f LspCodeAction_Future) Struct() (LspCodeAction, error) {
+	p, err := f.Future.Ptr()
+	return LspCodeAction(p.Struct()), err
 }
 
 type PluginDecorationKind uint16
@@ -11234,412 +11567,418 @@ func NewEditOp_OpType_List(s *capnp.Segment, sz int32) (EditOp_OpType_List, erro
 	return capnp.NewEnumList[EditOp_OpType](s, sz)
 }
 
-const schema_d75b3b54eb3ed6a2 = "x\xda\xcc|{|T\xd5\xf5\xef^\xe7$9\x09U" +
-	"\xc3p\x12y\x08\x0c\x09\xa1\x90\x81(\x09R5\x803" +
-	"y\x80&\x12\xc9I\xc0J\xaa\xb7Nfv\x92\x03\x93" +
-	"\x99\xe9\x99\x13 U\x0c\xa1\xd0\x8a\x8a@\xaf/nK" +
-	"\x15Q\xab^_Tc\x95+\x16\xb4T\xa1b\xc5G" +
-	"+>\xda\xfa\xe0ZT\xa0\xd4\xa2U\x7f8\xbf\xcf\xda" +
-	"\xe7\xb5g2\x90\x99\xe0\xe7\xd7\xfe\xa5\xd9g\xcf\xde{" +
-	"\xad\xbd\x9e\xdf\xb56S\xdf,\xf4e\x95\x9f>q\x02" +
-	"\x11\x9a\x1f\x85\xec\x9c\xf8\xca\xc5\xe7>\xba\xf6\x9fkV" +
-	"\x10\x97\x07\x08\xc9\x92\x08\x99\xd6=l\x1b\x90\xac\xf8\xfb" +
-	"m\xebnx#\xe7\xa2^\xa2\x8c\x06!~\xd7\x1f/" +
-	"\xfcx\xfe\x8c\xef\xfd\x89d\x8b8G\x1d\xb6\x08\xe4\xe5" +
-	"\xc3\x8c\xe9\xeb\x80@\xfc\xda\xbb\x16\x1d\x1e\xff\xc8\x17\xbd" +
-	"D\xf1\x80@H6\xe0\xb7\xbc\x82=@@\x1eS\xf0" +
-	"\x08\x81\xbf<C/\x0f|\xb0c\xa5\xe2\x01 $[" +
-	"\xc0\xef\xdb\x0b\x04\x81\x80\xbc\x0f\xbf\xc7\xddY\xcd\x8f\x9d" +
-	"\xf5\xd6s?\xc2\x0d\x81\xdb\x90\xad\xd4YX\x0d\xf2\xf2" +
-	"B\x89\x10\xb9\xbbp)\x81\xf8\x87o<|\xde\xe7\x13" +
-	"sV\x11\xd7d\xeb\xe0\xfb\x0bG\x09$+\xdeq\xb3" +
-	"\xb0~\xea\xff\xb9k\x15G\xd2\xbe\xc2!\xf8\xe5\xe5U" +
-	"\xebf|\xb7\xf9\x0d\xf3\x8b\xb1\xf0n\xfc\x11\xc8\xef\x16" +
-	"z\x09\xc4\xdf\xbf\xf6\xd5aug\x9f\xb3:\xf9\x08\x8c" +
-	"f\xd7\x99M O8\x13\x8fPt\xe6\x87\x04\xe2\xca" +
-	"\xedC\xb3\xbd;V\xac6If;\xb9\x86\xbf\x82\x14" +
-	"O\x18\x8e\x14]\xb2\xed\xa5\xbf\xb4\xcc\x1ar\x1d?a" +
-	"\xfb\xf0/q\xc2>6\xe1\xb17\x8b\xae\x8d^:\xe7" +
-	":\xfe@\xea\x88ax\xa0\xde\x11x\xa0\xaf|\xa3\xd7" +
-	"\\yx\xfaM\xfc\x84\xcd#>\xc2\x15\xfa\xd8\x84\xfa" +
-	"\x9f\xfci\xeb\xfc\xaf*o\"\xae\xd1\xfdxvpD" +
-	"\x0b\xc8\xc7G\xe0\x81\xbf`\x93\xaf\x1bvw\xdb\xf4\x8f" +
-	"Z6p\x9c\x199\x92\xf1\xec\x9e\xc7zw\xac\xdf\x9c" +
-	"\xf5S$<'y\x1d\xd7\xc8Q \x17\x8d\x1cN\xc8" +
-	"\xb4\xd2\x91\xe7\x09\x04\xe2m\xbf\xff\xfe\x86{^,\xba" +
-	"5\xa5lt\x9fU\x0f\xf2\xda\xb3\xf0\x7f\xd7\x9c\xf5]" +
-	"\x94\x8d'\x864(\xcf-]t+O\xc5\xfe\xd1\xec" +
-	"\xea\x0f\x8d\xc6\x83\x15\xff\xac\xb4\xfb\xca\xc7{oO\x10" +
-	"\x9e1c\xdeD:\xcb\xc7 \xafo\xd8r\xe5\x03\xd3" +
-	"\x1f\x0cm\xe4Yy\xfa\xd8\xf7pB\xd1Xde\xce" +
-	"\xc6\x8bfm\x99\xbe~#G\xdbSc+\x91\xb6\xdf" +
-	"\\\xfb\xe7[*\xdc\xf7o\xe4w\xdf:\xb6\x18w\xdf" +
-	"=\x16w\xcf\xda{\xd7\x1f\x95\xc6\x1d\x1b\x91\x1a\x91\xa3" +
-	"\x86\x89\xe8\xf1\xb1M \xbb\xdcl?7\x93\xf49{" +
-	"_\xfa\xad\xf2\xc9\x97\x9b\xb8\x9d6\x8ec;i\xa5\xbf" +
-	"\xdc\xd9z\xdb\xb1;\xcc\x9d\xd8\xef7\x8cct\xde3" +
-	"\x0e\x85\xb6\xfb\xc6\x97\xa7\xe9\xd9\xfe;\x93n\x8b\xb1-" +
-	"\xbb\xa8\x09\xe4\x91Ex[\x85EH\xd1\xf8\xef\xde\x12" +
-	"z\xe2\xde\xd1\x9b9\x09\xef+\xfa\x12U\xf3\x8c\xf5\xaf" +
-	"\xcd\x196j\xcaf\x9e\x19\xf7\x171\xb1\xd9\xc9~z" +
-	"\xa8`\xf9\x0d\x1fm^\xb4\x99\xb8Fs\x04\x11\x98\xb6" +
-	"\xb0\xb8\x05\xe4\xceb&g\xc5\x17\x09\xf2\xb1\xf1\x12!" +
-	"q\xd7_\xf7\xbcA/{$a\xbdw\xc6W\xe0z" +
-	"\xc7\xc6\xe3\xb9g\xae\x9c\x9b\xd7\xfb\xfcO\xb6pGY" +
-	"P2\x0cI\xbe\xe6\xc5\x1b?\xf1\xe6\x96\xdf\xcb1\xa3" +
-	"\xa1\x84\x1d\xb2vO\xfd\xa8\x85\x97u\xdc\xcb\xb3\xbd\xaa" +
-	"\xa4\x12\x17]X\x82l\xff\xdf{\x7f\xfd\xd7\x19\xf3|" +
-	"\xf7q\x8b\xae-\xf9\x07\xfeT>|\xc9\xd7\x97/\xed" +
-	"z\x80[\xb4\xb7d\x0f~\x89\x8c{\xf3\xc9G\xc7\xed" +
-	"x\x80_\xb4\xab\x84i\xf0Z\xb6\xe8\x8f\xee(\xeb\xdd" +
-	"\x97\xf3\xda\xc3\x09*W2\x04'\xbc^\x82\xa4\xfc\xec" +
-	"\x83\xd9%\xcf\xf5}\xf9p\xaa+\xb8`B\x05\xc8u" +
-	"\x13\xf0\x0afO@>\x0e\x7fa\xa2<\xb3g\xd5V" +
-	"~\xb5w'\xb0\x0b=\xc6&l\x18\xdf\xb3v\xd3\x9d" +
-	"/<\x86\x13Ds\xc2\x86o3\xb1\xbc\xe7\xdb8\xe1" +
-	"\x93\xfa\x9c\xb6-S\x9b\xfb8R\xea&2c\xb4\xff" +
-	"\xab\x1f\xcey\xe3\xfe\xef<\xc9}\xa9\x9aX!\x90\xac" +
-	"\xdf\xd4\x1c8t\xcb\xc2\x9e\xa7\x92\xa41\x9b\x9dp\xe2" +
-	"\"\x90\x1b&\x1a\xcbDP\x15\xd7\x0f\xff\xdd\xae\x07\xab" +
-	"VmKVE\xc6\x9a}\xa5\x8b@>P\x8a\x04\xbd" +
-	"[\x8aj\xb4e\xc5\x81\xa2gz\xde\xdff\xf0\xdc\x98" +
-	"\xd4\xe7a\x04\xed\xf6 \xff^xx\xdb+_W\xde" +
-	"\xfa4w\xaa\x83\x1ev)=}\xdb\xb7\xbe\xf7\xe3}" +
-	"Os\xd7\xf5\x8e\x87Q2\xd4u\xc3]\x1b<\xc1\xed" +
-	")\x8f\xf0\xba\xa7\x12\xe4\x03\x1e\xc69\x8f\x1b\xf5\xe7\xd3" +
-	"\xff\xe5-\xeaq\xd7?CLO\xc0\xa6\x1d\x9b\xcc\xc4" +
-	"\xf7\xf4)xG}{\xae\x185\xf9\xb3\xbf[3\xd8" +
-	"^\xea\x14fX\x97O\xc1S\x1e\xbb\xfe\xcc\x83\x9fm" +
-	"\x99\xb43\xc1^l\x9a\xf2,\xcexh\x0a\xf2\xfd\xaa" +
-	"\xf6\xf1\x93\xb7\xe5=\xb1\x93(\x93\xed%\x1a\xca\xfe\x81" +
-	"\x13\xfce\xb8\xc7\x8d7?\xfb\xc9\xb1[\xafx\xd6\xbc" +
-	"9\xd3\x1f\x95\xa1\xa4L{\xbd\x8c\x99\xad\xcb>\xbf\xf2" +
-	">\xf7\xc4#\xcf'\xecRv\x0eJ\xdb\xb4\xd9\xe70" +
-	"Z\x0e\xdd\xf6\xfdM\xef\x8e\xcd\xdd\x9d$Ml\xb1\x85" +
-	"S\x9b@\xee\x9c\x8a\xccW\xa7\xe2\x96\xf7\x1e\xa6\x87\xab" +
-	"\xee\xab\xde\xc3K\xd3\xae\xa9\xcc\x98\xefg\x13\xca~q" +
-	"\xfch\x8d\xafso\x02gf\x953\xc2\x95r\x9c\xe1" +
-	"\xbf\xf9_0\xea\xf8'{y\xcel-7lY9" +
-	"rf\xc4[\xdb\x8e_\xbdn\xc5K\xc45^p\xac" +
-	":\x81i\x07\xcb\x9b@>^\xce\x9cA\xf9<\x02\xf1" +
-	"\xdc\x15\xf3\xe7\xaf\x1a\xbf\xf3\x0f\xbc*\x9d^\xc14e" +
-	"B\x05.u\xf9\xc4K\xce\xb8:\xeb\xe3?p\xa2\xb0" +
-	"\xa0\x82\xd9\xb9\x1b|\xc7?\x98\xd1\xeb\xdf\xc7\x13\xd2P" +
-	"\xc1\xa4\xde_\x81\xdc/\xec\xb9\xe9\x8aE7\xe5\xbe\xc2" +
-	"\xfd\xf4\x8b\x0a\x94\xed\xf8\xc7\x17\xe5\xcc\xabz~\xd2+" +
-	")=\xec\xd1\x8a\x16\x90\xb3\xa7\xe1\x19a\x1a\x8a\xeb\xe2" +
-	"\x91S\xd6\xd5m9\xef\x15S\\\x19[\xf7Oc\x92" +
-	"rt\x1a\xf2\x03\xee\x88\xac\x9fv\xb4\xf7\x95~\x86N" +
-	"9\xb7\x09dz.\xfe\xc0\x7f\xae\x94+\x1f\xbd\x00\x0d" +
-	"]\xcd\xd5w\xbc\x1d.\xf6\xbc\x9a\xe0\x88.`7p" +
-	"\xe8\x02\xa4\xf9\xce\xe1m\xb7\xdf\xf1\xe1\xf6\xd7\x12\xdcL" +
-	"\xe56\x16\xc4T\"eU\x17\xdf\xbcy\xf6\xc7\xf0\x06" +
-	"\xbfB_%sT\xbb+q\x85s\xae=o\xf5[" +
-	"\xa5\xff\xd8\xcf\x93^\xc9H\x17\x0f\xec\xf9}\xe1\x13W" +
-	"\xbc\x95RM\x8eV6\x81\x9c=\x83\x91>\x03I\x9f" +
-	"\x1c]w\xbfT\xfa\xea[\xfcM\x1f\x9d\xc1\xae'o" +
-	"&nt\xf5\x95W\xcf}\xe4\xed3\xdf\xe6'\x94\xce" +
-	"d*p\x01\x9b\xb0\xfe\xeb\xd8\xbb;\x8f\x8f|;A" +
-	"\x9a\x16\xced\xd4v\xceD\xeeM\xbe\xee\xfc\xfd\xc3\xae" +
-	"\x1f\xfe\x0eO\xed\xfe\x99\xbf\xc2\x09\x07\xd9\x84\xbf\xdc\xb6" +
-	"\xf4\xd5\x87\xff\xd9\xfbgN\xe7\x1bf1\xbb\xff\xdcy" +
-	"\xff\xb5\xae\xe2\xf3\x1b\xf8/\xb3g\xb1P\xe2\xa2Z\xd7" +
-	"\xf5k\x83O\xf3_f\xcdb\x1e\xe1\xfc?\xfb\x7f<" +
-	"j\xfc\xe1\xf7\xf8\x13\x97\xcf\xf2 Iu\xb3\xf0\xc4\x8f" +
-	"\x7f}d\xf9\xf5}\xef\xbc\x9fpbu\x16\x8b!\x97" +
-	"\xcfB\xf6\xff\xaad\xcc\xeaIk\xaa>\xe0\xd9?\xf2" +
-	"B6\xa1\xecB\\\xe2\xeeK\x7f\xb1\xbbUs\xff\xff" +
-	"\x84%\x94\x0b\x19\xdf\xd4\x0b\x91\xa6\x8e7o\xfa\xf4\xc3" +
-	"_\xff\xdf\xbf\xf1\xa7\xd8\x7f!s!G\xd9\x12/<" +
-	"\xf4\xd6\xe3?\xff\x9e\xfb \xbfG\xa1\x97\x09]\x99\x17" +
-	"'x\xcf\x99[>\xf7\x97\x1f|\xcc\xaf\xd0\xe0eF" +
-	"\xd4\xcf&T\x1fy\xe6\x89\xde\xb5\xbf<D\\\xa3\x85" +
-	"\x04\xa9\xec\xf5^\x0f\xf2F/\xde\xf2-\xde\x1e\x02\xf1" +
-	"mw?y\xe5e\x1b\xde;d\x9a)\xd3dz\x99" +
-	"<\x1d\xf4\xe2q\x9f\xaf*\x0coYQ}\x98?\xcd" +
-	"l\x1f\xdbl\xa1\x0f7k\xde\xe6z\x7f\xdbK\x87\x13" +
-	"&t\xfb\x98\xf3\xde\xc0&<]X\x16\xa9\xdd1\xed" +
-	"H\xb2\xca1m\xda\xea\xab\x07y\x97\x0fO\xb4\xd3\x87" +
-	"r\xb7\xacc\xda\xe4ooZ{\x84_\xee\x96*F" +
-	"\xfdCU\xb8\xdcg\xc5\xad\xa3\xbf\xb5\xfa\xae#xd" +
-	";X\xa8bRu\xb4\x0a\xef\xe8\xce\x0f\xb4\xdf\xfc\xe2" +
-	"\xaa\xaf\x8e\xf0>fM53\xbd\x9b\xaa\xd9\x0a[\x0f" +
-	"\xbd9\xaf\xe1\xc8\xdf\xf9-\xb6W3\xc9\xdd\xcb&\x0c" +
-	"\xcd\xeb\x1b\xda:\xf2\xb2O9\x11:T\xcd\x84k\xde" +
-	"\xdf6G'\xac[\xc6\x7f9`|\xf9\xb8\xae\xea\x0f" +
-	"\xbf\x9b\xbc\xeaSN\xef\xde\xa9\xfe\x08H\xd6\xf1\x9cI" +
-	"m\xb7\xfd?\xe53\xce\x84\xec\xabf\xf4\x1c\xacF\x06" +
-	"G7\xbf:r\xf8\x83\xdf\xf9<\xa5Z.\xa8i\x05" +
-	"Y\xad\xc1\xff\xa55\xcc)|\xb1\xf2\xa3]\xa5\xa5\x97" +
-	"\x7f\xde\xefn\xf7\xd5^\x0f\xf2\xc1Z\xe4\xe4\x81Z4" +
-	"\xb0\xf0\xec\xdd3&\xbe\x7f\xde\xbfx19^\xcb\x8c" +
-	"\xb9k6\x92\xb9\xabz\xfc\x9f\xf64\xf6}\xc1\x1dy" +
-	"\xfa\xecb$fi\xc5\x07\xcftT\xdc\xfb\x15Gf" +
-	"\xd9\xec\xf7P\x87\xe2\xbf\x1a\xba\xee\xec'\x1e>\xce/" +
-	"Z4\x9b\x99\xde\xe9\xb3\xbd\xa4,\xae\x86u\xaa\x85\xfd" +
-	"\xa1\xecs\xa2ZD\x8f\x9cC\x83\xaa\x1e\xd1\xce\x0e\xf8" +
-	"\xa3\xe1h\xe5l\xf6G3\xd5\x96\xa8\x01zv\xcc\xbf" +
-	"\x84\x964yi\xac+\xa4\xc7\xec\x1ff\xa5\xfaac" +
-	"\xa8\xab]\x0dW\x05t5\x12\xce\xaf\xd3ig#\x80" +
-	"2Z\xcc\"$\x0b\x08q\xf5U\x10\xa2<*\x82\xf2" +
-	"\xb4\x00.\x80\x02<\x9a\xeb\xa9jB\x94\xc7EPv" +
-	"\x08\x00B\x01\x0a\x8bk{=!\xca\xd3\"(/\x08" +
-	"\xe0\x12\xa1\x00]\xafk\x17N\xdc!\x82\xf2\xa2\x00\xae" +
-	",\xa1\x00\xb2\x08q\xed\xae$D\xf9\xad\x08\xca\xcb\x02" +
-	"\xb8\xb2\xc5\x02\xc8&\xc4\xb5\x17\xf7yA\x04\xe55\x01" +
-	"\\9B\x01\xe4\x10\xe2\xda\xd7B\x88\xf2\xb2\x08\xca\xdb" +
-	"\x02\xb8C\xfeV\x1a\x82\xd3\x88\x00\xa7\x11\xe8\xd1h4" +
-	"\xe4\x0fP\xeb\xefx\x9b\x16\xe9\x9c\xab\x86)!\x04r" +
-	"\x89\x00\xb9\x04zp\xac&\x12\xb2\xfe\xf6\xea\x11\x9ca" +
-	"\xfd\xe9\xd6#\xdc\xc7x\x94\xf1\xe1R?\x11;\x9dU" +
-	"-\xce\xe5\x0c\xccr\x7f4\x1a\xea\x9e\x17-i\xf4k" +
-	"\xfe\xce\x18!\xcai6\x0fg#kjEP\x1a\x91" +
-	"\x87\x82\xc1\xc3\x06\x1c\x9c+\x82r\xb9\xc3\xc3\x05\xa3\x08" +
-	"Q\x1aEP\xae\x10 \x1e\x08\xa94\xac\xd7\x05\x91\xa2" +
-	"<\"@\x1e\x81xkW[\x1b\xd5\x8c1\xf3\xe0b" +
-	"$\x0aC\xf9x\x00\x86r\x07\x97\xd2<\xb8!\x05s" +
-	"\xd4e\xd6\xf9\xf9\xe3\xb7\xf0\xc77E\xa0\x01o\xf6b" +
-	"\x11\x94\xf9\xce\xf1\x95\x0a\x87\xa4\x94\xfc\xeciS\x97\xd5" +
-	"\xfau\xbf\xf5\xb7[\x0d\x07\xe92\xfb\x0aN*\xa7\x17" +
-	"G\x96P\xad\x89I4A\x11\xcd\xb5\xcfW\x8a\x9c\x9c" +
-	"$\x82r\xae\x00\xd6\xf1\xca\xf1(SDP\xceGN" +
-	"F\xc2:\x0d\xeb1\xe4\x9a\xb5s[\xa4+\x1c\x04 " +
-	"\x02\xc0@\xec\xaaa\x17Q\xe3\x0f\x85Z\xfd\x81\xc5g" +
-	"w\xa8AZ\x17\x8ev\xe9\x8dZ\xa43\xaa\x97\xb03" +
-	"\x89\x9c\x9ae\xces\x83\xac\x18!\x99\xac\xb14\xa2-" +
-	"\x8eE\xfd\x01\xda\xdc\xdd\xd9\x1a\x09\xc5\xec\x83(Y6" +
-	"kN\xc7[\xca\x15A)\x11\xa0'f\xcc\x833\x08" +
-	"4\x8a\x00C\x9d\\\x9f\x00\x0e\x9e\x9c\xff\xcdj{\xd8" +
-	"\xafwi\xb4.\xdc\x06\x11\xbc\x81\xa1\xf66~\xe4\xf6" +
-	"\x15\"(\x1d\x9c\x84P\x8d\x10%(\x82\x12\x15\xc0%" +
-	"\x98\"\xd2\x89\xb2\x14\x12A\xb9N\x00\x10\x0d#\xb1z" +
-	"%!\xca*\x11\x94\xf5\xc9Z\x1e\x0fF\x02]\x9d4" +
-	"\xac\x13\xb7\x1f\xed\x93=\x1eE!\xa5:%\xa2\xc6\xd1" +
-	"c#&&=\xfe\x80\xae.\xa1\x8d~0&k\xa4" +
-	"\x9f\xa4\xa5\xa1\xd7\x81Hg4Duj(\x06\xc4x" +
-	"\xc5@\xb2}\"(s9\xb2\xeb<\x9c\xb6Xd7" +
-	"\x14;\xda\xe2n\xedj\xab\x0bZG\xc9\x0fq&I" +
-	"\x0ap\x06)\x833\xc6\xac\xbb\xb9\x98\x86\xa2%^C" +
-	"\x85\xff\xc7\x0f\x9a\x86\xcc\x06\xd5X\xc0\xaf\x05\x9bh\x00" +
-	"\xb5\xb9\xdb\x14|H)\xb2\x05\x02\xf4\x98\x9a;\x18{" +
-	"\xac\xd16\xaa\xd1p\x802\xc5\xc8G\xfd\xe2wib" +
-	"\x16\x1a\x94I\x02\xc4C\x91\x00\x13/\x02\x9c0\xd9\xb1" +
-	"UF\xca\xd1\xe8\xd7D?s\xa1\xdc^\x15\x0eEI" +
-	"\xf2\x9d\x01\xeb\xda\xa9n\x18\x8cj5\x1cT\xc3\xed1" +
-	"&\x90b\xa7cw\xc4\x13-\"\xce\x8b*Y\xc0g" +
-	"\x90P\xe9\x9d\x17\x9d\xdf\x1d\xa5\xca$\xeb\x98r\x1e\xd4" +
-	"\x13\xd2\x9c\x0b\"4\x17\x80#'\xb2\x0b\xaa\x09i>" +
-	"\x0d\xc7G\xe0\xb8\x90\xcbDE.\x04\x0f!\xcdCq" +
-	"|4\x8e\x8b\xd9L\x9d\xe5\x91\xd0BH\xf3\x08\x1c/" +
-	"\xc1\xf1\xac\x1c\xe6\xf6\xe5\"h\"\xa4y\x1c\x8eO\x01" +
-	"\x01 \x9b9~\xb9\x94M\x9f\x84\xc3\xe7\xe2\xf4\x1c\x89" +
-	"\xf9~\xb9\x9c\x1dg*\x8e\xcf\xc4q)\xb7\x00\xe36" +
-	"\xf9\x02v\x9csq\xdc\x87\xe3\xb9y\x05\x90K\x88<" +
-	"\x0b*\x09i>\x1f\xc7kq<oH\x01\xe4\x11\"" +
-	"WA\x05!\xcd3q\xfcbH\xedV{\x96P-" +
-	"\x86\xe6\xc5\xfc;_\xef\x8eR\xc8w\xf8E\x00\xf2\xd9" +
-	"m\xc5\xa8\xa6\xcfU\x89\xe8h\x829X\x13!\x10J" +
-	"\x1a\x9bO\x89\xb8L\xff\xe6\"\x94\x93K 3\xee\xa6" +
-	"\x7fd\x0er\x84-\x80\x1bQ\xd3o\x16A\xb9\xd3q" +
-	"\x90\x9bp\xecv\x11\x94\xbb\xf1J\xc1\xd0\xfe\xcdh\xb2" +
-	"\xef\x14Ay\x10\xefS0\xcc\xf3\xfd8\xf3n\x11\x94" +
-	"G\xf12\xc1\x88\xe1\x1e\xc2\xc1\xfbDP\x1e\xc7\x18N" +
-	"0b\xb8\xadh<\x1e\x14AyR\x80\xfc\xb0\xdf\xf1" +
-	"\xfb\xf9\x8b\xd5p\x10r\x88\x009\xc4p\xc7~d\x84" +
-	"[\xbb\x94\x9f\x14\xf5\xeb\x1d\xf6\x1f\xdf\x84\xb5\xb1U\xe6" +
-	"\x12\xda\x1d\xb3\x9d,\xaf\x99\x1e\xc7=\xe6/\xa6\xdd\xb6" +
-	"\xfa\xe3)\xce\xc8\xcc\xdeD\xa24<G\x0dQ\xc7\x0d" +
-	"s\xfe\x11#\x94\xabDPB\xce\x05\xa8\xd5\xbc{4" +
-	"/\xa0\x13\x07;DPt\xbc\x80q\xc6\x05\xfc`\x11" +
-	"!JT\x04\xe5\x1a!e\x04\x98l%\x93\xc5\x99I" +
-	"\x1e\x9a\\\x92\x8fF\xb7_\xd0\x93\x991m\xf4k\xd2" +
-	"\x7f\xa8w1BN\x16\x9b\xd5\xf8\xc3\x01\x1a\x0a\xd1`" +
-	"\xff,hP\xb6\x16/UJr!\xf5\x9c\x0bi5" +
-	"'\xe2\xb5\xd8.\xc4\xae\x09\xa4\xe3B\xe6\xc6\xa2\xb5\xaa" +
-	"\xbf=\x1c\x89\xe9*\x04\x92\x920O\xaa$\xac\xd8I" +
-	"\xc2l\x0eoG\x01zR\x04\xe5\xb7(@f\x80\xb5" +
-	"\xb3\x92K\xcd\xb2\x86\x1a\x1a\xbc\xab\xde\xc9\xc2L[\xec" +
-	"\xda[\xcd'a`&a\xf8\xeb\x17EP\xde\x10N" +
-	"|M=4\x1c\xe4M\x97\x97\x86\x83\xbc\xed\x8a\xd1%" +
-	"TS\xf5n\xe4\x8fi\x07z:i,\xe6o\xb7\xf5" +
-	"\xdf\x1b\x8bti\x01:\x18\xdfh\\|c$\xda\x15" +
-	"\xfd\x86.~\x8e\xba\xcc\x90u\x96\x0bq\xb9F\x8b\x93" +
-	"k\xd87Q^\xcd%\x1b\xe9\xe4=\xe9d\xe4\x86\xe8" +
-	"A;J\xc2@\xb9\x18\xa7V\xb6$(\xad\\.\x99" +
-	"\xeaP\xd2b\xda\xed\x04\xda4\x16\xd0\xd4\xa8N$>" +
-	"\xcc>\xa9\x85HJ\x8b\xda\xd4\x10\xad\xe9\xf0\x87\xdbO" +
-	"\x95\xf5\x06\x14\x11\xfb\xb7\xc5\xdbY\x03\x11+\x06\x16\xe3" +
-	"\xa5\x94\x88\xd9\x84\xd8\x90\x18X\xe0\xa8\xec\x82V\"\xc8" +
-	"y \x81\x83\xa8\x81U\x11s\x1do!\x82\xeb\x98\x04" +
-	"\x82\x0d\x10\x82\x05\x09\xb9\x0e\xd6\x13\xc1\xf5\xae\x04\xa2]" +
-	"\xcc\x01\xab4\xe3z]#\x82k\xaf\x04Yv\xfd\x03" +
-	"\xac*\xa2kg+\x11\\OI\x90m\x01b\x1c\x86" +
-	"\xfb\xd0J\"\xb8\xee\x91 \xc7F|\xc1\xc2\xe0\\\x1b" +
-	"\xf1\xdb\x06\x09$\x1b\x8d\x07\x0b\x85\xc3\xa4Lp-\x97" +
-	" \xd7\xae\x10\x82U\x97w\xfd\x00\xbf\xa9R<\xd6\x11" +
-	"Y\xda@c1\"\xf9\xdb\xa9\x0f\xe2\x9d\x91%\xb4\xa6" +
-	"K\x8b\x111\xa2\xf9 nyDB\x88\x0f\xe2\x8bi" +
-	"w\x13mWc\xc4\xadS\x8d\x06}\x10\xb7$\x86H" +
-	"\xed\xeco\\\x0eE\x00LU\xc6_a\xb2\x9d<\x86" +
-	"\xf3\xd0\xc8\x83\x99\x81[\xf3\x92\xc6\x1aap\xc1B-" +
-	"\x0dD4\xbf)\x83n#\x95J\x0d6\xd8XN\"" +
-	"\xda\xd0?\xc0L\x14\xc1SB\x1bL\xad\xc8\xc4y'" +
-	"\x86Afvx\xca\xac\xb1t\x9c\xf7\x88\xad\x9cG\x0c" +
-	"\x9as\x89\x14\x09;i\x95U\x01M\xf2\x88\xe9\x18\x18" +
-	"K\xba\"ZI\x13u'\xda\x97\x9c\xf4 \xd1\xaa\xd8" +
-	"\xe0\xa0\x96~\xb6)\x15\xd4R\xe1\xc4\x92nU\xa7\x9d" +
-	"\\.i7\xdc$\x91=\x88\x8c\xd9\x86\x17\x07\x12I" +
-	"\x1c\x9c*\x8223}(\xf1\xe4\x99$\xea\x9f;j" +
-	"!\xc4\x03Y\xe5\xfaT.\xc9\xe3\xe0\x83I\x89p\xac" +
-	"\xab\x95\x0dp\x10]~0\x95\xc7L\x83e]\xd1\xa0" +
-	"_\xa7\x97\xa9ti4\xa2\xe9\xa9\x00\xcd\x94xl5" +
-	"\x7fb\xd1<q%\x87h\xa6\xca\x1c\xf5H4!\xec" +
-	"\xe9\xa0j{\x87>\x18\x0c\xa7\x9d\xea\x0b\xd8\xc1S\x86" +
-	"\xd8\x03!\xc86\x8f\x17`\xb20_\x04\xe5\xaa\x0c\xee" +
-	"=\xa6\x86\x03\xf42\xaa\x91\xfc\x84\xbca\xf0<\x1f\x94" +
-	"\x96\xa5\x0c\xdfM\x0b\x9cN\xc4dX\xa7|\xd4P\x94" +
-	"\xd0)6\xb21\x81!\x156\xf2`#\x1b\xa5PL" +
-	"Hs\x09\x8eO\x05\x1b\xc6\x96\xcb\xd8t\x07\x91\x10\xb3" +
-	"\x0c`\xa3\x9c\x8dO\xc1\xf1\xf3\x19\xb0!\x1a\xc0\xc6t" +
-	"\x86<8HE\xb6\x89l\\\x00?L@$\xcc\x80" +
-	"Z\xaeb\xe3>\x1c\x9f\xcb\x90\x8d\x15\x06\xb2Q\xc7\x90" +
-	"\x8dZ\x1cod\xc8\x86` \x1b\x0dl\xfcb\x1c\x9f" +
-	"\xcf\x90\x0d\xd1@6\x14\x86\x9c4\xe2\xf8\x158>$" +
-	"\xab\x00\x86\x10\"/d@\xcb\xe58\x1e\x84\x93\xc4\xec" +
-	"\xf9:u\xe0\x09#E\xcfw\x0a\x9c\x06\xe6\x91\x1c\xc7" +
-	"w\x85\x83T\x0b\xa9a\xe2\xa5\xcdzw\x88B\xbeS" +
-	"63Q\x12nJM$\x14\xd1\xf8 \xd8\xdf\x1a\xa2" +
-	"V\xfe\xd9/(NY\x81\xc13\xe22\x04\xb4\xf4\xa2" +
-	"\xe7Z\xda\xa6\x86U\x14\x82&\x9a\x8fRxb\xa8\xda" +
-	"F\xaa=Nzn\xa7\xe2\xaa\x87\xcb\xcf-,\xa4\xb3" +
-	"\xd8\xc9\xcf\x13K\x08\xdf\x04z\x91\xe4\xf0\xac\x88\x89\xc5" +
-	"K\xb6\x19;\x01R\xaakj{;\xd5\x06\x83\x94\x06" +
-	"B\x91\x18\xadff\xa1\xbfg\xcd\xfc\xa0\xfdu_<" +
-	"\x91\xcez\xd50\x1e\x05o\xa8\xc0&k9\x9a\xb5k" +
-	"\x8c\x12\x81\xedOV#\xad+DPn\xe4l\xdd\x9a" +
-	"J\xa7p`'\xbbk\xf1\x82\xaf\x13A\xb9Y\x00\xc8" +
-	"2r\xdd\x0d\xf8\xeb\x1bEPn\x17N\x1d\x87\xeb\x09" +
-	"\xd3\xa5\xf39\xcd9\xa5\x9a\x8d\x95\xe4p\xde\x1c\xcf_" +
-	"\"\x822\xd5\x11\xd0\xb2\x0a\xc7\xc3'\xc6\x92\xee\x1ft" +
-	"Q\xad\xfbT\xea\x95\x03A\xf0\xc9`R\xe6!W\xba" +
-	"\x0e8UA\xd4\x93yA4A\x13\x07\x9d\xc2\xa6\x88" +
-	"\xfc\xb9\x8bq\xc1\xb8\x01o&\xa8jzwz\x15\xc6" +
-	"D\xb6u\xf8\xc3\xc1\x10\xb5Cv'\xe4\xe3\x10\xddz" +
-	"\x0e\xbd\xb5\x18\xb8\x19\xcf\xf2s\x11\x94\xfb\x1c\x06\xdeS" +
-	"\xcc#\xba\x90\x0a\xd1\x15MD\xb7\xc5\x01o]\xd9Y" +
-	"\x06 \xd4\xd7\xe4`L\x03'6<\xa2\x90\xdf\x19\x09" +
-	":V<\xc0\xe2\xf6$\xe4\xdc\x18LF\xce\x07SC" +
-	"5\xc2r\xab \xc2\xdb\x92\x16\xc7\x96\xd8\xa6\xa4\x827" +
-	"%\xa6\xb5_\xe3\xe1M\x89i\xed\xd7\x16;\xa6\xc4\xe6" +
-	"\xd3\x86\x0a\xce\x96\xa4rYi\xe2\x0d\x99\xd4\xbemL" +
-	"\xaaN\xa7\xd0\x99T\xfdN\x10K\xcb`Tsby" +
-	"\xf2\xc6\x89A:\x8aF\x7f~Z\x99\xf1\xa9\xa4!\x99" +
-	"\xa0\xee)\x0ci\xaa\xb6\x00\xcf\xc9\x13\xf5\xd4\xb6#\x0d" +
-	"a4\xc80\xedI\xa4+\xac\xa7D\x8c\xf9B`\x00" +
-	"g\xa5w\xfd\xb8\xd5\xbc\xe8\xd9\xacb\x07\x94e_L" +
-	"h\xc7x0\xe6r\x15V\x12\x02\x82\xeb\xf4JB\xf2" +
-	"\xc3\x91H\xd4k\x94\x9f\xbcA\x1a\xa2:=\x05\xf8\xd3" +
-	"\xf6\xe4i\xa6\xb9v\xcbl\xe6i.\x1f\xfbG\xc2m" +
-	"\xaa\xd6\x99\x0aFLC \x82v\xf8\xf7\x9f_\xa9H" +
-	"\x02\xac\xd3Juj\x8cv\x045\x12\xae\xd3E#\x15" +
-	"\x1fLp[\x99*\xb8\xb5z3\x96%\x1b\x8d\x84\xfa" +
-	"\x9d7Hu\xbf\xca\xd7\xb0S\x14;3\x09\x1f-<" +
-	"/\x09\xe2\x1a\xd0\xc6\xb5:\xba\xec\xd6U=D\xb9L" +
-	"\xc2\x1f\xa0\x1d\x91\x10\x91\x824\xcd\xb4\x81\xbf\x1fC\xc7" +
-	"V0|\xd7jK\x05\xab\xe7O>*V\x13A>" +
-	" J\x00v\xcf\x1eX=\x8a\xf2~\xb1\x85\x08\xf2>" +
-	"Q\x02\xc1n\xfa\x06\xeb\x11\x8c\xbcK\xac'\x82\xbc]" +
-	"\x94@\xb4\x1f\x18\x80\xd5\xcd+oe\xbf\xbd_\x94 " +
-	"\xcb~t\x05V\xc7\xbc\xbc\x89\xed\xbbA\x94 \xdbn" +
-	"\xef\x05\xeb\x91\x97\xbcZ\xf4\x10A\xee\x16%\xc8\xb1\xbb" +
-	"\xd1\xc1j\xf9\x97;\xc5V\"\xc8T\x94@\xb2\xbbd" +
-	"\xc1\xea8\x97\x17\x8a?%\x82\xbc@\x94 \xd7~e" +
-	"\x01\xd6\x03&\xb9N\\I\x04\xb9J\x94 \xcf\xee\x8f" +
-	"\x05\xab\x19W\x9e.\xfe\x90\x08r\x99(\xc1\x10\xbb\xc5" +
-	"\x1a\xac6P\xb9H\xac \x82\\(J\xf0-\xfb\xc9" +
-	"\x14X}\xafr\x9e\xa8\x11A\x06Q\x82\xd3\xec\x17W" +
-	"`\xb5a\xcb\xc7\x04\xe4\xd5!A\x82\xd3\xed\xb6t\xb0" +
-	"\xda\xbc\xe5w\x05\xe4\xd5~A\x823\xec~i\xb0\xba" +
-	"\x8c\xe5\xbdB%\x11\xe4\x9d\x82\x04\xf9\xf6s\x00\xb0\xba" +
-	"\x7f\xe5>\x01)zH\x90`\xa8\xfd\x0e\x04\xac\xe7\x1c" +
-	"\xf2f\x01)\xda(H\xe0\xb2\x9f\xcf\x80\xf5\xe4E^" +
-	"+<@\x04y\x8d \xc10\xfb\x85\x0cX\xaf\xa0\xe4" +
-	"\xe5\x02R\xd4%HP`\xbfd\x00\xeb\xcd\x8b\xac\xb2" +
-	"S])HPh?(\x02\xabY_V\xd8\xbeu" +
-	"\x82\x04gZ\x0f\xea\x9c\x07o\xf2,\xf6u\xba \xc1" +
-	"p\xfb\x91\x10Xof\xe4R\xe1z\"\xc8\x13\x04\x09" +
-	"F\xd8o\x1b\xc0jB\x95G\x0ax\xbf\x85\x82\x04\xb2" +
-	"\xfdP\x0c\xac\xb7Sr\x1e\xfb\x9a-H0\xd2\xee\xe3" +
-	"\x06\xab\xd7]\xfe\x02\xee\"\x82|\x0c$\x18e\xf7\xfe" +
-	"\x83\xf5NJ>\x08\xc8\x8d\x03 \xc1Yv\xb72X" +
-	"\xaf\x0b\xe4\xfd\xec\xeb\xeb \xc1h\xfbM\x0cX\xaf\xb9" +
-	"\xe4\xdd\xec\xeb.\x90`\x8c\xfd\x06\x0c\xacWq\xf2S" +
-	"\x80\xf7\xbb\x15$\x18k?+\x01\xeb\x95\x9f|\x0f " +
-	"\xbd\x9bA\x02\xb7\xddN\x0fV\x7f\xb3|\x0b\xe0\xfd\xae" +
-	"\x05\xa9'\x10\x09\x87i@\xf7A<\xa8\xc6\xd8\x1fD" +
-	"d\x7f&\xd6&,\xec\x8d\x884\xe6\x83\x1e35\xf2" +
-	"A>f0>\x8c\x14\x8c\xc0\x87HmT\xf3YA" +
-	"KM\x08,w\x0f\xd6\x16~-\xd8\x04&Vk\xae" +
-	"\xcc\xaa\xba\xc4\x1b\x89\xe9j \xe6\x03w\x07~\xf4A" +
-	"\xdcj\xda\"n\xd6\xb6\x85\xdb\x98\xadf\xc6\xa1,O" +
-	"F\xc4H\xd8\x07\xde\xb6\x88\xd6\xe9\xc7m\xac\xf4\x00\xcc" +
-	"\xfc\x00\xe7Z\xf0\x1b\xf1\x1a\x00\x9c\xb13\xf3\xe5`\xa1" +
-	"\xf6\xf9j$\x1c\xe3>\x107+\x08\xf8\xc0k\xe4i" +
-	"\xfc'\xaf\x11\x01\xf8 nE\xd9\xc4k\x84\x05\x09+" +
-	"\x9bp8;\xae5\x11\xacx\x1c\xc2\x09s\xcdR:" +
-	"\xe0\xa2\x96\xfb\x83hW\xb4\x99\x86h@\xd2Y\x05\x88" +
-	"\x1fg~1\x1f\x1d\xa3\xfd\xa1.\x0cV|\x90\x8f\x01" +
-	"B\xf2\x07\xfe\x17V\xc7\x82q\xa5q+\xf1\x06+\xf3" +
-	"6Xl\xb6\x17\x825\x98X5\xca,\xdcH\xd5e" +
-	"V\xe9\x04|^\xcdH\xb4\x87:\xef\xba\x92zu\xd3" +
-	"\xe8\xebf\xb2\xf3ok\xf0\xcb\xa4[2\xc3\x0a\x89\xfd" +
-	"xh\xb0\xa1#\x8b\xa5\x98,\xe9\x0c\x83r\xa7\xd1\xfa" +
-	"\xde\xcc\xb5MB4)\x94j1\xc3\xa6k\x9cP\xaa" +
-	"{%!\xca2\x11\x94U\\(\xd5\xbb\x92K'E" +
-	"\x9f\x11J\xad\xa9p\xd2IG\xd1E\xca\xd7\x84\xac\x07" +
-	"\xc9\x09\xcd\xaa\xcd*\x98gr\xd2\xa1\x13\xb6\xb1f\xd2" +
-	"\xc4\x9c$\xb6\xa6\xe0'\xc0P'\x08\xf4\x0b\x84\x13\xd5" +
-	"/\xd3\x90\x07\xc3j\xa5\x02/\xbf\x91\xe5\xb9\xa2\x89\xad" +
-	"~\\\xd8Xl\x86\x8d>\xe7\x0egaf|\xbe\x08" +
-	"J\xad\x00R$\xca]\x08\xdfB\x7f\x0691\xf0\x95" +
-	"\xee\xf3\x8btk\xc7\xa7\x92!\xa7[Antt\xa4" +
-	"_\x059\xdd\x10\x9d_\xa3_\xcf{N\x9a\x8b4\x18" +
-	"=?\x83\xea\x10I\xa5\xe8\x16\x0cq\x02\xc1J\x8d\xb1" +
-	"\xa4/\xb7N\x06\xcc\xd9\xdaj\xc7\xd6\xda\xa6\xb6\x9a7" +
-	"\xb5\xa6ehhu\x00\xcd~=z\x01\x03g\xb4\x95" +
-	"7\x1c\x99\xc3\xb6$\x92N\xb5\xc1\xb4\xe8\x99\xa1NJ" +
-	"U\xb6:\xd5F\xa0\x88\x99\xd7\x81\xe2\xe4r\x9e\x93\x13" +
-	"\x00W\xc6\xdd\x95v\xc3Z\x80\x07\x0bR\xe4m\xbc\x02" +
-	"\xe2af\x8a\xa0\\\xdc\xdf\x0b\xd8\xcf\xf5M\x9b\x18\x8a" +
-	"E\x9b\xa8?\xc8\xba\xc6\x06a\xe5\xfa\x832\x16Bx" +
-	"\x02\xded\xacj'\x07nSA\xeb)#\x02\xfb\xa1" +
-	"Z\xe6\xafw\x92naP\x866{\xa0\x9a*\xc67" +
-	"\x97\xa8\xe1\xa0\xd1XlH\xf7\xf4J&3e\xd5\x0c" +
-	"|\x9a\xd0D\x08\x88\xae\"\xfcO\x96kL\x0b!\xde" +
-	"\xf6.]\xa7Z\x0fF,!\x7fw<\xa6\xfb\xf5\xae" +
-	"X\xb5\x9f\x80\xe6\x94\x08\x81\xc6C\xb4M\xbf\xa8K\xc7" +
-	"\xd8[\xcb\xc8\x9c$@\x7fb\xa2\xa1\xf5\xa4\xa8\xa1x" +
-	"\x1c\xe3{\xe2b]&\xacO|u\x91\xaa\xbd8\xe5" +
-	"e\xdb\x8f\x853\xbf\xec\x94(\x99\xe5gR\xb45\x17" +
-	"\x08\x89E\xde\x93\x87C\xc8\xcc\xb9\xd6S\x08\x92\x14\x0e" +
-	"y\xd2E\x96\x8ayd\xc9,8\xf0m\xcd\xe9\x15J" +
-	"{\xa2\x1a]\xa2\xd2\xa5\x83\xc1b\x93\x83\x9b\x93U\xb8" +
-	"2z\x17\x95a\x97\x92\xe5\x9b\xfe#\xc2\xf4\x93\xf8\xe2" +
-	"\xc1\x08PN\xba\xb9J\xdaja\xff\x1bA\xe9\xa8\xc5" +
-	"\x00!NzO\xf2\x06\x80!\xd3\x8bq\xfawk\x99" +
-	"~\xd8\x8aGO)\xceJ\x17\x0a\xb5\xaa\x90\xb5\xc9P" +
-	"h\xb2\x87\xb5\xff\x8d\x94tZ\xd2mO\xd6Dc\x92" +
-	"\xd9I\xc1\xd5 \xabS\xbc*\xa90\xeb\x92\x8fs&" +
-	"ak\x0b\xd7\xbdn\x81\xcdO5q\x8d\xea\xd6\xab\x92" +
-	"\x9dM\xdcsa\xebe\xf0\xeeV\xa7)\xbd\xc7p\xb1" +
-	"v\xd8\xe4\xc6\xf3r\xe4\xd9\xff^\x89I^\xdau\xc7" +
-	"\x0e\x7f\x8ci-\x01'\xf8\x0a\xf8\xa3h\xdd/!\x12" +
-	"\xed\x8ee\xe24\x17\x98\xee\xcdh\x911Lib\xc5" +
-	"\xa6\x9e9MW\x05\xab\xd8\x84i<\xa6k~\xb5\xbd" +
-	"C'\x84\xb8\x03]Z\xa8{0\x91_*;\x97\x10" +
-	"\xf9\xa5H.N\xa9\xdej\x95\xb8\x06\xe7\xb6\xd3\xfb\xf5" +
-	"\x09\xf5\xcb\xaa\xee\xa4O\xec\x7f\x07\x00\x00\xff\xffC\xc4" +
-	"\x05)"
+const schema_d75b3b54eb3ed6a2 = "x\xda\xcc|{|\x14\xd5\xf5\xf8=3\x9bL\xa2b" +
+	"X&\x01\"\x8f\x00\x09J\xc2+\x09R!\x06v\x93" +
+	" \x12\x04\xc9$@\x95\xca\xafNv'\xc9\xc8fw" +
+	"\xdd\x9d\x00Q1@\xa1\x15\x15\x01\x7f\xbe\xb0\xa5\x1aP" +
+	"+\xfeD\xa5\x8a\x15~j\x89\xd6\xfa\xa8X\xf1\xd1\"" +
+	"j[\x1f|\xad\x0f\xa0j\xd1R\x8b\xfb\xfd\x9c;s" +
+	"g\xeen&\xc9B\xbf\x9f\xfa\xfd\x8b\xec\xbdg\xee=" +
+	"\xe7\xdc\xf3\xbe\xe7R\xba;\xcf\xef)\xeb7\xf1l\"" +
+	"4<\x09\x19\x99\x89\xd5K\xce}d\xfd\xdf\xd7\xad$" +
+	"\xde!@\x88G\"d\xd2\x89\x01\xd5@<\x89\x0f\x9a" +
+	"6\xdcp \xf3\xc2UD\xe9\x07Bb\xeb\x1f\xa6\x7f" +
+	":\xff\xfc\x1f\xfc\x91d\x88\x12!\xf2\xa1\x01_\xc8\x9f" +
+	"\x0f@\xe8\xc3\x036\x00\x81\xc4\xb5[\xaf8R\xf8\xf0" +
+	"\xf1UD\x19\x02\x02!\x19\x80s+r\xeb\x81\x80\xbc" +
+	".\xf7a\x02\x7f~Z\xbb$\xf0\xe1\xde\xd5\xca\x10\x00" +
+	"B2\x04\x9c/\xce\xbb\x1e\xe7\xa7\xe6=L Q\xe0" +
+	"ixt\xc8\xdb\xcf\xfe\x08\xf7\x03n?\\I~3" +
+	"\xef%\xf9\xbd<\xfc\xeb\xdd\xbce\x04\x12\x1f\x1dx\xe8" +
+	"\xbc\xaf\xcf\xc9\\C\xbcC\x19\xda\xd3\x06nE\xb4[" +
+	"n\x116\x96\xde\xb9u\x0dG\xd0\xf8\x817\xe3\xcc\xab" +
+	"k6\x9c\xff\xfd\x86\x03\xd6\x8c\x89\xe10\xfc\x08\xe4\xf1" +
+	"\x03}\x04\x12\x1f\\\xfb\xfa\x80\xda\x09\x13\xd7\xa6b@" +
+	")^<\xf0\xa0\xac\x0f\xc4\xbf\xb4\x81\x1f\x11H(w" +
+	"\xf4\xcf\xf0\xed]\xb9\xd6\"\x98n\xb4`\xd0\"\\M" +
+	"\x1d\x84\xf4\\\xb4\xe7\x95?/\x9av\xdau<\xc0\xf1" +
+	"A\xab\x11 c0\x02<zp\xe4\xb5\xd1\x8bg^" +
+	"\xc7\xe3\xb3e\xf0\x9d\x08\xb0c0\xe2\xf3\x8d\x7f\xe8\xba" +
+	"\xc5G&\xdf\xc4\x03\xec\x1b\x1cC\x80\xb7(\xc0\xec\x9f" +
+	"\xfcq\xe7\xfco*n\"\xde~\xdd8\xd6/\xff}" +
+	"9?\x1f\xff\xca\xcbG\xd8\xeb\x06\xdc\xd34\xf9\x93E" +
+	"\x9b8\xbeL\xce\xa7\x1c\xbb\xf7\xd1U{7vzn" +
+	"F\xb23S\x97\x19\x9d\xbfU\x1e\x9f?\x88B\x9f'" +
+	"\x10H4\xfd\xee\x87\x9b\xee}y\xe4m\xaeb\xb1v" +
+	"\xc8k\xf2\xa6!\xb8\xf6\xfa!\xdfG\xb1x\xfc\xb4\xb9" +
+	"\xca\xb3\xcb\xae\xb8\x8d'\xe1\xdd\xa1\xf4\xd4\x0f\x0fE\xb4" +
+	"F\xfd\xb4\xb8}\xf1c\xab\xeeH\x92\x9ba\xc3\x1a\x11" +
+	"\xa2x\x182\xfa\x86m\x8b\x1f\x98\xfc`h3\xcf\xc7" +
+	"\x8c\xe1W \x80w8\xf21s\xf3\x85\xd3\xb6M\xde" +
+	"\xb8\x99\xa3l\xfb\xf0g\x90\xb2__\xfb\xa7[\xcb\x0b" +
+	"\xb6o\xe6w\xdf<\xfc\x01\xfct\xfbp\xdc\xdd\xb3o" +
+	"\xeb\x1f\x94\xba\xbd\x9b\x91\x18\x91#F\xa0\x926\xfc\xa0" +
+	"\xfc\xf1p\xfc\xe6\xd0p*\xe33\xf7\xbd\xf2\x1b\xe5\xb3" +
+	"\x7fn\xe16\xbar\x04\xdd(V\xfc\x8b\xae\xc6\xdb\x8f" +
+	"\xddemD\x85[\x1dA\xc9\xbcr\x04\xcak\xfb\x8d" +
+	"\xafN22\xd4\xbbSN\x8a2m\xff\x88\x83\xf2\xbb" +
+	"#\xf0\xaf\xb7F =\x85\xdf\xbf5\xf4\xf8}C;" +
+	"9\xd9n\x1f\xb9\x1a\xb79s\xe3\x1b3\x07\x9c5\xae" +
+	"\x93g\x856\x92JL\xdbH\xfc\xf4p\xee\x8a\x1b>" +
+	"\xe9\xbc\xa2\x93x\xfbq\xe4\x10\x90\xfb\x8dz_\xce\x1f" +
+	"\x85\xf0y\xa3.\x14\xe4\xceB\x89\x90\x84\xf7//\x1d" +
+	"\xd0\x16>\x9c\xb4\xdc\xba\xc2=\xb8\xdc\xe6B\xc4\xbar" +
+	"\xf5\x9c\xecU\xcf\xffd\x1b\x87\xc9\xf1\xc2;\x11\x93k" +
+	"^\xbe\xf13_V\xd9}\x1c+>.\xa48\xcex" +
+	"i\xf6Y\x97.l\xb9\x8f\xe7\xf9\x9b\x85\xcf\xe0\xa2\x87" +
+	"\x0a\x91\xe7\xffw\xdf\xaf\xfer\xfe<\xff\xfd\xdc\xa2\xf9" +
+	"EW\xe1\xa7\xf2\x91\x8b\xbe\xbddY\xdb\x03\xdc\xa2\x19" +
+	"E\xf58\x13\x19q\xf0\x89GF\xec}\x80_\xf4\xf3" +
+	"B\xaa\xbaP\x84\x8b\xfe\xe8\xae\xf1\xab\xf6g\xbe\xf1\x10" +
+	"OJY\xd1\xcd\x08PU\x84\xa4\xfc\xf4\xc3\x0b\x8a\x9e" +
+	"\xdd\xf5\xcf\x87\xdc\x0e\xe0\xde\xa2=\xf2\x8e\"\xfck{" +
+	"\x11rq\xd0\x0b\xe7\xc8\x95\x1dkv\xf2\x8b]0\x9a" +
+	"\x9e\xe6\x82\xd1\x08\xb0\xa9\xb0c\xfd\x96\xbb_x\x14\x01" +
+	"D\x0b\xe0\xf3\xd1T$OP\x80\xcffg6m+" +
+	"m\xd8\xc5Q\xd2y65Bo}s\xd5\xcc\x03\xdb" +
+	"\xbf\xf7\x047\xb3\xe9\xec=@<\xbf\xae9t\xf8\xd6" +
+	"K;v\xa7Hb\x06\xa2\xb5\xea\xec/\xe4\xf5g\xd3" +
+	"\xe39;\x82J\xb8q\xd0o\x9f{\xb0j\xcd\x9eT" +
+	"%\xa4*\xeb-\xfeB\x1eV\x8c\x7f\xe5\x17\xa3\x02m" +
+	"[yh\xe4\xd3\x1d\x1f\xec1\x19n2\xefp1%" +
+	"\xe7D12\xef\x85\x87\xf6\xbc\xf6m\xc5mOr8" +
+	"\x0d+\xa1'\xd2\xb1\xeb\xa9\x9d\xef\xffx\xff\x93\xdcY" +
+	"e\x97P:\xfa{o\xd8\xba\xa9$\xf8\x94+\x06\xc7" +
+	"\x8b\x9f\x91\xa1\x84\xfa\x92\xe2\x02\xd4\x9c/\xff\x8fod" +
+	"G\xc1\xec\xa7\x89e\xfd)\x0e\xde\xb1TrG\x8e\xc5" +
+	"\xf3\xd9\xf5\xd2eg\x8d\xfd\xeao\x0c\x82n\xb5b," +
+	"5\xa7\xeb\xc6\"\x92\xc7\xae\x1f\xf8\xf1W\xdb\xc6t%" +
+	"\x19\x8a\xedcg#\xc4\xae\xb1\xc8\xf4\xcb\x9b\x0b\xc7\xee" +
+	"\xc9~\xbc\x8b(C\xed%\x16\x8c\xbb\x8aZ\xe4q\xb8" +
+	"\xc7\x8d\xb7<\xf3\xd9\xb1\xdb.{\xc6:6SM\x9f" +
+	"\x1a\x87R2i\xdf8j\xaf\x16~\xbd\xf8\xfe\x82s" +
+	"\x8e>\x9f\xb4\xcb\xe8\x09(i\x93&O\xa0\xb4\x1c\xbe" +
+	"\xfd\x87[\xde\x1b\x9e\xf5b\x8a$Q\x93Q;\xf1\xa0" +
+	"\xbc`\"\xfe\xa5L\xc4\x1d\xef;\xa2\x1d\xa9\xba\xbf\xfa" +
+	"%^\x92vL\xa4\x16|7\x05\x18\xff\xf3\x13\x9f\xd7" +
+	"\xf8[\xf7%1fX)\xa5\xbb\xb8\x14!\xd4[\xfe" +
+	"\x01g\x9d\xf8l\x1f\xcf\x98u\xa5\xd4\x86m.E\xc6" +
+	"\x0c~{\xcf\x89\xab7\xac|\x85xs\x05\xc7\x96\xe3" +
+	"\x0e\xa5\x07\xe5\xe7J\x11\x99\xae\xd2y\x04\x12Y+\xe7" +
+	"\xcf_S\xd8\xf5\xfb$\xcd,\xa5:r\x88\xaet\xc9" +
+	"9\x17\x9dy\xb5\xe7\xd3\xdfsr\x90WF\xed\xdb\x0d" +
+	"\xfe\x13\x1f\x9e\xbfJ\xdd\x9fd\x83\xcbL\x1b\\\x86\xbc" +
+	"\xcf\xeb\xb8\xe9\xb2+n\xcaz\x8d\xb7\xc1e(\xd6\x89" +
+	"O/\xcc\x9cW\xf5\xfc\x98\xd7\\\x9d\xea\xe6\xb2\xf7\xe5" +
+	"{\xcb\xf0\xaf\xce2\x14\xd5%\xf9\xe36\xd4n;\xef" +
+	"5KT\xe9\x01\xb5\x97S1YW\x8e\xdc\x80\xbb\"" +
+	"\x1b'}\xbe\xea\xb5n\x06\xee\xe3\xf2\x83\xf2\xb1r\xaa" +
+	"\x88\xe5\x17f\xc9;\xa6\xa0\x81\xab\xb9\xfa\xaew\xc2\xa3" +
+	"J^\xe7)\xbeu\x0ae\x7f\xe7\x14\xa4\xf8\xeeAM" +
+	"w\xdc\xf5\xd1So\xf0tuM\xa9F\x80\x17\xa7 " +
+	"]U\xb3n\xe9\xbc\xe0S8\xc0\xaf\xa0N\xa5\xde\xa9" +
+	"u*\xae0\xf1\xda\xf3\xd6\xbe]\xfc\xc5[\x1c\xe1[" +
+	"\xa6R\xc2\xc5C/\xfd.\xef\xf1\xcb\xdev\xd5\x90\xf5" +
+	"S\x0f\xca\x9b\xa7\xe2_\xb7NE\xc2\xc7F7l\x97" +
+	"\x8a_\x7f\x9b?\xe5\xb5\x15\xf4ln\xad\xc0}\xae^" +
+	"|\xf5\x9c\x87\xdf\x19\xf8\x0e\x0f\xb0\xab\x82J\x7f\x17\x05" +
+	"\xd8\xf8m\xfc\xbd\xae\x13\xf9\xef$I\xd2{\x15\x94\xd8" +
+	"\xc3\x15\xc8;}\xf7\x01\x98\xb0\xf4\xc4;<\xb1\x97\x9e" +
+	"O\xed\x80~>\x12;\xf6\xba)o\x0d\xb8~\xd0\xbb" +
+	"<\x00TV @v%\xae\xf0\xe7\xdb\x97\xbd\xfe\xd0" +
+	"\xdfW\xfd\x893\x07\xad\x95\xd4\x1f<{\xde\xbf6\x94" +
+	"\x7f}\x03?\xb3\xb8\x92F\x17\x17\xce\xf0^\xbf>\xf8" +
+	"$?3\xb7\x92z\x8a)\x7fR\x7f|V\xe1\x91\xf7" +
+	"y\x92\xa6V\xfe\x12\xb7\xab\xadD\x92\x1e\xfb\xf6\xe8\x8a" +
+	"\xebw\xbd\xfbA\x12Iz%\x8d)\xdb*\x11\xe3_" +
+	"\x16\x0d[;f]\xd5\x87\xfc\xf1x\xa7Q\x80a\xd3" +
+	"p\x89{.\xfe\xf9\x8b\x8d\xb1\x82\xffJZ\xa2j\x1a" +
+	"e\xac2\x0dij9x\xd3\x97\x1f\xfd\xea\xff\xfd\x95" +
+	"\xc7\xa2k\x1au-\xfb\xe9\x12/\xecx\xfb\xb1\x9f\xfd" +
+	"\xa0\xe0c~\x8fc\xd3\xa8LfLG\x00\xdf\xc49" +
+	"es~\xf1\xe1\xa7\xfc\x0a\xa3\xa7S\xbeN\xa6\x00\xd5" +
+	"G\x9f~|\xd5\xfa_\x1c&\xde~\x02/\xb4\x93\x16" +
+	"L\x1f\x00\xb26\x1d\xc5@\x9d\xdeA \xb1\xe7\x9e'" +
+	"\x16/\xdc\xf4\xfea\xcb\x84\x99\x9buN\xa7\xf2\xb6c" +
+	":\xa2\xfb|U^x\xdb\xca\xea#<6\xd9>\xba" +
+	"Y\xbe\x0f7k\xd8\xe3\xfd`\xcf+G\x92\x00\xa6\xfa" +
+	"\xa8S\xaf\xa5\x00O\xe6\x8d\x8f\xcc\xd8;\xe9h\xaaB" +
+	"R\x03\xa6\xfb^\x93\xdb|\xf8\xd7\x95>\x94\xcb\xe5-" +
+	"\x93\xc6\x9e\xbde\xfdQ~\xb5\x0b\xfc\x94\xf8\x05~\\" +
+	"\xed\xabQ\x8dCO_\xbb\xf5(b\xccdf\xad\x9f" +
+	"J\xdd&?\x1e\xd1\xdd\x1f\xc6~\xfd\xf3\xcb\xbf9\xca" +
+	"{\x9f\xe2*j\x95'W\xd1\x15v\x1e>8o\xee" +
+	"\xd1\xbf\xf1[,\xa8\xa2\x92\xadR\x80\x85\xeb\xee\xac~" +
+	"%\xbe\xf8s\x1e`U\x15=\xc2M\x14\xa0\x7f\xf6\xae" +
+	"\xfe\x8d\xf9\x0b\xbf\xe4D\xac\xab\x8a\x0a\xdf\xbc\xbfvF" +
+	"GoX\xce\xcf\xec4g>\xad\xad\xfa\xfdo\xc7\xae" +
+	"\xf9\x92\xf7\xd0U1 \x9e\x13\x99c\x9an\xff\xff\xca" +
+	"W\x9c\x05Z_E\x09\xdeR\x85\x07\x10\xed|=\x7f" +
+	"\xd0\x83\xdf\xfb\xdaU\xad\xb3\xab?\x91\xf3\xaa\xa9\x14V" +
+	"S\x7fr|\xf5'\xcf\x15\x17_\xf2u\xb7\xa3_Q" +
+	"3\x00\xe4\xf55\xf8\xd1\xba\x1a\xb4\xce\xf0\xcc=\xe7\x9f" +
+	"\xf3\xc1y\xff\xe0\xa5\xa8\xb3\x86:\x82\x1d5H\xe5s" +
+	"\xd5\x85\x7f|\xa9n\xd7q\x0e\xe3\xfd5\x0f -\xcb" +
+	"\xca?|\xba\xa5\xfc\xbeox\xfak\xae\xc0\x99\xf2\xa5" +
+	"\x13+\xcb\x1e\x98\xf3/7_\xb5\xa3\xe6\xa0\xbc\x9b\"" +
+	"\xb0\xab\x06\x09K\xfc\xb2\xff\x86\x09\x8f?t\x82G`" +
+	"\xe4\x0cj\xe3\xc7\xcf\xf0\x91\xf1\x09-\xa8\x1b\x91\xd8\x84" +
+	"\x80\xa4F\xc3\xd1\x8a\x0b\xe8\xaf\x06-\xb6T\x0fh\x13" +
+	"\xe2\xeaR\xad\xa8^\x8b\xb7\x85\x8c8a\x80\x14\xae." +
+	"\xd4\xd6\xac\x87\xab\x02\x86\x1e)\x08\xd7\x1aZk\x1d\x80" +
+	"2T\xf4\x10\xe2\x01B\xbc\xbb\xca\x09Q\x1e\x11Ay" +
+	"R\x00/@.n\xed\xdd]M\x88\xf2\x98\x08\xca^" +
+	"\x01@\xc8E\xc1\xf2>5\x9b\x10\xe5I\x11\x94\x17\x04" +
+	"\xf0\x8a\x90\x8b\x1e\xdc\xfb\x1c\x02\xee\x15AyY\x00\xaf" +
+	"G\xc8\x05\x0f!\xde\x17+\x08Q~#\x82\xf2\xaa\x00" +
+	"\xde\x0c1\x172\x08\xf1\xee\xc3}^\x10AyC\x00" +
+	"o\xa6\x90\x0b\x99\x84x\xf7/\"DyU\x04\xe5\x1d" +
+	"\x01\x0aBj\xa3\x16\x823\x88\x00g\x10\xe8\x88i\xd1" +
+	"\x90\x1a\xd0\xd8\xefDS,\xd2:G\x0fk\x84\x10\xc8" +
+	"\"\x02d\x11\xe8\xc0\xb1\x9aH\x88\xfd\xf6\x19\x11\x84`" +
+	"?\x0b\x8c\x087\x99\x88R>\\\xac\x12\xb1\xd5Y\x95" +
+	"q\xca\xe3\xc2R5\x1a\x0d\xb5\xcf\x8b\x16\xd5\xa91\xb5" +
+	"\x15\xe2\xca\x196\xcf.@V\xcc\x10A\xa9C\x9e\x09" +
+	"&\xcf\xe6\xe2\xe0\x1c\x11\x94K\x1c\x9e-8\x8b\x10\xa5" +
+	"N\x04\xe52\x01\x12\x81\x90\xae\x85\x8d\xda R\x90M" +
+	"\x04\xc8&\x90hlkj\xd2b\xe6\x98\x85\xa8\x18\x89" +
+	"B\x7f>\x8e\x80\xfe\x1c\xa2\x19=!j\x1e\xf3L}" +
+	"\xb9\x89o\x9c\x10\x1e\xe1E<\xc2\xd6!\xcf\xc5\xb3\x9b" +
+	"%\x822\xdfAX)w\x88p\xe5XG\x93\xbe|" +
+	"\x86j\xa8\xecw\x81\x1e\x0ej\xcbm&34\x05\x8a" +
+	"\xe6\xac\xc8R-f\x0a%!(vY6F\xc5\xc8" +
+	"\xad1\"(\xe7\x0a\xc0\x10*\xc3\xcd\xc7\x89\xa0LA" +
+	"nE\xc2\x86\x166\xe2\xc8\x19\xb6WS\xa4-\x1c\x04" +
+	" \x02@7\x96\xd4P\xee\xd6\xa8\xa1P\xa3\x1aX2" +
+	"\xa1E\x0fj\xb5\xe1h\x9bQ\x17\x8b\xb4F\x0d\xaa\x1a" +
+	"R\xc8\x88\x9f\x0c#M\xcc\xa1\xf7o\x96EbK\xe2" +
+	"Q5\xa05\xb4\xb76FBq{'\xc5c\x13\xdb" +
+	"\x0f9\x9d%\x82R$@G\xdc\x84\x833\x09\xd4\x89" +
+	"\x00\xfd\x9d\x84\x9e\x00\x0e\xa6\xf0\xb0Ao\x0e\xabF[" +
+	"L\xab\x0d\x8bM\x11db\x7f{]\x15\x19v\x99\x08" +
+	"J\x0bw\xacZ\x8c\x10%(\x82\x12\x15\xc0+X\xe7" +
+	"\xda\x8a\x02\x10\x12A\xb9N\x00\x10M\xdd]\xbb\x9a\x10" +
+	"e\x8d\x08\xca\xc6T\xe5K\x04#\x81\xb6V-l\x90" +
+	"\x02\xd5\xd0#a{<\x8a\xa2\xa5\x19\x1a\x11c\x1c\x01" +
+	"v\x15\xc4\"@\x0d\x18\xfaR\xadN\x05\x138F\xba" +
+	"\x89\x87\x9b\xba\x05\"\xad\xd1\x90fhT~\xc5\xd6$" +
+	"}C:\xfd\"(s8:kK8\x99ft\xce" +
+	"\x1d\xe5\xc8tAc[Sm\x90\xed\x9d\x13\xe2L\x83" +
+	"\x14\xe0\x0cCo\xa7\x1bg\xdc\x9f\xa5\x85\xa2L\xb3\xfe" +
+	"W`\x16\xd4\xe3\x015\x16\xac\xd7\x02\xa8d\xed\xa6\xb0" +
+	"\x8a\xeeb\x97+@\x87\xa5OiY\xbe\x98\xd6\xa4\xc5" +
+	"\xb4p@Ci.\xa0>\x85_\xb6\x9e\xda\x16P\xc6" +
+	"\x08\x90\x08E\x02TD\x08p\x02aG8\xbdKt" +
+	"\x9d*\xc5T\xea\x8e\xb8\xc5\xcb\x1d\x9cS\x84\xb27n" +
+	"4k\x86\xa9\xb7\xd5z8\xa8\x87\x9b\xe3xV\x92\xda" +
+	"\xea\xe8.\xb0\xaf$c^T\xf1\x00\x9f\xb7A\x85o" +
+	"^t~{TS\xc60D\xe4l\x98MHC\x16" +
+	"\x88\xd0\x90\x0b\xce\xe1\xca^\xa8&\xa4\xe1\x0c\x1c\x1f\x8c" +
+	"\xe3B\x16=_9\x0fJ\x08i\xe8\x8f\xe3Cq\\" +
+	"\xcc\xa0Z&\xe7\xc3\"B\x1a\x06\xe3x\x11\x8e{2" +
+	"\xa9\x93\x94GB=!\x0d#p|\x1c\x08\x00\x19\xd4" +
+	"M\xca\xc5\x14|\x0c\x0e\x9f\x8b\xe0\x99\x12\xf5\x94r\x19" +
+	"E\xa7\x14\xc7+q\\\xca\xca\xa5\x01\xcfT\x8a\xce\xb9" +
+	"8\xee\xc7\xf1\xac\xec\\\xc8\"D\x9e\x06\x15\x844L" +
+	"\xc1\xf1\x198\x9e}Z.d\x13\"WA9!\x0d" +
+	"\x958>\x0b\xdc\x9dR\xc7R-\x16G\xad\xb7~\xe7" +
+	"\x18\xedQ\x0dr\x1c~\x11\x80\x1cLg\xc2q-f" +
+	"\xcc\xd1\x89\xe8\x88\xaf5X\x13!\x10J\x19\x9b\xaf\x11" +
+	"q\xb9\xf1?\xe7\xcfS\x84\x8aZU\xaa\x04`\xa0H" +
+	"\x0d\xb6Ej3\xaa\xe3-\"(w;\xaef\x0b\x8e" +
+	"\xdd!\x82r\x0f\x1e!\x98*\xda\x89\x96\xf3n\x11\x94" +
+	"\x07\xf1\xfc\x04\xd3JnG\xc8{DP\x1e\xc1\xc3\x03" +
+	"3\xc2\xd9\x81\x83\xf7\x8b\xa0<\x86\x11\x8e`F8;" +
+	"Q\xc3\x1f\x14AyB\x80\x9c\xb0\xea\xf8\xcc\x9c%z" +
+	"8\x08\x99D\x80Lb:6\x15\x09/\x88]\xcc\x03" +
+	"EU\xa3\xc5\xfeqJ&\xc1V\x82\x8b\xb4\xf6\xb8\x1d" +
+	"\x0c\x12^\xbbJ\x1cG\x94\xb3Dk\xb7u\x16\xf7=" +
+	"\xb3\x0f\xab\x10\x89j\xe1\x99zHs<\x1c\xe7\x89\xd0" +
+	"\x9d_.\x82\x12rx\xacW\xf3\x8e\xc8\xe2q+\x0e" +
+	"\xb6\x88\xa0\x18\xc8\xe3\x11&\x8f\xaf\xbc\x82\x10%*\x82" +
+	"r\x8d\xe0\x1a\x12\xa5\x1a\xafT\x09\xa5\xc2\x84\x96\x90\xe4" +
+	"\xa0-\xec\x16!\xf4a\xe3\xea\xd4\x1c\xb4\xeb\xffq\xb3" +
+	"~\x86\x0bZf\xccE#\x97\x1a5\x1c\xd0B!-" +
+	"\xe8\x1e\xd7\xf7e\x00\xeb\xb5xN\xaa\xe5\x9e\xcdY\xee" +
+	"F\x0b\x10\xf9l[n\xbbL\xeej\xb9\xe7\xc4\xa33" +
+	"t\xb59\x1c\x89\x1b\xa2\x1eH\xc9#J\xdc\xf2\x88Q" +
+	"N\x1ea\xb3\xec)\x14\x81'DP~\x83\"`\x05" +
+	"#]\x15\\v\xe1\xe9o\xaa\xd9s\xb3\x9dD\xc22" +
+	"\x90\xde}\xd5|\x1e\x01V\x1e\x81_\xbf,\x82r@" +
+	"\xe8\x99\xef\x1dZ8\xc8\xdb\x13\x9f\x16\x0e\xf2\x06%\xae" +
+	"-\xd5b\xba\xd1\x8e\x0c\xb1\x94\xb5\xa3U\x8b\xc7\xd5f" +
+	"[I}\xf1H[,\xd0=}\xe8\xf9$\xeb\"\xd1" +
+	"\xb6\xe8\xa9\x9d\xe4L}9\x15N+\x9a\xe7b\xe7E" +
+	"N\xecl\xb3\xba\xac\x9a\x0b\x9e\xd3\x89\xdcS\xce\x96\x93" +
+	"\x1e1\xdc\x8cg\xdbW\xfa\xc0I\xbe}\xb6J#\x97" +
+	"\xf0\xb8a!-\xd1\xda\x9d0S\x8b\x07bz\xd4 " +
+	"\x12\x1fd2\xbcNw\x8b\xeb\x9b\xf4\x90V\xd3\xa2\x86" +
+	"\x9bO\x92\x994\xff\x0d\xc7\xbf\xb3\xe0RH%FR" +
+	"\x03K\x90\xcbEb\x06!v\x91\x06X\xb5N\xf6B" +
+	"#\x11\xe4l\x90\xc0\xa9\xf1\x00\xbb\xba\xf1\x9eXD\x04" +
+	"\xef1\x09\x04\xbbb\x05\xac\x08\xe1\xfdx6\x11\xbc\xef" +
+	"I \xda\x17\x0f\xc0\xae\x11\xbco\xc6\x88\xe0\xdd'\x81" +
+	"\xc7.\xd6\x03\xbb\xed\xf2v5\x12\xc1\xbb[\x82\x0cV" +
+	"\x81\xe1\x8a\x8a;V\x13\xc1{\xaf\x04\x99v\x09\x12X" +
+	"\xd1\xc7\xbb\x19\xe76I \xd9\xd5c`e\x1f\xcc1" +
+	"\x04\xef\x0a\x09\xb2\xec\xab,`7\xc7\xde+qN\x97" +
+	"\x12\xf1\x96\xc8\xb2\xb9Z<N$\xb5Y\xf3C\xa25" +
+	"\xb2T\xabi\x8b\xc5\x89\x18\x89\xf9!\xc1\xdc\x0e!\xc4" +
+	"\x0f\x89%Z{\xbd\xd6\xac\xc7I\x81\xa1\xc5\xb4\xa0\x1f" +
+	"\x12L\"\x88\xd4L\x7f\xe3rx\xe6`)\x1f~\x85" +
+	"\xd9`\xea\x18\xc2\xa1\x9d\x05+Edp)cu\x90" +
+	"\xa6\xd3\x9d\xa1\x05\"1\xd5\x942\x9f\xa9\xb5=\xe4\xbb" +
+	"v\xc9 9\xe1\xed\x1e\x89%\x0b\xd9\xc9%\xbc\x96\xa0" +
+	"\xf7j\xa2\x92\x03\x06\xcb\xd2\xa4\xa3M<\xadL\x0by" +
+	"?\xd3\xc8\xf9\x99\xa0\x05K\xa4H\xd8\xc9\x11\xd8m[" +
+	"\x8a\x9f\xf1\xb8\x91\xc6\x04\"\x12+\xaa\xf7\x99\xbb\xf5\xea" +
+	"\xda\xe3\xeaR\xad*\x9e^\xfa\xde\xcd@\xb8\xa5\xef\xe5" +
+	"N\xd4T\xa0\x1bZ+\x97\xea\xd8M\x1a)\x84\xa4\x93" +
+	"\xb2\xb1\xc2R_R\x82\x83\xa5\"(\x95\xe9\x17\x91R" +
+	"\xd2\x9e\xbaH\xd4\xd7\x16e\xc5\xbf\xbel\xdfl7\xc3" +
+	"^\xe2\x14\x86R\xf2\xb2x[#\x1d\xe0*59A" +
+	"7G\xe3\xc6\x93\xb6hP5\xb4\x85\xba\xb6,\x1a\x89" +
+	"\x19\xae\xb5+\xd7b[5\x8f\xa3h\xe1X\xc1\x15\xaf" +
+	"\xdc\x12\x1b#\x12M\x0a\x00Z4\xbd\xb9\xc5H\xab:" +
+	"\xd1\xac\x19\x0b(\xaa\xae\xe1b_\xf5@\x9b\x8d\x0b0" +
+	"\xd2\x9d/\x82r\xf9I\x9ce\\\x0f\x07\xb4\x85Z\x8c" +
+	"\xe4$\x05\xbd'\xc1\xd6\xb4T\xc15\xf4\xb4,\x99k" +
+	"\xb0@\xad\x80Y!B\xb1\x1ag\xe7\xce\xa3i.l" +
+	"\xe7\xb6v\xee\\\x0c\xa3\x08i(\xc2\xf1R\xb0\x8b\x8e" +
+	"\xf2x\x0a\xee\xe4\xbc\xa2\xc7L\x9d\xcb\xe8\xf88\x1c\x9f" +
+	"BSg\xd1L\x9d'\xd3\xdc\xd6\xc9\x853\xac\xdcy" +
+	"*\\\x95\x94\xf3Z\xd1\xa1\\E\xc7\xfd8>\x87\xe6" +
+	"\xce+\xcd\xdc\xb9\x96\xe6\xce3p\xbc\x8e\xe6\xce\x82\x99" +
+	";\xcf\xa5\xe3\xb3p|>\xcd\x9dE3wVhn" +
+	"^\x87\xe3\x97\xe1\xf8i\x9e\\8\x8d\x10\xf9R\x9a\xca" +
+	"_\x82\xe3A\xe8%\x00\xcd14'\x016\x93\xc2\x1c" +
+	"\xe7n\xca\xcc\xaaS\x83\xd2\xb6pP\x8b\x85\xf40\xf1" +
+	"i\x0dF{\x08\xf3p\xfbJ\xc3\xca\xc39\x90\x9aH" +
+	"(\x12\xe3\x03>\xb51\xa4\xb1t\xa8[\x00\xe8Z\x11" +
+	"G\x1cq\x19\x02\xb1\x1e\"\xc5\x19Z\x93\x1e\xd6\xf1\xd4" +
+	"\xeb\x0b\xa8\\\xf5\\\x94\xb4k\x92%Nzh\xa7\x82" +
+	"z\x09\x97\x1f\xb2t\xbbu\x94\x93\x1f&\xd7{O)" +
+	"AN\xf1$,z\xa0\xb1\x83clz(\x99\x191" +
+	"\xbd\xb9Y\x8b\xa5U2\x0b\x84\"q\xad\x9a*ow" +
+	"'\x95\x06.\xdd4\x94W4\xdc\x8a\xd6\xcfsmD" +
+	"W\xa0u\xb9\xc6,\xe8\xda\x96{-b\xbfR\x04\xe5" +
+	"F\xce\xe4\xac\xabp\xca\xbcv\xba\xb5\x1e\x0f\xe9:\x11" +
+	"\x94[\x04\x00\x8f\x99mm\xc2\xafo\x14A\xb9C\xf8" +
+	"\xf7\xcb3\x1dam\xd9|N\xdcO\xae\x86\xce\xa2t" +
+	"\xce3\"\xc2E\"(\xa5\x8eT\x8d/w\xbcer" +
+	"\xa8Tpe\x9b\x16k?\xa9[\x9e\xbe\xea\xa7\xa9%" +
+	"\x874\x02\x90\xb4\x9d\x99\xdb\xcdQ\xc9\xc9\xdf\x1c%i" +
+	"H\xef!\x15\x9fF\xb9\x04\xab\x1c\xb3\xbd0\xa2On" +
+	"\x07\xf5\x98\xd1\xde\xc3\xbdL2gZ\xd4p0\xa4\xd9" +
+	"A\xa7\x1d\x02q\xd5\xba\xd9\\e\x8eq\xa8\x13\xf7\xfe" +
+	"\x99\x08\xca\xfd\x0e\x87\xee\x1d\xc5W\xeb\xc0\xadZ'Z" +
+	"\xd5\xbaENa\xce\x9b\xe11\xeb\x08\xbb\xea\x9d\xd2D" +
+	"\xdf\xb17\x9f\xb6\xe6\xb4F\x82\x8e\xbd\x0c\xd0\xc04\xa5" +
+	"\x0aj\x0e&WA\xd3\xbcx2\xe3PV\xbe\xe65" +
+	"~\x91\xa3\xf1\xb6\xc2\x97\xf3\x0ao\xd9\xd5u%\xbc\xc2" +
+	"[vu\xfd(G\xe1m\xc6l*\xe74\xde\xcd\x1b" +
+	"\xa4\x99\xe5\xf6z\x09h\x173j\x0d\xd1\x8c?{\x12" +
+	"4\xa6\xd6\xd5\x9c\xa0\xf5~)\x9c\xaeE\xae+H/" +
+	"\x1f\xfbw\"\xed^K\xa6.\x06\xcd\xed\x02\xb4\xa4\xf7" +
+	"|\xd0]\xc1\xdd\x04\xcaD\xd4R\xfaH[\xd8p-" +
+	"\x07\xf2w-\x01\x84\xea\xe1\x08q\xedy\xd1\x09\xf3\xa2" +
+	"\xf3\xdb\xc5\xa8FS\x08*i\xc3J0\x06\xf1\xe6U" +
+	"\x10\x02\x82\xb7_\x05!9\xe1H$\xea3\x0b\xfe\xbe" +
+	"\xa0\x16\xd2\x0c-\xbd\xf4\xcb,v1/\x98f\xf2e" +
+	"w\x02\xa6$_\xa7\xf7\x11\xddF\xc2Mz\xac5\xbd" +
+	"\x0aR\xd0\x8ev\xbe\xb3:qF\xba\xd5E\xf7`\xbd" +
+	"\xc6\xbcX\xd5#\xe1Z\xc9\xca\x00O%Z\xabp\x8b" +
+	"\xd6\xd8\xb5\xf2\xf2TUM\xba\xf3\xf0\x055C\xd5\x9d" +
+	"\x8c\xd1\xf5B\xa8\xd7`\x89\x15kR\xaa\x1b}\x9a\x92" +
+	"FG\xa1\x0a\x0c\xdd\x08i\\\xf0\xab\x06\xb4\x96H\x88" +
+	"HA\xad\xa7H\x97c\xb9\x18\xa0r\xbf\x86V\xebX" +
+	"\xd7\x1b\xb0\x9e!\xd9\xeb\xa9&\x82\x9c\xe1\x91\xc0\xe9\xe3" +
+	"\x01\xd6\xe2$\x1f\x17\x17\x11A\xfe\\\x94@\xb0\x1bN" +
+	"\x815\xde\xcb\x87\xc4\xd9D\x90\xdf\x15%\x10\xed\xc6f" +
+	"`\xdd\x84\xf2~\xfa\xed\x8b\xa2\x04\x1e\xfb\x8d\x07\xb0f" +
+	"]\xf9)\x11\xf7\xdd)J\x90aw\x0f\x02{R\"" +
+	"\xdf+\x96\x10A\xde,J\x90iw\xc2\x02k6\x96" +
+	"\xd7\x8b\x8dD\x90\xd7\x8a\x12Hv\x13\x1e\xb0nW\xb9" +
+	"]\xbc\x99\x08r\x9b(A\x96\xdd\xdc\x0d\xec\xc5\x84\xac" +
+	"\x8b\xab\x89 \xab\xa2\x04\xd9v\xfb\x1d\xb0^?y\x81" +
+	"x\x15\x11\xe4\xb9\xa2\x04\xa7\xd9\x1d\x9e\xc0\xda\xcc\xe4*" +
+	"\xb1\x9c\x08\xf2dQ\x82\xd3\xed7\x1a\xc0\xda\xea\xe4b" +
+	"1F\x04y\xa4(\xc1\x19\xf6\x13\x0f`]\xa0r\x1e" +
+	"\xe5U?Q\x82~vO,\xb0.S\x19(\xaf\x8e" +
+	"\x0b\x12\x9ci\xf7k\x02kb\x94\x0f\x0b\x15D\x90\xdf" +
+	"\x13$\xc8\xb1;\x91\x815\x17\xcao\x0aH\xd1>A" +
+	"\x82\xfev\xff9\xb06r\xb9K@\x8av\x0b\x12x" +
+	"\xed\xae}`\x9d\xf6\xf2\x0e\xe1\x01\"\xc8\xdb\x05\x09\x06" +
+	"\xd8\x8d\xf9\xc0^^\xc8[\x04\xa4\xe8VA\x82\\\xbb" +
+	"\x89\x1aX\xab\xbd\xbc\x8eb\xb5B\x90 \xcf~\xc5\x00" +
+	"\xacSX\xbe\x92\xee\xab\x0b\x12\x0cd\xefw\x9c\x076" +
+	"\xf2b:\xbb@\x90`\x90\xfd4\x01X\xab\xbe\\+" +
+	"\\O\x04\xf9\x02A\x82\xc1v[5\xb0&6y\xaa" +
+	"\x80\xe7;Y\x90@\xb6\x9f\xa6\x00{\xaf!\x17\xd3\xd9" +
+	"\xd1\x82\x04\xf9v\x9b(\xb0V[9_\xd8J\x049" +
+	"O\x90\xe0,\xbb\xf1\x18\xd8\xe3\x0c9\x9br#C\x90" +
+	"`\x88\xdd\x0c\x09\xac\xb5Y>\x0e8{\x0c$\x18j" +
+	"\xf7\xe2\x03{A\"\x7fLg\x0f\x81\x04\xc3\xecw'" +
+	"\xc0\x9e\xe1\xc8o\x01\x9e\xef~\x90`\xb8\xdd\xd1\x0e\xec" +
+	"U\x91\xfc\x1c \xbd] A\x81\xdd\xce\x0b\xac\x7fR" +
+	"\xde\x05x\xbe;@\x82\x11v#.\xb0\xceF\xb9\x13" +
+	"\x90\x93\x9bA\xea\x08D\xc2a-`\xf8!\x11\xd4\xe3" +
+	"\xf4\x07\x11\xe9\xcf\xe4:4\xab\x07\x11Q\x8b\xfb\xa1\xc3" +
+	"\xca\"\xfc\x90\x83\xb1\xbf\x1f\xbd\xb7\x19}\x10\xa9I\x8b" +
+	"\xf9Y\xe4P\x13\x02\xe6\x91\x81m\xa1\xc6\x82\xf5`\x95" +
+	"\x04\xad\x95\xe9%\x1b\xf1E\xe2\x86\x1e\x88\xfb\xa1\xa0\x05" +
+	"'\xfd\x90`\xdd(\xa4\x80\xf6\xa3\xe06V\xd3\x8c\x89" +
+	"\x14\xf3UD\x8c\x84\xfd\xe0k\x8a\xc4ZU\xdc\x86E" +
+	"\xdd`\x85\xdd\x08\xcb*D\xc4g\xd6\x88\xcc\x9d\xa93" +
+	"\x06V\xdf\xcd\xd1#\xe187A\x0ah\xa5\xd8\x0f>" +
+	"3\xc3\xe1\xa7|\xa6\x0b\xf7C\x82\x05\xb3\xc4g\xfa\xf5" +
+	"\xa4\x95\xad2+E\x97\x01\x02\x0b{!\x9c\x04k]" +
+	"e\x02.\xca\xfc\x1dD\xdb\xa2\x0dZH\x0bH\x06\xad" +
+	"\xf6\xf3\xe3\xd4\x11\xe6\xa0'\xb4'j\xc3\xc0\x1c~\x0e" +
+	"z\xfc\xd4\x09\xfe\x0bv#l\x1ei\x82%\xa5\xc0\xb2" +
+	"R\x93\xc5Vg\x14\xb0A?$B\xf1hM$\xa8" +
+	"U\x11\x9fI\\\xf2\xa5\x81\xa7\xf7\xa0\xc2\xad\xc1\xa6\xc2" +
+	"\x89\xcb|13$\xea\xef<9I\xe9\x08t[\x9f" +
+	"\x0a\xccw\xd6\xae\xd4kw\xd7I\xd6\xd7\xed\xd7\x0bi" +
+	"\xd4\xd7\xb9\x98\x88\x8a\x88\x81\x11^j-&\xa5\x07i" +
+	"\x96&\x86\xa2)!\xd1\"+\xfc\xb9\xc6\x09\x89\xdaW" +
+	"\x13\xa2,\x17AY\xc3\x85D\xabVs\xd9\x97\xe87" +
+	"C\xa2u\xe5N\xf6\xe5(\xac\xa8\xf1w\x06\xec\x99c" +
+	"R\xbf\\\x83\x0e\x16NNn\xd1c']\xaf\xad\x90" +
+	")\xb2fI,_[i\x85\x1e\xf3\x00\xf7+'\xb7" +
+	"#5\xcd\x8bk\x15\xed\xd4\x16\xe4j\xec\xb6Vp\x01" +
+	"\xde(+\xc0\xf3;\xc72\x0dS\xc5)\"(3\x04" +
+	"\x90\"Q\x8e\xc7|\xff\xec\x99\xa4\xe7\xf2\x8d\x1b\xc7\x98" +
+	">sW\xc6\xa9e\x9c\xff\x88\x1e\x89=\xf5y\xa7{" +
+	"\xbd\xf8\xef\xa4\xb3=^2\xd69Z\xd6\xed\x92\xb1\xc7" +
+	"\xd8\x9d\xff\xa8[+\xee\xe9=}5\xd7\xec\xbeH'" +
+	"Ms\xd3}\x96\xf5\xf7 \x98\xeeE\x8b^$\xdd\xce" +
+	"N9A\xa8v\x04\xc1\x96\x83j^\x0e,[1\xb7" +
+	"\xd1\xa9\xf1ukg\x0a\x98\x958[\x9d\xc3\x91\x99t" +
+	"G\"\x19Z,\xadn&+jqSn\xd6\xf33" +
+	"\x18\x85\xc0\xe2.\x1e\xb8\xd7y\xac\x8aI|\xdf\xbde" +
+	"\xac\xf5G\x0fp\x89\xbaK\x02\xc6\xeb'n^)\x82" +
+	"2\xab\xbbe\xb7\x9f\xfeZV0\x14\x8f\xd6kj\x90" +
+	"\xb6\xdf\xa4c\xd7\xba\x978X\xcd\xac\x07\xe2\xfb\x96\xf6" +
+	"\xdek\x95n\x15bWOm\xbfPI\xa3w?\x85" +
+	"\xaf\xa7fL\xc5\xd4K9z'w\x91\x1e\x86 \xbd" +
+	"5\xa0\x128\xb9\x82\x9e\xf3\xf8jZ\xac\x19]O\x08" +
+	"\x88\xde\x91\xf8\x8f\xc7;l\x11!\xbe\xe66\xc3\xd0b" +
+	"\x1d\x18:\x84\xd4\xf6D\xdcP\x8d\xb6x\xb5J \xe6" +
+	"\\1\x81\x96\x08iM\xc6\x85m\x06F\xbe\xb1\xde\x8b" +
+	"\xcc|\xf5KJ\xb1W%.\xe5\xfc\x12\xc7\x86\xf5|" +
+	"\xd9s\x12\xed\xda\xae\x1d\x90\xae'f?\x15L\xe3\xc4" +
+	"\\\x0bI\xcc\"\xbb\xb4Z\xe6\x0a\xc9\x17\x7f)\x91\x08" +
+	"2h\x8e\xd9D\x0d\xe1\x94@\xa4$\xdd\xda\xcc(\xbe" +
+	"6c\x95\xc2\xf9N\xcb\xf4\xee\xce:\xa21m\xa9\xae" +
+	"-K\xab\xc2\x98\x1aV\xf4v\x7frR\xcf\x1e\xfaj" +
+	"\x01aV\xfd\xbb\x89j{\xf1R\xa7\"\x03=\x07\xef" +
+	"\xe9\x0b\xaf\xfd\xffv\xa4!\xbc)\xa1\x8d[\xbd\x95?" +
+	"4\xd5\x84s\x0e\xcd~\xcf\xe6\x1a\x8e\xf7\x11-\xf4\xf0" +
+	"\x06\xa7\x8fR_\xb7\xaf<=\xb4\xd6X.\x90\x85\x8e" +
+	"'\x17\x94\xa4[Pd\x97`3R\x0b\x8a\xa9\xee\xcd" +
+	"\xfe\xff\x0e\\;im\xafR\xaf\xe5\xb0+t\xee\x0e" +
+	"\xac\xda\xa5c\xbd\xdc\xba\x17{\x8cS\xfc\x9d\x8b\xb8\xa6" +
+	"[V\x94\xdd]\xcf\xf5\xd7\xb2\x8e\xf5\xaez\xee\xa1\x1e" +
+	"{\x93\xf7b\xa3\xd3K\xdba\xba;;\x08)@\x84" +
+	"9z\xec\xffo\xc0\xa2'\xed{\xaf\x165N5\x97" +
+	"\x80\x13\xca\x04\xd4(Z\xe9\x8b\x88\xa4\xb5\xc7{ug" +
+	"\x0b,\xcfC\xbb\x1f\xc0\xe5\xeea6ug\xderz" +
+	"\xf7\x10\xd6\x12q#\xa6\xea\xcd-\x06!\xa4 \xd0\x16" +
+	"\x0b\xb5\xa7\x157\xb9Y\xaf\xa4\xc0\xc9%z>\xb9\x0b" +
+	"=v\xff\x92\xa6\xcb\xec\x06nw`3\xfd\x15\xcd\xae" +
+	"\x9bS\x17\xd8>\x0e8Muc\x97\"\xe93\xee\xbf" +
+	"\x03\x00\x00\xff\xff\xb5k\x19\x00"
 
 func RegisterSchema(reg *schemas.Registry) {
 	reg.Register(&schemas.Schema{
@@ -11719,6 +12058,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xdbd32907a98f702b,
 			0xdc16dcaf4c7b5d7b,
 			0xdc19fdc1e173fe90,
+			0xdcfd762e01d8b969,
 			0xdd178a12d938882b,
 			0xde81f4aed37797df,
 			0xde8bf7328ffc37c3,
@@ -11739,6 +12079,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xefa2850b1c6222f6,
 			0xeffb609ebf72e4a0,
 			0xf0ef4d4fdaedb1f6,
+			0xf15d73ce429a8956,
 			0xf356196210b50910,
 			0xf3788f2570a1e84f,
 			0xf3842bc6cf4149eb,
@@ -11748,6 +12089,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xf837e3273ba4c201,
 			0xf9b550cad72342c5,
 			0xfba63268bee43277,
+			0xfc4caa313c2f7632,
 			0xfdaeb62e8f10b2ff,
 		},
 		Compressed: true,

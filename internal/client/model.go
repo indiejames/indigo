@@ -784,7 +784,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// also lands at 25% down rather than the top.
 		loc := msg.loc
 		return m, func() tea.Msg {
-			return OpenFileAtMsg{Path: loc.Path, Line: loc.Line, Col: loc.Col}
+			return OpenFileAtMsg(loc)
 		}
 
 	case referencesMsg:

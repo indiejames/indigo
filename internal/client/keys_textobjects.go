@@ -38,17 +38,6 @@ func executeGoToLineEnd(m Model) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func executeGoToFirstNonWS(m Model) (tea.Model, tea.Cmd) {
-	m.sel = nil
-	runes := []rune(m.buf.Line(m.cursor.Line))
-	i := 0
-	for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t') {
-		i++
-	}
-	m.cursor.Col = i
-	return m, nil
-}
-
 // executeSelectInsideWord selects the full word enclosing the cursor.
 func executeSelectInsideWord(m Model) (tea.Model, tea.Cmd) {
 	m.applyToAllCursors(func(m *Model) {
@@ -70,9 +59,9 @@ func executeSelectInsideWord(m Model) (tea.Model, tea.Cmd) {
 		}
 		m.sel = &Selection{
 			Anchor: document.Pos{Line: m.cursor.Line, Col: start},
-			Head:   document.Pos{Line: m.cursor.Line, Col: end + 1},
+			Head:   document.Pos{Line: m.cursor.Line, Col: end},
 		}
-		m.cursor = document.Pos{Line: m.cursor.Line, Col: end + 1}
+		m.cursor = document.Pos{Line: m.cursor.Line, Col: end}
 	})
 	return m, nil
 }

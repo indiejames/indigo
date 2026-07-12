@@ -369,3 +369,118 @@ type Location struct {
 	URI   string `json:"uri"`
 	Range Range  `json:"range"`
 }
+
+// ---- workspace/symbol and textDocument/documentSymbol ----
+
+// SymbolKind is the LSP symbol kind (1–26).
+type SymbolKind int
+
+const (
+	SymbolKindFile          SymbolKind = 1
+	SymbolKindModule        SymbolKind = 2
+	SymbolKindNamespace     SymbolKind = 3
+	SymbolKindPackage       SymbolKind = 4
+	SymbolKindClass         SymbolKind = 5
+	SymbolKindMethod        SymbolKind = 6
+	SymbolKindProperty      SymbolKind = 7
+	SymbolKindField         SymbolKind = 8
+	SymbolKindConstructor   SymbolKind = 9
+	SymbolKindEnum          SymbolKind = 10
+	SymbolKindInterface     SymbolKind = 11
+	SymbolKindFunction      SymbolKind = 12
+	SymbolKindVariable      SymbolKind = 13
+	SymbolKindConstant      SymbolKind = 14
+	SymbolKindString        SymbolKind = 15
+	SymbolKindNumber        SymbolKind = 16
+	SymbolKindBoolean       SymbolKind = 17
+	SymbolKindArray         SymbolKind = 18
+	SymbolKindObject        SymbolKind = 19
+	SymbolKindKey           SymbolKind = 20
+	SymbolKindNull          SymbolKind = 21
+	SymbolKindEnumMember    SymbolKind = 22
+	SymbolKindStruct        SymbolKind = 23
+	SymbolKindEvent         SymbolKind = 24
+	SymbolKindOperator      SymbolKind = 25
+	SymbolKindTypeParameter SymbolKind = 26
+)
+
+// KindLabel returns a short 2-character label for display.
+func (k SymbolKind) KindLabel() string {
+	switch k {
+	case SymbolKindFunction:
+		return "fn"
+	case SymbolKindMethod:
+		return "me"
+	case SymbolKindClass:
+		return "cl"
+	case SymbolKindStruct:
+		return "st"
+	case SymbolKindInterface:
+		return "if"
+	case SymbolKindVariable:
+		return "va"
+	case SymbolKindConstant:
+		return "co"
+	case SymbolKindEnumMember:
+		return "em"
+	case SymbolKindEnum:
+		return "en"
+	case SymbolKindConstructor:
+		return "ct"
+	case SymbolKindProperty:
+		return "pr"
+	case SymbolKindField:
+		return "fi"
+	case SymbolKindTypeParameter:
+		return "tp"
+	case SymbolKindModule:
+		return "mo"
+	case SymbolKindPackage:
+		return "pk"
+	case SymbolKindNamespace:
+		return "ns"
+	default:
+		return "  "
+	}
+}
+
+// SymbolInformation is returned by workspace/symbol and (flattened) documentSymbol.
+type SymbolInformation struct {
+	Name          string     `json:"name"`
+	Kind          SymbolKind `json:"kind"`
+	ContainerName string     `json:"containerName,omitempty"`
+	Location      Location   `json:"location"`
+}
+
+// WorkspaceSymbolParams is the request for workspace/symbol.
+type WorkspaceSymbolParams struct {
+	Query string `json:"query"`
+}
+
+// DocumentSymbolParams is the request for textDocument/documentSymbol.
+type DocumentSymbolParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+// DocumentSymbol is the hierarchical symbol returned by textDocument/documentSymbol.
+// The server may return []DocumentSymbol OR []SymbolInformation; we handle both.
+type DocumentSymbol struct {
+	Name           string           `json:"name"`
+	Detail         string           `json:"detail,omitempty"`
+	Kind           SymbolKind       `json:"kind"`
+	Range          Range            `json:"range"`
+	SelectionRange Range            `json:"selectionRange"`
+	Children       []DocumentSymbol `json:"children,omitempty"`
+}
+
+// ---- textDocument/references ----
+
+type ReferenceContext struct {
+	IncludeDeclaration bool `json:"includeDeclaration"`
+}
+
+type ReferenceParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	Context      ReferenceContext       `json:"context"`
+}

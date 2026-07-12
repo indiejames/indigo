@@ -95,7 +95,7 @@ func (s *callbackServer) OpenFile(_ context.Context, call proto.ClientCallback_o
 	if err != nil {
 		return err
 	}
-	s.dispatch(OpenFileAtMsg{Path: path, Line: int(args.Line())})
+	s.dispatch(OpenFileAtMsg{Path: path, Line: int(args.Line()), Col: -1})
 	_, err = call.AllocResults()
 	return err
 }

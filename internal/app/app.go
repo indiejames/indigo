@@ -1,16 +1,12 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
 
 	"github.com/indiejames/indigo/internal/client"
@@ -62,7 +58,6 @@ type configTickMsg struct {
 	cfg    *config.Config // non-nil only when the file changed and parsed OK
 }
 
-
 // bufferReloadedMsg replaces a buffer model in-place after an external-change reload.
 type bufferReloadedMsg struct {
 	idx   int
@@ -83,6 +78,10 @@ type App struct {
 	picker    *filePicker // non-nil when file picker is open
 	grep      *grepPicker // non-nil when workspace search picker is open
 	bufPicker *bufPicker  // non-nil when buffer picker popup is open
+
+	symbolPicker    *symbolPickerState    // non-nil when workspace symbol picker is open
+	docSymbolPicker *docSymbolPickerState // non-nil when document symbol picker is open
+	refPicker       *refPickerState       // non-nil when reference picker is open
 
 	// fileChangedIdx is the index of a dirty buffer awaiting user decision after
 	// an external modification. -1 means no prompt is active.
@@ -254,6 +253,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.pluginInput.width = msg.Width
 			a.pluginInput.height = msg.Height
 		}
+		if a.symbolPicker != nil {
+			a.symbolPicker.width = msg.Width
+			a.symbolPicker.height = msg.Height
+		}
+		if a.docSymbolPicker != nil {
+			a.docSymbolPicker.width = msg.Width
+			a.docSymbolPicker.height = msg.Height
+		}
+		if a.refPicker != nil {
+			a.refPicker.width = msg.Width
+			a.refPicker.height = msg.Height
+		}
 		// Resize all buffers with the correct height (minus tab bar if shown).
 		bufMsg := tea.WindowSizeMsg{Width: msg.Width, Height: a.bufHeight()}
 		var cmds []tea.Cmd
@@ -343,6 +354,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.doOpenFile(msg.absPath)
 
 	case client.OpenFileAtMsg:
+		if msg.Col >= 0 {
+			return a, a.doOpenFileAtPos(msg.Path, msg.Line, msg.Col)
+		}
 		return a, a.doOpenFileAt(msg.Path, msg.Line)
 
 	case switchBufferMsg:
@@ -352,7 +366,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if msg.col >= 0 && msg.matchLen > 0 {
 					a.buffers[a.active] = a.buffers[a.active].AtMatch(msg.line, msg.col, msg.matchLen, a.bufHeight())
 				} else if msg.col >= 0 {
-					a.buffers[a.active] = a.buffers[a.active].AtPos(msg.line, msg.col)
+					a.buffers[a.active] = a.buffers[a.active].AtPos(msg.line, msg.col, a.bufHeight())
 				} else {
 					a.buffers[a.active] = a.buffers[a.active].AtLine(msg.line)
 				}
@@ -367,7 +381,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.col >= 0 && msg.matchLen > 0 {
 				m = m.AtMatch(msg.line, msg.col, msg.matchLen, a.bufHeight())
 			} else if msg.col >= 0 {
-				m = m.AtPos(msg.line, msg.col)
+				m = m.AtPos(msg.line, msg.col, a.bufHeight())
 			} else {
 				m = m.AtLine(msg.line)
 			}
@@ -505,6 +519,30 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return a, nil
+
+	case client.OpenSymbolPickerMsg:
+		if len(a.buffers) > 0 {
+			a.symbolPicker = newSymbolPicker(msg.BufID, a.width, a.height)
+		}
+		return a, nil
+
+	case client.OpenDocSymbolPickerMsg:
+		a.docSymbolPicker = newDocSymbolPicker(msg.Syms, a.width, a.height)
+		return a, nil
+
+	case client.OpenRefPickerMsg:
+		if len(msg.Refs) > 0 {
+			a.refPicker = newRefPicker(msg.Title, msg.Refs, a.width, a.height)
+		}
+		return a, nil
+
+	case symbolResultsMsg:
+		if a.symbolPicker != nil && msg.query == a.symbolPicker.query {
+			a.symbolPicker.results = msg.syms
+			a.symbolPicker.cursor = 0
+			a.symbolPicker.loading = false
+		}
+		return a, nil
 	}
 
 	// Each picker intercepts key input only. Non-key messages (tickMsg, diagnosticsMsg,
@@ -559,6 +597,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handlePluginPopupKey(km)
 		}
 	}
+	if a.symbolPicker != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleSymbolPickerKey(km)
+		}
+	}
+	if a.docSymbolPicker != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleDocSymbolPickerKey(km)
+		}
+	}
+	if a.refPicker != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleRefPickerKey(km)
+		}
+	}
 
 	// No buffer open: handle essential keys at the App level.
 	if len(a.buffers) == 0 {
@@ -575,158 +628,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	updated, cmd := a.buffers[a.active].Update(msg)
 	a.buffers[a.active] = updated.(client.Model)
 	return a, cmd
-}
-
-// handlePickerKey routes key events to the file picker.
-func (a App) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "ctrl+c":
-		return a, func() tea.Msg { return pickerCancelledMsg{} }
-	case "enter":
-		path := a.picker.selected()
-		if path == "" {
-			// No filtered match — treat the query as a direct (possibly relative) path.
-			q := strings.TrimSpace(a.picker.query)
-			if q == "" {
-				return a, nil
-			}
-			if !filepath.IsAbs(q) {
-				q = filepath.Join(a.workDir, q)
-			}
-			return a, func() tea.Msg { return pickedMsg{absPath: q} }
-		}
-		return a, func() tea.Msg { return pickedMsg{absPath: path} }
-	case "up", "ctrl+p":
-		a.picker.moveUp()
-	case "down", "ctrl+n":
-		a.picker.moveDown()
-	case "backspace":
-		q := []rune(a.picker.query)
-		if len(q) > 0 {
-			a.picker.setQuery(string(q[:len(q)-1]))
-		}
-	default:
-		if len(msg.Runes) > 0 {
-			a.picker.setQuery(a.picker.query + string(msg.Runes))
-		}
-	}
-	return a, nil
-}
-
-// handleBufPickerKey routes key events to the buffer picker popup.
-func (a App) handleBufPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "ctrl+c":
-		return a, func() tea.Msg { return bufPickerCancelledMsg{} }
-	case "enter":
-		idx := a.bufPicker.selected()
-		return a, func() tea.Msg { return bufPickedMsg{idx: idx} }
-	case "up", "k":
-		a.bufPicker.moveUp()
-	case "down", "j":
-		a.bufPicker.moveDown()
-	}
-	return a, nil
-}
-
-// handlePluginPopupKey routes key events to the plugin-driven list popup.
-func (a App) handlePluginPopupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "ctrl+c":
-		a.pluginPopup = nil
-		rpc := a.rpc
-		return a, func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			_ = rpc.PluginPopupCancelled(ctx)
-			return nil
-		}
-	case "enter":
-		if a.pluginPopup != nil && len(a.pluginPopup.items) > 0 {
-			idx := uint32(a.pluginPopup.idx)
-			a.pluginPopup = nil
-			rpc := a.rpc
-			return a, func() tea.Msg {
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				defer cancel()
-				_ = rpc.PluginPopupSelected(ctx, idx)
-				return nil
-			}
-		}
-	case "up", "k":
-		if a.pluginPopup != nil && a.pluginPopup.idx > 0 {
-			a.pluginPopup.idx--
-		}
-	case "down", "j":
-		if a.pluginPopup != nil && a.pluginPopup.idx < len(a.pluginPopup.items)-1 {
-			a.pluginPopup.idx++
-		}
-	}
-	return a, nil
-}
-
-// handlePluginInputKey routes key events to the plugin-driven text-input overlay.
-func (a App) handlePluginInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "ctrl+c":
-		a.pluginInput = nil
-		rpc := a.rpc
-		return a, func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			_ = rpc.PluginInputCancelled(ctx)
-			return nil
-		}
-	case "enter":
-		if a.pluginInput != nil {
-			text := a.pluginInput.text
-			a.pluginInput = nil
-			rpc := a.rpc
-			return a, func() tea.Msg {
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				defer cancel()
-				_ = rpc.PluginInputConfirmed(ctx, text)
-				return nil
-			}
-		}
-	case "backspace":
-		if a.pluginInput != nil {
-			runes := []rune(a.pluginInput.text)
-			if len(runes) > 0 {
-				a.pluginInput.text = string(runes[:len(runes)-1])
-			}
-		}
-	default:
-		if len(msg.Runes) > 0 && a.pluginInput != nil {
-			a.pluginInput.text += string(msg.Runes)
-		}
-	}
-	return a, nil
-}
-
-// handleGrepKey routes key events to the workspace search picker.
-func (a App) handleGrepKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "ctrl+c":
-		return a, func() tea.Msg { return grepCancelledMsg{} }
-	case "enter":
-		if a.grep != nil && len(a.grep.results) > 0 {
-			r := a.grep.results[a.grep.cursor]
-			absPath := filepath.Join(a.grep.workDir, r.RelPath)
-			return a, func() tea.Msg {
-				return grepPickedMsg{absPath: absPath, line: r.Line, col: r.Col, matchLen: r.MatchLen}
-			}
-		}
-	case "up", "ctrl+p", "k":
-		if a.grep != nil {
-			a.grep.moveUp()
-		}
-	case "down", "ctrl+n", "j":
-		if a.grep != nil {
-			a.grep.moveDown()
-		}
-	}
-	return a, nil
 }
 
 // resizeAllBuffers sends the current effective height to every buffer.
@@ -789,624 +690,4 @@ func (a App) bufHeight() int {
 
 func (a App) showTabBar() bool {
 	return !a.cfg.HideTabs && len(a.buffers) > 1
-}
-
-// ---- async commands ----
-
-type bufferOpenedMsg struct {
-	model    client.Model
-	line     int // 0-based target line; -1 = no jump
-	col      int // -1 = use AtLine; >= 0 with matchLen > 0 = AtMatch; >= 0 with matchLen == 0 = AtPos
-	matchLen int
-}
-type errorOpenMsg struct{ err error }
-
-func (a App) doOpenFile(absPath string) tea.Cmd {
-	return a.doOpenFileAt(absPath, -1)
-}
-
-func (a App) doOpenFileAt(absPath string, line int) tea.Cmd {
-	// Check if already open — switch to it instead of opening again.
-	for i, m := range a.buffers {
-		if m.FilePath() == absPath {
-			idx := i
-			return func() tea.Msg { return switchBufferMsg{idx: idx, line: line, col: -1} }
-		}
-	}
-	rpc := a.rpc
-	cfg := a.cfg
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, absPath)
-		if err != nil {
-			return errorOpenMsg{err}
-		}
-		m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
-		return bufferOpenedMsg{model: m, line: line, col: -1}
-	}
-}
-
-func (a App) doOpenFileAtMatch(absPath string, line, col, matchLen int) tea.Cmd {
-	// Check if already open — switch to it instead of opening again.
-	for i, m := range a.buffers {
-		if m.FilePath() == absPath {
-			idx := i
-			return func() tea.Msg {
-				return switchBufferMsg{idx: idx, line: line, col: col, matchLen: matchLen}
-			}
-		}
-	}
-	rpc := a.rpc
-	cfg := a.cfg
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, absPath)
-		if err != nil {
-			return errorOpenMsg{err}
-		}
-		m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
-		return bufferOpenedMsg{model: m, line: line, col: col, matchLen: matchLen}
-	}
-}
-
-// applyEditRecord adjusts existing jump entries that were shifted by the edit
-// described in msg, then adds a new entry for msg.{Line,Col}.
-func (a *App) applyEditRecord(msg client.EditRecordMsg) {
-	if msg.FilePath == "" {
-		return
-	}
-	if msg.LineDelta != 0 {
-		atLine := msg.AtLine
-		delta := msg.LineDelta
-		n := 0
-		for _, e := range a.jumpList {
-			if e.filePath != msg.FilePath {
-				a.jumpList[n] = e
-				n++
-				continue
-			}
-			if delta < 0 {
-				// Lines [atLine, atLine-delta) were deleted.
-				deletedTo := atLine - delta
-				if e.line >= deletedTo {
-					e.line += delta // shift back
-				} else if e.line >= atLine && e.active {
-					// Active entry inside the deleted range: suspend it rather
-					// than discarding. It will be restored if the delete is undone.
-					e.active = false
-					e.deactivatedDepth = msg.UndoDepth
-				}
-				// Inactive entries in the range keep their stored position and
-				// deactivatedDepth; they're already suspended by an earlier delete.
-				a.jumpList[n] = e
-				n++
-			} else {
-				// Lines were inserted; shift entries that follow the insertion point.
-				if e.line > atLine {
-					e.line += delta
-				}
-				a.jumpList[n] = e
-				n++
-			}
-		}
-		a.jumpList = a.jumpList[:n]
-	}
-	a.recordEdit(msg.FilePath, msg.Line, msg.Col, msg.UndoDepth)
-}
-
-// recordEdit appends {filePath, line, col, undoDepth} to the jump list.
-// A new edit invalidates forward history; consecutive edits on the same
-// file+line collapse into one entry (updating col and undoDepth in-place).
-func (a *App) recordEdit(filePath string, line, col, undoDepth int) {
-	if filePath == "" {
-		return
-	}
-	if a.jumpIdx >= 0 {
-		// Truncate any forward entries — a new edit rewrites the future.
-		a.jumpList = a.jumpList[:a.jumpIdx+1]
-		a.jumpIdx = -1
-	}
-	a.jumpList = append(a.jumpList, jumpEntry{filePath: filePath, line: line, col: col, undoDepth: undoDepth, active: true})
-	if len(a.jumpList) > 100 {
-		a.jumpList = a.jumpList[len(a.jumpList)-100:]
-	}
-}
-
-// handleUndoJump processes a single undo in a single pass over the jump list:
-//
-//  1. Active entries created by the undone edit (undoDepth > newDepth) are
-//     dropped — those edits no longer exist.
-//
-//  2. Inactive entries that were suspended by the undone edit
-//     (deactivatedDepth > newDepth) are reactivated. Their stored line number
-//     is already correct (it was frozen at the time they were suspended), so no
-//     line adjustment is applied to them.
-//
-//  3. All other entries (both active and inactive) have their line numbers
-//     adjusted to account for the buffer change the undo caused. Inactive
-//     entries need this too so their positions stay valid when reactivated by a
-//     future undo.
-func (a *App) handleUndoJump(msg client.UndoMsg) {
-	atLine := msg.AtLine
-	delta := msg.LineDelta
-	deletedTo := atLine - delta // only meaningful when delta < 0
-
-	n := 0
-	for _, e := range a.jumpList {
-		if e.filePath == msg.FilePath {
-			// Rule 1: drop active entries whose creating edit is now gone.
-			if e.active && e.undoDepth > msg.NewDepth {
-				continue
-			}
-			// Rule 2: reactivate inactive entries suspended by the undone edit.
-			// Skip line adjustment — the stored position is already correct.
-			if !e.active && e.deactivatedDepth > msg.NewDepth {
-				e.active = true
-				e.deactivatedDepth = 0
-				a.jumpList[n] = e
-				n++
-				continue
-			}
-			// Rule 3: adjust line numbers for everything else.
-			if delta < 0 {
-				// Undo of a forward insert: the inserted lines are being removed.
-				if e.line >= deletedTo {
-					e.line += delta
-				}
-				// Entries in [atLine, deletedTo) are inserted-content entries;
-				// they were already dropped by Rule 1 (undoDepth > newDepth).
-				// Inactive entries from prior deletes that happen to sit in this
-				// range keep their position — their deactivatedDepth is older and
-				// will be handled by a future undo.
-			} else {
-				// Undo of a forward delete: the deleted lines are being restored.
-				// Use >= so entries that landed exactly at atLine (shifted from
-				// deletedTo by the original delete) are correctly restored.
-				if e.line >= atLine {
-					e.line += delta
-				}
-			}
-		}
-		a.jumpList[n] = e
-		n++
-	}
-	a.jumpList = a.jumpList[:n]
-	// Reset navigation state. After an undo the cursor is at the undo-restored
-	// position, not at any known jump entry. Leaving jumpIdx set (possibly
-	// clamped by earlier pruning) causes doJumpBack to think we're already at
-	// the oldest entry and do nothing. Starting fresh from -1 lets the next
-	// jump-back find the most recent surviving active entry.
-	a.jumpIdx = -1
-}
-
-func (a App) doJumpBack() (tea.Model, tea.Cmd) {
-	// Search backward from one before the current position (or from the end
-	// if not navigating) for the nearest active entry.
-	start := len(a.jumpList) - 1
-	if a.jumpIdx >= 0 {
-		start = a.jumpIdx - 1
-	}
-	for i := start; i >= 0; i-- {
-		if a.jumpList[i].active {
-			a.jumpIdx = i
-			return a.jumpToEntry(a.jumpList[i])
-		}
-	}
-	return a, nil
-}
-
-func (a App) doJumpForward() (tea.Model, tea.Cmd) {
-	if a.jumpIdx < 0 {
-		return a, nil
-	}
-	for i := a.jumpIdx + 1; i < len(a.jumpList); i++ {
-		if a.jumpList[i].active {
-			a.jumpIdx = i
-			return a.jumpToEntry(a.jumpList[i])
-		}
-	}
-	return a, nil
-}
-
-// jumpToEntry switches to (or opens) the buffer for e and positions the cursor.
-func (a App) jumpToEntry(e jumpEntry) (tea.Model, tea.Cmd) {
-	for i, m := range a.buffers {
-		if m.FilePath() == e.filePath {
-			a.active = i
-			a.buffers[i] = m.AtPos(e.line, e.col)
-			return a, nil
-		}
-	}
-	return a, a.doOpenFileAtPos(e.filePath, e.line, e.col)
-}
-
-// doOpenFileAtPos opens absPath in a new buffer positioned at (line, col).
-func (a App) doOpenFileAtPos(absPath string, line, col int) tea.Cmd {
-	rpc := a.rpc
-	cfg := a.cfg
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, absPath)
-		if err != nil {
-			return errorOpenMsg{err}
-		}
-		m := client.New(rpc, bufID, content, version, absPath, cfg, fromRecovery)
-		return bufferOpenedMsg{model: m, line: line, col: col}
-	}
-}
-
-// doReloadBuffer closes the server-side buffer and reopens it so the server
-// re-reads the file from disk. The result replaces the buffer at idx in-place.
-func (a App) doReloadBuffer(idx int) tea.Cmd {
-	if idx < 0 || idx >= len(a.buffers) {
-		appLog("doReloadBuffer: idx %d out of range (len=%d)", idx, len(a.buffers))
-		return nil
-	}
-	m := a.buffers[idx]
-	path := m.FilePath()
-	oldBufID := m.BufID()
-	rpc := a.rpc
-	cfg := a.cfg
-	appLog("doReloadBuffer: queuing cmd for idx=%d path=%q oldBufID=%d", idx, path, oldBufID)
-	return func() tea.Msg {
-		appLog("doReloadBuffer: cmd running, calling CloseBuffer bufID=%d", oldBufID)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := rpc.CloseBuffer(ctx, oldBufID); err != nil {
-			appLog("doReloadBuffer: CloseBuffer error: %v", err)
-		}
-		appLog("doReloadBuffer: CloseBuffer done, calling OpenFile path=%q", path)
-		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, path)
-		if err != nil {
-			appLog("doReloadBuffer: OpenFile error: %v", err)
-			return errorOpenMsg{err}
-		}
-		appLog("doReloadBuffer: OpenFile done, new bufID=%d contentLen=%d", bufID, len(content))
-		newModel := client.New(rpc, bufID, content, version, path, cfg, fromRecovery)
-		return bufferReloadedMsg{idx: idx, model: newModel}
-	}
-}
-
-func (a App) doCloseAllAndQuit() tea.Cmd {
-	buffers := a.buffers
-	rpc := a.rpc
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		for _, m := range buffers {
-			rpc.CloseBuffer(ctx, m.BufID()) //nolint:errcheck
-		}
-		rpc.Disconnect(ctx) //nolint:errcheck
-		return appQuitMsg{}
-	}
-}
-
-func (a App) doSaveAllAndQuit() tea.Cmd {
-	buffers := a.buffers
-	rpc := a.rpc
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		for _, m := range buffers {
-			if m.Dirty() {
-				rpc.Save(ctx, m.BufID()) //nolint:errcheck
-			}
-			rpc.CloseBuffer(ctx, m.BufID()) //nolint:errcheck
-		}
-		rpc.Disconnect(ctx) //nolint:errcheck
-		return appQuitMsg{}
-	}
-}
-
-func (a App) doDisconnectAndQuit() tea.Cmd {
-	rpc := a.rpc
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		rpc.Disconnect(ctx) //nolint:errcheck
-		return appQuitMsg{}
-	}
-}
-
-// ---- View ----
-
-var (
-	tabBarBg      = lipgloss.Color("#065A96")
-	tabActiveStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#087AC8")).
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Bold(true)
-	tabInactiveStyle = lipgloss.NewStyle().
-				Background(tabBarBg).
-				Foreground(lipgloss.Color("#AABBCC"))
-	tabDirtyMark = "● "
-	tabBarFill   = lipgloss.NewStyle().Background(tabBarBg)
-)
-
-func (a App) View() string {
-	if a.picker != nil {
-		return a.picker.View()
-	}
-	if a.grep != nil {
-		return a.grep.View()
-	}
-	if len(a.buffers) == 0 {
-		return "No buffer open. Press ctrl+p to open a file."
-	}
-
-	var sb strings.Builder
-	if a.showTabBar() {
-		sb.WriteString(a.renderTabBar())
-		sb.WriteByte('\n')
-	}
-	sb.WriteString(a.buffers[a.active].View())
-	base := sb.String()
-
-	if a.fileChangedIdx >= 0 {
-		return overlayCenter(base, renderFileChangedPrompt(a.width, a.fileChangedSel), a.width, a.height)
-	}
-	if a.bufPicker != nil {
-		return overlayCenter(base, a.bufPicker.render(), a.width, a.height)
-	}
-	if a.pluginPopup != nil {
-		return overlayCenter(base, a.pluginPopup.render(), a.width, a.height)
-	}
-	if a.pluginInput != nil {
-		return overlayCenter(base, a.pluginInput.render(), a.width, a.height)
-	}
-	return base
-}
-
-const pluginPopupMaxVisible = 14
-
-var (
-	pluginPopupBg = lipgloss.Color("#1E2A38")
-
-	pluginPopupBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#4488CC")).
-				Background(pluginPopupBg)
-
-	pluginPopupTitleStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#0D1B2A")).
-				Foreground(lipgloss.Color("#88BBEE")).
-				Bold(true).
-				Padding(0, 1)
-
-	pluginPopupItemStyle = lipgloss.NewStyle().
-				Background(pluginPopupBg).
-				Foreground(lipgloss.Color("#AABBCC")).
-				Padding(0, 1)
-
-	pluginPopupSelStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#2D5F8A")).
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Padding(0, 1)
-
-	pluginInputBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#44AA88")).
-				Background(lipgloss.Color("#1E2A38"))
-
-	pluginInputTitleStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#0D1B2A")).
-				Foreground(lipgloss.Color("#88DDAA")).
-				Bold(true).
-				Padding(0, 1)
-
-	pluginInputFieldStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#0D1B2A")).
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Padding(0, 1)
-
-	pluginInputPlaceholderStyle = lipgloss.NewStyle().
-					Background(lipgloss.Color("#0D1B2A")).
-					Foreground(lipgloss.Color("#445566")).
-					Padding(0, 1)
-)
-
-func (p *appPluginPopup) render() string {
-	innerW := lipgloss.Width(p.title)
-	for _, item := range p.items {
-		n := len(item.Label)
-		if item.Sublabel != "" {
-			n += len(item.Sublabel) + 2
-		}
-		if n > innerW {
-			innerW = n
-		}
-	}
-	innerW += 4
-	if p.width > 0 {
-		innerW = min(innerW, p.width*2/3)
-	}
-	innerW = max(innerW, 30)
-
-	vis := min(len(p.items), pluginPopupMaxVisible)
-	if vis == 0 {
-		vis = 1
-	}
-	start := max(0, min(p.idx-vis/2, len(p.items)-vis))
-	end := min(start+vis, len(p.items))
-
-	var rows []string
-	rows = append(rows, pluginPopupTitleStyle.Width(innerW).Render(p.title))
-	rows = append(rows, lipgloss.NewStyle().
-		Background(pluginPopupBg).
-		Foreground(lipgloss.Color("#4488CC")).
-		Render(strings.Repeat("─", innerW)))
-
-	if start > 0 {
-		rows = append(rows, pluginPopupItemStyle.Width(innerW).Render("  ↑ more"))
-	}
-	for i := start; i < end; i++ {
-		item := p.items[i]
-		label := item.Label
-		if item.Sublabel != "" {
-			label += "  " + item.Sublabel
-		}
-		maxW := innerW - 2
-		if len([]rune(label)) > maxW && maxW > 0 {
-			label = string([]rune(label)[:maxW-1]) + "…"
-		}
-		label = "  " + label
-		if i == p.idx {
-			rows = append(rows, pluginPopupSelStyle.Width(innerW).Render(label))
-		} else {
-			rows = append(rows, pluginPopupItemStyle.Width(innerW).Render(label))
-		}
-	}
-	if end < len(p.items) {
-		rows = append(rows, pluginPopupItemStyle.Width(innerW).Render("  ↓ more"))
-	}
-
-	return pluginPopupBorderStyle.Render(strings.Join(rows, "\n"))
-}
-
-func (p *appPluginInput) render() string {
-	innerW := max(lipgloss.Width(p.title), lipgloss.Width(p.placeholder))
-	innerW += 4
-	if p.width > 0 {
-		innerW = min(innerW, p.width*2/3)
-	}
-	innerW = max(innerW, 30)
-
-	var rows []string
-	rows = append(rows, pluginInputTitleStyle.Width(innerW).Render(p.title))
-	rows = append(rows, lipgloss.NewStyle().
-		Background(lipgloss.Color("#1E2A38")).
-		Foreground(lipgloss.Color("#44AA88")).
-		Render(strings.Repeat("─", innerW)))
-
-	if p.text == "" && p.placeholder != "" {
-		rows = append(rows, pluginInputPlaceholderStyle.Width(innerW).Render(p.placeholder))
-	} else {
-		rows = append(rows, pluginInputFieldStyle.Width(innerW).Render(p.text+"█"))
-	}
-
-	return pluginInputBorderStyle.Render(strings.Join(rows, "\n"))
-}
-
-func renderFileChangedPrompt(w, sel int) string {
-	innerW := 40
-	if w > 0 && w*2/3 < innerW {
-		innerW = w * 2 / 3
-	}
-	if innerW < 30 {
-		innerW = 30
-	}
-
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#FFAA44")).
-		Background(lipgloss.Color("#1E2A38"))
-	titleStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#0D1B2A")).
-		Foreground(lipgloss.Color("#FFAA44")).
-		Bold(true).
-		Padding(0, 1)
-	divStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#1E2A38")).
-		Foreground(lipgloss.Color("#FFAA44"))
-	itemStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#1E2A38")).
-		Foreground(lipgloss.Color("#AABBCC")).
-		Padding(0, 1)
-	selStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#2D5F8A")).
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Padding(0, 1)
-
-	style := func(idx int, label string) string {
-		if idx == sel {
-			return selStyle.Width(innerW).Render(label)
-		}
-		return itemStyle.Width(innerW).Render(label)
-	}
-
-	rows := []string{
-		titleStyle.Width(innerW).Render("⚠  File changed on disk"),
-		divStyle.Render(strings.Repeat("─", innerW)),
-		style(0, "  Reload  (discard local changes)"),
-		style(1, "  Keep local version"),
-	}
-	return borderStyle.Render(strings.Join(rows, "\n"))
-}
-
-// overlayCenter splices popup (a multi-line box) into the centre of base,
-// using ANSI-aware left/right truncation so editor colours show on both sides.
-func overlayCenter(base, popup string, termW, termH int) string {
-	baseLines := strings.Split(base, "\n")
-	popLines := strings.Split(popup, "\n")
-
-	popH := len(popLines)
-	popW := lipgloss.Width(popLines[0])
-
-	startRow := (termH - popH) / 2
-	startCol := (termW - popW) / 2
-	if startCol < 0 {
-		startCol = 0
-	}
-
-	out := make([]string, termH)
-	for i := range out {
-		if i < len(baseLines) {
-			out[i] = baseLines[i]
-		} else {
-			out[i] = strings.Repeat(" ", termW)
-		}
-	}
-
-	for pi, popLine := range popLines {
-		ri := startRow + pi
-		if ri < 0 || ri >= termH {
-			continue
-		}
-		baseLine := out[ri]
-		left := ansi.Truncate(baseLine, startCol, "")
-		// Pad left side if baseLine is shorter than startCol (e.g. empty lines).
-		leftW := lipgloss.Width(left)
-		if leftW < startCol {
-			left += strings.Repeat(" ", startCol-leftW)
-		}
-		right := ansi.TruncateLeft(baseLine, startCol+popW, "")
-		out[ri] = left + popLine + right
-	}
-
-	return strings.Join(out, "\n")
-}
-
-func (a App) renderTabBar() string {
-	var sb strings.Builder
-	used := 0
-	for i, m := range a.buffers {
-		name := filepath.Base(m.FilePath())
-		dirty := ""
-		if m.Dirty() {
-			dirty = tabDirtyMark
-		}
-		label := fmt.Sprintf("  %s%s  ", dirty, name)
-		var rendered string
-		if i == a.active {
-			rendered = tabActiveStyle.Render(label)
-		} else {
-			rendered = tabInactiveStyle.Render(label)
-		}
-		sb.WriteString(rendered)
-		used += lipgloss.Width(rendered)
-	}
-	// Show app-level status at the right if set.
-	if a.status != "" {
-		gap := a.width - used - lipgloss.Width(a.status)
-		if gap > 0 {
-			sb.WriteString(tabBarFill.Render(strings.Repeat(" ", gap)))
-		}
-		sb.WriteString(tabInactiveStyle.Foreground(lipgloss.Color("#FF5555")).Render(a.status))
-	} else if used < a.width {
-		sb.WriteString(tabBarFill.Render(strings.Repeat(" ", a.width-used)))
-	}
-	return sb.String()
 }

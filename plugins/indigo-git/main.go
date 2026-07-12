@@ -244,19 +244,11 @@ func (g *GitPlugin) updateDiffFromBuffer(bufID uint32, path, root string) {
 	origTmp.WriteString(headContent) //nolint:errcheck
 	_ = origTmp.Close()
 
-	// Write buffer content to a second temp file.
-	bufTmp, err := os.CreateTemp("", "indigo-git-buf-*")
-	if err != nil {
-		return
-	}
-	bufPath := bufTmp.Name()
-	defer os.Remove(bufPath) //nolint:errcheck
-	bufTmp.WriteString(content) //nolint:errcheck
-	_ = bufTmp.Close()
-
-	// Diff the two temp files. Exit code 1 = differences found (normal).
-	cmd := exec.Command("git", "diff", "--unified=0", "--no-index", "--", origPath, bufPath)
+	// Pipe buffer content via stdin; diff reads the HEAD temp file and stdin ("-").
+	// Exit code 1 = differences found (normal); 0 = identical; 2+ = error.
+	cmd := exec.Command("diff", "--unified=0", origPath, "-")
 	cmd.Dir = root
+	cmd.Stdin = strings.NewReader(content)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Run() //nolint:errcheck

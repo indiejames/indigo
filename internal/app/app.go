@@ -354,6 +354,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.doOpenFile(msg.absPath)
 
 	case client.OpenFileAtMsg:
+		if msg.Col >= 0 {
+			return a, a.doOpenFileAtPos(msg.Path, msg.Line, msg.Col)
+		}
 		return a, a.doOpenFileAt(msg.Path, msg.Line)
 
 	case switchBufferMsg:

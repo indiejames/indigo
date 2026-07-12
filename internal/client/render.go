@@ -493,13 +493,19 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 	gutterW := m.gutterWidth()
 	var sb strings.Builder
 
+	isFlash := lineNum == m.cursor.Line && m.flashTick > 0
+
 	padToWidth := func(s string) string {
 		if m.width <= 0 {
 			return s
 		}
 		w := lipgloss.Width(s)
 		if w < m.width {
-			return s + strings.Repeat(" ", m.width-w)
+			pad := strings.Repeat(" ", m.width-w)
+			if isFlash {
+				return s + flashPadStyle.Render(pad)
+			}
+			return s + pad
 		}
 		return s
 	}
@@ -550,9 +556,12 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 			}
 			if numW > 0 {
 				numStr := fmt.Sprintf("%*d ", numW-1, lineNum+1)
-				if lineNum == m.cursor.Line {
+				switch {
+				case isFlash:
+					sb.WriteString(flashGutterStyle.Width(numW).Render(numStr))
+				case lineNum == m.cursor.Line:
 					sb.WriteString(gutterCurStyle.Render(numStr))
-				} else {
+				default:
 					sb.WriteString(gutterStyle.Render(numStr))
 				}
 			}

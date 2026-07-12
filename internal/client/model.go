@@ -120,9 +120,11 @@ type CloseBufferMsg struct{}
 
 // OpenFileAtMsg signals the App to open a file at a specific 0-based line,
 // reusing an existing buffer if the file is already open.
+// Col is the 0-based column; -1 means no specific column (use start of line).
 type OpenFileAtMsg struct {
 	Path string
 	Line int
+	Col  int
 }
 
 // OpenPickerMsg signals the App to open the file picker.
@@ -230,9 +232,11 @@ var (
 	popupKeyStyle    lipgloss.Style
 	popupTextStyle   lipgloss.Style
 
-	selectionStyle lipgloss.Style
-	gutterStyle    lipgloss.Style
-	gutterCurStyle lipgloss.Style
+	selectionStyle  lipgloss.Style
+	gutterStyle     lipgloss.Style
+	gutterCurStyle  lipgloss.Style
+	flashGutterStyle lipgloss.Style
+	flashPadStyle    lipgloss.Style
 
 	diagErrorStyle lipgloss.Style
 	diagWarnStyle  lipgloss.Style
@@ -285,6 +289,8 @@ func ApplyTheme(t *theme.Theme) {
 	selectionStyle = lipgloss.NewStyle().Background(lipgloss.Color(t.UI.SelectionBg)).Foreground(lipgloss.Color(t.UI.SelectionFg))
 	gutterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.GutterFg))
 	gutterCurStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.GutterCurFg))
+	flashGutterStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+	flashPadStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8"))
 
 	diagErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.DiagErrorFg))
 	diagWarnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.DiagWarnFg))
@@ -337,6 +343,8 @@ func applyDefaultDark() {
 	selectionStyle = lipgloss.NewStyle().Background(lipgloss.Color("#2D5F8A")).Foreground(lipgloss.Color("#FFFFFF"))
 	gutterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#606060"))
 	gutterCurStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
+	flashGutterStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+	flashPadStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8"))
 
 	diagErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555"))
 	diagWarnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFDD44"))
@@ -473,6 +481,10 @@ type Model struct {
 
 	// Plugin help entries loaded at startup for the ? popup.
 	pluginBindings []ClientPluginBinding
+
+	// flashTick counts down after a jump (AtPos); the cursor line is highlighted
+	// while it is odd, creating a brief alternating flash effect.
+	flashTick int
 }
 
 // WithConfig returns a copy of the model with a new config applied.
@@ -541,14 +553,16 @@ func (m Model) AtLine(line int) Model {
 	return m
 }
 
-// AtPos moves the cursor to the given 0-based (line, col) and scrolls so the
-// target line sits ~25% down from the top of the visible area.
+// AtPos moves the cursor to the given 0-based (line, col), scrolls so the
+// target line sits ~25% down from the top of the visible area, and starts
+// a brief flash to make the landed line easy to spot.
 func (m Model) AtPos(line, col, bufHeight int) Model {
 	line = max(0, min(line, m.buf.LineCount()-1))
 	col = max(0, min(col, m.buf.LineLen(line)))
 	m.cursor = document.Pos{Line: line, Col: col}
 	quarter := max(1, bufHeight/4)
 	m.topLine = max(0, line-quarter)
+	m.flashTick = 5
 	return m
 }
 
@@ -592,6 +606,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		m.diagTick++
 		m.decorTick++
+		if m.flashTick > 0 {
+			m.flashTick--
+		}
 		cmds := []tea.Cmd{m.fetchUpdates(), tick()}
 		if m.diagTick%10 == 0 {
 			cmds = append(cmds, m.fetchDiagnostics())
@@ -760,14 +777,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.loc.Path == m.filePath {
-			m.cursor = document.Pos{Line: msg.loc.Line, Col: msg.loc.Col}
-			m.scrollToCursor()
+			m = m.AtPos(msg.loc.Line, msg.loc.Col, m.height)
 			return m, nil
 		}
-		// Different file: ask the App to open it in a new buffer.
+		// Different file: ask the App to open it, carrying the column so it
+		// also lands at 25% down rather than the top.
 		loc := msg.loc
 		return m, func() tea.Msg {
-			return OpenFileAtMsg{Path: loc.Path, Line: loc.Line}
+			return OpenFileAtMsg{Path: loc.Path, Line: loc.Line, Col: loc.Col}
 		}
 
 	case referencesMsg:

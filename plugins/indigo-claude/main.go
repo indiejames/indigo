@@ -10,30 +10,28 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/server"
 )
 
-// ─── message types ───────────────────────────────────────────────────────────
+// ─── conversation message types ───────────────────────────────────────────────
 
-// MsgRole classifies a conversation entry. Adding new roles here (e.g.
-// RoleDiff, RolePermission) is the extension point for future features.
 type MsgRole int
 
 const (
-	RoleStatus    MsgRole = iota // system/context updates, shown dimmed
-	RoleUser                     // user input
-	RoleAssistant                // Claude response
+	RoleStatus     MsgRole = iota // system/context updates, shown dimmed
+	RoleUser                      // user input
+	RoleAssistant                 // Claude response
+	RoleTool                      // tool call notification
+	RolePermission                // pending edit approval (replaced by status once resolved)
 )
 
-// ConvMsg is one entry in the conversation history.
-// Keep it simple for now; future roles (diff, permission) will add fields.
 type ConvMsg struct {
 	Role    MsgRole
 	Content string
-	// Pending bool  // future: true while streaming
 }
 
 // ─── tea messages ────────────────────────────────────────────────────────────
@@ -44,21 +42,45 @@ type activeCtxUpdated struct{ ctx client.ActiveContext }
 // ─── model ───────────────────────────────────────────────────────────────────
 
 type Model struct {
-	rpc       *client.RPC
-	width     int
-	height    int
-	conv      []ConvMsg
-	input     []rune
-	inputPos  int // cursor position within input (rune index)
+	rpc     *client.RPC
+	prog    *programLink
+	apiKey  string // non-empty = API mode; empty = CLI mode
+	workDir string
+
+	width    int
+	height   int
+	conv     []ConvMsg
+	input    []rune
+	inputPos int
+
+	// API mode state.
+	history     []apiMessage
+	pendingPerm *permissionRequestMsg
+
+	// CLI mode state.
+	sessionID string
+
+	// streaming state (both modes)
+	agentRunning     bool
+	streamingConvIdx int
+
 	activeCtx client.ActiveContext
-	scroll    int  // lines scrolled up from bottom; 0 = show latest
-	ready     bool // false until first WindowSizeMsg
+	scroll    int
+	ready     bool
 }
 
-func newModel(rpc *client.RPC) Model {
+func newModel(rpc *client.RPC, prog *programLink, apiKey, workDir string) Model {
+	mode := "CLI mode (Claude Code)"
+	if apiKey != "" {
+		mode = "API mode (buffer-aware edits)"
+	}
 	return Model{
-		rpc:  rpc,
-		conv: []ConvMsg{{Role: RoleStatus, Content: "Connected to indigo server."}},
+		rpc:              rpc,
+		prog:             prog,
+		apiKey:           apiKey,
+		workDir:          workDir,
+		streamingConvIdx: -1,
+		conv:             []ConvMsg{{Role: RoleStatus, Content: "Connected · " + mode}},
 	}
 }
 
@@ -83,8 +105,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		prev := m.activeCtx
 		m.activeCtx = msg.ctx
 		if msg.ctx.Found && msg.ctx.FilePath != prev.FilePath {
-			m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Active file: " + m.displayPath(msg.ctx.FilePath)})
+			m.conv = append(m.conv, ConvMsg{
+				Role:    RoleStatus,
+				Content: "Active file: " + m.displayPath(msg.ctx.FilePath),
+			})
 		}
+		return m, nil
+
+	case agentTextDeltaMsg:
+		if m.streamingConvIdx < 0 {
+			m.conv = append(m.conv, ConvMsg{Role: RoleAssistant, Content: msg.text})
+			m.streamingConvIdx = len(m.conv) - 1
+		} else {
+			m.conv[m.streamingConvIdx].Content += msg.text
+		}
+		m.scroll = 0
+		return m, nil
+
+	case agentToolStartMsg:
+		m.conv = append(m.conv, ConvMsg{Role: RoleTool, Content: "  ⟳ " + msg.name + "…"})
+		m.scroll = 0
+		return m, nil
+
+	case agentToolDoneMsg:
+		// Mark the most recent pending tool entry as done.
+		for i := len(m.conv) - 1; i >= 0; i-- {
+			if m.conv[i].Role == RoleTool && strings.HasSuffix(m.conv[i].Content, "…") {
+				m.conv[i].Content = "  ✓ " + strings.TrimSuffix(strings.TrimPrefix(m.conv[i].Content, "  ⟳ "), "…")
+				break
+			}
+		}
+		// Reset streaming index so next assistant segment starts a new ConvMsg.
+		m.streamingConvIdx = -1
+		return m, nil
+
+	case permissionRequestMsg:
+		m.pendingPerm = &msg
+		m.conv = append(m.conv, ConvMsg{Role: RolePermission, Content: renderPermissionDiff(msg)})
+		m.scroll = 0
+		return m, nil
+
+	case agentDoneMsg:
+		m.agentRunning = false
+		m.streamingConvIdx = -1
+		if msg.sessionID != "" {
+			m.sessionID = msg.sessionID
+		}
+		if msg.history != nil {
+			m.history = msg.history
+		}
+		return m, nil
+
+	case agentErrorMsg:
+		m.agentRunning = false
+		m.streamingConvIdx = -1
+		m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Error: " + msg.err.Error()})
 		return m, nil
 
 	case tea.KeyMsg:
@@ -94,6 +169,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pendingPerm != nil {
+		return m.handlePermissionKey(msg)
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Press ctrl+q to quit."})
@@ -104,18 +183,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyEnter:
 		text := strings.TrimSpace(string(m.input))
-		if text == "" {
+		if text == "" || m.agentRunning {
 			return m, nil
 		}
 		m.conv = append(m.conv, ConvMsg{Role: RoleUser, Content: text})
 		m.input = nil
 		m.inputPos = 0
 		m.scroll = 0
-		// TODO: wire Claude API here; for now echo a placeholder
-		m.conv = append(m.conv, ConvMsg{
-			Role:    RoleAssistant,
-			Content: "(Claude API not yet connected — coming soon)",
-		})
+		m.streamingConvIdx = -1
+		m.agentRunning = true
+
+		prog := m.prog
+		ac := m.activeCtx
+		if m.apiKey != "" {
+			history := append(m.history, buildUserMessage(text, ac)) //nolint:gocritic
+			apiKey := m.apiKey
+			rpc := m.rpc
+			workDir := m.workDir
+			go runAgent(prog, rpc, apiKey, workDir, history, ac)
+		} else {
+			go runClaudeSubprocess(prog, m.workDir, text, m.sessionID, ac)
+		}
 		return m, nil
 
 	case tea.KeyBackspace, tea.KeyDelete:
@@ -156,6 +244,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.KeySpace:
+		m.input = append(m.input[:m.inputPos], append([]rune{' '}, m.input[m.inputPos:]...)...)
+		m.inputPos++
+		return m, nil
+
 	case tea.KeyRunes:
 		r := []rune(msg.String())
 		m.input = append(m.input[:m.inputPos], append(r, m.input[m.inputPos:]...)...)
@@ -165,6 +258,44 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	perm := m.pendingPerm
+	m.pendingPerm = nil
+
+	approved := msg.String() == "y" || msg.String() == "Y"
+	label := "Rejected: " + perm.file
+	if approved {
+		label = "Approved: " + perm.file
+	}
+	for i := len(m.conv) - 1; i >= 0; i-- {
+		if m.conv[i].Role == RolePermission {
+			m.conv[i] = ConvMsg{Role: RoleStatus, Content: label}
+			break
+		}
+	}
+	perm.replyCh <- approved
+	return m, nil
+}
+
+func renderPermissionDiff(perm permissionRequestMsg) string {
+	var sb strings.Builder
+	sb.WriteString("  File: " + perm.file + "\n")
+	if perm.reason != "" {
+		sb.WriteString("  Reason: " + perm.reason + "\n")
+	}
+	for _, e := range perm.edits {
+		sb.WriteString("  ── remove ──\n")
+		for _, l := range strings.Split(e.oldText, "\n") {
+			sb.WriteString("  - " + l + "\n")
+		}
+		sb.WriteString("  ── add ──\n")
+		for _, l := range strings.Split(e.newText, "\n") {
+			sb.WriteString("  + " + l + "\n")
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
 // ─── view ────────────────────────────────────────────────────────────────────
 
 var (
@@ -172,6 +303,10 @@ var (
 	youStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFDD44")).Bold(true)
 	claudeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#44DDAA")).Bold(true)
 	statusStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#667788"))
+	toolStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#AABBCC"))
+	permStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF8844")).Bold(true)
+	diffOldStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555"))
+	diffNewStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#55FF55"))
 	dividerStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#334455"))
 	inputPromptSty = lipgloss.NewStyle().Foreground(lipgloss.Color("#087AC8")).Bold(true)
 	cursorStyle    = lipgloss.NewStyle().Reverse(true)
@@ -193,13 +328,15 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	var label string
+	label := " indigo-claude"
 	if m.activeCtx.Found {
 		label = fmt.Sprintf(" indigo-claude  ·  %s  line %d",
-			m.displayPath(m.activeCtx.FilePath),
-			m.activeCtx.Line+1)
-	} else {
-		label = " indigo-claude"
+			m.displayPath(m.activeCtx.FilePath), m.activeCtx.Line+1)
+	}
+	if m.pendingPerm != nil {
+		label += "  [approve edit? y/n]"
+	} else if m.agentRunning {
+		label += "  [thinking…]"
 	}
 	return headerStyle.Width(m.width).Render(label)
 }
@@ -209,11 +346,8 @@ func (m Model) renderConversation() string {
 	if h <= 0 {
 		return ""
 	}
-
-	// Render all messages to visual lines.
 	lines := m.renderAllLines()
 
-	// Apply scroll offset (clamped so we can't scroll past top).
 	maxScroll := len(lines) - h
 	if maxScroll < 0 {
 		maxScroll = 0
@@ -222,8 +356,6 @@ func (m Model) renderConversation() string {
 	if scroll > maxScroll {
 		scroll = maxScroll
 	}
-
-	// Select the window of lines to display (bottom-anchored by default).
 	start := len(lines) - h - scroll
 	if start < 0 {
 		start = 0
@@ -234,7 +366,6 @@ func (m Model) renderConversation() string {
 	}
 	visible := lines[start:end]
 
-	// Pad with empty lines at top if conversation is short.
 	var rows strings.Builder
 	for i := 0; i < h-len(visible); i++ {
 		rows.WriteString(strings.Repeat(" ", m.width))
@@ -249,7 +380,6 @@ func (m Model) renderConversation() string {
 	return rows.String()
 }
 
-// renderAllLines converts m.conv into a flat list of terminal-width strings.
 func (m Model) renderAllLines() []string {
 	w := m.width
 	if w < 8 {
@@ -258,26 +388,23 @@ func (m Model) renderAllLines() []string {
 	var lines []string
 	for i, msg := range m.conv {
 		if i > 0 {
-			lines = append(lines, "") // blank separator between messages
+			lines = append(lines, "")
 		}
 		lines = append(lines, m.renderMsg(msg, w)...)
 	}
 	return lines
 }
 
-// renderMsg renders one ConvMsg to visual lines of exactly width w.
 func (m Model) renderMsg(msg ConvMsg, w int) []string {
 	switch msg.Role {
 	case RoleStatus:
-		text := statusStyle.Render("  · " + msg.Content)
-		return []string{padRight(text, w)}
+		return []string{padRight(statusStyle.Render("  · "+msg.Content), w)}
 
 	case RoleUser:
 		label := youStyle.Render("You")
 		sep := dividerStyle.Render(strings.Repeat("─", max(0, w-lipgloss.Width(label)-2)))
-		header := label + " " + sep
 		var out []string
-		out = append(out, header)
+		out = append(out, label+" "+sep)
 		for _, l := range wordWrap(msg.Content, w-2) {
 			out = append(out, "  "+l)
 		}
@@ -286,11 +413,27 @@ func (m Model) renderMsg(msg ConvMsg, w int) []string {
 	case RoleAssistant:
 		label := claudeStyle.Render("Claude")
 		sep := dividerStyle.Render(strings.Repeat("─", max(0, w-lipgloss.Width(label)-2)))
-		header := label + " " + sep
 		var out []string
-		out = append(out, header)
-		for _, l := range wordWrap(msg.Content, w-2) {
-			out = append(out, "  "+l)
+		out = append(out, label+" "+sep)
+		out = append(out, renderMarkdown(msg.Content, w)...)
+		return out
+
+	case RoleTool:
+		return []string{padRight(toolStyle.Render(msg.Content), w)}
+
+	case RolePermission:
+		header := permStyle.Render("  ⚠ Edit request — approve? [y]es / [n]o")
+		out := []string{padRight(header, w)}
+		for _, l := range strings.Split(msg.Content, "\n") {
+			// Colour the diff lines.
+			switch {
+			case strings.HasPrefix(l, "  - "):
+				out = append(out, diffOldStyle.Render(l))
+			case strings.HasPrefix(l, "  + "):
+				out = append(out, diffNewStyle.Render(l))
+			default:
+				out = append(out, statusStyle.Render(l))
+			}
 		}
 		return out
 	}
@@ -298,6 +441,11 @@ func (m Model) renderMsg(msg ConvMsg, w int) []string {
 }
 
 func (m Model) renderDivider() string {
+	if m.agentRunning {
+		hint := statusStyle.Render(" thinking…")
+		dashes := max(0, m.width-lipgloss.Width(hint))
+		return dividerStyle.Render(strings.Repeat("─", dashes)) + hint
+	}
 	return dividerStyle.Render(strings.Repeat("─", m.width))
 }
 
@@ -309,11 +457,9 @@ func (m Model) renderInput() string {
 		avail = 1
 	}
 
-	// Build the input display with a cursor block.
 	before := string(m.input[:m.inputPos])
 	after := string(m.input[m.inputPos:])
 
-	// If the input is wider than available, scroll right so cursor is visible.
 	if len([]rune(before)) > avail-1 {
 		runes := []rune(before)
 		before = string(runes[len(runes)-(avail-1):])
@@ -332,7 +478,6 @@ func (m Model) renderInput() string {
 		after = ""
 	}
 
-	// Truncate after-cursor text to available width.
 	remainAfter := avail - len([]rune(before)) - 1
 	if remainAfter < 0 {
 		remainAfter = 0
@@ -348,7 +493,6 @@ func (m Model) renderInput() string {
 // ─── layout helpers ──────────────────────────────────────────────────────────
 
 func (m Model) convHeight() int {
-	// header(1) + newline(1) + conv + newline(1) + divider(1) + newline(1) + input(1) = header+conv+4
 	return max(1, m.height-5)
 }
 
@@ -377,17 +521,12 @@ func (m Model) cmdPollActiveCtx() tea.Cmd {
 // ─── utilities ───────────────────────────────────────────────────────────────
 
 func (m Model) displayPath(filePath string) string {
-	cwd, err := os.Getwd()
-	if err == nil {
-		if rel, err := filepath.Rel(cwd, filePath); err == nil && !strings.HasPrefix(rel, "..") {
-			return rel
-		}
+	if rel, err := filepath.Rel(m.workDir, filePath); err == nil && !strings.HasPrefix(rel, "..") {
+		return rel
 	}
 	return filepath.Base(filePath)
 }
 
-// wordWrap splits text into lines of at most width visible characters,
-// breaking on word boundaries. Preserves existing newlines.
 func wordWrap(text string, width int) []string {
 	if width <= 0 {
 		return []string{text}
@@ -422,7 +561,50 @@ func wordWrap(text string, width int) []string {
 	return lines
 }
 
-// padRight pads s to at least width terminal columns with spaces.
+// ─── markdown rendering ──────────────────────────────────────────────────────
+
+// mdCache holds a glamour renderer for the last-seen width. View() is
+// single-threaded (Bubble Tea main loop), so no lock is needed.
+var mdCache struct {
+	width int
+	r     *glamour.TermRenderer
+}
+
+func getMarkdownRenderer(width int) *glamour.TermRenderer {
+	if mdCache.r == nil || mdCache.width != width {
+		r, err := glamour.NewTermRenderer(
+			glamour.WithStandardStyle("dark"),
+			glamour.WithWordWrap(width),
+		)
+		if err != nil {
+			return nil
+		}
+		mdCache.r = r
+		mdCache.width = width
+	}
+	return mdCache.r
+}
+
+// renderMarkdown runs content through glamour and returns terminal lines.
+// Falls back to plain word-wrap if glamour fails.
+func renderMarkdown(content string, width int) []string {
+	r := getMarkdownRenderer(width)
+	if r == nil {
+		return wordWrap(content, width)
+	}
+	rendered, err := r.Render(content)
+	if err != nil {
+		return wordWrap(content, width)
+	}
+	// Glamour wraps output in blank lines; trim them.
+	rendered = strings.TrimRight(rendered, "\n")
+	lines := strings.Split(rendered, "\n")
+	if len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
+		lines = lines[1:]
+	}
+	return lines
+}
+
 func padRight(s string, width int) string {
 	vis := lipgloss.Width(s)
 	if vis >= width {
@@ -440,9 +622,6 @@ func max(a, b int) int {
 
 // ─── lock file ───────────────────────────────────────────────────────────────
 
-// acquireWorkspaceLock creates an exclusive flock on <socketDir>/claude.lock.
-// The lock is released automatically when the process exits (even on crash).
-// Returns the open file so the caller can keep it alive for the process lifetime.
 func acquireWorkspaceLock(sockPath string) (*os.File, error) {
 	lockPath := filepath.Join(filepath.Dir(sockPath), "claude.lock")
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0600)
@@ -485,9 +664,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	model := newModel(rpc)
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+
+	prog := &programLink{}
+	model := newModel(rpc, prog, apiKey, workDir)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
+
+	prog.mu.Lock()
+	prog.send = p.Send
+	prog.mu.Unlock()
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "indigo-claude: %v\n", err)

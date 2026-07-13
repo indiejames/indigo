@@ -47,13 +47,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "ctrl+c":
-		if m.buf.Dirty() && !m.checkingQuit {
-			m.checkingQuit = true
-			return m, m.fetchClientCount()
-		}
-		if !m.checkingQuit {
-			return m, m.doCloseBuffer()
-		}
+		m.status = "Use :q to quit"
 	case "ctrl+p":
 		return m, func() tea.Msg { return OpenPickerMsg{} }
 

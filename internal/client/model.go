@@ -42,8 +42,6 @@ type savedAsMsg struct {
 	thenClose  bool
 }
 
-// clientCountMsg carries the result of a bufferClientCount RPC.
-type clientCountMsg struct{ count uint32 }
 
 // discardRecoveryMsg carries original file content after the server discards the recovery file.
 type discardRecoveryMsg struct{ content string }
@@ -416,8 +414,6 @@ type Model struct {
 	filePath       string
 	workDir        string // project root, used for display-path shortening
 	status         string // transient error message shown in modeline
-	warnQuit       bool   // showing unsaved-changes warning
-	checkingQuit   bool // client-count RPC in flight
 	sel            *Selection
 	dragging       bool
 	lastClickAt    time.Time
@@ -661,16 +657,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = ""
 		m.savedUndoDepth = len(m.undoStack)
 		if msg.thenClose {
-			return m, m.doCloseBuffer()
-		}
-		return m, nil
-
-	case clientCountMsg:
-		m.checkingQuit = false
-		if msg.count <= 1 {
-			m.warnQuit = true
-		} else {
-			// Another client has the buffer — safe to close without warning.
 			return m, m.doCloseBuffer()
 		}
 		return m, nil

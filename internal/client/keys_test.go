@@ -334,68 +334,6 @@ func TestHandleInsertEnd(t *testing.T) {
 	}
 }
 
-// --- handleWarnQuit ---
-
-func TestHandleWarnQuitDiscardQ(t *testing.T) {
-	m := newTestModel("text")
-	m.warnQuit = true
-	m2, cmd := m.handleWarnQuit(fakeKey("q"))
-	got := m2.(Model)
-	if got.warnQuit {
-		t.Error("q: warnQuit should be false")
-	}
-	if cmd == nil {
-		t.Error("q: should return a close cmd")
-	}
-}
-
-func TestHandleWarnQuitDiscardCapQ(t *testing.T) {
-	m := newTestModel("text")
-	m.warnQuit = true
-	_, cmd := m.handleWarnQuit(fakeKey("Q"))
-	if cmd == nil {
-		t.Error("Q: should return a close cmd")
-	}
-}
-
-func TestHandleWarnQuitEscCancels(t *testing.T) {
-	m := newTestModel("text")
-	m.warnQuit = true
-	m2, cmd := m.handleWarnQuit(fakeKey("esc"))
-	got := m2.(Model)
-	if got.warnQuit {
-		t.Error("esc: warnQuit should be false")
-	}
-	if cmd != nil {
-		t.Error("esc: should not return a close cmd")
-	}
-}
-
-func TestHandleWarnQuitNKey(t *testing.T) {
-	m := newTestModel("text")
-	m.warnQuit = true
-	m2, cmd := m.handleWarnQuit(fakeKey("n"))
-	got := m2.(Model)
-	if got.warnQuit {
-		t.Error("n: warnQuit should be false")
-	}
-	if cmd != nil {
-		t.Error("n: should not return a close cmd")
-	}
-}
-
-func TestHandleWarnQuitSaveReturnsCmd(t *testing.T) {
-	m := newTestModel("text")
-	m.warnQuit = true
-	m2, cmd := m.handleWarnQuit(fakeKey("s"))
-	got := m2.(Model)
-	if got.warnQuit {
-		t.Error("s: warnQuit should be false")
-	}
-	if cmd == nil {
-		t.Error("s: should return a non-nil cmd for saving")
-	}
-}
 
 // --- executeSelectInsideWord ---
 

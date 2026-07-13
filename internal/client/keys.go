@@ -129,10 +129,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.recoveryPrompt {
 		return m.handleRecoveryPrompt(msg)
 	}
-	if m.warnQuit {
-		return m.handleWarnQuit(msg)
-	}
-	// Escape dismisses the diagnostic popup and suppresses re-show until cursor leaves the range.
+// Escape dismisses the diagnostic popup and suppresses re-show until cursor leaves the range.
 	// Always falls through so the mode transition (insert→normal) also happens.
 	if m.diagPopup && msg.String() == "esc" {
 		m.diagPopup = false
@@ -267,20 +264,6 @@ func (m Model) handleRecoveryPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return discardRecoveryMsg{content}
 		}
-	}
-	return m, nil
-}
-
-func (m Model) handleWarnQuit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "s", "ctrl+s":
-		m.warnQuit = false
-		return m, m.doSaveAndClose()
-	case "q", "Q":
-		m.warnQuit = false
-		return m, m.doCloseBuffer()
-	case "esc", "n", "N":
-		m.warnQuit = false
 	}
 	return m, nil
 }

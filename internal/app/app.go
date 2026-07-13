@@ -372,7 +372,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return a, nil
+		return a, a.buffers[a.active].ReportActiveContextCmd()
 
 	// ---- file opened ----
 	case bufferOpenedMsg:
@@ -411,14 +411,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.active = (a.active + 1) % len(a.buffers)
 			a.status = ""
 		}
-		return a, nil
+		return a, a.buffers[a.active].ReportActiveContextCmd()
 
 	case client.PrevBufferMsg:
 		if len(a.buffers) > 1 {
 			a.active = (a.active - 1 + len(a.buffers)) % len(a.buffers)
 			a.status = ""
 		}
-		return a, nil
+		return a, a.buffers[a.active].ReportActiveContextCmd()
 
 	// ---- cleanup done ----
 	case appQuitMsg:

@@ -518,9 +518,7 @@ func (m Model) renderStatusBar() string {
 	switch {
 	case m.recoveryPrompt:
 		centerContent = "Recovery file found!   Use it [y]   Ignore and delete [n]"
-	case m.warnQuit:
-		centerContent = "Unsaved changes!   Save [s]   Discard [q]   Cancel [esc]"
-	case m.status != "":
+case m.status != "":
 		centerContent = dp + dirtyMark + "   " + m.status
 	default:
 		centerContent = dp + dirtyMark

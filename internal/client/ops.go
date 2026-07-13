@@ -259,18 +259,6 @@ func (m Model) doSaveAsNow(newPath string, thenClose bool) tea.Cmd {
 	}
 }
 
-func (m Model) fetchClientCount() tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		count, err := m.rpc.BufferClientCount(ctx, m.bufID)
-		if err != nil {
-			// On error, assume we're alone and warn.
-			return clientCountMsg{count: 1}
-		}
-		return clientCountMsg{count: count}
-	}
-}
 
 func (m Model) reparseHighlight() tea.Cmd {
 	if m.hlr == nil {

@@ -486,11 +486,11 @@ type Model struct {
 	// while it is odd, creating a brief alternating flash effect.
 	flashTick int
 
-	// isActiveCtx is true after this client has reported itself as the active
-	// context to the server. Cleared on terminal blur so the next cursor move or
-	// focus event re-reports. Also cleared on buffer switch so the newly active
-	// buffer always reports itself.
-	isActiveCtx bool
+	// lastReportedLine/Col track the cursor position last sent to the server via
+	// SetActiveContext. Initialized to -1 so the first cursor move always reports.
+	// Reset to -1 on blur so re-focus always triggers a fresh report.
+	lastReportedLine int
+	lastReportedCol  int
 }
 
 // WithConfig returns a copy of the model with a new config applied.
@@ -519,6 +519,8 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 		recoveryPrompt:      fromRecovery,
 		pluginBindings:      rpc.PluginBindings(),
 		reservePluginGutter: rpc != nil,
+		lastReportedLine:    -1,
+		lastReportedCol:     -1,
 	}
 }
 
@@ -806,15 +808,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return OpenDocSymbolPickerMsg{BufID: bufID, Syms: syms} }
 
 	case tea.FocusMsg:
-		m.isActiveCtx = true
 		return m, m.ReportActiveContextCmd()
 
 	case tea.BlurMsg:
-		m.isActiveCtx = false
+		m.lastReportedLine = -1
+		m.lastReportedCol = -1
 		return m, nil
 
 	case tea.MouseMsg:
 		prevTopLine := m.topLine
+		prevCursor := m.cursor
 		switch {
 		case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
 			m.handleMousePress(msg.X, msg.Y)
@@ -827,10 +830,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sel = nil
 			}
 		}
+		var cmds []tea.Cmd
 		if m.topLine != prevTopLine {
-			return m, m.updateViewportCmd()
+			cmds = append(cmds, m.updateViewportCmd())
 		}
-		return m, nil
+		if m.cursor != prevCursor && (m.cursor.Line != m.lastReportedLine || m.cursor.Col != m.lastReportedCol) {
+			m.lastReportedLine = m.cursor.Line
+			m.lastReportedCol = m.cursor.Col
+			cmds = append(cmds, m.ReportActiveContextCmd())
+		}
+		return m, tea.Batch(cmds...)
 
 	case decorationsMsg:
 		if msg.bufID != m.bufID {
@@ -898,8 +907,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Fallback focus detection: if terminal focus events aren't working,
 		// the first cursor move or edit after focus switches panes reports the
 		// active context. Once reported, skip until BlurMsg clears the flag.
-		if !nm.isActiveCtx {
-			nm.isActiveCtx = true
+		if nm.cursor.Line != nm.lastReportedLine || nm.cursor.Col != nm.lastReportedCol {
+			nm.lastReportedLine = nm.cursor.Line
+			nm.lastReportedCol = nm.cursor.Col
 			cmd = tea.Batch(cmd, nm.ReportActiveContextCmd())
 		}
 		return nm, cmd

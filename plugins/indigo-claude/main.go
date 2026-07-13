@@ -119,12 +119,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.conv[m.streamingConvIdx].Content += msg.text
 		}
-		m.scroll = 0
 		return m, nil
 
 	case agentToolStartMsg:
 		m.conv = append(m.conv, ConvMsg{Role: RoleTool, Content: "  ⟳ " + msg.name + "…"})
-		m.scroll = 0
 		return m, nil
 
 	case agentToolDoneMsg:
@@ -231,6 +229,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyEnd, tea.KeyCtrlE:
 		m.inputPos = len(m.input)
+		return m, nil
+
+	case tea.KeyUp:
+		m.scroll++
+		return m, nil
+
+	case tea.KeyDown:
+		if m.scroll > 0 {
+			m.scroll--
+		}
 		return m, nil
 
 	case tea.KeyPgUp:
@@ -372,7 +380,7 @@ func (m Model) renderConversation() string {
 		rows.WriteByte('\n')
 	}
 	for i, l := range visible {
-		rows.WriteString(l)
+		rows.WriteString(padRight(strings.TrimRight(l, "\r"), m.width))
 		if i < len(visible)-1 {
 			rows.WriteByte('\n')
 		}
@@ -441,12 +449,15 @@ func (m Model) renderMsg(msg ConvMsg, w int) []string {
 }
 
 func (m Model) renderDivider() string {
-	if m.agentRunning {
-		hint := statusStyle.Render(" thinking…")
-		dashes := max(0, m.width-lipgloss.Width(hint))
-		return dividerStyle.Render(strings.Repeat("─", dashes)) + hint
+	var hint string
+	switch {
+	case m.agentRunning:
+		hint = statusStyle.Render(" thinking…")
+	case m.scroll > 0:
+		hint = statusStyle.Render(" ↑↓ / PgUp PgDn to scroll · ↓ for latest")
 	}
-	return dividerStyle.Render(strings.Repeat("─", m.width))
+	dashes := max(0, m.width-lipgloss.Width(hint))
+	return dividerStyle.Render(strings.Repeat("─", dashes)) + hint
 }
 
 func (m Model) renderInput() string {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -73,6 +74,8 @@ Rules:
 - Explain your reasoning before using apply_edits.
 - Each apply_edits call requires user approval; batch related edits into one call when possible.
 - When the user asks a question that doesn't require editing, just answer.
+- This is a text-only terminal interface. The user cannot share screenshots, images, or any visual media.
+  If you need visual information, use your tools to read the relevant source code directly. Never ask for a screenshot.
 `)
 	return sb.String()
 }
@@ -147,6 +150,43 @@ func runAgent(prog *programLink, rpc *client.RPC, apiKey, workDir string, histor
 	}
 }
 
+// toolDisplayName returns a short human-readable label for a tool call.
+func toolDisplayName(name string, input json.RawMessage) string {
+	var args map[string]string
+	json.Unmarshal(input, &args) //nolint:errcheck
+
+	switch name {
+	case "Read", "Edit", "Write", "MultiEdit", "NotebookEdit":
+		if f := args["file_path"]; f != "" {
+			return name + ": " + filepath.Base(f)
+		}
+	case "Bash":
+		if cmd := args["command"]; cmd != "" {
+			if len(cmd) > 32 {
+				cmd = cmd[:32] + "…"
+			}
+			return "Bash: " + cmd
+		}
+	case "Grep":
+		if p := args["pattern"]; p != "" {
+			return "Grep: " + p
+		}
+	case "Glob":
+		if p := args["pattern"]; p != "" {
+			return "Glob: " + p
+		}
+	case "WebSearch":
+		if q := args["query"]; q != "" {
+			return "Search: " + q
+		}
+	case "WebFetch":
+		if u := args["url"]; u != "" {
+			return "Fetch: " + u
+		}
+	}
+	return name
+}
+
 // ─── subprocess runner ───────────────────────────────────────────────────────
 
 // runClaudeSubprocess runs `claude -p` as a subprocess and emits agent events.
@@ -163,14 +203,18 @@ func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, a
 	if sessionID != "" {
 		args = append(args, "--resume", sessionID)
 	}
+	sysPrompt := "This is indigo-claude, a text-only terminal interface. " +
+		"The user cannot share screenshots, images, or any visual media. " +
+		"If you need visual information, use your file-reading tools to inspect the source code directly. " +
+		"Never ask for a screenshot."
 	if ac.Found {
-		sysPrompt := fmt.Sprintf(
-			"The user is currently editing %s at line %d, column %d. "+
-				"When suggesting edits to this file, prefer editing that file first.",
+		sysPrompt += fmt.Sprintf(
+			" The user is currently editing %s at line %d, column %d."+
+				" When suggesting edits to this file, prefer editing that file first.",
 			ac.FilePath, ac.Line+1, ac.Col+1,
 		)
-		args = append(args, "--append-system-prompt", sysPrompt)
 	}
+	args = append(args, "--append-system-prompt", sysPrompt)
 
 	cmd := exec.CommandContext(context.Background(), "claude", args...)
 	cmd.Dir = workDir
@@ -191,9 +235,11 @@ func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, a
 
 	var (
 		newSessionID string
-		// lastTextLen tracks how much text we've already emitted for the current
-		// assistant turn, so we only emit deltas as partial messages arrive.
 		lastTextLen  int
+		// Track announced tool calls by ID so partial events don't double-emit.
+		announced    = map[string]bool{}
+		// Map tool_use ID → display name so tool_result events can name the tool.
+		pendingTools = map[string]string{}
 	)
 
 	scanner := bufio.NewScanner(stdout)
@@ -214,17 +260,17 @@ func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, a
 
 		switch evType {
 		case "system":
-			// Capture the session ID so we can resume it next turn.
 			json.Unmarshal(ev["session_id"], &newSessionID) //nolint:errcheck
 
 		case "assistant":
-			// Parse content blocks; emit text deltas and tool-start notifications.
 			var wrapper struct {
 				Message struct {
 					Content []struct {
-						Type string `json:"type"`
-						Text string `json:"text"`
-						Name string `json:"name"`
+						Type  string          `json:"type"`
+						Text  string          `json:"text"`
+						ID    string          `json:"id"`
+						Name  string          `json:"name"`
+						Input json.RawMessage `json:"input"`
 					} `json:"content"`
 				} `json:"message"`
 			}
@@ -237,19 +283,48 @@ func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, a
 				case "text":
 					fullText.WriteString(blk.Text)
 				case "tool_use":
-					prog.emit(agentToolStartMsg{name: blk.Name})
+					display := toolDisplayName(blk.Name, blk.Input)
+					pendingTools[blk.ID] = display
+					if !announced[blk.ID] {
+						announced[blk.ID] = true
+						prog.emit(agentToolStartMsg{name: display})
+					}
 				}
 			}
-			// Emit only new text since the last partial.
 			text := fullText.String()
+			// If text shrank, a new assistant turn started after a tool call.
+			if len(text) < lastTextLen {
+				lastTextLen = 0
+			}
 			if len(text) > lastTextLen {
 				prog.emit(agentTextDeltaMsg{text: text[lastTextLen:]})
 				lastTextLen = len(text)
 			}
 
-		case "tool_result":
-			// A tool finished; reset delta counter for the next assistant segment.
-			prog.emit(agentToolDoneMsg{name: "tool"})
+		case "user":
+			// Tool results arrive as user messages. Mark each pending tool done
+			// and reset the text counter for the next assistant segment.
+			var wrapper struct {
+				Message struct {
+					Content []struct {
+						Type      string `json:"type"`
+						ToolUseID string `json:"tool_use_id"`
+					} `json:"content"`
+				} `json:"message"`
+			}
+			if json.Unmarshal([]byte(line), &wrapper) == nil {
+				for _, blk := range wrapper.Message.Content {
+					if blk.Type == "tool_result" {
+						name := pendingTools[blk.ToolUseID]
+						if name == "" {
+							name = "tool"
+						}
+						prog.emit(agentToolDoneMsg{name: name})
+						delete(pendingTools, blk.ToolUseID)
+						delete(announced, blk.ToolUseID)
+					}
+				}
+			}
 			lastTextLen = 0
 
 		case "result":

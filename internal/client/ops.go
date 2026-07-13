@@ -11,6 +11,26 @@ import (
 	"github.com/indiejames/indigo/internal/highlight"
 )
 
+// ReportActiveContextCmd returns a Cmd that tells the server this client's
+// current buffer and cursor position is the active context. Returns nil when
+// rpc is nil (e.g. in tests).
+func (m Model) ReportActiveContextCmd() tea.Cmd {
+	if m.rpc == nil {
+		return nil
+	}
+	clientID := m.rpc.ClientID()
+	bufID := m.bufID
+	filePath := m.filePath
+	line := uint32(m.cursor.Line)
+	col := uint32(m.cursor.Col)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = m.rpc.SetActiveContext(ctx, clientID, bufID, filePath, line, col)
+		return nil
+	}
+}
+
 // sendOp applies the op locally and sends it to the server.
 func (m Model) sendOp(op document.Op) tea.Cmd {
 	m.buf.Apply(op)

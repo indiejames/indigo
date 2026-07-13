@@ -99,6 +99,10 @@ type editorService struct {
 	inputOnConfirm func(text string)
 	inputOnCancel  func()
 
+	// activeCtx tracks the most recently active client buffer for external tools.
+	activeCtxMu sync.RWMutex
+	activeCtx   activeContext
+
 	// shutdown is called when the last client disconnects (cleanly or not).
 	shutdown        func()
 	onClientConnect func() // called once per Connect RPC; used to mark that real clients have connected

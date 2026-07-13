@@ -489,6 +489,12 @@ type Model struct {
 	// flashTick counts down after a jump (AtPos); the cursor line is highlighted
 	// while it is odd, creating a brief alternating flash effect.
 	flashTick int
+
+	// isActiveCtx is true after this client has reported itself as the active
+	// context to the server. Cleared on terminal blur so the next cursor move or
+	// focus event re-reports. Also cleared on buffer switch so the newly active
+	// buffer always reports itself.
+	isActiveCtx bool
 }
 
 // WithConfig returns a copy of the model with a new config applied.
@@ -598,7 +604,7 @@ func tick() tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(tick(), m.reparseHighlight(), m.fetchDecorations())
+	return tea.Batch(tick(), m.reparseHighlight(), m.fetchDecorations(), m.ReportActiveContextCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -813,6 +819,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_ = bufID
 		return m, func() tea.Msg { return OpenDocSymbolPickerMsg{BufID: bufID, Syms: syms} }
 
+	case tea.FocusMsg:
+		m.isActiveCtx = true
+		return m, m.ReportActiveContextCmd()
+
+	case tea.BlurMsg:
+		m.isActiveCtx = false
+		return m, nil
+
 	case tea.MouseMsg:
 		prevTopLine := m.topLine
 		switch {
@@ -894,6 +908,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Entered a range (not suppressed): schedule show.
 				cmd = tea.Batch(cmd, scheduleShowDiagPopup())
 			}
+		}
+		// Fallback focus detection: if terminal focus events aren't working,
+		// the first cursor move or edit after focus switches panes reports the
+		// active context. Once reported, skip until BlurMsg clears the flag.
+		if !nm.isActiveCtx {
+			nm.isActiveCtx = true
+			cmd = tea.Batch(cmd, nm.ReportActiveContextCmd())
 		}
 		return nm, cmd
 	}

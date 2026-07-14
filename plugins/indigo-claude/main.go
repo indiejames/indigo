@@ -23,11 +23,12 @@ import (
 type MsgRole int
 
 const (
-	RoleStatus     MsgRole = iota // system/context updates, shown dimmed
-	RoleUser                      // user input
-	RoleAssistant                 // Claude response
-	RoleTool                      // tool call notification
-	RolePermission                // pending edit approval (replaced by status once resolved)
+	RoleStatus          MsgRole = iota // system/context updates, shown dimmed
+	RoleUser                           // user input
+	RoleAssistant                      // Claude response
+	RoleTool                           // tool call notification
+	RolePermission                     // pending file edit approval
+	RoleShellPermission                // pending shell command approval
 )
 
 type ConvMsg struct {
@@ -57,6 +58,9 @@ type Model struct {
 	// API mode state.
 	history     []apiMessage
 	pendingPerm *permissionRequestMsg
+
+	// CLI mode hook state.
+	pendingShellPerm *shellPermissionRequestMsg
 
 	// CLI mode state.
 	sessionID string
@@ -149,6 +153,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scroll = 0
 		return m, nil
 
+	case shellPermissionRequestMsg:
+		m.pendingShellPerm = &msg
+		m.conv = append(m.conv, ConvMsg{Role: RoleShellPermission, Content: "  $ " + msg.command})
+		m.scroll = 0
+		return m, nil
+
 	case agentDoneMsg:
 		m.agentRunning = false
 		m.streamingConvIdx = -1
@@ -158,6 +168,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.history != nil {
 			m.history = msg.history
 		}
+		return m, nil
+
+	case agentUnknownEventMsg:
 		return m, nil
 
 	case agentErrorMsg:
@@ -175,6 +188,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.pendingPerm != nil {
 		return m.handlePermissionKey(msg)
+	}
+	if m.pendingShellPerm != nil {
+		return m.handleShellPermissionKey(msg)
 	}
 
 	switch msg.Type {
@@ -374,6 +390,25 @@ func (m Model) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleShellPermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	perm := m.pendingShellPerm
+	m.pendingShellPerm = nil
+
+	approved := msg.String() == "y" || msg.String() == "Y"
+	label := "Command rejected."
+	if approved {
+		label = "Command approved."
+	}
+	for i := len(m.conv) - 1; i >= 0; i-- {
+		if m.conv[i].Role == RoleShellPermission {
+			m.conv[i] = ConvMsg{Role: RoleStatus, Content: label}
+			break
+		}
+	}
+	perm.replyCh <- approved
+	return m, nil
+}
+
 func renderPermissionDiff(perm permissionRequestMsg) string {
 	var sb strings.Builder
 	sb.WriteString("  File: " + perm.file + "\n")
@@ -437,8 +472,8 @@ func (m Model) renderHeader() string {
 		label = fmt.Sprintf(" indigo-claude  ·  %s  line %d",
 			m.displayPath(m.activeCtx.FilePath), m.activeCtx.Line+1)
 	}
-	if m.pendingPerm != nil {
-		label += "  [approve edit? y/n]"
+	if m.pendingPerm != nil || m.pendingShellPerm != nil {
+		label += "  [approve? y/n]"
 	} else if m.agentRunning {
 		label += "  [thinking…]"
 	}
@@ -529,7 +564,6 @@ func (m Model) renderMsg(msg ConvMsg, w int) []string {
 		header := permStyle.Render("  ⚠ Edit request — approve? [y]es / [n]o")
 		out := []string{padRight(header, w)}
 		for _, l := range strings.Split(msg.Content, "\n") {
-			// Colour the diff lines.
 			switch {
 			case strings.HasPrefix(l, "  - "):
 				out = append(out, diffOldStyle.Render(l))
@@ -538,6 +572,14 @@ func (m Model) renderMsg(msg ConvMsg, w int) []string {
 			default:
 				out = append(out, statusStyle.Render(l))
 			}
+		}
+		return out
+
+	case RoleShellPermission:
+		header := permStyle.Render("  ⚠ Shell command — approve? [y]es / [n]o")
+		out := []string{padRight(header, w)}
+		for _, l := range strings.Split(msg.Content, "\n") {
+			out = append(out, toolStyle.Render(l))
 		}
 		return out
 	}
@@ -810,6 +852,12 @@ func acquireWorkspaceLock(sockPath string) (*os.File, error) {
 // ─── main ────────────────────────────────────────────────────────────────────
 
 func main() {
+	// Hook-client mode: invoked by the PreToolUse hook script.
+	if len(os.Args) == 3 && os.Args[1] == "--hook" {
+		runHookClient(os.Args[2])
+		return
+	}
+
 	workDir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "indigo-claude: cannot determine working directory: %v\n", err)
@@ -839,6 +887,25 @@ func main() {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 
 	prog := &programLink{}
+
+	// Set up PreToolUse permission hook (best-effort; CLI mode only).
+	pid := os.Getpid()
+	permSockPath := fmt.Sprintf("/tmp/indigo-claude-perm-%d.sock", pid)
+	hookScriptPath := fmt.Sprintf("/tmp/indigo-claude-hook-%d.sh", pid)
+	if binaryPath, err := os.Executable(); err == nil {
+		if err := writeHookScript(hookScriptPath, binaryPath, permSockPath); err == nil {
+			installHook(workDir, hookScriptPath) //nolint:errcheck
+			defer func() {
+				removeHook(workDir)
+				os.Remove(hookScriptPath)
+				os.Remove(permSockPath)
+			}()
+			if ln, err := startPermissionServer(permSockPath, prog); err == nil {
+				defer ln.Close() //nolint:errcheck
+			}
+		}
+	}
+
 	model := newModel(rpc, prog, apiKey, workDir)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)

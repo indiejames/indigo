@@ -30,7 +30,10 @@ func runHookClient(socketPath string) {
 	}
 	defer conn.Close() //nolint:errcheck
 
-	fmt.Fprintln(conn, input.String())
+	if _, err := fmt.Fprintln(conn, input.String()); err != nil {
+		os.Stdout.Write(decisionJSON(true)) //nolint:errcheck
+		return
+	}
 
 	resp, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {

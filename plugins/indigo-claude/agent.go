@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -21,8 +22,9 @@ import (
 // programLink lets goroutines push tea.Msg values to the running program.
 // The send field is set after tea.NewProgram returns its *Program.
 type programLink struct {
-	mu   sync.Mutex
-	send func(tea.Msg)
+	mu     sync.Mutex
+	send   func(tea.Msg)
+	cancel context.CancelFunc
 }
 
 func (pl *programLink) emit(msg tea.Msg) {
@@ -31,6 +33,22 @@ func (pl *programLink) emit(msg tea.Msg) {
 	pl.mu.Unlock()
 	if fn != nil {
 		fn(msg)
+	}
+}
+
+func (pl *programLink) setCancel(fn context.CancelFunc) {
+	pl.mu.Lock()
+	pl.cancel = fn
+	pl.mu.Unlock()
+}
+
+func (pl *programLink) cancelAgent() {
+	pl.mu.Lock()
+	fn := pl.cancel
+	pl.cancel = nil
+	pl.mu.Unlock()
+	if fn != nil {
+		fn()
 	}
 }
 
@@ -52,6 +70,32 @@ type permissionRequestMsg struct {
 	reason  string
 	edits   []editSpec
 	replyCh chan bool
+}
+
+// ─── buffer context snippet ──────────────────────────────────────────────────
+
+// bufferSnippet reads ±radius lines around line (0-indexed) from filePath and
+// returns a fenced block with the cursor line marked. Returns "" on error.
+func bufferSnippet(filePath string, line, radius int) string {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return ""
+	}
+	fileLines := strings.Split(string(data), "\n")
+	start := max(0, line-radius)
+	end := min(len(fileLines), line+radius+1)
+
+	var sb strings.Builder
+	sb.WriteString("```\n")
+	for i := start; i < end; i++ {
+		if i == line {
+			fmt.Fprintf(&sb, "▶ %4d  %s\n", i+1, fileLines[i])
+		} else {
+			fmt.Fprintf(&sb, "  %4d  %s\n", i+1, fileLines[i])
+		}
+	}
+	sb.WriteString("```")
+	return sb.String()
 }
 
 // ─── API mode: agentic loop ──────────────────────────────────────────────────
@@ -80,17 +124,27 @@ Rules:
 	return sb.String()
 }
 
-func buildUserMessage(text string, ac client.ActiveContext) apiMessage {
+func buildUserMessage(text string, ac client.ActiveContext, snippet string) apiMessage {
 	if !ac.Found {
 		return userText(text)
 	}
-	ctx := fmt.Sprintf("[Active file: %s, line %d]\n\n", ac.FilePath, ac.Line+1)
-	return userText(ctx + text)
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "[Active file: %s, line %d]\n\n", ac.FilePath, ac.Line+1)
+	if snippet != "" {
+		sb.WriteString("Context around cursor:\n")
+		sb.WriteString(snippet)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString(text)
+	return userText(sb.String())
 }
 
 // runAgent runs the direct-API agentic loop in a goroutine.
-func runAgent(prog *programLink, rpc *client.RPC, apiKey, workDir string, history []apiMessage, ac client.ActiveContext) {
-	ctx := context.Background()
+func runAgent(prog *programLink, rpc *client.RPC, apiKey, workDir string, history []apiMessage, ac client.ActiveContext, snippet string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	prog.setCancel(cancel)
+	defer prog.setCancel(nil)
+
 	system := buildSystemPrompt(workDir, ac)
 	tools := allTools()
 
@@ -192,7 +246,7 @@ func toolDisplayName(name string, input json.RawMessage) string {
 // runClaudeSubprocess runs `claude -p` as a subprocess and emits agent events.
 // sessionID is empty for the first turn; subsequent turns pass --resume so Claude
 // Code continues the conversation with full context.
-func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, ac client.ActiveContext) {
+func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, ac client.ActiveContext, snippet string) {
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
@@ -216,9 +270,21 @@ func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, a
 	}
 	args = append(args, "--append-system-prompt", sysPrompt)
 
-	cmd := exec.CommandContext(context.Background(), "claude", args...)
+	ctx, cancel := context.WithCancel(context.Background())
+	prog.setCancel(cancel)
+	defer prog.setCancel(nil)
+
+	// Prepend file context to the user prompt so Claude sees the relevant code
+	// without needing a read_file tool call.
+	userPrompt := prompt
+	if ac.Found && snippet != "" {
+		userPrompt = fmt.Sprintf("[File: %s, line %d]\nContext around cursor:\n%s\n\n%s",
+			ac.FilePath, ac.Line+1, snippet, prompt)
+	}
+
+	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = workDir
-	cmd.Stdin = strings.NewReader(prompt)
+	cmd.Stdin = strings.NewReader(userPrompt)
 
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf

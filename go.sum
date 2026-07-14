@@ -32,6 +32,8 @@ github.com/alexaandru/go-sitter-forest/erlang v1.9.7 h1:NwCErr9f/X9OW1HXYQzi/83f
 github.com/alexaandru/go-sitter-forest/erlang v1.9.7/go.mod h1:w44gyZikbQBpzX7/RJqNxsLzMrLqn4Tvh9r649ml9xI=
 github.com/alexaandru/go-sitter-forest/gdscript v1.9.6 h1:9TOQ7lvbv/Y/R40gQisUfIN455PR+zLWuy1evsTo7q0=
 github.com/alexaandru/go-sitter-forest/gdscript v1.9.6/go.mod h1:bePnpjBZbV3SRQOIZDuMAtDOuv7jj4zAOBQoQNddjmw=
+github.com/alexaandru/go-sitter-forest/gitcommit v1.9.4 h1:h4C8PRGxa2OfauFJZ7Ou4k7QFqxBJk0IfNBgMoVVJXk=
+github.com/alexaandru/go-sitter-forest/gitcommit v1.9.4/go.mod h1:dzywHlkljvhbO6STRGNnn1OGNkku9AehNCkEGPtYIL0=
 github.com/alexaandru/go-sitter-forest/gleam v1.9.9 h1:6104gWAx0Obl9tvbzzcDq3ntyj7slB2FjoiD9AzwHHI=
 github.com/alexaandru/go-sitter-forest/gleam v1.9.9/go.mod h1:JPvlemzwt8XlnKRoQ9X8H3JvVjzYfxf7LfuzXv4Y8Pw=
 github.com/alexaandru/go-sitter-forest/go v1.9.4 h1:Xpq8HijvTp2+AHL4UplLLiCOdIAA20u0JyM8NGBIBWs=

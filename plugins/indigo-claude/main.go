@@ -32,8 +32,9 @@ const (
 )
 
 type ConvMsg struct {
-	Role    MsgRole
-	Content string
+	Role      MsgRole
+	Content   string
+	StartedAt time.Time // non-zero for in-progress tool entries
 }
 
 // ─── tea messages ────────────────────────────────────────────────────────────
@@ -59,8 +60,8 @@ type Model struct {
 	history     []apiMessage
 	pendingPerm *permissionRequestMsg
 
-	// CLI mode hook state.
-	pendingShellPerm *shellPermissionRequestMsg
+	// CLI mode hook state: queued shell permission requests shown one at a time.
+	shellPermQueue []shellPermissionRequestMsg
 
 	// CLI mode state.
 	sessionID string
@@ -109,6 +110,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
+		for i := range m.conv {
+			if m.conv[i].Role == RoleTool && !m.conv[i].StartedAt.IsZero() {
+				name := strings.TrimPrefix(m.conv[i].Content, "  ⟳ ")
+				if j := strings.LastIndex(name, " ("); j >= 0 {
+					name = name[:j]
+				}
+				elapsed := time.Since(m.conv[i].StartedAt).Round(time.Second)
+				m.conv[i].Content = fmt.Sprintf("  ⟳ %s (%s)", name, elapsed)
+			}
+		}
 		return m, tea.Batch(scheduleTick(), m.cmdPollActiveCtx())
 
 	case activeCtxUpdated:
@@ -132,18 +143,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case agentToolStartMsg:
-		m.conv = append(m.conv, ConvMsg{Role: RoleTool, Content: "  ⟳ " + msg.name + "…"})
+		m.conv = append(m.conv, ConvMsg{Role: RoleTool, Content: "  ⟳ " + msg.name, StartedAt: time.Now()})
 		return m, nil
 
 	case agentToolDoneMsg:
-		// Mark the most recent pending tool entry as done.
 		for i := len(m.conv) - 1; i >= 0; i-- {
-			if m.conv[i].Role == RoleTool && strings.HasSuffix(m.conv[i].Content, "…") {
-				m.conv[i].Content = "  ✓ " + strings.TrimSuffix(strings.TrimPrefix(m.conv[i].Content, "  ⟳ "), "…")
+			if m.conv[i].Role == RoleTool && !m.conv[i].StartedAt.IsZero() {
+				elapsed := time.Since(m.conv[i].StartedAt).Round(time.Millisecond)
+				m.conv[i] = ConvMsg{Role: RoleTool, Content: fmt.Sprintf("  ✓ %s (%s)",
+					strings.TrimPrefix(m.conv[i].Content, "  ⟳ "), elapsed)}
 				break
 			}
 		}
-		// Reset streaming index so next assistant segment starts a new ConvMsg.
 		m.streamingConvIdx = -1
 		return m, nil
 
@@ -154,9 +165,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case shellPermissionRequestMsg:
-		m.pendingShellPerm = &msg
-		m.conv = append(m.conv, ConvMsg{Role: RoleShellPermission, Content: "  $ " + msg.command})
-		m.scroll = 0
+		m.shellPermQueue = append(m.shellPermQueue, msg)
+		if len(m.shellPermQueue) == 1 {
+			// Only show immediately if this is the first in the queue; subsequent
+			// ones are shown after the current one is resolved.
+			m.conv = append(m.conv, ConvMsg{Role: RoleShellPermission, Content: "  $ " + msg.command})
+			m.scroll = 0
+		}
 		return m, nil
 
 	case agentDoneMsg:
@@ -189,7 +204,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.pendingPerm != nil {
 		return m.handlePermissionKey(msg)
 	}
-	if m.pendingShellPerm != nil {
+	if len(m.shellPermQueue) > 0 {
 		return m.handleShellPermissionKey(msg)
 	}
 
@@ -391,8 +406,8 @@ func (m Model) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleShellPermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	perm := m.pendingShellPerm
-	m.pendingShellPerm = nil
+	perm := m.shellPermQueue[0]
+	m.shellPermQueue = m.shellPermQueue[1:]
 
 	approved := msg.String() == "y" || msg.String() == "Y"
 	label := "Command rejected."
@@ -406,6 +421,13 @@ func (m Model) handleShellPermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	perm.replyCh <- approved
+
+	// If more permissions are queued, show the next one now.
+	if len(m.shellPermQueue) > 0 {
+		next := m.shellPermQueue[0]
+		m.conv = append(m.conv, ConvMsg{Role: RoleShellPermission, Content: "  $ " + next.command})
+		m.scroll = 0
+	}
 	return m, nil
 }
 
@@ -472,7 +494,7 @@ func (m Model) renderHeader() string {
 		label = fmt.Sprintf(" indigo-claude  ·  %s  line %d",
 			m.displayPath(m.activeCtx.FilePath), m.activeCtx.Line+1)
 	}
-	if m.pendingPerm != nil || m.pendingShellPerm != nil {
+	if m.pendingPerm != nil || len(m.shellPermQueue) > 0 {
 		label += "  [approve? y/n]"
 	} else if m.agentRunning {
 		label += "  [thinking…]"

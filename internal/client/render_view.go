@@ -386,6 +386,11 @@ func fileTypeName(path string) string {
 	case "capnp":
 		return "Cap'n Proto"
 	default:
+		// Match git edit files by base filename (no extension).
+		switch strings.ToLower(filepath.Base(path)) {
+		case "commit_editmsg", "merge_msg", "squash_msg", "tag_editmsg":
+			return "Git Commit"
+		}
 		ext := strings.TrimPrefix(filepath.Ext(path), ".")
 		if ext != "" {
 			return ext

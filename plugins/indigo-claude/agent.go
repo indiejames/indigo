@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,9 +23,10 @@ import (
 // programLink lets goroutines push tea.Msg values to the running program.
 // The send field is set after tea.NewProgram returns its *Program.
 type programLink struct {
-	mu     sync.Mutex
-	send   func(tea.Msg)
-	cancel context.CancelFunc
+	mu          sync.Mutex
+	send        func(tea.Msg)
+	cancel      context.CancelFunc
+	stdinWriter io.WriteCloser // open pipe to the running CLI subprocess stdin
 }
 
 func (pl *programLink) emit(msg tea.Msg) {
@@ -52,6 +54,28 @@ func (pl *programLink) cancelAgent() {
 	}
 }
 
+func (pl *programLink) setStdinWriter(w io.WriteCloser) {
+	pl.mu.Lock()
+	pl.stdinWriter = w
+	pl.mu.Unlock()
+}
+
+// sendCLIPermission writes "y\n" or "n\n" to the subprocess stdin so the CLI
+// can continue after a permission prompt.
+func (pl *programLink) sendCLIPermission(approved bool) {
+	pl.mu.Lock()
+	w := pl.stdinWriter
+	pl.mu.Unlock()
+	if w == nil {
+		return
+	}
+	if approved {
+		w.Write([]byte("y\n")) //nolint:errcheck
+	} else {
+		w.Write([]byte("n\n")) //nolint:errcheck
+	}
+}
+
 // ─── agent tea messages ──────────────────────────────────────────────────────
 
 type agentTextDeltaMsg struct{ text string }
@@ -62,6 +86,18 @@ type agentDoneMsg struct {
 	sessionID string       // populated by CLI mode
 }
 type agentErrorMsg struct{ err error }
+
+// agentUnknownEventMsg carries a raw stream-json line whose "type" field we
+// don't recognise yet. Shown in the TUI so we can discover new event formats
+// (e.g. permission requests).
+type agentUnknownEventMsg struct{ raw string }
+
+// shellPermissionRequestMsg asks the TUI to show a shell command and get user
+// approval. The hook goroutine blocks on replyCh until the user responds.
+type shellPermissionRequestMsg struct {
+	command string
+	replyCh chan bool
+}
 
 // permissionRequestMsg asks the TUI to show a diff and get user approval.
 // The agent goroutine blocks on replyCh until the user responds.
@@ -284,6 +320,10 @@ func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, a
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = workDir
+	// strings.NewReader closes stdin (returns EOF) as soon as the prompt is
+	// consumed. That's needed because claude reads stdin until EOF to get the
+	// full prompt. Permission responses via stdin require a different approach
+	// once we know the stream-json permission-request event format.
 	cmd.Stdin = strings.NewReader(userPrompt)
 
 	var stderrBuf bytes.Buffer
@@ -402,6 +442,13 @@ func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, a
 				prog.emit(agentErrorMsg{err: fmt.Errorf("%s", result.Result)})
 				cmd.Wait() //nolint:errcheck
 				return
+			}
+
+		default:
+			// Surface unrecognised event types (e.g. permission_request) so we
+			// can discover their format and handle them properly.
+			if evType != "" {
+				prog.emit(agentUnknownEventMsg{raw: line})
 			}
 		}
 	}

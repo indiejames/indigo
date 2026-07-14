@@ -421,6 +421,13 @@ func (m Model) View() string {
 	sb.WriteString(m.renderDivider())
 	sb.WriteByte('\n')
 	sb.WriteString(m.renderInput())
+	// Pad remaining input rows with blank lines so the layout never shifts when
+	// inputLineCount changes — Bubble Tea's delta renderer would otherwise leave
+	// stale content from the old larger input area on screen.
+	for i := m.inputLineCount(); i < maxInputLines; i++ {
+		sb.WriteByte('\n')
+		sb.WriteString(strings.Repeat(" ", m.width))
+	}
 	return sb.String()
 }
 
@@ -627,7 +634,11 @@ func (m Model) renderInput() string {
 
 // ─── layout helpers ──────────────────────────────────────────────────────────
 
-const maxInputLines = 5
+// maxInputLines is the maximum (and reserved) height of the input area.
+// The conversation area is always m.height - 4 - maxInputLines rows so the
+// layout never shifts when the input grows or shrinks (which would leave stale
+// Bubble Tea delta-renderer content on screen).
+const maxInputLines = 3
 
 func (m Model) inputLineCount() int {
 	n := strings.Count(string(m.input), "\n") + 1
@@ -638,7 +649,7 @@ func (m Model) inputLineCount() int {
 }
 
 func (m Model) convHeight() int {
-	return max(1, m.height-4-m.inputLineCount())
+	return max(1, m.height-4-maxInputLines)
 }
 
 // ─── commands ────────────────────────────────────────────────────────────────

@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,10 +22,9 @@ import (
 // programLink lets goroutines push tea.Msg values to the running program.
 // The send field is set after tea.NewProgram returns its *Program.
 type programLink struct {
-	mu          sync.Mutex
-	send        func(tea.Msg)
-	cancel      context.CancelFunc
-	stdinWriter io.WriteCloser // open pipe to the running CLI subprocess stdin
+	mu     sync.Mutex
+	send   func(tea.Msg)
+	cancel context.CancelFunc
 }
 
 func (pl *programLink) emit(msg tea.Msg) {
@@ -51,28 +49,6 @@ func (pl *programLink) cancelAgent() {
 	pl.mu.Unlock()
 	if fn != nil {
 		fn()
-	}
-}
-
-func (pl *programLink) setStdinWriter(w io.WriteCloser) {
-	pl.mu.Lock()
-	pl.stdinWriter = w
-	pl.mu.Unlock()
-}
-
-// sendCLIPermission writes "y\n" or "n\n" to the subprocess stdin so the CLI
-// can continue after a permission prompt.
-func (pl *programLink) sendCLIPermission(approved bool) {
-	pl.mu.Lock()
-	w := pl.stdinWriter
-	pl.mu.Unlock()
-	if w == nil {
-		return
-	}
-	if approved {
-		w.Write([]byte("y\n")) //nolint:errcheck
-	} else {
-		w.Write([]byte("n\n")) //nolint:errcheck
 	}
 }
 

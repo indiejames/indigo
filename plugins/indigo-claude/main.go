@@ -897,8 +897,8 @@ func main() {
 			installHook(workDir, hookScriptPath) //nolint:errcheck
 			defer func() {
 				removeHook(workDir)
-				os.Remove(hookScriptPath)
-				os.Remove(permSockPath)
+				os.Remove(hookScriptPath) //nolint:errcheck
+				os.Remove(permSockPath)   //nolint:errcheck
 			}()
 			if ln, err := startPermissionServer(permSockPath, prog); err == nil {
 				defer ln.Close() //nolint:errcheck

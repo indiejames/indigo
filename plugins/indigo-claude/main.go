@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -67,6 +68,11 @@ type Model struct {
 	activeCtx client.ActiveContext
 	scroll    int
 	ready     bool
+
+	// Input history (most recent last); historyIdx -1 = not browsing.
+	inputHistory []string
+	historyIdx   int
+	savedInput   string
 }
 
 func newModel(rpc *client.RPC, prog *programLink, apiKey, workDir string) Model {
@@ -173,17 +179,65 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Type {
 	case tea.KeyCtrlC:
-		m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Press ctrl+q to quit."})
+		if m.agentRunning {
+			m.prog.cancelAgent()
+			m.agentRunning = false
+			m.streamingConvIdx = -1
+			m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Cancelled."})
+		} else {
+			m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Press ctrl+q to quit."})
+		}
 		return m, nil
 
 	case tea.KeyCtrlQ:
 		return m, tea.Quit
 
 	case tea.KeyEnter:
+		if msg.Alt {
+			// Alt+Enter: insert newline in multi-line input.
+			m.input = append(m.input[:m.inputPos], append([]rune{'\n'}, m.input[m.inputPos:]...)...)
+			m.inputPos++
+			m.historyIdx = -1
+			return m, nil
+		}
+
 		text := strings.TrimSpace(string(m.input))
 		if text == "" || m.agentRunning {
 			return m, nil
 		}
+
+		// Slash commands.
+		if text == "/clear" {
+			m.conv = []ConvMsg{{Role: RoleStatus, Content: "Conversation cleared."}}
+			m.history = nil
+			m.sessionID = ""
+			m.input = nil
+			m.inputPos = 0
+			m.scroll = 0
+			m.historyIdx = -1
+			return m, nil
+		}
+		if text == "/copy" {
+			for i := len(m.conv) - 1; i >= 0; i-- {
+				if m.conv[i].Role == RoleAssistant {
+					copyToClipboard(m.conv[i].Content)
+					m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Last response copied to clipboard."})
+					break
+				}
+			}
+			m.input = nil
+			m.inputPos = 0
+			m.historyIdx = -1
+			return m, nil
+		}
+
+		// Save to history (skip consecutive duplicates).
+		if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != text {
+			m.inputHistory = append(m.inputHistory, text)
+		}
+		m.historyIdx = -1
+		m.savedInput = ""
+
 		m.conv = append(m.conv, ConvMsg{Role: RoleUser, Content: text})
 		m.input = nil
 		m.inputPos = 0
@@ -193,14 +247,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		prog := m.prog
 		ac := m.activeCtx
+		snippet := bufferSnippet(ac.FilePath, int(ac.Line), 20)
 		if m.apiKey != "" {
-			history := append(m.history, buildUserMessage(text, ac)) //nolint:gocritic
+			history := append(m.history, buildUserMessage(text, ac, snippet)) //nolint:gocritic
 			apiKey := m.apiKey
 			rpc := m.rpc
 			workDir := m.workDir
-			go runAgent(prog, rpc, apiKey, workDir, history, ac)
+			go runAgent(prog, rpc, apiKey, workDir, history, ac, snippet)
 		} else {
-			go runClaudeSubprocess(prog, m.workDir, text, m.sessionID, ac)
+			go runClaudeSubprocess(prog, m.workDir, text, m.sessionID, ac, snippet)
 		}
 		return m, nil
 
@@ -208,6 +263,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.inputPos > 0 {
 			m.input = append(m.input[:m.inputPos-1], m.input[m.inputPos:]...)
 			m.inputPos--
+			m.historyIdx = -1
 		}
 		return m, nil
 
@@ -232,10 +288,41 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyUp:
+		if msg.Alt {
+			// Alt+Up: step back through input history.
+			if len(m.inputHistory) == 0 {
+				return m, nil
+			}
+			if m.historyIdx == -1 {
+				m.savedInput = string(m.input)
+				m.historyIdx = len(m.inputHistory) - 1
+			} else if m.historyIdx > 0 {
+				m.historyIdx--
+			}
+			m.input = []rune(m.inputHistory[m.historyIdx])
+			m.inputPos = len(m.input)
+			return m, nil
+		}
 		m.scroll++
 		return m, nil
 
 	case tea.KeyDown:
+		if msg.Alt {
+			// Alt+Down: step forward through input history.
+			if m.historyIdx == -1 {
+				return m, nil
+			}
+			if m.historyIdx >= len(m.inputHistory)-1 {
+				m.input = []rune(m.savedInput)
+				m.inputPos = len(m.input)
+				m.historyIdx = -1
+				return m, nil
+			}
+			m.historyIdx++
+			m.input = []rune(m.inputHistory[m.historyIdx])
+			m.inputPos = len(m.input)
+			return m, nil
+		}
 		if m.scroll > 0 {
 			m.scroll--
 		}
@@ -255,12 +342,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeySpace:
 		m.input = append(m.input[:m.inputPos], append([]rune{' '}, m.input[m.inputPos:]...)...)
 		m.inputPos++
+		m.historyIdx = -1
 		return m, nil
 
 	case tea.KeyRunes:
 		r := []rune(msg.String())
 		m.input = append(m.input[:m.inputPos], append(r, m.input[m.inputPos:]...)...)
 		m.inputPos += len(r)
+		m.historyIdx = -1
 		return m, nil
 	}
 	return m, nil
@@ -463,48 +552,93 @@ func (m Model) renderDivider() string {
 func (m Model) renderInput() string {
 	prompt := inputPromptSty.Render("▶ ")
 	pw := lipgloss.Width(prompt)
+	cont := strings.Repeat(" ", pw) // continuation prefix for lines 2+
 	avail := m.width - pw
 	if avail < 1 {
 		avail = 1
 	}
 
-	before := string(m.input[:m.inputPos])
-	after := string(m.input[m.inputPos:])
+	inputText := string(m.input)
+	inputLines := strings.Split(inputText, "\n")
 
-	if len([]rune(before)) > avail-1 {
-		runes := []rune(before)
-		before = string(runes[len(runes)-(avail-1):])
-	}
+	// Find which line and column within that line the cursor sits on.
+	beforeCursor := string(m.input[:m.inputPos])
+	beforeLines := strings.Split(beforeCursor, "\n")
+	cursorLine := len(beforeLines) - 1
+	cursorCol := len([]rune(beforeLines[cursorLine]))
 
-	var cursorChar string
-	if len(after) > 0 {
-		cursorChar = cursorStyle.Render(string([]rune(after)[0]))
-		if len([]rune(after)) > 1 {
-			after = string([]rune(after)[1:])
-		} else {
-			after = ""
+	// Show a window of maxInputLines lines centred on the cursor line.
+	totalLines := len(inputLines)
+	winStart := max(0, cursorLine-maxInputLines+1)
+	winEnd := min(totalLines, winStart+maxInputLines)
+
+	var sb strings.Builder
+	for i := winStart; i < winEnd; i++ {
+		if i > winStart {
+			sb.WriteByte('\n')
 		}
-	} else {
-		cursorChar = cursorStyle.Render(" ")
-		after = ""
-	}
+		if i == 0 {
+			sb.WriteString(prompt)
+		} else {
+			sb.WriteString(cont)
+		}
 
-	remainAfter := avail - len([]rune(before)) - 1
-	if remainAfter < 0 {
-		remainAfter = 0
-	}
-	afterRunes := []rune(after)
-	if len(afterRunes) > remainAfter {
-		afterRunes = afterRunes[:remainAfter]
-	}
+		lineRunes := []rune(inputLines[i])
 
-	return prompt + before + cursorChar + string(afterRunes)
+		if i == cursorLine {
+			col := cursorCol
+			// Scroll the view rightward if cursor is past the visible area.
+			viewStart := 0
+			if col >= avail {
+				viewStart = col - avail + 1
+			}
+			if viewStart > 0 {
+				lineRunes = lineRunes[viewStart:]
+				col -= viewStart
+			}
+			// Clamp rendered runes to avail width.
+			if len(lineRunes) > avail {
+				lineRunes = lineRunes[:avail]
+			}
+
+			before := string(lineRunes[:col])
+			var curChar, after string
+			if col < len(lineRunes) {
+				curChar = cursorStyle.Render(string(lineRunes[col]))
+				remaining := avail - col - 1
+				tail := lineRunes[col+1:]
+				if len(tail) > remaining {
+					tail = tail[:remaining]
+				}
+				after = string(tail)
+			} else {
+				curChar = cursorStyle.Render(" ")
+			}
+			sb.WriteString(before + curChar + after)
+		} else {
+			if len(lineRunes) > avail {
+				lineRunes = lineRunes[:avail]
+			}
+			sb.WriteString(string(lineRunes))
+		}
+	}
+	return sb.String()
 }
 
 // ─── layout helpers ──────────────────────────────────────────────────────────
 
+const maxInputLines = 5
+
+func (m Model) inputLineCount() int {
+	n := strings.Count(string(m.input), "\n") + 1
+	if n > maxInputLines {
+		n = maxInputLines
+	}
+	return n
+}
+
 func (m Model) convHeight() int {
-	return max(1, m.height-5)
+	return max(1, m.height-4-m.inputLineCount())
 }
 
 // ─── commands ────────────────────────────────────────────────────────────────
@@ -530,6 +664,22 @@ func (m Model) cmdPollActiveCtx() tea.Cmd {
 }
 
 // ─── utilities ───────────────────────────────────────────────────────────────
+
+// copyToClipboard writes text to the system clipboard, trying pbcopy (macOS),
+// xclip, and xsel in order.
+func copyToClipboard(text string) {
+	for _, args := range [][]string{
+		{"pbcopy"},
+		{"xclip", "-selection", "clipboard"},
+		{"xsel", "--clipboard", "--input"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Stdin = strings.NewReader(text)
+		if err := cmd.Run(); err == nil {
+			return
+		}
+	}
+}
 
 func (m Model) displayPath(filePath string) string {
 	if rel, err := filepath.Rel(m.workDir, filePath); err == nil && !strings.HasPrefix(rel, "..") {

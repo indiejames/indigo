@@ -642,6 +642,9 @@ func (m Model) buildPermPopup() []string {
 	switch {
 	case m.pendingPerm != nil:
 		title = "⚠ Edit request"
+		if len(m.pendingPerm.edits) == 0 {
+			title = "⚠ Save request"
+		}
 		bodyLines = append(bodyLines, "  File: "+m.pendingPerm.file)
 		if m.pendingPerm.reason != "" {
 			bodyLines = append(bodyLines, "  Reason: "+m.pendingPerm.reason)

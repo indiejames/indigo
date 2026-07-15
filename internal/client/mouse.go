@@ -102,3 +102,34 @@ func (m *Model) handleMouseDrag(x, y int) {
 		m.sel.Head = pos
 	}
 }
+
+// wheelScrollLines is how many buffer lines one wheel tick scrolls.
+const wheelScrollLines = 3
+
+// scrollWheel moves the viewport by delta buffer lines (positive = down),
+// dragging the cursor along only as much as needed to keep it on screen.
+// The cursor column is clamped manually — clampCursor would call
+// scrollToCursor and undo the scroll.
+func (m *Model) scrollWheel(delta int) {
+	maxTop := max(0, m.displayLineCount()-1)
+	m.topLine = min(maxTop, max(0, m.topLine+delta))
+
+	layout := m.buildScreenLayout(m.visibleLines(), m.contentWidth())
+	if len(layout) == 0 {
+		return
+	}
+	lastVisible := layout[len(layout)-1].bufLine
+	switch {
+	case m.cursor.Line < m.topLine:
+		m.cursor.Line = m.topLine
+	case m.cursor.Line > lastVisible:
+		m.cursor.Line = lastVisible
+	default:
+		return // cursor still visible — leave it alone
+	}
+	maxCol := m.buf.LineLen(m.cursor.Line)
+	if m.mode == ModeNormal && maxCol > 0 {
+		maxCol--
+	}
+	m.cursor.Col = min(m.cursor.Col, max(0, maxCol))
+}

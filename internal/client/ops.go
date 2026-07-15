@@ -228,11 +228,13 @@ func (m Model) fetchUpdates() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		ops, ver, err := m.rpc.GetUpdates(ctx, m.bufID, m.version)
-		if err != nil || len(ops) == 0 {
+		ops, ver, savedHash, err := m.rpc.GetUpdates(ctx, m.bufID, m.version)
+		if err != nil {
 			return nil
 		}
-		return updatesMsg{ops: ops, version: ver}
+		// Deliver even with zero ops: savedHash keeps the dirty marker
+		// accurate when another client (e.g. an agent) saves this buffer.
+		return updatesMsg{ops: ops, version: ver, savedHash: savedHash}
 	}
 }
 

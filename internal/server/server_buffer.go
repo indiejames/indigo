@@ -201,6 +201,12 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 		return err
 	}
 	res.SetVersion(entry.buf.Version())
+	// Saved-content hash lets clients keep their dirty markers accurate when
+	// another client (e.g. an agent) saves the buffer.
+	h := entry.buf.SavedHash()
+	if err := res.SetSavedHash(h[:]); err != nil {
+		return err
+	}
 
 	if len(filtered) == 0 {
 		return nil

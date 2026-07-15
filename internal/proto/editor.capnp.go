@@ -3402,7 +3402,7 @@ func (c EditorService_getUpdates) Args() EditorService_getUpdates_Params {
 
 // AllocResults allocates the results struct.
 func (c EditorService_getUpdates) AllocResults() (EditorService_getUpdates_Results, error) {
-	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 8, PointerCount: 1})
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 8, PointerCount: 2})
 	return EditorService_getUpdates_Results(r), err
 }
 
@@ -4650,6 +4650,19 @@ func (s EditorService_getUpdates_Results) Version() uint64 {
 
 func (s EditorService_getUpdates_Results) SetVersion(v uint64) {
 	capnp.Struct(s).SetUint64(0, v)
+}
+
+func (s EditorService_getUpdates_Results) SavedHash() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return []byte(p.Data()), err
+}
+
+func (s EditorService_getUpdates_Results) HasSavedHash() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s EditorService_getUpdates_Results) SetSavedHash(v []byte) error {
+	return capnp.Struct(s).SetData(1, v)
 }
 
 // EditorService_getUpdates_Results_List is a list of EditorService_getUpdates_Results.

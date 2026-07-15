@@ -1,6 +1,7 @@
 package client
 
 import (
+	"crypto/sha256"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,10 +25,12 @@ const (
 // tickMsg is sent periodically to poll for remote updates.
 type tickMsg struct{}
 
-// updatesMsg carries ops received from the server.
+// updatesMsg carries ops received from the server, plus the sha256 of the
+// buffer content at its last save (for dirty-marker reconciliation).
 type updatesMsg struct {
-	ops     []document.Op
-	version uint64
+	ops       []document.Op
+	version   uint64
+	savedHash []byte
 }
 
 // errorMsg carries a non-fatal error to display in the status bar.
@@ -646,6 +649,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.redoStack = nil
 		}
 		m.version = msg.version
+		// Reconcile the dirty marker: if another client saved this buffer, our
+		// content now matches disk exactly when its hash equals savedHash. The
+		// hash check makes this race-free — an in-flight local keystroke means
+		// the hashes differ, so a stale response can never mask dirtiness.
+		if m.buf.Dirty() && len(msg.savedHash) == sha256.Size {
+			if sha256.Sum256([]byte(m.buf.Content())) == [sha256.Size]byte(msg.savedHash) {
+				m.buf.SetClean()
+				m.savedUndoDepth = len(m.undoStack)
+			}
+		}
+		if len(msg.ops) == 0 {
+			return m, nil
+		}
 		m.clampCursor()
 		return m, m.reparseHighlight()
 
@@ -833,6 +849,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		prevCursor := m.cursor
 		prevSel := copySel(m.sel)
 		switch {
+		case msg.Button == tea.MouseButtonWheelUp:
+			m.scrollWheel(-wheelScrollLines)
+		case msg.Button == tea.MouseButtonWheelDown:
+			m.scrollWheel(wheelScrollLines)
 		case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
 			m.handleMousePress(msg.X, msg.Y)
 		case msg.Action == tea.MouseActionMotion && m.dragging:

@@ -139,7 +139,7 @@ func mcpTools() []mcpTool {
 	var out []mcpTool
 	for _, t := range allTools() {
 		switch t.Name {
-		case "read_file", "apply_edits", "insert_at_line":
+		case "read_file", "apply_edits", "insert_at_line", "save_file":
 			out = append(out, mcpTool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
 		}
 	}

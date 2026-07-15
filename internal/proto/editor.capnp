@@ -20,7 +20,10 @@ interface EditorService {
   connect         @0 (callback :ClientCallback)                                -> (clientId :UInt64);
   disconnect      @1 (clientId :UInt64)                                        -> ();
   openFile        @2 (clientId :UInt64, path :Text)                            -> (bufferId :UInt32, content :Text, version :UInt64, fromRecovery :Bool);
-  getUpdates      @3 (clientId :UInt64, bufferId :UInt32, sinceVersion :UInt64) -> (ops :List(EditOp), version :UInt64);
+  # savedHash is the sha256 of the buffer content at its last save; clients
+  # compare it against their own content hash to keep dirty markers accurate
+  # when another client (e.g. an agent) saves the buffer.
+  getUpdates      @3 (clientId :UInt64, bufferId :UInt32, sinceVersion :UInt64) -> (ops :List(EditOp), version :UInt64, savedHash :Data);
   applyOp         @4 (clientId :UInt64, bufferId :UInt32, op :EditOp)          -> (version :UInt64);
   save            @5 (clientId :UInt64, bufferId :UInt32)                      -> ();
   closeBuffer     @6 (clientId :UInt64, bufferId :UInt32)                      -> ();

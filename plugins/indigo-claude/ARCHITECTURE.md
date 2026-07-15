@@ -83,8 +83,9 @@ MCP tools as first class. So in CLI mode:
    passes it to every `claude` subprocess via `--mcp-config`, together with
    `--disallowedTools Read,Edit,Write,MultiEdit,NotebookEdit`.
 2. The config tells claude to spawn `indigo-claude --mcp <socket>` — the same
-   binary in MCP-server mode (`mcp.go`). It exposes two tools:
-   `read_file` and `apply_edits` (Glob/Grep/Bash stay native).
+   binary in MCP-server mode (`mcp.go`). It exposes `read_file`, `apply_edits`,
+   `insert_at_line` (exact-line insertion), and `save_file` (flush a buffer to
+   disk so builds/tests see approved edits); Glob/Grep/Bash stay native.
 3. Each `tools/call` is forwarded as one JSON line over the Unix socket to the
    TUI process, which executes it via the shared `execTool` path.
 

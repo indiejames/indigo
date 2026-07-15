@@ -113,7 +113,7 @@ func (r *RPC) ApplyOps(ctx context.Context, bufID uint32, ops []document.Op) (ui
 }
 
 // GetUpdates polls for ops on bufID that arrived after sinceVersion.
-func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]document.Op, uint64, error) {
+func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]document.Op, uint64, []byte, error) {
 	fut, rel := r.svc.GetUpdates(ctx, func(p proto.EditorService_getUpdates_Params) error {
 		p.SetClientId(r.clientID)
 		p.SetBufferId(bufID)
@@ -123,12 +123,13 @@ func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]doc
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
+	savedHash, _ := res.SavedHash()
 
 	opList, err := res.Ops()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 
 	ops := make([]document.Op, opList.Len())
@@ -156,7 +157,7 @@ func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]doc
 		}
 		ops[i] = op
 	}
-	return ops, res.Version(), nil
+	return ops, res.Version(), savedHash, nil
 }
 
 // Save asks the server to flush bufID to disk.

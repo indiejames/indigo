@@ -266,6 +266,9 @@ Rules:
   that line. Use apply_edits only for replacing existing text.
 - When the user refers to "the selection" or "the selected code", they mean the
   "Selected text" block in their message — operate on exactly that text.
+- Approved edits are fully applied to the live buffer; never ask the user to
+  approve or save an edit after the tool succeeds. The on-disk file stays stale
+  until saved — call save_file on edited files before disk-based verification.
 - Prefer small, focused edits over large rewrites.
 - Explain your reasoning before using apply_edits.
 - Each apply_edits call requires user approval; batch related edits into one call when possible.
@@ -456,7 +459,10 @@ func runClaudeSubprocess(prog *programLink, rpc *client.RPC, workDir, prompt, se
 			" mcp__indigo__apply_edits to replace existing text," +
 			" and mcp__indigo__insert_at_line to insert new lines at an exact 1-based line number" +
 			" (the inserted text becomes that line; always prefer it when the user names a line or says 'at the cursor')." +
-			" Edits apply to the live buffer and the user sees a diff to approve." +
+			" Each edit shows the user a diff popup; once approved it is fully applied to the live buffer —" +
+			" never ask the user to approve or save an edit after the tool succeeds." +
+			" The on-disk file stays stale until saved, so before running disk-based commands (go build, tests, grep)" +
+			" call mcp__indigo__save_file on every file you edited; then verify and finish the task yourself." +
 			" The built-in Read, Edit, Write, MultiEdit, and NotebookEdit tools are disabled in this session;" +
 			" Glob, Grep, and Bash remain available."
 	}

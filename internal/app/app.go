@@ -625,6 +625,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	}
+	// The tab bar occupies terminal row 0 when visible, so mouse coordinates
+	// must shift up one row to be buffer-relative. Clicks landing on the tab
+	// bar itself are not forwarded (wheel events pass through — scrolling
+	// should work wherever the pointer is).
+	if mm, ok := msg.(tea.MouseMsg); ok && a.showTabBar() {
+		wheel := mm.Button == tea.MouseButtonWheelUp || mm.Button == tea.MouseButtonWheelDown
+		if mm.Y == 0 && !wheel {
+			return a, nil
+		}
+		mm.Y--
+		msg = mm
+	}
 	updated, cmd := a.buffers[a.active].Update(msg)
 	a.buffers[a.active] = updated.(client.Model)
 	return a, cmd

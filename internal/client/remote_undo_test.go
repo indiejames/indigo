@@ -1,10 +1,42 @@
 package client
 
 import (
+	"crypto/sha256"
 	"testing"
 
 	"github.com/indiejames/indigo/internal/document"
 )
+
+// When another client (e.g. an agent) saves this buffer, the poll response's
+// savedHash must clear the local dirty marker — but only when local content
+// matches exactly, so an in-flight keystroke can never be masked.
+func TestSavedHashReconcilesDirtyMarker(t *testing.T) {
+	m := newTestModel("line1\n")
+	m.buf.Apply(document.Op{Type: document.OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "x"})
+	if !m.buf.Dirty() {
+		t.Fatal("expected dirty buffer after local apply")
+	}
+
+	// Non-matching hash (content differs from what was saved): stays dirty.
+	wrong := sha256.Sum256([]byte("something else"))
+	m2, _ := m.Update(updatesMsg{version: 1, savedHash: wrong[:]})
+	got := m2.(Model)
+	if !got.buf.Dirty() {
+		t.Error("mismatched saved hash cleared the dirty marker")
+	}
+
+	// Matching hash: buffer content is exactly what's on disk → clean.
+	match := sha256.Sum256([]byte(got.buf.Content()))
+	m3, _ := got.Update(updatesMsg{version: 2, savedHash: match[:]})
+	got = m3.(Model)
+	if got.buf.Dirty() {
+		t.Error("matching saved hash did not clear the dirty marker")
+	}
+	if got.savedUndoDepth != len(got.undoStack) {
+		t.Errorf("savedUndoDepth = %d, want %d (undo back past this point should re-dirty)",
+			got.savedUndoDepth, len(got.undoStack))
+	}
+}
 
 // Regression test: ops arriving from other clients (e.g. an agent adding a
 // comment via apply_edits) must be undoable locally. Previously updatesMsg

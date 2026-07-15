@@ -78,6 +78,17 @@ func allTools() []toolDef {
 				Required: []string{"path", "reason", "line", "text"},
 			},
 		},
+		{
+			Name:        "save_file",
+			Description: "Write a file's live editor buffer to disk. Approved edits apply to the buffer immediately but the on-disk file stays stale until saved — call this on every file you edited before running disk-based commands (builds, tests, grep). If the file is open in the editor the user is asked to approve the save (it may include their own unsaved changes).",
+			InputSchema: toolSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"path": {Type: "string", Description: "File to save, relative to workspace root or absolute."},
+				},
+				Required: []string{"path"},
+			},
+		},
 	}
 }
 
@@ -149,6 +160,12 @@ func execTool(ctx context.Context, rpc *client.RPC, prog *programLink, workDir, 
 			return fmt.Sprintf("bad input: %v", err), true
 		}
 		return execInsertAtLine(ctx, rpc, prog, workDir, in)
+	case "save_file":
+		var in readFileInput
+		if err := json.Unmarshal(rawInput, &in); err != nil {
+			return fmt.Sprintf("bad input: %v", err), true
+		}
+		return execSaveFile(ctx, rpc, prog, workDir, in.Path)
 	default:
 		return fmt.Sprintf("unknown tool: %s", name), true
 	}
@@ -345,7 +362,7 @@ func execApplyEdits(ctx context.Context, rpc *client.RPC, prog *programLink, wor
 		rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
 		return fmt.Sprintf("edited and saved %s", in.Path), false
 	}
-	return fmt.Sprintf("edited %s (open in editor — review and save when ready)", in.Path), false
+	return fmt.Sprintf("edited %s — applied to the live buffer (approved by the user). Not yet on disk: call save_file before disk-based builds/tests.", in.Path), false
 }
 
 // ─── insert_at_line ───────────────────────────────────────────────────────────
@@ -411,7 +428,47 @@ func execInsertAtLine(ctx context.Context, rpc *client.RPC, prog *programLink, w
 		rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
 		return fmt.Sprintf("inserted at line %d and saved %s", in.Line, in.Path), false
 	}
-	return fmt.Sprintf("inserted at line %d in %s (open in editor — review and save when ready)", in.Line, in.Path), false
+	return fmt.Sprintf("inserted at line %d in %s — applied to the live buffer (approved by the user). Not yet on disk: call save_file before disk-based builds/tests.", in.Line, in.Path), false
+}
+
+// ─── save_file ────────────────────────────────────────────────────────────────
+
+// execSaveFile writes the live buffer for path to disk so disk-based tools
+// (builds, tests, grep) see edits that were applied to the buffer. When the
+// buffer is open in an editor it may hold the user's own unsaved changes, so
+// the save must be approved; when only the agent has it open, every unsaved
+// byte was already approved edit by edit and the save is silent.
+func execSaveFile(ctx context.Context, rpc *client.RPC, prog *programLink, workDir, path string) (string, bool) {
+	abs := absPath(workDir, path)
+	bufID, _, _, _, err := rpc.OpenFile(ctx, abs)
+	if err != nil {
+		return fmt.Sprintf("cannot open %s: %v", path, err), true
+	}
+	count, _ := rpc.BufferClientCount(ctx, bufID)
+	weOpened := count == 1
+
+	if !weOpened {
+		replyCh := make(chan bool, 1)
+		prog.emit(permissionRequestMsg{
+			file:    path,
+			reason:  "Save buffer to disk so builds/tests see the edits. Any of your own unsaved changes in this file will be saved too.",
+			replyCh: replyCh,
+		})
+		if !<-replyCh {
+			return "save rejected by user — on-disk file unchanged; buffer edits remain applied in the editor", true
+		}
+	}
+
+	if err := rpc.Save(ctx, bufID); err != nil {
+		if weOpened {
+			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
+		}
+		return fmt.Sprintf("save failed for %s: %v", path, err), true
+	}
+	if weOpened {
+		rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
+	}
+	return fmt.Sprintf("saved %s to disk", path), false
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

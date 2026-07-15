@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/server"
@@ -78,6 +79,13 @@ type Model struct {
 	inputHistory []string
 	historyIdx   int
 	savedInput   string
+
+	// Collapsed user messages: conv index → true means the bubble is collapsed.
+	// Only messages with more than collapseThreshold rendered lines are collapsible.
+	collapsedMsgs map[int]bool
+
+	// Permission dialog: false = "approve" highlighted, true = "reject" highlighted.
+	permChoice bool
 }
 
 func newModel(rpc *client.RPC, prog *programLink, apiKey, workDir string) Model {
@@ -92,6 +100,7 @@ func newModel(rpc *client.RPC, prog *programLink, apiKey, workDir string) Model 
 		workDir:          workDir,
 		streamingConvIdx: -1,
 		conv:             []ConvMsg{{Role: RoleStatus, Content: "Connected · " + mode}},
+		collapsedMsgs:    map[int]bool{},
 	}
 }
 
@@ -160,18 +169,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case permissionRequestMsg:
 		m.pendingPerm = &msg
-		m.conv = append(m.conv, ConvMsg{Role: RolePermission, Content: renderPermissionDiff(msg)})
-		m.scroll = 0
 		return m, nil
 
 	case shellPermissionRequestMsg:
 		m.shellPermQueue = append(m.shellPermQueue, msg)
-		if len(m.shellPermQueue) == 1 {
-			// Only show immediately if this is the first in the queue; subsequent
-			// ones are shown after the current one is resolved.
-			m.conv = append(m.conv, ConvMsg{Role: RoleShellPermission, Content: "  $ " + msg.command})
-			m.scroll = 0
-		}
 		return m, nil
 
 	case agentDoneMsg:
@@ -192,6 +193,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agentRunning = false
 		m.streamingConvIdx = -1
 		m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Error: " + msg.err.Error()})
+		return m, nil
+
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.scroll += m.convHeight() / 4
+		case tea.MouseButtonWheelDown:
+			m.scroll -= m.convHeight() / 4
+			if m.scroll < 0 {
+				m.scroll = 0
+			}
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -246,6 +259,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.inputPos = 0
 			m.scroll = 0
 			m.historyIdx = -1
+			m.collapsedMsgs = map[int]bool{}
 			return m, nil
 		}
 		if text == "/copy" {
@@ -270,6 +284,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.savedInput = ""
 
 		m.conv = append(m.conv, ConvMsg{Role: RoleUser, Content: text})
+		m.collapsedMsgs[len(m.conv)-1] = true // collapsed by default once sent
 		m.input = nil
 		m.inputPos = 0
 		m.scroll = 0
@@ -311,11 +326,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyHome, tea.KeyCtrlA:
-		m.inputPos = 0
+		m.inputPos = inputLineStart(m.input, m.inputPos)
 		return m, nil
 
 	case tea.KeyEnd, tea.KeyCtrlE:
-		m.inputPos = len(m.input)
+		m.inputPos = inputLineEnd(m.input, m.inputPos)
 		return m, nil
 
 	case tea.KeyUp:
@@ -334,7 +349,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.inputPos = len(m.input)
 			return m, nil
 		}
-		m.scroll++
+		m.inputPos = inputCursorUp(m.input, m.inputPos)
 		return m, nil
 
 	case tea.KeyDown:
@@ -354,9 +369,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.inputPos = len(m.input)
 			return m, nil
 		}
-		if m.scroll > 0 {
-			m.scroll--
-		}
+		m.inputPos = inputCursorDown(m.input, m.inputPos)
 		return m, nil
 
 	case tea.KeyPgUp:
@@ -377,6 +390,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyRunes:
+		if msg.Alt {
+			// Alt+e: toggle expand/collapse of the topmost visible user message.
+			if len(msg.Runes) == 1 && msg.Runes[0] == 'e' {
+				m.toggleTopUserMsg()
+			}
+			return m, nil
+		}
 		r := []rune(msg.String())
 		m.input = append(m.input[:m.inputPos], append(r, m.input[m.inputPos:]...)...)
 		m.inputPos += len(r)
@@ -387,67 +407,64 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyLeft, tea.KeyRight:
+		m.permChoice = !m.permChoice
+		return m, nil
+	case tea.KeyEnter:
+		// fall through to confirm
+	default:
+		// y/n shortcuts still work.
+		switch msg.String() {
+		case "y", "Y":
+			m.permChoice = false
+		case "n", "N":
+			m.permChoice = true
+		default:
+			return m, nil
+		}
+	}
 	perm := m.pendingPerm
 	m.pendingPerm = nil
-
-	approved := msg.String() == "y" || msg.String() == "Y"
+	approved := !m.permChoice
+	m.permChoice = false
 	label := "Rejected: " + perm.file
 	if approved {
 		label = "Approved: " + perm.file
 	}
-	for i := len(m.conv) - 1; i >= 0; i-- {
-		if m.conv[i].Role == RolePermission {
-			m.conv[i] = ConvMsg{Role: RoleStatus, Content: label}
-			break
-		}
-	}
+	m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: label})
 	perm.replyCh <- approved
 	return m, nil
 }
 
 func (m Model) handleShellPermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyLeft, tea.KeyRight:
+		m.permChoice = !m.permChoice
+		return m, nil
+	case tea.KeyEnter:
+		// fall through to confirm
+	default:
+		switch msg.String() {
+		case "y", "Y":
+			m.permChoice = false
+		case "n", "N":
+			m.permChoice = true
+		default:
+			return m, nil
+		}
+	}
 	perm := m.shellPermQueue[0]
 	m.shellPermQueue = m.shellPermQueue[1:]
-
-	approved := msg.String() == "y" || msg.String() == "Y"
+	approved := !m.permChoice
+	m.permChoice = false
 	label := "Command rejected."
 	if approved {
 		label = "Command approved."
 	}
-	for i := len(m.conv) - 1; i >= 0; i-- {
-		if m.conv[i].Role == RoleShellPermission {
-			m.conv[i] = ConvMsg{Role: RoleStatus, Content: label}
-			break
-		}
-	}
+	m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: label})
 	perm.replyCh <- approved
-
-	// If more permissions are queued, show the next one now.
-	if len(m.shellPermQueue) > 0 {
-		next := m.shellPermQueue[0]
-		m.conv = append(m.conv, ConvMsg{Role: RoleShellPermission, Content: "  $ " + next.command})
-		m.scroll = 0
-	}
 	return m, nil
-}
-
-func renderPermissionDiff(perm permissionRequestMsg) string {
-	var sb strings.Builder
-	sb.WriteString("  File: " + perm.file + "\n")
-	if perm.reason != "" {
-		sb.WriteString("  Reason: " + perm.reason + "\n")
-	}
-	for _, e := range perm.edits {
-		sb.WriteString("  ── remove ──\n")
-		for _, l := range strings.Split(e.oldText, "\n") {
-			sb.WriteString("  - " + l + "\n")
-		}
-		sb.WriteString("  ── add ──\n")
-		for _, l := range strings.Split(e.newText, "\n") {
-			sb.WriteString("  + " + l + "\n")
-		}
-	}
-	return strings.TrimRight(sb.String(), "\n")
 }
 
 // ─── view ────────────────────────────────────────────────────────────────────
@@ -461,9 +478,31 @@ var (
 	permStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF8844")).Bold(true)
 	diffOldStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555"))
 	diffNewStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#55FF55"))
-	dividerStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#334455"))
-	inputPromptSty = lipgloss.NewStyle().Foreground(lipgloss.Color("#087AC8")).Bold(true)
+	dividerStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#334455"))
+	inputBorderSty  = lipgloss.NewStyle().Foreground(lipgloss.Color("#335577"))
+	inputPromptSty  = lipgloss.NewStyle().Foreground(lipgloss.Color("#087AC8")).Bold(true)
 	cursorStyle    = lipgloss.NewStyle().Reverse(true)
+
+	// User message bubble — slightly elevated surface colour.
+	bubbleBg = lipgloss.AdaptiveColor{Dark: "#1B2939", Light: "#DDE8F4"}
+	// Progressive foreground dimming for collapsed bubbles (bright → dim).
+	bubbleFg  = lipgloss.AdaptiveColor{Dark: "#C8D8E8", Light: "#2A3A4A"}
+	bubbleDim = []lipgloss.TerminalColor{
+		lipgloss.AdaptiveColor{Dark: "#C8D8E8", Light: "#2A3A4A"}, // line 1: full
+		lipgloss.AdaptiveColor{Dark: "#8898A8", Light: "#627282"}, // line 2: medium
+		lipgloss.AdaptiveColor{Dark: "#4A5A6A", Light: "#96A6B6"}, // line 3: dim
+	}
+	bubbleBorderColor = lipgloss.AdaptiveColor{Dark: "#3D5472", Light: "#7A9DC0"}
+	bubbleHintColor   = lipgloss.AdaptiveColor{Dark: "#445566", Light: "#8899AA"}
+
+	// Permission popup — matches the indigo editor popup palette.
+	ppBg     = lipgloss.Color("#1E2A38")
+	ppBorder = lipgloss.NewStyle().Background(ppBg).Foreground(lipgloss.Color("#4488CC"))
+	ppKey    = lipgloss.NewStyle().Background(ppBg).Foreground(lipgloss.Color("#FFDD44")).Bold(true)
+	ppLabel  = lipgloss.NewStyle().Background(ppBg).Foreground(lipgloss.Color("#CCDDEC")).Bold(true)
+	ppText   = lipgloss.NewStyle().Background(ppBg).Foreground(lipgloss.Color("#CCDDEE"))
+	ppOld    = lipgloss.NewStyle().Background(ppBg).Foreground(lipgloss.Color("#FF5555"))
+	ppNew    = lipgloss.NewStyle().Background(ppBg).Foreground(lipgloss.Color("#55FF55"))
 )
 
 func (m Model) View() string {
@@ -471,21 +510,150 @@ func (m Model) View() string {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString(m.renderHeader())
-	sb.WriteByte('\n')
 	sb.WriteString(m.renderConversation())
 	sb.WriteByte('\n')
-	sb.WriteString(m.renderDivider())
+	sb.WriteString(m.renderInput()) // bordered box; always exactly inputHeight() rows
 	sb.WriteByte('\n')
-	sb.WriteString(m.renderInput())
-	// Pad remaining input rows with blank lines so the layout never shifts when
-	// inputLineCount changes — Bubble Tea's delta renderer would otherwise leave
-	// stale content from the old larger input area on screen.
-	for i := m.inputLineCount(); i < maxInputLines; i++ {
-		sb.WriteByte('\n')
-		sb.WriteString(strings.Repeat(" ", m.width))
+	sb.WriteString(m.renderHeader()) // status bar at the bottom, like indigo
+	base := sb.String()
+	if m.pendingPerm != nil || len(m.shellPermQueue) > 0 {
+		base = m.overlayPermPopup(base)
 	}
-	return sb.String()
+	return base
+}
+
+// buildPermPopup returns the styled lines of the permission popup box.
+func (m Model) buildPermPopup() []string {
+	const maxInnerW = 64
+
+	var title string
+	var bodyLines []string // plain text, styled during render
+
+	switch {
+	case m.pendingPerm != nil:
+		title = "⚠ Edit request"
+		bodyLines = append(bodyLines, "  File: "+m.pendingPerm.file)
+		if m.pendingPerm.reason != "" {
+			bodyLines = append(bodyLines, "  Reason: "+m.pendingPerm.reason)
+		}
+		for _, e := range m.pendingPerm.edits {
+			bodyLines = append(bodyLines, "  ── remove ──")
+			for _, l := range strings.Split(e.oldText, "\n") {
+				bodyLines = append(bodyLines, "  - "+l)
+			}
+			bodyLines = append(bodyLines, "  ── add ──")
+			for _, l := range strings.Split(e.newText, "\n") {
+				bodyLines = append(bodyLines, "  + "+l)
+			}
+		}
+	case len(m.shellPermQueue) > 0:
+		title = "⚠ Shell command"
+		bodyLines = append(bodyLines, "  $ "+m.shellPermQueue[0].command)
+	default:
+		return nil
+	}
+
+	footerStr := "  ◀ approve ▶   ◀ reject ▶"
+
+	// innerW = visible chars between the │ borders
+	innerW := lipgloss.Width(title) + 3 // "─ " + title + " " at minimum
+	for _, l := range bodyLines {
+		if w := lipgloss.Width(l); w > innerW {
+			innerW = w
+		}
+	}
+	if w := lipgloss.Width(footerStr); w > innerW {
+		innerW = w
+	}
+	innerW = min(innerW, min(maxInnerW, m.width-8))
+	innerW = max(innerW, 32)
+
+	// Top border: ╭─ ⚠(yellow) rest-of-title(label) ────╮
+	// title is "⚠ Edit request" or "⚠ Shell command"
+	titleStyled := ppKey.Render("⚠") + ppLabel.Render(strings.TrimPrefix(title, "⚠"))
+	remainDashes := max(0, innerW-lipgloss.Width(title)-3)
+	topLine := ppBorder.Render("╭─ ") + titleStyled + ppBorder.Render(" "+strings.Repeat("─", remainDashes)+"╮")
+
+	var out []string
+	out = append(out, topLine)
+
+	for _, bl := range bodyLines {
+		// Truncate overlong lines to fit innerW
+		if lipgloss.Width(bl) > innerW {
+			bl = ansi.Truncate(bl, innerW-1, "…")
+		}
+		pad := max(0, innerW-lipgloss.Width(bl))
+		// Include padding inside the styled span so the popup background covers it.
+		var mid string
+		switch {
+		case strings.HasPrefix(bl, "  - "):
+			mid = ppOld.Render(bl + strings.Repeat(" ", pad))
+		case strings.HasPrefix(bl, "  + "):
+			mid = ppNew.Render(bl + strings.Repeat(" ", pad))
+		default:
+			mid = ppText.Render(bl + strings.Repeat(" ", pad))
+		}
+		out = append(out, ppBorder.Render("│")+mid+ppBorder.Render("│"))
+	}
+
+	// Separator + footer with highlighted selection (◀ active choice ▶).
+	selStyle := lipgloss.NewStyle().Background(ppBg).Foreground(lipgloss.Color("#FFDD44")).Bold(true)
+	dimStyle := ppText
+	var approveStyled, rejectStyled string
+	if !m.permChoice { // approve highlighted
+		approveStyled = selStyle.Render("◀ approve ▶")
+		rejectStyled = dimStyle.Render("  reject   ")
+	} else { // reject highlighted
+		approveStyled = dimStyle.Render("  approve  ")
+		rejectStyled = selStyle.Render("◀ reject ▶")
+	}
+	footerRendered := ppText.Render("  ") + approveStyled + ppText.Render("   ") + rejectStyled
+	footerPad := max(0, innerW-lipgloss.Width(footerStr))
+	out = append(out, ppBorder.Render("├"+strings.Repeat("─", innerW)+"┤"))
+	out = append(out, ppBorder.Render("│")+footerRendered+ppText.Render(strings.Repeat(" ", footerPad))+ppBorder.Render("│"))
+	out = append(out, ppBorder.Render("╰"+strings.Repeat("─", innerW)+"╯"))
+
+	return out
+}
+
+// overlayPermPopup places the permission popup just above the input box.
+func (m Model) overlayPermPopup(base string) string {
+	popup := m.buildPermPopup()
+	if len(popup) == 0 {
+		return base
+	}
+
+	popW := 0
+	for _, l := range popup {
+		if w := lipgloss.Width(l); w > popW {
+			popW = w
+		}
+	}
+
+	lines := strings.Split(base, "\n")
+	totalH := len(lines)
+	startCol := max(0, (m.width-popW)/2)
+	// Position popup so its bottom edge sits just above the input box top border.
+	// The input box occupies rows [convHeight .. convHeight+inputHeight-1] (0-indexed).
+	// We want the popup to end at row convHeight-1.
+	inputBoxTopRow := m.convHeight()
+	startRow := max(1, inputBoxTopRow-len(popup))
+
+	for i, popLine := range popup {
+		row := startRow + i
+		if row >= totalH {
+			break
+		}
+		bg := lines[row]
+		// ansi.Truncate gives us the first startCol visual columns; pad if shorter.
+		left := ansi.Truncate(bg, startCol, "")
+		leftW := lipgloss.Width(left)
+		if leftW < startCol {
+			left += strings.Repeat(" ", startCol-leftW)
+		}
+		lines[row] = left + popLine
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) renderHeader() string {
@@ -507,53 +675,225 @@ func (m Model) renderConversation() string {
 	if h <= 0 {
 		return ""
 	}
-	lines := m.renderAllLines()
 
-	maxScroll := len(lines) - h
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	scroll := m.scroll
-	if scroll > maxScroll {
-		scroll = maxScroll
-	}
-	start := len(lines) - h - scroll
-	if start < 0 {
-		start = 0
-	}
-	end := start + h
-	if end > len(lines) {
-		end = len(lines)
-	}
-	visible := lines[start:end]
+	allLines, userStarts := m.renderAllLinesIndexed()
+	total := len(allLines)
+	maxScroll := max(0, total-h)
+	scroll := min(m.scroll, maxScroll)
+	visibleStart := max(0, total-h-scroll)
 
-	var rows strings.Builder
-	for i := 0; i < h-len(visible); i++ {
-		rows.WriteString(strings.Repeat(" ", m.width))
-		rows.WriteByte('\n')
-	}
-	for i, l := range visible {
-		rows.WriteString(padRight(strings.TrimRight(l, "\r"), m.width))
-		if i < len(visible)-1 {
-			rows.WriteByte('\n')
+	// Find the user message to pin: the most-recent one whose natural start
+	// line lies strictly above the visible area's top edge.
+	pinnedConvIdx := -1
+	for _, s := range userStarts {
+		if s.startLine < visibleStart {
+			pinnedConvIdx = s.convIdx
 		}
 	}
+
+	// writeLines writes exactly count rows to sb (padding blank rows at the top
+	// when src has fewer than count lines). Each row is separated by '\n' with no
+	// trailing '\n' after the last row, so the caller can safely append '\n'+more.
+	writeLines := func(sb *strings.Builder, src []string, count int) {
+		lineIdx := 0
+		for i := 0; i < count-len(src); i++ {
+			if lineIdx > 0 {
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(strings.Repeat(" ", m.width))
+			lineIdx++
+		}
+		for _, l := range src {
+			if lineIdx > 0 {
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(padRight(strings.TrimRight(l, "\r"), m.width))
+			lineIdx++
+		}
+	}
+
+	var rows strings.Builder
+
+	if pinnedConvIdx < 0 {
+		// No pinning — normal scroll view.
+		end := min(visibleStart+h, total)
+		visible := allLines[visibleStart:end]
+		writeLines(&rows, visible, h)
+		return rows.String()
+	}
+
+	// Render the pinned bubble (always in its current collapsed/expanded state).
+	pinLines := m.renderUserMsg(pinnedConvIdx, m.conv[pinnedConvIdx], m.width)
+	pinH := len(pinLines)
+	scrollH := h - pinH
+	if scrollH < 0 {
+		scrollH = 0
+	}
+
+	// Write pinned lines with '\n' between them (no trailing '\n').
+	for i, l := range pinLines {
+		if i > 0 {
+			rows.WriteByte('\n')
+		}
+		rows.WriteString(padRight(strings.TrimRight(l, "\r"), m.width))
+	}
+
+	if scrollH > 0 {
+		rows.WriteByte('\n') // separator between pinned and scrolled content
+		end := min(visibleStart+scrollH, total)
+		visible := allLines[visibleStart:end]
+		writeLines(&rows, visible, scrollH)
+	}
+
 	return rows.String()
 }
 
-func (m Model) renderAllLines() []string {
+// userMsgStart records where a user message begins in the flat line array.
+type userMsgStart struct {
+	convIdx   int
+	startLine int
+}
+
+// renderAllLinesIndexed builds all conversation lines and returns where each
+// user message starts, so renderConversation can pin the right one.
+func (m Model) renderAllLinesIndexed() (lines []string, starts []userMsgStart) {
 	w := m.width
 	if w < 8 {
 		w = 8
 	}
-	var lines []string
 	for i, msg := range m.conv {
 		if i > 0 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, m.renderMsg(msg, w)...)
+		if msg.Role == RoleUser {
+			starts = append(starts, userMsgStart{convIdx: i, startLine: len(lines)})
+			lines = append(lines, m.renderUserMsg(i, msg, w)...)
+		} else {
+			lines = append(lines, m.renderMsg(msg, w)...)
+		}
 	}
+	return
+}
+
+func (m Model) renderAllLines() []string {
+	lines, _ := m.renderAllLinesIndexed()
 	return lines
+}
+
+// renderUserMsg renders a user message as a full-width rounded bubble with
+// progressive dimming when collapsed. collapseThreshold is the minimum number
+// of content lines before collapsing takes effect.
+const collapseThreshold = 3
+
+func (m Model) renderUserMsg(convIdx int, msg ConvMsg, w int) []string {
+	const margin = 2
+	boxW := w - margin*2 // total box width including both border chars
+	if boxW < 8 {
+		boxW = 8
+	}
+	// inner content width: boxW minus left-border(1)+left-pad(1)+right-pad(1)+right-border(1)
+	contentW := boxW - 4
+	if contentW < 1 {
+		contentW = 1
+	}
+
+	// Word-wrap raw content into content-width lines.
+	var contentLines []string
+	for _, para := range strings.Split(msg.Content, "\n") {
+		if para == "" {
+			contentLines = append(contentLines, "")
+			continue
+		}
+		contentLines = append(contentLines, wordWrap(para, contentW)...)
+	}
+	if len(contentLines) == 0 {
+		contentLines = []string{""}
+	}
+
+	left := strings.Repeat(" ", margin)
+	bdrSty := lipgloss.NewStyle().Background(bubbleBg).Foreground(bubbleBorderColor)
+	hintSty := lipgloss.NewStyle().Background(bubbleBg).Foreground(bubbleHintColor).Italic(true)
+
+	// Render one content line with the given foreground colour and bubble background.
+	renderLine := func(text string, fg lipgloss.TerminalColor) string {
+		sty := lipgloss.NewStyle().Background(bubbleBg).Foreground(fg)
+		pad := strings.Repeat(" ", max(0, contentW-lipgloss.Width(text)))
+		// " " + text + padding + " " fills the full inner area including padding cols.
+		return left + bdrSty.Render("│") + sty.Render(" "+text+pad+" ") + bdrSty.Render("│")
+	}
+
+	dashes := strings.Repeat("─", boxW-2)
+	topLine := left + bdrSty.Render("╭"+dashes+"╮")
+	botLine := left + bdrSty.Render("╰"+dashes+"╯")
+
+	collapsed := m.collapsedMsgs[convIdx] && len(contentLines) > collapseThreshold
+
+	var out []string
+	out = append(out, topLine)
+
+	if collapsed {
+		for i := 0; i < collapseThreshold; i++ {
+			line := contentLines[i]
+			if lipgloss.Width(line) > contentW {
+				line = ansi.Truncate(line, contentW-1, "…")
+			}
+			fg := bubbleDim[min(i, len(bubbleDim)-1)]
+			out = append(out, renderLine(line, fg))
+		}
+		remaining := len(contentLines) - collapseThreshold
+		hint := fmt.Sprintf("… %d more lines  [alt+e] expand", remaining)
+		hintPad := strings.Repeat(" ", max(0, contentW-lipgloss.Width(hint)))
+		out = append(out, left+bdrSty.Render("│")+hintSty.Render(" "+hint+hintPad+" ")+bdrSty.Render("│"))
+	} else {
+		for _, line := range contentLines {
+			if lipgloss.Width(line) > contentW {
+				line = ansi.Truncate(line, contentW-1, "…")
+			}
+			out = append(out, renderLine(line, bubbleFg))
+		}
+		// Show collapse hint only when the message is long enough to be collapsible.
+		if len(contentLines) > collapseThreshold {
+			hint := "[alt+e] collapse"
+			hintPad := strings.Repeat(" ", max(0, contentW-lipgloss.Width(hint)))
+			out = append(out, left+bdrSty.Render("│")+hintSty.Render(" "+hint+hintPad+" ")+bdrSty.Render("│"))
+		}
+	}
+
+	out = append(out, botLine)
+	return out
+}
+
+// toggleTopUserMsg flips the collapsed state of whichever user message is
+// currently pinned at the top of the view, or the topmost visible one if none.
+func (m Model) toggleTopUserMsg() {
+	allLines, starts := m.renderAllLinesIndexed()
+	if len(starts) == 0 {
+		return
+	}
+	h := m.convHeight()
+	total := len(allLines)
+	maxScroll := max(0, total-h)
+	scroll := min(m.scroll, maxScroll)
+	visibleStart := max(0, total-h-scroll)
+
+	target := -1
+	for _, s := range starts {
+		if s.startLine < visibleStart {
+			target = s.convIdx // keep updating → last user msg above viewport
+		}
+	}
+	if target == -1 {
+		// Nothing pinned; pick the topmost user message that is visible.
+		for _, s := range starts {
+			if s.startLine >= visibleStart {
+				target = s.convIdx
+				break
+			}
+		}
+	}
+	if target >= 0 {
+		m.collapsedMsgs[target] = !m.collapsedMsgs[target]
+	}
 }
 
 func (m Model) renderMsg(msg ConvMsg, w int) []string {
@@ -561,49 +901,13 @@ func (m Model) renderMsg(msg ConvMsg, w int) []string {
 	case RoleStatus:
 		return []string{padRight(statusStyle.Render("  · "+msg.Content), w)}
 
-	case RoleUser:
-		label := youStyle.Render("You")
-		sep := dividerStyle.Render(strings.Repeat("─", max(0, w-lipgloss.Width(label)-2)))
-		var out []string
-		out = append(out, label+" "+sep)
-		for _, l := range wordWrap(msg.Content, w-2) {
-			out = append(out, "  "+l)
-		}
-		return out
-
 	case RoleAssistant:
-		label := claudeStyle.Render("Claude")
-		sep := dividerStyle.Render(strings.Repeat("─", max(0, w-lipgloss.Width(label)-2)))
-		var out []string
-		out = append(out, label+" "+sep)
-		out = append(out, renderMarkdown(msg.Content, w)...)
-		return out
+		// No label — just the markdown content, like a chat response.
+		return renderMarkdown(msg.Content, w)
 
 	case RoleTool:
 		return []string{padRight(toolStyle.Render(msg.Content), w)}
 
-	case RolePermission:
-		header := permStyle.Render("  ⚠ Edit request — approve? [y]es / [n]o")
-		out := []string{padRight(header, w)}
-		for _, l := range strings.Split(msg.Content, "\n") {
-			switch {
-			case strings.HasPrefix(l, "  - "):
-				out = append(out, diffOldStyle.Render(l))
-			case strings.HasPrefix(l, "  + "):
-				out = append(out, diffNewStyle.Render(l))
-			default:
-				out = append(out, statusStyle.Render(l))
-			}
-		}
-		return out
-
-	case RoleShellPermission:
-		header := permStyle.Render("  ⚠ Shell command — approve? [y]es / [n]o")
-		out := []string{padRight(header, w)}
-		for _, l := range strings.Split(msg.Content, "\n") {
-			out = append(out, toolStyle.Render(l))
-		}
-		return out
 	}
 	return nil
 }
@@ -614,17 +918,37 @@ func (m Model) renderDivider() string {
 	case m.agentRunning:
 		hint = statusStyle.Render(" thinking…")
 	case m.scroll > 0:
-		hint = statusStyle.Render(" ↑↓ / PgUp PgDn to scroll · ↓ for latest")
+		hint = statusStyle.Render(" PgUp/PgDn to scroll · PgDn for latest")
 	}
 	dashes := max(0, m.width-lipgloss.Width(hint))
 	return dividerStyle.Render(strings.Repeat("─", dashes)) + hint
 }
 
 func (m Model) renderInput() string {
+	h := m.inputHeight()  // total rows including top and bottom border
+	contentH := h - 2     // inner content rows
+	innerW := m.width - 2 // inner width (m.width minus two '│' border chars)
+	if innerW < 1 {
+		innerW = 1
+	}
+
+	// Embed scroll/thinking hint in the top border.
+	var hintStr string
+	switch {
+	case m.agentRunning:
+		hintStr = " thinking… "
+	case m.scroll > 0:
+		hintStr = " PgUp/PgDn to scroll "
+	}
+	hintW := len([]rune(hintStr))
+	topDashes := max(0, innerW-1-hintW)
+	topBorder := inputBorderSty.Render("╭─" + hintStr + strings.Repeat("─", topDashes) + "╮")
+	botBorder := inputBorderSty.Render("╰" + strings.Repeat("─", innerW) + "╯")
+
 	prompt := inputPromptSty.Render("▶ ")
 	pw := lipgloss.Width(prompt)
-	cont := strings.Repeat(" ", pw) // continuation prefix for lines 2+
-	avail := m.width - pw
+	cont := strings.Repeat(" ", pw)
+	avail := innerW - pw
 	if avail < 1 {
 		avail = 1
 	}
@@ -632,33 +956,40 @@ func (m Model) renderInput() string {
 	inputText := string(m.input)
 	inputLines := strings.Split(inputText, "\n")
 
-	// Find which line and column within that line the cursor sits on.
 	beforeCursor := string(m.input[:m.inputPos])
 	beforeLines := strings.Split(beforeCursor, "\n")
 	cursorLine := len(beforeLines) - 1
 	cursorCol := len([]rune(beforeLines[cursorLine]))
 
-	// Show a window of maxInputLines lines centred on the cursor line.
 	totalLines := len(inputLines)
-	winStart := max(0, cursorLine-maxInputLines+1)
-	winEnd := min(totalLines, winStart+maxInputLines)
+	winStart := 0
+	if totalLines > contentH {
+		winStart = cursorLine - contentH + 1
+		if winStart < 0 {
+			winStart = 0
+		}
+		if winStart+contentH > totalLines {
+			winStart = totalLines - contentH
+		}
+	}
+	winEnd := min(totalLines, winStart+contentH)
 
 	var sb strings.Builder
+	sb.WriteString(topBorder)
+
 	for i := winStart; i < winEnd; i++ {
-		if i > winStart {
-			sb.WriteByte('\n')
-		}
+		sb.WriteByte('\n')
+		var prefix string
 		if i == 0 {
-			sb.WriteString(prompt)
+			prefix = prompt
 		} else {
-			sb.WriteString(cont)
+			prefix = cont
 		}
 
 		lineRunes := []rune(inputLines[i])
-
+		var lineContent string
 		if i == cursorLine {
 			col := cursorCol
-			// Scroll the view rightward if cursor is past the visible area.
 			viewStart := 0
 			if col >= avail {
 				viewStart = col - avail + 1
@@ -667,12 +998,10 @@ func (m Model) renderInput() string {
 				lineRunes = lineRunes[viewStart:]
 				col -= viewStart
 			}
-			// Clamp rendered runes to avail width.
 			if len(lineRunes) > avail {
 				lineRunes = lineRunes[:avail]
 			}
-
-			before := string(lineRunes[:col])
+			before := string(lineRunes[:min(col, len(lineRunes))])
 			var curChar, after string
 			if col < len(lineRunes) {
 				curChar = cursorStyle.Render(string(lineRunes[col]))
@@ -685,35 +1014,109 @@ func (m Model) renderInput() string {
 			} else {
 				curChar = cursorStyle.Render(" ")
 			}
-			sb.WriteString(before + curChar + after)
+			lineContent = before + curChar + after
 		} else {
 			if len(lineRunes) > avail {
 				lineRunes = lineRunes[:avail]
 			}
-			sb.WriteString(string(lineRunes))
+			lineContent = string(lineRunes)
 		}
+
+		lineW := lipgloss.Width(prefix + lineContent)
+		pad := strings.Repeat(" ", max(0, innerW-lineW))
+		sb.WriteString(inputBorderSty.Render("│"))
+		sb.WriteString(prefix + lineContent + pad)
+		sb.WriteString(inputBorderSty.Render("│"))
 	}
+
+	// Pad remaining content rows with empty bordered lines.
+	for i := winEnd - winStart; i < contentH; i++ {
+		sb.WriteByte('\n')
+		sb.WriteString(inputBorderSty.Render("│"))
+		sb.WriteString(strings.Repeat(" ", innerW))
+		sb.WriteString(inputBorderSty.Render("│"))
+	}
+
+	sb.WriteByte('\n')
+	sb.WriteString(botBorder)
 	return sb.String()
 }
 
 // ─── layout helpers ──────────────────────────────────────────────────────────
 
-// maxInputLines is the maximum (and reserved) height of the input area.
-// The conversation area is always m.height - 4 - maxInputLines rows so the
-// layout never shifts when the input grows or shrinks (which would leave stale
-// Bubble Tea delta-renderer content on screen).
-const maxInputLines = 3
-
-func (m Model) inputLineCount() int {
+// inputHeight returns the number of terminal rows the input box occupies,
+// including the top and bottom border rows. Minimum is 3 (border + 1 line + border).
+// Grows with content up to a third of the screen height.
+func (m Model) inputHeight() int {
+	maxContentH := max(1, m.height/3-2) // max inner content rows
 	n := strings.Count(string(m.input), "\n") + 1
-	if n > maxInputLines {
-		n = maxInputLines
-	}
-	return n
+	return min(n, maxContentH) + 2 // +2 for top and bottom border
 }
 
+// convHeight returns the number of rows available for conversation display.
+// Layout: conv(convHeight) + '\n' + input(inputHeight) + '\n' + header(1)
+// Total rows = convHeight + inputHeight + 1 (header only; no separate divider row).
 func (m Model) convHeight() int {
-	return max(1, m.height-4-maxInputLines)
+	return max(1, m.height-m.inputHeight()-1)
+}
+
+// ─── input cursor movement helpers ───────────────────────────────────────────
+
+// inputCursorUp moves pos to the same column on the previous line, or returns
+// pos unchanged if already on the first line.
+func inputCursorUp(input []rune, pos int) int {
+	before := string(input[:pos])
+	beforeLines := strings.Split(before, "\n")
+	curLine := len(beforeLines) - 1
+	if curLine == 0 {
+		return pos
+	}
+	curCol := len([]rune(beforeLines[curLine]))
+	allLines := strings.Split(string(input), "\n")
+	prevLen := len([]rune(allLines[curLine-1]))
+	targetCol := min(curCol, prevLen)
+	newPos := 0
+	for i := 0; i < curLine-1; i++ {
+		newPos += len([]rune(allLines[i])) + 1 // +1 for '\n'
+	}
+	return newPos + targetCol
+}
+
+// inputCursorDown moves pos to the same column on the next line, or returns
+// pos unchanged if already on the last line.
+func inputCursorDown(input []rune, pos int) int {
+	before := string(input[:pos])
+	beforeLines := strings.Split(before, "\n")
+	curLine := len(beforeLines) - 1
+	curCol := len([]rune(beforeLines[curLine]))
+	allLines := strings.Split(string(input), "\n")
+	if curLine >= len(allLines)-1 {
+		return pos
+	}
+	nextLen := len([]rune(allLines[curLine+1]))
+	targetCol := min(curCol, nextLen)
+	newPos := 0
+	for i := 0; i <= curLine; i++ {
+		newPos += len([]rune(allLines[i])) + 1
+	}
+	return newPos + targetCol
+}
+
+// inputLineStart returns the index of the first rune on the current line.
+func inputLineStart(input []rune, pos int) int {
+	for pos > 0 && input[pos-1] != '\n' {
+		pos--
+	}
+	return pos
+}
+
+// inputLineEnd returns the index just past the last rune on the current line
+// (i.e. at the '\n' or at len(input)).
+func inputLineEnd(input []rune, pos int) int {
+	for pos < len(input) && input[pos] != '\n' {
+		pos++
+	}
+	return pos
 }
 
 // ─── commands ────────────────────────────────────────────────────────────────
@@ -928,8 +1331,15 @@ func main() {
 		}
 	}
 
+	// Tell the indigo server we're connected so it can show an indicator in the
+	// status bar. The key is arbitrary; the editor renders any non-empty text
+	// set via SetStatusBarText as a status bar decoration.
+	connectCtx, connectCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	rpc.SetStatusBarText(connectCtx, "indigo-claude", " claude ◆ ") //nolint:errcheck
+	connectCancel()
+
 	model := newModel(rpc, prog, apiKey, workDir)
-	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithoutSignalHandler())
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
 
 	prog.mu.Lock()
@@ -940,6 +1350,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "indigo-claude: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Clear the status bar entry before disconnecting; the server-side
+	// clearForConn also handles crash recovery automatically.
+	clearCtx, clearCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	rpc.SetStatusBarText(clearCtx, "indigo-claude", "") //nolint:errcheck
+	clearCancel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

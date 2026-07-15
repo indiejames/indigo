@@ -491,6 +491,7 @@ type Model struct {
 	// Reset to -1 on blur so re-focus always triggers a fresh report.
 	lastReportedLine int
 	lastReportedCol  int
+
 }
 
 // WithConfig returns a copy of the model with a new config applied.

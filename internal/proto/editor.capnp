@@ -52,6 +52,7 @@ interface EditorService {
   lspCodeActions     @32 (bufId :UInt32, line :UInt32, col :UInt32) -> (actions :List(LspCodeAction));
   setActiveContext   @33 (clientId :UInt64, bufId :UInt32, filePath :Text, line :UInt32, col :UInt32) -> ();
   getActiveContext   @34 () -> (result :ActiveContext);
+  setStatusBarText   @35 (key :Text, text :Text) -> ();
 }
 
 struct PluginEdit {

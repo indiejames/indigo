@@ -342,7 +342,7 @@ func (g *GitPlugin) decorations(bufID uint32, _ uint64, r sdk.Range) []sdk.Decor
 	if branch != "" {
 		out = append(out, sdk.Decoration{
 			Kind: sdk.DecorationStatusBar,
-			Text: "  " + branch, // nf-pl-branch glyph; falls back gracefully
+			Text: "  " + branch + "  ", // nf-pl-branch glyph; falls back gracefully
 		})
 	}
 

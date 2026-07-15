@@ -2628,6 +2628,23 @@ func (c EditorService) GetActiveContext(ctx context.Context, params func(EditorS
 
 }
 
+func (c EditorService) SetStatusBarText(ctx context.Context, params func(EditorService_setStatusBarText_Params) error) (EditorService_setStatusBarText_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      35,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "setStatusBarText",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 2}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_setStatusBarText_Params(s)) }
+	}
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_setStatusBarText_Results_Future{Future: ans.Future()}, release
+}
+
 func (c EditorService) WaitStreaming() error {
 	return capnp.Client(c).WaitStreaming()
 }
@@ -2770,6 +2787,8 @@ type EditorService_Server interface {
 	SetActiveContext(context.Context, EditorService_setActiveContext) error
 
 	GetActiveContext(context.Context, EditorService_getActiveContext) error
+
+	SetStatusBarText(context.Context, EditorService_setStatusBarText) error
 }
 
 // EditorService_NewServer creates a new Server from an implementation of EditorService_Server.
@@ -3208,6 +3227,18 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
 			return s.GetActiveContext(ctx, EditorService_getActiveContext{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      35,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "setStatusBarText",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.SetStatusBarText(ctx, EditorService_setStatusBarText{call})
 		},
 	})
 
@@ -3807,6 +3838,60 @@ func (c EditorService_getActiveContext) Args() EditorService_getActiveContext_Pa
 func (c EditorService_getActiveContext) AllocResults() (EditorService_getActiveContext_Results, error) {
 	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
 	return EditorService_getActiveContext_Results(r), err
+}
+
+// EditorService_setStatusBarText holds the state for a server call to EditorService.setStatusBarText.
+// See server.Call for documentation.
+type EditorService_setStatusBarText struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_setStatusBarText) Args() EditorService_setStatusBarText_Params {
+	return EditorService_setStatusBarText_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_setStatusBarText) AllocResults() (EditorService_setStatusBarText_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_setStatusBarText_Results(r), err
+}
+
+// EditorService_setStatusBarText_Params is the params type for setStatusBarText.
+type EditorService_setStatusBarText_Params capnp.Struct
+
+func NewEditorService_setStatusBarText_Params(s *capnp.Segment) (EditorService_setStatusBarText_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_setStatusBarText_Params(st), err
+}
+
+func (s EditorService_setStatusBarText_Params) Key() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s EditorService_setStatusBarText_Params) SetKey(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s EditorService_setStatusBarText_Params) Text() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s EditorService_setStatusBarText_Params) SetText(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+// EditorService_setStatusBarText_Results is the results type for setStatusBarText (empty).
+type EditorService_setStatusBarText_Results capnp.Struct
+
+// EditorService_setStatusBarText_Results_Future is a future accessor for setStatusBarText results.
+type EditorService_setStatusBarText_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_setStatusBarText_Results_Future) Struct() (EditorService_setStatusBarText_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_setStatusBarText_Results(p.Struct()), err
 }
 
 // EditorService_List is a list of EditorService.

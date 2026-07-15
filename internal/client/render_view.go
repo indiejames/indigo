@@ -463,9 +463,19 @@ func (m Model) renderStatusBar() string {
 		ms = insertModeStyle
 	}
 	left := ms.Render("  " + modeLabel + "  ")
+
+	// Plugin status bar decorations (e.g. git branch, claude indicator) go on
+	// the left, after the mode label, so the right side stays fixed-width and
+	// the centered file path does not shift when decorations appear/disappear.
+	for _, d := range m.decorations {
+		if d.Kind == ClientDecorationStatusBar && d.Text != "" {
+			left += barStyle.Render(d.Text)
+		}
+	}
+
 	leftW := lipgloss.Width(left)
 
-	// Right side: [file type] [lsp] [line:col]
+	// Right side: [diag counts] [lsp] [file type] [line:col]
 	posStr := fmt.Sprintf("  %d:%d  ", m.cursor.Line+1, m.cursor.Col+1)
 	right := barStyle.Render(posStr)
 
@@ -502,13 +512,6 @@ func (m Model) renderStatusBar() string {
 	}
 	if errCnt > 0 {
 		right = barDiagErrorStyle.Render(fmt.Sprintf(" %dE ", errCnt)) + right
-	}
-
-	// Plugin status bar decorations (e.g. git branch) go on the right, before file type.
-	for _, d := range m.decorations {
-		if d.Kind == ClientDecorationStatusBar && d.Text != "" {
-			right = barStyle.Render(d.Text) + right
-		}
 	}
 
 	rightW := lipgloss.Width(right)

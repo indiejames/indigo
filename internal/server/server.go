@@ -50,6 +50,7 @@ func SocketPath(dir string) string {
 	return filepath.Join(socketDir(dir), "server.sock")
 }
 
+
 // IsRunning returns true if a server socket exists and is accepting connections.
 func IsRunning(socketPath string) bool {
 	conn, err := net.Dial("unix", socketPath)
@@ -103,6 +104,9 @@ type editorService struct {
 	activeCtxMu sync.RWMutex
 	activeCtx   activeContext
 
+	// statusBar holds client-contributed status bar text segments.
+	statusBar *statusBarRegistry
+
 	// shutdown is called when the last client disconnects (cleanly or not).
 	shutdown        func()
 	onClientConnect func() // called once per Connect RPC; used to mark that real clients have connected
@@ -130,6 +134,7 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 		cfg:             cfg,
 		shutdown:        shutdown,
 		onClientConnect: onClientConnect,
+		statusBar:       newStatusBarRegistry(),
 	}
 	svc.pluginMgr = plugin.NewManager(workspaceDir, svc)
 	if watcher != nil {
@@ -309,6 +314,7 @@ type Server struct {
 	svc          *editorService
 	done         chan struct{}
 	connCount    atomic.Int64
+	nextConnID   atomic.Uint64
 	hasHadClient atomic.Bool
 	shutdownOnce sync.Once
 }
@@ -429,13 +435,15 @@ func (s *Server) serve() {
 			return
 		}
 		s.connCount.Add(1)
-		go func(c net.Conn) {
+		connID := s.nextConnID.Add(1)
+		go func(c net.Conn, connID uint64) {
 			defer func() {
 				if r := recover(); r != nil {
 					buf := make([]byte, 64*1024)
 					n := runtime.Stack(buf, true)
 					serverLog("serve: PANIC: %v\n%s", r, buf[:n])
 				}
+				s.svc.statusBar.clearForConn(connID)
 				newCount := s.connCount.Add(-1)
 				serverLog("serve: connection closed, connCount now %d, hasHadClient=%v", newCount, s.hasHadClient.Load())
 				c.Close() //nolint:errcheck
@@ -444,8 +452,9 @@ func (s *Server) serve() {
 				}
 			}()
 			transport := rpc.NewStreamTransport(c)
+			svc := &connSvc{editorService: s.svc, connID: connID}
 			opts := &rpc.Options{
-				BootstrapClient: capnp.Client(proto.EditorService_ServerToClient(s.svc)),
+				BootstrapClient: capnp.Client(proto.EditorService_ServerToClient(svc)),
 				Logger:          &serverRPCLogger{},
 			}
 			conn := rpc.NewConn(transport, opts)
@@ -458,7 +467,7 @@ func (s *Server) serve() {
 			case <-s.done:
 				serverLog("serve: s.done fired")
 			}
-		}(conn)
+		}(conn, connID)
 	}
 }
 

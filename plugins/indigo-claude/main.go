@@ -92,6 +92,12 @@ type Model struct {
 	ctxTokens   int
 	sessionCost float64
 	ctxWarned   bool // 80% context warning already shown
+
+	// Subscription plan usage (CLI mode). warned* hold the highest warn level
+	// already announced for the current window; they reset when the window does.
+	plan          planUsage
+	warnedSession float64
+	warnedWeekly  float64
 }
 
 // contextWindowTokens is the assumed model context window for warnings.
@@ -125,7 +131,12 @@ func newModel(rpc *client.RPC, prog *programLink, apiKey, workDir string) Model 
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(scheduleTick(), m.cmdPollActiveCtx())
+	cmds := []tea.Cmd{scheduleTick(), m.cmdPollActiveCtx()}
+	if m.apiKey == "" {
+		// CLI mode runs on a subscription — check plan limits at startup.
+		cmds = append(cmds, fetchPlanUsageCmd())
+	}
+	return tea.Batch(cmds...)
 }
 
 // ─── update ──────────────────────────────────────────────────────────────────
@@ -204,9 +215,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.history != nil {
 			m.history = msg.history
 		}
-		return m, m.saveStateCmd()
+		cmds := []tea.Cmd{m.saveStateCmd()}
+		if m.apiKey == "" {
+			// Refresh plan usage after each turn — that's when it moves.
+			cmds = append(cmds, fetchPlanUsageCmd())
+		}
+		return m, tea.Batch(cmds...)
 
 	case agentUnknownEventMsg:
+		return m, nil
+
+	case planUsageMsg:
+		// New window → forget what we already warned about for it.
+		if msg.usage.SevenDayReset != m.plan.SevenDayReset {
+			m.warnedWeekly = 0
+		}
+		if msg.usage.FiveHourReset != m.plan.FiveHourReset {
+			m.warnedSession = 0
+		}
+		m.plan = msg.usage
+		if lvl := crossedLevel(m.plan.SevenDayPct, m.warnedWeekly); lvl > 0 {
+			m.warnedWeekly = lvl
+			m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: fmt.Sprintf(
+				"⚠ Weekly plan usage at %.0f%% — resets %s.",
+				m.plan.SevenDayPct, fmtReset(m.plan.SevenDayReset))})
+		}
+		if lvl := crossedLevel(m.plan.FiveHourPct, m.warnedSession); lvl > 0 {
+			m.warnedSession = lvl
+			m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: fmt.Sprintf(
+				"⚠ Session (5h) plan usage at %.0f%% — resets %s.",
+				m.plan.FiveHourPct, fmtReset(m.plan.FiveHourReset))})
+		}
 		return m, nil
 
 	case agentUsageMsg:
@@ -718,7 +757,8 @@ func (m Model) renderHeader() string {
 
 	// Right-aligned usage segment: "164.1k ctx (82%) " (⚠-prefixed when high).
 	// Cost appears only in API mode where tokens are billed directly; in CLI
-	// mode subscription usage has no incremental cost worth showing.
+	// mode subscription usage has no incremental cost worth showing. Plan
+	// windows join the segment once they pass the warning threshold.
 	var right string
 	if m.ctxTokens > 0 {
 		pct := m.ctxTokens * 100 / contextWindowTokens
@@ -729,6 +769,20 @@ func (m Model) renderHeader() string {
 		if m.apiKey != "" && m.sessionCost > 0 {
 			right += fmt.Sprintf(" · $%.2f", m.sessionCost)
 		}
+	}
+	if m.plan.SevenDayPct >= planWarnLevels[0] {
+		if right != "" {
+			right += " · "
+		}
+		right += fmt.Sprintf("⚠ wk %.0f%%", m.plan.SevenDayPct)
+	}
+	if m.plan.FiveHourPct >= planWarnLevels[0] {
+		if right != "" {
+			right += " · "
+		}
+		right += fmt.Sprintf("⚠ 5h %.0f%%", m.plan.FiveHourPct)
+	}
+	if right != "" {
 		right += " "
 	}
 	pad := m.width - lipgloss.Width(label) - lipgloss.Width(right)

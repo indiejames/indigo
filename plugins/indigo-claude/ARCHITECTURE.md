@@ -118,6 +118,12 @@ Shell commands take the hook path instead: claude runs with
 socket for an approve/reject popup. File edits need no hook because the only
 file-editing tools available are ours.
 
+The workspace settings file applies to *every* Claude Code session in the
+directory, so the hook script is guarded by an env var
+(`INDIGO_CLAUDE_HOOK=1`) that only indigo-claude's own subprocess carries.
+Other sessions run the script, get no decision, and continue with their own
+permission flow — their commands never pop dialogs in the indigo-claude TUI.
+
 ## Buffer-aware editing and undo
 
 `apply_edits` (`tools.go`) opens the buffer via the server (idempotent if the

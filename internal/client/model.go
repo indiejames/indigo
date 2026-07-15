@@ -831,6 +831,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		prevTopLine := m.topLine
 		prevCursor := m.cursor
+		prevSel := copySel(m.sel)
 		switch {
 		case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
 			m.handleMousePress(msg.X, msg.Y)
@@ -847,9 +848,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.topLine != prevTopLine {
 			cmds = append(cmds, m.updateViewportCmd())
 		}
+		reported := false
 		if m.cursor != prevCursor && (m.cursor.Line != m.lastReportedLine || m.cursor.Col != m.lastReportedCol) {
 			m.lastReportedLine = m.cursor.Line
 			m.lastReportedCol = m.cursor.Col
+			cmds = append(cmds, m.ReportActiveContextCmd())
+			reported = true
+		}
+		// Selection changes without a cursor move (e.g. click clearing a
+		// selection, drag extension) also report.
+		if !reported && !selEqual(prevSel, m.sel) {
 			cmds = append(cmds, m.ReportActiveContextCmd())
 		}
 		return m, tea.Batch(cmds...)
@@ -895,6 +903,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		prevLine := m.cursor.Line
 		prevTopLine := m.topLine
+		prevSel := copySel(m.sel)
 		newModel, cmd := m.handleKey(msg)
 		nm, ok := newModel.(Model)
 		if !ok {
@@ -920,9 +929,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Fallback focus detection: if terminal focus events aren't working,
 		// the first cursor move or edit after focus switches panes reports the
 		// active context. Once reported, skip until BlurMsg clears the flag.
+		// Selection changes (start, extend, clear — e.g. Esc) also report so
+		// external tools never see a stale selection.
+		needReport := false
 		if nm.cursor.Line != nm.lastReportedLine || nm.cursor.Col != nm.lastReportedCol {
 			nm.lastReportedLine = nm.cursor.Line
 			nm.lastReportedCol = nm.cursor.Col
+			needReport = true
+		}
+		if !selEqual(prevSel, nm.sel) {
+			needReport = true
+		}
+		if needReport {
 			cmd = tea.Batch(cmd, nm.ReportActiveContextCmd())
 		}
 		return nm, cmd

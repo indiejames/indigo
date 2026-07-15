@@ -12,8 +12,8 @@ import (
 )
 
 // ReportActiveContextCmd returns a Cmd that tells the server this client's
-// current buffer and cursor position is the active context. Returns nil when
-// rpc is nil (e.g. in tests).
+// current buffer, cursor position, and selection are the active context.
+// Returns nil when rpc is nil (e.g. in tests).
 func (m Model) ReportActiveContextCmd() tea.Cmd {
 	if m.rpc == nil {
 		return nil
@@ -23,10 +23,26 @@ func (m Model) ReportActiveContextCmd() tea.Cmd {
 	filePath := m.filePath
 	line := uint32(m.cursor.Line)
 	col := uint32(m.cursor.Col)
+
+	var sel ActiveSelection
+	if m.sel != nil {
+		start, end := m.sel.ordered()
+		sel = ActiveSelection{
+			Found:     true,
+			BufID:     bufID,
+			StartLine: uint32(start.Line),
+			StartCol:  uint32(start.Col),
+			EndLine:   uint32(end.Line),
+			EndCol:    uint32(end.Col), // inclusive, matching selectedText
+			IsLine:    m.sel.IsLine,
+		}
+	}
+
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		_ = m.rpc.SetActiveContext(ctx, clientID, bufID, filePath, line, col)
+		_ = m.rpc.SetActiveSelection(ctx, clientID, bufID, sel)
 		return nil
 	}
 }

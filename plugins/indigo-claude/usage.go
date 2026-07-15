@@ -157,6 +157,39 @@ func fetchPlanUsageCmd() tea.Cmd {
 	}
 }
 
+// planWarnHint returns a persistent one-line warning for the input-box border
+// when a subscription window is past the warning threshold, or "" when all
+// windows are comfortably below it.
+func (m Model) planWarnHint() string {
+	weekly := m.plan.SevenDayPct >= planWarnLevels[0]
+	session := m.plan.FiveHourPct >= planWarnLevels[0]
+	switch {
+	case weekly && session:
+		return fmt.Sprintf("⚠ plan usage: 5h %.0f%% (resets %s) · weekly %.0f%% (resets %s)",
+			m.plan.FiveHourPct, fmtReset(m.plan.FiveHourReset),
+			m.plan.SevenDayPct, fmtReset(m.plan.SevenDayReset))
+	case weekly:
+		return fmt.Sprintf("⚠ weekly plan usage %.0f%% — resets %s",
+			m.plan.SevenDayPct, fmtReset(m.plan.SevenDayReset))
+	case session:
+		return fmt.Sprintf("⚠ 5-hour plan usage %.0f%% — resets %s",
+			m.plan.FiveHourPct, fmtReset(m.plan.FiveHourReset))
+	}
+	return ""
+}
+
+// planWarnChips is the compact fallback for narrow terminals: "⚠ wk 79% · ⚠ 5h 77%".
+func (m Model) planWarnChips() string {
+	var parts []string
+	if m.plan.SevenDayPct >= planWarnLevels[0] {
+		parts = append(parts, fmt.Sprintf("⚠ wk %.0f%%", m.plan.SevenDayPct))
+	}
+	if m.plan.FiveHourPct >= planWarnLevels[0] {
+		parts = append(parts, fmt.Sprintf("⚠ 5h %.0f%%", m.plan.FiveHourPct))
+	}
+	return strings.Join(parts, " · ")
+}
+
 // fmtReset renders a reset time compactly: same-day resets show the clock
 // time, later resets include the weekday.
 func fmtReset(t time.Time) string {

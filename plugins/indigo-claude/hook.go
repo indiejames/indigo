@@ -165,7 +165,13 @@ func handleMCPToolCall(conn net.Conn, line string, prog *programLink, rpc *clien
 // ─── hook script + settings ───────────────────────────────────────────────────
 
 func writeHookScript(scriptPath, binaryPath, socketPath string) error {
-	content := fmt.Sprintf("#!/bin/sh\nexec %s --hook %s\n", binaryPath, socketPath)
+	// The env guard scopes the hook to the claude subprocess spawned by
+	// indigo-claude (which sets INDIGO_CLAUDE_HOOK=1). Any other Claude Code
+	// session in this workspace also runs the hook — settings.local.json
+	// applies directory-wide — but exits silently with no decision, so those
+	// sessions keep their own permission flow instead of popping dialogs in
+	// the indigo-claude TUI.
+	content := fmt.Sprintf("#!/bin/sh\n[ \"$INDIGO_CLAUDE_HOOK\" = \"1\" ] || exit 0\nexec %s --hook %s\n", binaryPath, socketPath)
 	return os.WriteFile(scriptPath, []byte(content), 0700)
 }
 

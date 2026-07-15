@@ -142,11 +142,10 @@ type permissionRequestMsg struct {
 
 // ─── buffer context snippet ──────────────────────────────────────────────────
 
-// bufferSnippet returns ±radius lines around line (0-indexed) of filePath as a
-// fenced block with the cursor line marked. Content comes from the live editor
-// buffer (so unsaved edits are reflected and edit anchors match reality),
-// falling back to disk when the RPC is unavailable. Returns "" on error.
-func bufferSnippet(rpc *client.RPC, filePath string, line, radius int) string {
+// bufferContent returns the live editor buffer content for filePath (so
+// unsaved edits are reflected), falling back to disk when the RPC is
+// unavailable. Returns "" on error.
+func bufferContent(rpc *client.RPC, filePath string) string {
 	var content string
 	if rpc != nil && filePath != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -164,6 +163,70 @@ func bufferSnippet(rpc *client.RPC, filePath string, line, radius int) string {
 			return ""
 		}
 		content = string(data)
+	}
+	return content
+}
+
+// extractSelection returns the selected text from content using the editor's
+// selection semantics: document-ordered range, end column inclusive, IsLine
+// meaning whole lines.
+func extractSelection(content string, sel client.ActiveSelection) string {
+	lines := strings.Split(content, "\n")
+	sl, el := int(sel.StartLine), int(sel.EndLine)
+	if sl >= len(lines) {
+		return ""
+	}
+	if el >= len(lines) {
+		el = len(lines) - 1
+	}
+	if sel.IsLine {
+		return strings.Join(lines[sl:el+1], "\n")
+	}
+	sc, ec := int(sel.StartCol), int(sel.EndCol)
+	if sl == el {
+		runes := []rune(lines[sl])
+		hi := min(ec+1, len(runes))
+		lo := min(sc, hi)
+		return string(runes[lo:hi])
+	}
+	var sb strings.Builder
+	first := []rune(lines[sl])
+	sb.WriteString(string(first[min(sc, len(first)):]))
+	sb.WriteByte('\n')
+	for l := sl + 1; l < el; l++ {
+		sb.WriteString(lines[l])
+		sb.WriteByte('\n')
+	}
+	last := []rune(lines[el])
+	sb.WriteString(string(last[:min(ec+1, len(last))]))
+	return sb.String()
+}
+
+// selectionNote returns a prompt fragment describing the active selection
+// ("Selected text (lines 10-25):\n```…```\n\n"), or "" when there is no
+// selection relevant to the active file.
+func selectionNote(rpc *client.RPC, ac client.ActiveContext, sel client.ActiveSelection) string {
+	if !sel.Found || !ac.Found || sel.BufID != ac.BufID {
+		return ""
+	}
+	content := bufferContent(rpc, ac.FilePath)
+	if content == "" {
+		return ""
+	}
+	text := extractSelection(content, sel)
+	if text == "" {
+		return ""
+	}
+	return fmt.Sprintf("Selected text (lines %d-%d):\n```\n%s\n```\n\n",
+		sel.StartLine+1, sel.EndLine+1, text)
+}
+
+// bufferSnippet returns ±radius lines around line (0-indexed) of filePath as a
+// fenced block with the cursor line marked. Returns "" on error.
+func bufferSnippet(rpc *client.RPC, filePath string, line, radius int) string {
+	content := bufferContent(rpc, filePath)
+	if content == "" {
+		return ""
 	}
 	fileLines := strings.Split(content, "\n")
 	start := max(0, line-radius)
@@ -201,6 +264,8 @@ Rules:
 - Line numbers in snippets are 1-based. When the user names a line number (or
   says "at the cursor"), use insert_at_line — the inserted text becomes exactly
   that line. Use apply_edits only for replacing existing text.
+- When the user refers to "the selection" or "the selected code", they mean the
+  "Selected text" block in their message — operate on exactly that text.
 - Prefer small, focused edits over large rewrites.
 - Explain your reasoning before using apply_edits.
 - Each apply_edits call requires user approval; batch related edits into one call when possible.
@@ -211,12 +276,13 @@ Rules:
 	return sb.String()
 }
 
-func buildUserMessage(text string, ac client.ActiveContext, snippet string) apiMessage {
+func buildUserMessage(text string, ac client.ActiveContext, snippet, selNote string) apiMessage {
 	if !ac.Found {
 		return userText(text)
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "[Active file: %s, line %d]\n\n", ac.FilePath, ac.Line+1)
+	sb.WriteString(selNote)
 	if snippet != "" {
 		sb.WriteString("Context around cursor:\n")
 		sb.WriteString(snippet)
@@ -227,8 +293,9 @@ func buildUserMessage(text string, ac client.ActiveContext, snippet string) apiM
 }
 
 // runAgent runs the direct-API agentic loop in a goroutine. It builds the
-// cursor snippet itself (an RPC call) so the UI loop never blocks on it.
-func runAgent(prog *programLink, rpc *client.RPC, apiKey, workDir string, history []apiMessage, text string, ac client.ActiveContext) {
+// cursor snippet and selection note itself (RPC calls) so the UI loop never
+// blocks on them.
+func runAgent(prog *programLink, rpc *client.RPC, apiKey, workDir string, history []apiMessage, text string, ac client.ActiveContext, sel client.ActiveSelection) {
 	ctx, cancel := context.WithCancel(context.Background())
 	prog.setCancel(cancel)
 	defer prog.setCancel(nil)
@@ -237,7 +304,7 @@ func runAgent(prog *programLink, rpc *client.RPC, apiKey, workDir string, histor
 	if ac.Found {
 		snippet = bufferSnippet(rpc, ac.FilePath, int(ac.Line), 20)
 	}
-	history = append(history, buildUserMessage(text, ac, snippet))
+	history = append(history, buildUserMessage(text, ac, snippet, selectionNote(rpc, ac, sel)))
 
 	system := buildSystemPrompt(workDir, ac)
 	tools := allTools()
@@ -353,11 +420,12 @@ func toolDisplayName(name string, input json.RawMessage) string {
 // runClaudeSubprocess runs `claude -p` as a subprocess and emits agent events.
 // sessionID is empty for the first turn; subsequent turns pass --resume so Claude
 // Code continues the conversation with full context.
-func runClaudeSubprocess(prog *programLink, rpc *client.RPC, workDir, prompt, sessionID string, ac client.ActiveContext) {
+func runClaudeSubprocess(prog *programLink, rpc *client.RPC, workDir, prompt, sessionID string, ac client.ActiveContext, sel client.ActiveSelection) {
 	var snippet string
 	if ac.Found {
 		snippet = bufferSnippet(rpc, ac.FilePath, int(ac.Line), 20)
 	}
+	selNote := selectionNote(rpc, ac, sel)
 
 	args := []string{
 		"-p",
@@ -400,6 +468,13 @@ func runClaudeSubprocess(prog *programLink, rpc *client.RPC, workDir, prompt, se
 			ac.FilePath, ac.Line+1, ac.Col+1,
 		)
 	}
+	if selNote != "" {
+		sysPrompt += fmt.Sprintf(
+			" The user has lines %d-%d selected in the editor;"+
+				" 'the selection' or 'the selected code' means exactly the Selected text block in their message.",
+			sel.StartLine+1, sel.EndLine+1,
+		)
+	}
 	args = append(args, "--append-system-prompt", sysPrompt)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -409,18 +484,21 @@ func runClaudeSubprocess(prog *programLink, rpc *client.RPC, workDir, prompt, se
 	// Prepend file context to the user prompt so Claude sees the relevant code
 	// without needing a read_file tool call.
 	userPrompt := prompt
-	if ac.Found && snippet != "" {
-		userPrompt = fmt.Sprintf("[File: %s, line %d]\nContext around cursor:\n%s\n\n%s",
-			ac.FilePath, ac.Line+1, snippet, prompt)
+	if ac.Found && (snippet != "" || selNote != "") {
+		userPrompt = fmt.Sprintf("[File: %s, line %d]\n%sContext around cursor:\n%s\n\n%s",
+			ac.FilePath, ac.Line+1, selNote, snippet, prompt)
 	}
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = workDir
 	// apply_edits blocks on the in-editor approval popup, so give MCP tool
-	// calls a generous timeout (values in milliseconds).
+	// calls a generous timeout (values in milliseconds). INDIGO_CLAUDE_HOOK
+	// marks this subprocess as ours so the workspace hook script only gates
+	// commands from this session, not other Claude Code sessions.
 	cmd.Env = append(os.Environ(),
 		"MCP_TIMEOUT=30000",
 		"MCP_TOOL_TIMEOUT=600000",
+		"INDIGO_CLAUDE_HOOK=1",
 	)
 	// strings.NewReader closes stdin (returns EOF) as soon as the prompt is
 	// consumed. That's needed because claude reads stdin until EOF to get the

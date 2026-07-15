@@ -56,6 +56,10 @@ interface EditorService {
   # Apply a batch of ops atomically: once the server receives the call, all
   # ops are applied even if the client dies mid-request.
   applyOps           @36 (clientId :UInt64, bufferId :UInt32, ops :List(EditOp)) -> (version :UInt64);
+  # Report / query the active editor selection (start/end in document order,
+  # end column inclusive; isLine = whole-line selection; active=false clears).
+  setActiveSelection @37 (clientId :UInt64, bufId :UInt32, startLine :UInt32, startCol :UInt32, endLine :UInt32, endCol :UInt32, isLine :Bool, active :Bool) -> ();
+  getActiveSelection @38 () -> (bufId :UInt32, startLine :UInt32, startCol :UInt32, endLine :UInt32, endCol :UInt32, isLine :Bool, found :Bool);
 }
 
 struct PluginEdit {

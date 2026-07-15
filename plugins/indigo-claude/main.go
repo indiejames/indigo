@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -41,7 +42,10 @@ type ConvMsg struct {
 // ─── tea messages ────────────────────────────────────────────────────────────
 
 type tickMsg struct{}
-type activeCtxUpdated struct{ ctx client.ActiveContext }
+type activeCtxUpdated struct {
+	ctx client.ActiveContext
+	sel client.ActiveSelection
+}
 
 // ─── model ───────────────────────────────────────────────────────────────────
 
@@ -72,6 +76,7 @@ type Model struct {
 	streamingConvIdx int
 
 	activeCtx client.ActiveContext
+	activeSel client.ActiveSelection
 	scroll    int
 	ready     bool
 
@@ -165,6 +170,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case activeCtxUpdated:
 		prev := m.activeCtx
 		m.activeCtx = msg.ctx
+		m.activeSel = msg.sel
 		if msg.ctx.Found && msg.ctx.FilePath != prev.FilePath {
 			m.conv = append(m.conv, ConvMsg{
 				Role:    RoleStatus,
@@ -378,14 +384,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		prog := m.prog
 		ac := m.activeCtx
+		sel := m.activeSel
 		if m.apiKey != "" {
 			// Copy history so the goroutine's append can't share a backing
 			// array with m.history.
 			history := make([]apiMessage, len(m.history))
 			copy(history, m.history)
-			go runAgent(prog, m.rpc, m.apiKey, m.workDir, history, text, ac)
+			go runAgent(prog, m.rpc, m.apiKey, m.workDir, history, text, ac, sel)
 		} else {
-			go runClaudeSubprocess(prog, m.rpc, m.workDir, text, m.sessionID, ac)
+			go runClaudeSubprocess(prog, m.rpc, m.workDir, text, m.sessionID, ac, sel)
 		}
 		return m, nil
 
@@ -481,13 +488,32 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		r := []rune(msg.String())
+		s := msg.String()
+		// Fast wheel scrolling can overwhelm the terminal parser and leak SGR
+		// mouse sequences ("<65;70;21M") into the rune stream. Strip them from
+		// typed input; pasted text is left untouched.
+		if !msg.Paste && len(msg.Runes) > 1 {
+			s = stripMouseArtifacts(s)
+			if s == "" {
+				return m, nil
+			}
+		}
+		r := []rune(s)
 		m.input = append(m.input[:m.inputPos], append(r, m.input[m.inputPos:]...)...)
 		m.inputPos += len(r)
 		m.historyIdx = -1
 		return m, nil
 	}
 	return m, nil
+}
+
+// mouseSeqRe matches fragments of SGR mouse escape sequences that survive when
+// the ESC[ prefix was consumed elsewhere: "<65;70;21M", "[<64;10;5M", etc.
+var mouseSeqRe = regexp.MustCompile(`\[?<?\d{1,3};\d{1,3};\d{1,3}[Mm]`)
+
+// stripMouseArtifacts removes leaked SGR mouse-event fragments from s.
+func stripMouseArtifacts(s string) string {
+	return mouseSeqRe.ReplaceAllString(s, "")
 }
 
 func (m Model) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -748,6 +774,9 @@ func (m Model) renderHeader() string {
 	if m.activeCtx.Found {
 		label = fmt.Sprintf(" indigo-claude  ·  %s  line %d",
 			m.displayPath(m.activeCtx.FilePath), m.activeCtx.Line+1)
+		if m.activeSel.Found && m.activeSel.BufID == m.activeCtx.BufID {
+			label += fmt.Sprintf("  ·  sel %d–%d", m.activeSel.StartLine+1, m.activeSel.EndLine+1)
+		}
 	}
 	if m.pendingPerm != nil || len(m.shellPermQueue) > 0 {
 		label += "  [approve? y/n]"
@@ -755,42 +784,39 @@ func (m Model) renderHeader() string {
 		label += "  [thinking…]"
 	}
 
-	// Right-aligned usage segment: "164.1k ctx (82%) " (⚠-prefixed when high).
-	// Cost appears only in API mode where tokens are billed directly; in CLI
-	// mode subscription usage has no incremental cost worth showing. Plan
-	// windows join the segment once they pass the warning threshold.
-	var right string
+	// Right side: context stats plus the plan-limit warning. Cost appears only
+	// in API mode where tokens are billed directly. The plan warning prefers
+	// its full text with reset times; on narrow terminals it degrades to
+	// compact chips, then drops entirely rather than truncating the label.
+	var ctxSeg string
 	if m.ctxTokens > 0 {
 		pct := m.ctxTokens * 100 / contextWindowTokens
 		if pct >= ctxWarnPct {
-			right = "⚠ "
+			ctxSeg = "⚠ "
 		}
-		right += fmt.Sprintf("%s ctx (%d%%)", fmtTokens(m.ctxTokens), pct)
+		ctxSeg += fmt.Sprintf("%s ctx (%d%%)", fmtTokens(m.ctxTokens), pct)
 		if m.apiKey != "" && m.sessionCost > 0 {
-			right += fmt.Sprintf(" · $%.2f", m.sessionCost)
+			ctxSeg += fmt.Sprintf(" · $%.2f", m.sessionCost)
 		}
 	}
-	if m.plan.SevenDayPct >= planWarnLevels[0] {
+
+	labelW := lipgloss.Width(label)
+	for _, plan := range []string{m.planWarnHint(), m.planWarnChips(), ""} {
+		right := ctxSeg
+		if plan != "" {
+			if right != "" {
+				right += " · "
+			}
+			right += plan
+		}
 		if right != "" {
-			right += " · "
+			right += " "
 		}
-		right += fmt.Sprintf("⚠ wk %.0f%%", m.plan.SevenDayPct)
-	}
-	if m.plan.FiveHourPct >= planWarnLevels[0] {
-		if right != "" {
-			right += " · "
+		if pad := m.width - labelW - lipgloss.Width(right); pad >= 1 {
+			return headerStyle.Render(label + strings.Repeat(" ", pad) + right)
 		}
-		right += fmt.Sprintf("⚠ 5h %.0f%%", m.plan.FiveHourPct)
 	}
-	if right != "" {
-		right += " "
-	}
-	pad := m.width - lipgloss.Width(label) - lipgloss.Width(right)
-	if pad < 1 {
-		// Not enough room — drop the usage segment rather than truncating the label.
-		return headerStyle.Width(m.width).Render(label)
-	}
-	return headerStyle.Render(label + strings.Repeat(" ", pad) + right)
+	return headerStyle.Width(m.width).Render(label)
 }
 
 func (m Model) renderConversation() string {
@@ -1055,7 +1081,8 @@ func (m Model) renderInput() string {
 		innerW = 1
 	}
 
-	// Embed scroll/thinking hint in the top border.
+	// Embed scroll/thinking hint in the top border. Plan-limit warnings live
+	// in the status bar at the bottom.
 	var hintStr string
 	switch {
 	case m.agentRunning:
@@ -1063,7 +1090,7 @@ func (m Model) renderInput() string {
 	case m.scroll > 0:
 		hintStr = " PgUp/PgDn to scroll "
 	}
-	hintW := len([]rune(hintStr))
+	hintW := lipgloss.Width(hintStr)
 	topDashes := max(0, innerW-1-hintW)
 	topBorder := inputBorderSty.Render("╭─" + hintStr + strings.Repeat("─", topDashes) + "╮")
 	botBorder := inputBorderSty.Render("╰" + strings.Repeat("─", innerW) + "╯")
@@ -1260,7 +1287,8 @@ func (m Model) cmdPollActiveCtx() tea.Cmd {
 		if err != nil {
 			return nil
 		}
-		return activeCtxUpdated{ctx: ac}
+		sel, _ := rpc.GetActiveSelection(ctx) // zero value on error = no selection
+		return activeCtxUpdated{ctx: ac, sel: sel}
 	}
 }
 

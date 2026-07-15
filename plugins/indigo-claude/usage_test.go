@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -47,6 +49,53 @@ func TestParsePlanUsage(t *testing.T) {
 	wantReset := time.Date(2026, 7, 18, 20, 59, 59, 726788000, time.UTC)
 	if !u.SevenDayReset.Equal(wantReset) {
 		t.Errorf("SevenDayReset = %v, want %v", u.SevenDayReset, wantReset)
+	}
+}
+
+func TestPlanWarnHint(t *testing.T) {
+	reset := time.Now().Add(3 * time.Hour)
+
+	m := Model{}
+	if got := m.planWarnHint(); got != "" {
+		t.Errorf("no data: hint = %q, want empty", got)
+	}
+
+	m.plan = planUsage{SevenDayPct: 50, FiveHourPct: 50}
+	if got := m.planWarnHint(); got != "" {
+		t.Errorf("below threshold: hint = %q, want empty", got)
+	}
+
+	m.plan = planUsage{SevenDayPct: 79, SevenDayReset: reset}
+	got := m.planWarnHint()
+	if !strings.Contains(got, "weekly") || !strings.Contains(got, "79%") {
+		t.Errorf("weekly-only hint = %q", got)
+	}
+
+	m.plan = planUsage{SevenDayPct: 79, SevenDayReset: reset, FiveHourPct: 90, FiveHourReset: reset}
+	got = m.planWarnHint()
+	if !strings.Contains(got, "5h 90%") || !strings.Contains(got, "weekly 79%") {
+		t.Errorf("both-windows hint = %q", got)
+	}
+}
+
+// Regression test: the hook script must be a no-op for Claude Code sessions
+// that aren't indigo-claude's own subprocess, or their Bash commands pop
+// approval dialogs in the indigo-claude TUI.
+func TestHookScriptGuardsForeignSessions(t *testing.T) {
+	path := t.TempDir() + "/hook.sh"
+	if err := writeHookScript(path, "/bin/indigo-claude", "/tmp/x.sock"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	if !strings.Contains(script, `[ "$INDIGO_CLAUDE_HOOK" = "1" ] || exit 0`) {
+		t.Errorf("hook script missing env guard:\n%s", script)
+	}
+	if !strings.Contains(script, "exec /bin/indigo-claude --hook /tmp/x.sock") {
+		t.Errorf("hook script missing forward line:\n%s", script)
 	}
 }
 

@@ -18,6 +18,61 @@ type ActiveContext struct {
 	UpdatedAt time.Time
 }
 
+// ActiveSelection describes the current editor selection, in document order
+// with an inclusive end column. Found=false means nothing is selected.
+type ActiveSelection struct {
+	Found     bool
+	BufID     uint32
+	StartLine uint32
+	StartCol  uint32
+	EndLine   uint32
+	EndCol    uint32
+	IsLine    bool
+}
+
+// SetActiveSelection reports this client's selection (or clears it when
+// active=false). Coordinates must be in document order, end column inclusive.
+func (r *RPC) SetActiveSelection(ctx context.Context, clientID uint64, bufID uint32, sel ActiveSelection) error {
+	fut, rel := r.svc.SetActiveSelection(ctx, func(p proto.EditorService_setActiveSelection_Params) error {
+		p.SetClientId(clientID)
+		p.SetBufId(bufID)
+		p.SetStartLine(sel.StartLine)
+		p.SetStartCol(sel.StartCol)
+		p.SetEndLine(sel.EndLine)
+		p.SetEndCol(sel.EndCol)
+		p.SetIsLine(sel.IsLine)
+		p.SetActive(sel.Found)
+		return nil
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
+// GetActiveSelection returns the most recently reported editor selection.
+func (r *RPC) GetActiveSelection(ctx context.Context) (ActiveSelection, error) {
+	fut, rel := r.svc.GetActiveSelection(ctx, func(proto.EditorService_getActiveSelection_Params) error {
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return ActiveSelection{}, err
+	}
+	if !res.Found() {
+		return ActiveSelection{}, nil
+	}
+	return ActiveSelection{
+		Found:     true,
+		BufID:     res.BufId(),
+		StartLine: res.StartLine(),
+		StartCol:  res.StartCol(),
+		EndLine:   res.EndLine(),
+		EndCol:    res.EndCol(),
+		IsLine:    res.IsLine(),
+	}, nil
+}
+
 // SetActiveContext notifies the server that this client's cursor/edit position
 // is the current active context. Call on buffer switch, cursor move, or any edit.
 func (r *RPC) SetActiveContext(ctx context.Context, clientID uint64, bufID uint32, filePath string, line, col uint32) error {

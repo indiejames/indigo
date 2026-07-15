@@ -72,6 +72,33 @@ func TestRemoteOpBatchRecordsSingleUndoEntry(t *testing.T) {
 	}
 }
 
+// selEqual/copySel drive selection-change reporting to the server; copySel
+// must snapshot (handlers mutate the pointed-to Selection in place) and
+// selEqual must treat nil and equal-range selections correctly.
+func TestSelEqualAndCopySel(t *testing.T) {
+	a := &Selection{Anchor: document.Pos{Line: 1, Col: 2}, Head: document.Pos{Line: 3, Col: 4}}
+
+	if !selEqual(nil, nil) {
+		t.Error("selEqual(nil, nil) = false")
+	}
+	if selEqual(a, nil) || selEqual(nil, a) {
+		t.Error("selEqual(sel, nil) = true")
+	}
+
+	snap := copySel(a)
+	if !selEqual(a, snap) {
+		t.Error("copy not equal to original")
+	}
+	// In-place mutation (as visual-mode handlers do) must not affect the copy.
+	a.Head = document.Pos{Line: 9, Col: 0}
+	if selEqual(a, snap) {
+		t.Error("copySel did not snapshot: mutation leaked into the copy")
+	}
+	if copySel(nil) != nil {
+		t.Error("copySel(nil) != nil")
+	}
+}
+
 // Remote ops must clear the redo stack, like any other new edit.
 func TestRemoteOpsClearRedoStack(t *testing.T) {
 	m := newTestModel("line1\n")

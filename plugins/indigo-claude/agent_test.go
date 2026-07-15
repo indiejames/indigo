@@ -6,8 +6,40 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/document"
 )
+
+// extractSelection must mirror the editor's selection semantics: ranges in
+// document order, end column inclusive, IsLine selecting whole lines.
+func TestExtractSelection(t *testing.T) {
+	content := "alpha\nbravo charlie\ndelta\necho"
+	cases := []struct {
+		name string
+		sel  client.ActiveSelection
+		want string
+	}{
+		{"single line partial",
+			client.ActiveSelection{StartLine: 1, StartCol: 6, EndLine: 1, EndCol: 12}, "charlie"},
+		{"multi line",
+			client.ActiveSelection{StartLine: 1, StartCol: 6, EndLine: 2, EndCol: 4}, "charlie\ndelta"},
+		{"line-wise",
+			client.ActiveSelection{StartLine: 1, EndLine: 2, IsLine: true}, "bravo charlie\ndelta"},
+		{"whole first line char-wise",
+			client.ActiveSelection{StartLine: 0, StartCol: 0, EndLine: 0, EndCol: 4}, "alpha"},
+		{"end col past line end clamps",
+			client.ActiveSelection{StartLine: 3, StartCol: 0, EndLine: 3, EndCol: 99}, "echo"},
+		{"start line past EOF",
+			client.ActiveSelection{StartLine: 9, EndLine: 9}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := extractSelection(content, c.sel); got != c.want {
+				t.Errorf("extractSelection(%+v) = %q, want %q", c.sel, got, c.want)
+			}
+		})
+	}
+}
 
 // Regression test for the off-by-one insert bug: text inserted "at line N"
 // must become line N (1-based), not land a line below.
@@ -80,6 +112,25 @@ func TestBufferSnippetMarksCursorLine(t *testing.T) {
 	}
 	if strings.Contains(snip, "▶    1") || strings.Contains(snip, "▶    3") {
 		t.Errorf("snippet marks the wrong line:\n%s", snip)
+	}
+}
+
+// Regression test: SGR mouse escape sequences that leak past the terminal
+// parser during fast wheel scrolling must not end up in the input box.
+func TestStripMouseArtifacts(t *testing.T) {
+	cases := []struct{ in, want string }{
+		// The exact leak reported: a burst of wheel-down events.
+		{"<65;70;21M<65;69;18M<65;62;24M<65;62;24M<65;62;24M", ""},
+		{"[<64;10;5M", ""},          // with leading [ when ESC alone was eaten
+		{"<65;70;21m", ""},          // release variant (lowercase m)
+		{"abc<65;70;21Mdef", "abcdef"}, // mixed with real typed text
+		{"hello world", "hello world"}, // plain text untouched
+		{"a < b; c > d", "a < b; c > d"},
+	}
+	for _, c := range cases {
+		if got := stripMouseArtifacts(c.in); got != c.want {
+			t.Errorf("stripMouseArtifacts(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 

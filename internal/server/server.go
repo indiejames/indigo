@@ -103,6 +103,7 @@ type editorService struct {
 	// activeCtx tracks the most recently active client buffer for external tools.
 	activeCtxMu sync.RWMutex
 	activeCtx   activeContext
+	activeSel   activeSelection
 
 	// statusBar holds client-contributed status bar text segments.
 	statusBar *statusBarRegistry

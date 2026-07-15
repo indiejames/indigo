@@ -2662,6 +2662,40 @@ func (c EditorService) ApplyOps(ctx context.Context, params func(EditorService_a
 	return EditorService_applyOps_Results_Future{Future: ans.Future()}, release
 }
 
+func (c EditorService) SetActiveSelection(ctx context.Context, params func(EditorService_setActiveSelection_Params) error) (EditorService_setActiveSelection_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      37,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "setActiveSelection",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 32, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_setActiveSelection_Params(s)) }
+	}
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_setActiveSelection_Results_Future{Future: ans.Future()}, release
+}
+
+func (c EditorService) GetActiveSelection(ctx context.Context, params func(EditorService_getActiveSelection_Params) error) (EditorService_getActiveSelection_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      38,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "getActiveSelection",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_getActiveSelection_Params(s)) }
+	}
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_getActiveSelection_Results_Future{Future: ans.Future()}, release
+}
+
 func (c EditorService) WaitStreaming() error {
 	return capnp.Client(c).WaitStreaming()
 }
@@ -2808,6 +2842,10 @@ type EditorService_Server interface {
 	SetStatusBarText(context.Context, EditorService_setStatusBarText) error
 
 	ApplyOps(context.Context, EditorService_applyOps) error
+
+	SetActiveSelection(context.Context, EditorService_setActiveSelection) error
+
+	GetActiveSelection(context.Context, EditorService_getActiveSelection) error
 }
 
 // EditorService_NewServer creates a new Server from an implementation of EditorService_Server.
@@ -3270,6 +3308,30 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
 			return s.ApplyOps(ctx, EditorService_applyOps{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      37,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "setActiveSelection",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.SetActiveSelection(ctx, EditorService_setActiveSelection{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      38,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "getActiveSelection",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.GetActiveSelection(ctx, EditorService_getActiveSelection{call})
 		},
 	})
 
@@ -12913,4 +12975,206 @@ type EditorService_applyOps_Results_Future struct{ *capnp.Future }
 func (f EditorService_applyOps_Results_Future) Struct() (EditorService_applyOps_Results, error) {
 	p, err := f.Future.Ptr()
 	return EditorService_applyOps_Results(p.Struct()), err
+}
+
+// ─── setActiveSelection / getActiveSelection (manually added) ────────────────
+
+// EditorService_setActiveSelection holds the state for a server call to
+// EditorService.setActiveSelection. See server.Call for documentation.
+type EditorService_setActiveSelection struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_setActiveSelection) Args() EditorService_setActiveSelection_Params {
+	return EditorService_setActiveSelection_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_setActiveSelection) AllocResults() (EditorService_setActiveSelection_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_setActiveSelection_Results(r), err
+}
+
+// Params: clientId @0-8, bufId @8, startLine @12, startCol @16, endLine @20,
+// endCol @24, isLine bit @224, active bit @225. DataSize 32, no pointers.
+type EditorService_setActiveSelection_Params capnp.Struct
+
+func (s EditorService_setActiveSelection_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_setActiveSelection_Params) ClientId() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s EditorService_setActiveSelection_Params) SetClientId(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
+func (s EditorService_setActiveSelection_Params) BufId() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s EditorService_setActiveSelection_Params) SetBufId(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+func (s EditorService_setActiveSelection_Params) StartLine() uint32 {
+	return capnp.Struct(s).Uint32(12)
+}
+
+func (s EditorService_setActiveSelection_Params) SetStartLine(v uint32) {
+	capnp.Struct(s).SetUint32(12, v)
+}
+
+func (s EditorService_setActiveSelection_Params) StartCol() uint32 {
+	return capnp.Struct(s).Uint32(16)
+}
+
+func (s EditorService_setActiveSelection_Params) SetStartCol(v uint32) {
+	capnp.Struct(s).SetUint32(16, v)
+}
+
+func (s EditorService_setActiveSelection_Params) EndLine() uint32 {
+	return capnp.Struct(s).Uint32(20)
+}
+
+func (s EditorService_setActiveSelection_Params) SetEndLine(v uint32) {
+	capnp.Struct(s).SetUint32(20, v)
+}
+
+func (s EditorService_setActiveSelection_Params) EndCol() uint32 {
+	return capnp.Struct(s).Uint32(24)
+}
+
+func (s EditorService_setActiveSelection_Params) SetEndCol(v uint32) {
+	capnp.Struct(s).SetUint32(24, v)
+}
+
+func (s EditorService_setActiveSelection_Params) IsLine() bool {
+	return capnp.Struct(s).Bit(224)
+}
+
+func (s EditorService_setActiveSelection_Params) SetIsLine(v bool) {
+	capnp.Struct(s).SetBit(224, v)
+}
+
+func (s EditorService_setActiveSelection_Params) Active() bool {
+	return capnp.Struct(s).Bit(225)
+}
+
+func (s EditorService_setActiveSelection_Params) SetActive(v bool) {
+	capnp.Struct(s).SetBit(225, v)
+}
+
+type EditorService_setActiveSelection_Results capnp.Struct
+
+func (s EditorService_setActiveSelection_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+// EditorService_setActiveSelection_Results_Future is a wrapper for a
+// EditorService_setActiveSelection_Results promised by a client call.
+type EditorService_setActiveSelection_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_setActiveSelection_Results_Future) Struct() (EditorService_setActiveSelection_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_setActiveSelection_Results(p.Struct()), err
+}
+
+// EditorService_getActiveSelection holds the state for a server call to
+// EditorService.getActiveSelection. See server.Call for documentation.
+type EditorService_getActiveSelection struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_getActiveSelection) Args() EditorService_getActiveSelection_Params {
+	return EditorService_getActiveSelection_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_getActiveSelection) AllocResults() (EditorService_getActiveSelection_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 24, PointerCount: 0})
+	return EditorService_getActiveSelection_Results(r), err
+}
+
+type EditorService_getActiveSelection_Params capnp.Struct
+
+func (s EditorService_getActiveSelection_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+// Results: bufId @0, startLine @4, startCol @8, endLine @12, endCol @16,
+// isLine bit @160, found bit @161. DataSize 24, no pointers.
+type EditorService_getActiveSelection_Results capnp.Struct
+
+func (s EditorService_getActiveSelection_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_getActiveSelection_Results) BufId() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s EditorService_getActiveSelection_Results) SetBufId(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+func (s EditorService_getActiveSelection_Results) StartLine() uint32 {
+	return capnp.Struct(s).Uint32(4)
+}
+
+func (s EditorService_getActiveSelection_Results) SetStartLine(v uint32) {
+	capnp.Struct(s).SetUint32(4, v)
+}
+
+func (s EditorService_getActiveSelection_Results) StartCol() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s EditorService_getActiveSelection_Results) SetStartCol(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+func (s EditorService_getActiveSelection_Results) EndLine() uint32 {
+	return capnp.Struct(s).Uint32(12)
+}
+
+func (s EditorService_getActiveSelection_Results) SetEndLine(v uint32) {
+	capnp.Struct(s).SetUint32(12, v)
+}
+
+func (s EditorService_getActiveSelection_Results) EndCol() uint32 {
+	return capnp.Struct(s).Uint32(16)
+}
+
+func (s EditorService_getActiveSelection_Results) SetEndCol(v uint32) {
+	capnp.Struct(s).SetUint32(16, v)
+}
+
+func (s EditorService_getActiveSelection_Results) IsLine() bool {
+	return capnp.Struct(s).Bit(160)
+}
+
+func (s EditorService_getActiveSelection_Results) SetIsLine(v bool) {
+	capnp.Struct(s).SetBit(160, v)
+}
+
+func (s EditorService_getActiveSelection_Results) Found() bool {
+	return capnp.Struct(s).Bit(161)
+}
+
+func (s EditorService_getActiveSelection_Results) SetFound(v bool) {
+	capnp.Struct(s).SetBit(161, v)
+}
+
+// EditorService_getActiveSelection_Results_Future is a wrapper for a
+// EditorService_getActiveSelection_Results promised by a client call.
+type EditorService_getActiveSelection_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_getActiveSelection_Results_Future) Struct() (EditorService_getActiveSelection_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_getActiveSelection_Results(p.Struct()), err
 }

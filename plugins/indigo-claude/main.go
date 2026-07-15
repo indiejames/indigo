@@ -1283,6 +1283,13 @@ func main() {
 		return
 	}
 
+	// MCP server mode: spawned by the claude CLI; speaks MCP over stdio and
+	// forwards tool calls to the running TUI via the Unix socket.
+	if len(os.Args) == 3 && os.Args[1] == "--mcp" {
+		runMCPServer(os.Args[2])
+		return
+	}
+
 	workDir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "indigo-claude: cannot determine working directory: %v\n", err)
@@ -1313,20 +1320,32 @@ func main() {
 
 	prog := &programLink{}
 
-	// Set up PreToolUse permission hook (best-effort; CLI mode only).
-	pid := os.Getpid()
-	permSockPath := fmt.Sprintf("/tmp/indigo-claude-perm-%d.sock", pid)
-	hookScriptPath := fmt.Sprintf("/tmp/indigo-claude-hook-%d.sh", pid)
-	if binaryPath, err := os.Executable(); err == nil {
-		if err := writeHookScript(hookScriptPath, binaryPath, permSockPath); err == nil {
-			installHook(workDir, hookScriptPath) //nolint:errcheck
-			defer func() {
-				removeHook(workDir)
-				os.Remove(hookScriptPath) //nolint:errcheck
-				os.Remove(permSockPath)   //nolint:errcheck
-			}()
-			if ln, err := startPermissionServer(permSockPath, prog); err == nil {
+	// Set up PreToolUse permission hook and the MCP tool bridge (best-effort;
+	// CLI mode only). Both share the same Unix socket served by this process.
+	// Everything lives in a private 0700 directory with an unpredictable name
+	// so other local users can neither connect to the socket nor squat its
+	// path (same defense as indigo's own server socket dir).
+	if runtimeDir, err := os.MkdirTemp("", "indigo-claude-"); err == nil {
+		defer os.RemoveAll(runtimeDir) //nolint:errcheck
+		permSockPath := filepath.Join(runtimeDir, "perm.sock")
+		hookScriptPath := filepath.Join(runtimeDir, "indigo-claude-hook.sh")
+		mcpConfigPath := filepath.Join(runtimeDir, "mcp.json")
+		if binaryPath, err := os.Executable(); err == nil {
+			// Fail closed: the socket must be listening before the hook is
+			// installed, so hook decisions can never come from a socket we
+			// don't own.
+			if ln, err := startPermissionServer(permSockPath, prog, rpc, workDir); err == nil {
 				defer ln.Close() //nolint:errcheck
+				if err := writeHookScript(hookScriptPath, binaryPath, permSockPath); err == nil {
+					installHook(workDir, hookScriptPath) //nolint:errcheck
+					defer removeHook(workDir)
+				}
+				// Buffer-aware file tools for the claude subprocess: claude
+				// spawns `indigo-claude --mcp <sock>`, which forwards tool
+				// calls back to this process over the same socket.
+				if err := writeMCPConfig(mcpConfigPath, binaryPath, permSockPath); err == nil {
+					prog.mcpConfig = mcpConfigPath
+				}
 			}
 		}
 	}

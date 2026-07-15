@@ -64,6 +64,20 @@ func allTools() []toolDef {
 				Required: []string{"path", "reason", "old_text", "new_text"},
 			},
 		},
+		{
+			Name:        "insert_at_line",
+			Description: "Insert new line(s) at an exact 1-based line number: the inserted text becomes that line and existing lines shift down. Preferred over apply_edits when the user names a line number or says 'at the cursor'. The user must approve before any change is made.",
+			InputSchema: toolSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"path":   {Type: "string", Description: "File to edit, relative to workspace root or absolute."},
+					"reason": {Type: "string", Description: "Short explanation of why this edit is needed."},
+					"line":   {Type: "integer", Description: "1-based line number the inserted text should end up on."},
+					"text":   {Type: "string", Description: "The line(s) to insert."},
+				},
+				Required: []string{"path", "reason", "line", "text"},
+			},
+		},
 	}
 }
 
@@ -86,6 +100,12 @@ type applyEditsInput struct {
 	Reason  string `json:"reason"`
 	OldText string `json:"old_text"`
 	NewText string `json:"new_text"`
+}
+type insertAtLineInput struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+	Line   int    `json:"line"`
+	Text   string `json:"text"`
 }
 
 // editSpec is one old→new replacement shown in the permission prompt.
@@ -123,6 +143,12 @@ func execTool(ctx context.Context, rpc *client.RPC, prog *programLink, workDir, 
 			return fmt.Sprintf("bad input: %v", err), true
 		}
 		return execApplyEdits(ctx, rpc, prog, workDir, in)
+	case "insert_at_line":
+		var in insertAtLineInput
+		if err := json.Unmarshal(rawInput, &in); err != nil {
+			return fmt.Sprintf("bad input: %v", err), true
+		}
+		return execInsertAtLine(ctx, rpc, prog, workDir, in)
 	default:
 		return fmt.Sprintf("unknown tool: %s", name), true
 	}
@@ -286,30 +312,29 @@ func execApplyEdits(ctx context.Context, rpc *client.RPC, prog *programLink, wor
 	startLine, startCol := offsetToLineCol(content, idx)
 	endLine, endCol := offsetToLineCol(content, idx+len(in.OldText))
 
-	if _, err := rpc.ApplyOp(ctx, bufID, document.Op{
-		Type:     document.OpDelete,
-		FromLine: startLine,
-		FromCol:  startCol,
-		ToLine:   endLine,
-		ToCol:    endCol,
-		Version:  version,
+	// One atomic batch: the server applies both ops even if this process dies
+	// mid-call, so the buffer can never be left with the deletion but not the
+	// replacement text.
+	if _, err := rpc.ApplyOps(ctx, bufID, []document.Op{
+		{
+			Type:     document.OpDelete,
+			FromLine: startLine,
+			FromCol:  startCol,
+			ToLine:   endLine,
+			ToCol:    endCol,
+			Version:  version,
+		},
+		{
+			Type:       document.OpInsert,
+			InsertLine: startLine,
+			InsertCol:  startCol,
+			InsertText: in.NewText,
+		},
 	}); err != nil {
 		if weOpened {
 			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
 		}
-		return fmt.Sprintf("delete op failed: %v", err), true
-	}
-
-	if _, err := rpc.ApplyOp(ctx, bufID, document.Op{
-		Type:       document.OpInsert,
-		InsertLine: startLine,
-		InsertCol:  startCol,
-		InsertText: in.NewText,
-	}); err != nil {
-		if weOpened {
-			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
-		}
-		return fmt.Sprintf("insert op failed: %v", err), true
+		return fmt.Sprintf("edit ops failed: %v", err), true
 	}
 
 	if weOpened {
@@ -321,6 +346,72 @@ func execApplyEdits(ctx context.Context, rpc *client.RPC, prog *programLink, wor
 		return fmt.Sprintf("edited and saved %s", in.Path), false
 	}
 	return fmt.Sprintf("edited %s (open in editor — review and save when ready)", in.Path), false
+}
+
+// ─── insert_at_line ───────────────────────────────────────────────────────────
+
+// insertLineOp returns the insert op that makes text become 1-based line
+// `line` of content, shifting existing lines down. A line past the end of the
+// file appends after the last line instead.
+func insertLineOp(content, text string, line int) document.Op {
+	if line < 1 {
+		line = 1
+	}
+	total := strings.Count(content, "\n") + 1
+	if line <= total {
+		if !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		return document.Op{Type: document.OpInsert, InsertLine: line - 1, InsertCol: 0, InsertText: text}
+	}
+	lines := strings.Split(content, "\n")
+	last := len(lines) - 1
+	return document.Op{
+		Type:       document.OpInsert,
+		InsertLine: last,
+		InsertCol:  len([]rune(lines[last])),
+		InsertText: "\n" + strings.TrimSuffix(text, "\n"),
+	}
+}
+
+func execInsertAtLine(ctx context.Context, rpc *client.RPC, prog *programLink, workDir string, in insertAtLineInput) (string, bool) {
+	abs := absPath(workDir, in.Path)
+
+	// Block the agent goroutine until the user approves or rejects.
+	replyCh := make(chan bool, 1)
+	prog.emit(permissionRequestMsg{
+		file:    fmt.Sprintf("%s (insert at line %d)", in.Path, in.Line),
+		reason:  in.Reason,
+		edits:   []editSpec{{path: abs, oldText: "", newText: in.Text}},
+		replyCh: replyCh,
+	})
+	if !<-replyCh {
+		return "edit rejected by user", true
+	}
+
+	bufID, content, _, _, err := rpc.OpenFile(ctx, abs)
+	if err != nil {
+		return fmt.Sprintf("cannot open %s: %v", in.Path, err), true
+	}
+	count, _ := rpc.BufferClientCount(ctx, bufID)
+	weOpened := count == 1
+
+	if _, err := rpc.ApplyOp(ctx, bufID, insertLineOp(content, in.Text, in.Line)); err != nil {
+		if weOpened {
+			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
+		}
+		return fmt.Sprintf("insert op failed: %v", err), true
+	}
+
+	if weOpened {
+		if serr := rpc.Save(ctx, bufID); serr != nil {
+			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
+			return fmt.Sprintf("inserted at line %d in %s (save failed: %v)", in.Line, in.Path, serr), false
+		}
+		rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
+		return fmt.Sprintf("inserted at line %d and saved %s", in.Line, in.Path), false
+	}
+	return fmt.Sprintf("inserted at line %d in %s (open in editor — review and save when ready)", in.Line, in.Path), false
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

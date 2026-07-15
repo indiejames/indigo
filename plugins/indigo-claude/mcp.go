@@ -138,7 +138,8 @@ type mcpTool struct {
 func mcpTools() []mcpTool {
 	var out []mcpTool
 	for _, t := range allTools() {
-		if t.Name == "read_file" || t.Name == "apply_edits" {
+		switch t.Name {
+		case "read_file", "apply_edits", "insert_at_line":
 			out = append(out, mcpTool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
 		}
 	}

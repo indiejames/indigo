@@ -4,12 +4,54 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/indiejames/indigo/internal/document"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
+
+// atomicWriteFile writes data to path via a temp file in the same directory
+// followed by a rename, so a crash mid-write can never leave a truncated
+// file. The existing file's permissions are preserved when present.
+func atomicWriteFile(path string, data []byte, defaultMode os.FileMode) error {
+	mode := defaultMode
+	if fi, err := os.Stat(path); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".indigo-save-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) //nolint:errcheck // no-op after successful rename
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close() //nolint:errcheck
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close() //nolint:errcheck
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, mode); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
+// rewatch re-establishes the fsnotify watch on path. Rename-based saves
+// replace the inode, which strands kqueue-style watches on the old file.
+func (s *editorService) rewatch(path string) {
+	if s.watcher == nil {
+		return
+	}
+	s.watcher.Remove(path) //nolint:errcheck // may already be gone
+	s.watcher.Add(path)    //nolint:errcheck
+}
 
 func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_openFile) error {
 	args := call.Args()
@@ -191,22 +233,8 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 	return nil
 }
 
-func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_applyOp) error {
-	args := call.Args()
-	clientID := args.ClientId()
-	bufID := args.BufferId()
-	protoOp, err := args.Op()
-	if err != nil {
-		return err
-	}
-
-	s.mu.Lock()
-	entry, ok := s.buffers[bufID]
-	s.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("unknown buffer %d", bufID)
-	}
-
+// protoToOp converts a wire EditOp into a document.Op for the given client.
+func protoToOp(protoOp proto.EditOp, clientID uint64) document.Op {
 	insertText, _ := protoOp.InsertText()
 	op := document.Op{
 		ClientID:   clientID,
@@ -226,7 +254,26 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	default:
 		op.Type = document.OpNoop
 	}
+	return op
+}
 
+func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_applyOp) error {
+	args := call.Args()
+	clientID := args.ClientId()
+	bufID := args.BufferId()
+	protoOp, err := args.Op()
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+
+	op := protoToOp(protoOp, clientID)
 	newVersion := entry.buf.Apply(op)
 
 	res, err := call.AllocResults()
@@ -264,6 +311,64 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	return nil
 }
 
+// ApplyOps applies a batch of ops back-to-back. The atomicity guarantee is at
+// the request level: once the call arrives, every op is applied even if the
+// client disconnects mid-request — so a delete+insert pair can never be left
+// half-done by a client crash.
+func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_applyOps) error {
+	args := call.Args()
+	clientID := args.ClientId()
+	bufID := args.BufferId()
+	protoOps, err := args.Ops()
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+
+	var newVersion uint64
+	for i := 0; i < protoOps.Len(); i++ {
+		op := protoToOp(protoOps.At(i), clientID)
+		newVersion = entry.buf.Apply(op)
+
+		// Notify edit-event handlers when the line count changed.
+		var lineDelta int32
+		var atLine uint32
+		switch op.Type {
+		case document.OpInsert:
+			if delta := int32(strings.Count(op.InsertText, "\n")); delta != 0 {
+				lineDelta = delta
+				atLine = uint32(op.InsertLine)
+			}
+		case document.OpDelete:
+			if delta := int32(op.FromLine - op.ToLine); delta != 0 { // negative: lines removed
+				lineDelta = delta
+				atLine = uint32(op.FromLine)
+			}
+		}
+		if lineDelta != 0 {
+			go s.pluginMgr.DispatchEditEvent(context.Background(), bufID, path, atLine, lineDelta)
+		}
+	}
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	res.SetVersion(newVersion)
+
+	content := entry.buf.Content()
+	go s.lspMgr.DidChange(path, content)
+	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
+	return nil
+}
+
 func (s *editorService) Save(_ context.Context, call proto.EditorService_save) error {
 	args := call.Args()
 	bufID := args.BufferId()
@@ -290,10 +395,11 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 	}
 
 	s.markSaving(path)
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := atomicWriteFile(path, []byte(content), 0644); err != nil {
 		s.unmarkSaving(path)
 		return err
 	}
+	s.rewatch(path)
 	s.unmarkSaving(path)
 	entry.buf.SetClean()
 	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
@@ -321,10 +427,11 @@ func (s *editorService) SaveAs(_ context.Context, call proto.EditorService_saveA
 
 	content := entry.buf.Content()
 	s.markSaving(newPath)
-	if err := os.WriteFile(newPath, []byte(content), 0o644); err != nil {
+	if err := atomicWriteFile(newPath, []byte(content), 0o644); err != nil {
 		s.unmarkSaving(newPath)
 		return err
 	}
+	s.rewatch(newPath)
 	s.unmarkSaving(newPath)
 	oldPath := entry.buf.Path()
 	entry.buf = document.New(newPath, content)

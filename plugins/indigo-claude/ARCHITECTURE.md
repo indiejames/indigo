@@ -6,6 +6,13 @@ by the agent land as document ops in indigo's live buffers — they show up
 instantly in the editor and participate in undo history, and each edit must
 first be approved in a diff popup shown in the indigo-claude TUI.
 
+A **turn** is one full prompt-response cycle: the user submits a message, the
+agent streams text and tool calls, and control returns to the user. In CLI
+mode each turn spawns a fresh `claude -p` process (continuity comes from
+`--resume <sessionID>`), so the claude CLI and its `--mcp`/`--hook`
+subprocesses live and die within a single turn, while the indigo-claude TUI
+and the indigo server persist for the whole session.
+
 ## Processes and transports
 
 ```mermaid

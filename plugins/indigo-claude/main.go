@@ -86,6 +86,26 @@ type Model struct {
 
 	// Permission dialog: false = "approve" highlighted, true = "reject" highlighted.
 	permChoice bool
+
+	// Token/cost tracking. ctxTokens approximates the conversation's context
+	// size; sessionCost accumulates across turns (CLI mode reports cost).
+	ctxTokens   int
+	sessionCost float64
+	ctxWarned   bool // 80% context warning already shown
+}
+
+// contextWindowTokens is the assumed model context window for warnings.
+const contextWindowTokens = 200_000
+
+// ctxWarnPct is the context-fill percentage that triggers a warning.
+const ctxWarnPct = 80
+
+// fmtTokens renders a token count compactly: 512, 34.2k.
+func fmtTokens(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
 
 func newModel(rpc *client.RPC, prog *programLink, apiKey, workDir string) Model {
@@ -184,15 +204,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.history != nil {
 			m.history = msg.history
 		}
-		return m, nil
+		return m, m.saveStateCmd()
 
 	case agentUnknownEventMsg:
+		return m, nil
+
+	case agentUsageMsg:
+		if msg.ctxTokens > 0 {
+			m.ctxTokens = msg.ctxTokens
+		}
+		m.sessionCost += msg.costUSD
+		if !m.ctxWarned && m.ctxTokens >= contextWindowTokens*ctxWarnPct/100 {
+			m.ctxWarned = true
+			m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: fmt.Sprintf(
+				"⚠ Context is %d%% full (%s of %s tokens). Consider /clear to start fresh.",
+				m.ctxTokens*100/contextWindowTokens, fmtTokens(m.ctxTokens), fmtTokens(contextWindowTokens))})
+		}
 		return m, nil
 
 	case agentErrorMsg:
 		m.agentRunning = false
 		m.streamingConvIdx = -1
-		m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Error: " + msg.err.Error()})
+		text := "Error: " + msg.err.Error()
+		if msg.friendly != "" {
+			text = "⚠ " + msg.friendly
+		}
+		m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: text})
+		// Restore the failed prompt into the input box for an easy retry,
+		// unless the user has already started typing something else.
+		if msg.prompt != "" && len(m.input) == 0 {
+			m.input = []rune(msg.prompt)
+			m.inputPos = len(m.input)
+		}
 		return m, nil
 
 	case tea.MouseMsg:
@@ -260,6 +303,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.scroll = 0
 			m.historyIdx = -1
 			m.collapsedMsgs = map[int]bool{}
+			m.ctxTokens = 0
+			m.ctxWarned = false
+			deleteState(m.workDir)
 			return m, nil
 		}
 		if text == "/copy" {
@@ -293,15 +339,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		prog := m.prog
 		ac := m.activeCtx
-		snippet := bufferSnippet(ac.FilePath, int(ac.Line), 20)
 		if m.apiKey != "" {
-			history := append(m.history, buildUserMessage(text, ac, snippet)) //nolint:gocritic
-			apiKey := m.apiKey
-			rpc := m.rpc
-			workDir := m.workDir
-			go runAgent(prog, rpc, apiKey, workDir, history, ac, snippet)
+			// Copy history so the goroutine's append can't share a backing
+			// array with m.history.
+			history := make([]apiMessage, len(m.history))
+			copy(history, m.history)
+			go runAgent(prog, m.rpc, m.apiKey, m.workDir, history, text, ac)
 		} else {
-			go runClaudeSubprocess(prog, m.workDir, text, m.sessionID, ac, snippet)
+			go runClaudeSubprocess(prog, m.rpc, m.workDir, text, m.sessionID, ac)
 		}
 		return m, nil
 
@@ -537,9 +582,12 @@ func (m Model) buildPermPopup() []string {
 			bodyLines = append(bodyLines, "  Reason: "+m.pendingPerm.reason)
 		}
 		for _, e := range m.pendingPerm.edits {
-			bodyLines = append(bodyLines, "  ── remove ──")
-			for _, l := range strings.Split(e.oldText, "\n") {
-				bodyLines = append(bodyLines, "  - "+l)
+			// Pure insertions (insert_at_line) have no old text to show.
+			if e.oldText != "" {
+				bodyLines = append(bodyLines, "  ── remove ──")
+				for _, l := range strings.Split(e.oldText, "\n") {
+					bodyLines = append(bodyLines, "  - "+l)
+				}
 			}
 			bodyLines = append(bodyLines, "  ── add ──")
 			for _, l := range strings.Split(e.newText, "\n") {
@@ -667,7 +715,28 @@ func (m Model) renderHeader() string {
 	} else if m.agentRunning {
 		label += "  [thinking…]"
 	}
-	return headerStyle.Width(m.width).Render(label)
+
+	// Right-aligned usage segment: "164.1k ctx (82%) " (⚠-prefixed when high).
+	// Cost appears only in API mode where tokens are billed directly; in CLI
+	// mode subscription usage has no incremental cost worth showing.
+	var right string
+	if m.ctxTokens > 0 {
+		pct := m.ctxTokens * 100 / contextWindowTokens
+		if pct >= ctxWarnPct {
+			right = "⚠ "
+		}
+		right += fmt.Sprintf("%s ctx (%d%%)", fmtTokens(m.ctxTokens), pct)
+		if m.apiKey != "" && m.sessionCost > 0 {
+			right += fmt.Sprintf(" · $%.2f", m.sessionCost)
+		}
+		right += " "
+	}
+	pad := m.width - lipgloss.Width(label) - lipgloss.Width(right)
+	if pad < 1 {
+		// Not enough room — drop the usage segment rather than truncating the label.
+		return headerStyle.Width(m.width).Render(label)
+	}
+	return headerStyle.Render(label + strings.Repeat(" ", pad) + right)
 }
 
 func (m Model) renderConversation() string {
@@ -1358,6 +1427,7 @@ func main() {
 	connectCancel()
 
 	model := newModel(rpc, prog, apiKey, workDir)
+	model = model.restoreState(loadState(workDir, apiKey))
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
 
@@ -1365,9 +1435,14 @@ func main() {
 	prog.send = p.Send
 	prog.mu.Unlock()
 
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "indigo-claude: %v\n", err)
 		os.Exit(1)
+	}
+	// Persist the conversation on clean exit so a restart can resume it.
+	if fm, ok := finalModel.(Model); ok && len(fm.conv) > 1 {
+		writeState(snapshotState(fm)) //nolint:errcheck
 	}
 
 	// Clear the status bar entry before disconnecting; the server-side

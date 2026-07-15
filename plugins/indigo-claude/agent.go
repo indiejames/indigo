@@ -9,8 +9,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -66,7 +68,56 @@ type agentDoneMsg struct {
 	history   []apiMessage // populated by API mode
 	sessionID string       // populated by CLI mode
 }
-type agentErrorMsg struct{ err error }
+
+// agentUsageMsg reports token usage. ctxTokens approximates the conversation's
+// context size (input + cache + output of the latest request); costUSD is the
+// incremental cost of the finished turn (CLI mode only, 0 in API mode).
+type agentUsageMsg struct {
+	ctxTokens int
+	costUSD   float64
+}
+
+type agentErrorMsg struct {
+	err error
+	// friendly is a classified, human-readable explanation ("" = show raw err).
+	friendly string
+	// prompt is the user prompt of the failed turn so the TUI can restore it
+	// into the input box for an easy retry.
+	prompt string
+}
+
+// classifyAgentError maps raw error text to a friendly, actionable message.
+// Returns "" when the error isn't recognised.
+func classifyAgentError(msg string) string {
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "usage limit reached"):
+		// Subscription limits arrive as "Claude AI usage limit reached|<epoch>".
+		if i := strings.LastIndex(msg, "|"); i >= 0 {
+			if epoch, err := strconv.ParseInt(strings.TrimSpace(msg[i+1:]), 10, 64); err == nil {
+				return fmt.Sprintf("Usage limit reached — resets at %s. The conversation is preserved; retry after the reset.",
+					time.Unix(epoch, 0).Format("15:04"))
+			}
+		}
+		return "Usage limit reached. The conversation is preserved; retry after the limit resets."
+	case strings.Contains(lower, "rate_limit") || strings.Contains(lower, "rate limit") || strings.Contains(lower, "429"):
+		return "Rate limited — too many requests. Wait a moment, then retry."
+	case strings.Contains(lower, "overloaded"):
+		return "The API is temporarily overloaded. Wait a moment, then retry."
+	case strings.Contains(lower, "credit balance"):
+		return "API credit balance too low — top up your account, then retry."
+	case strings.Contains(lower, "invalid api key") || strings.Contains(lower, "authentication") ||
+		strings.Contains(lower, "unauthorized") || strings.Contains(lower, "401"):
+		return "Authentication failed — check your API key or run `claude login`."
+	case strings.Contains(lower, "context") && strings.Contains(lower, "exceed"):
+		return "The conversation no longer fits the context window — use /clear to start fresh."
+	case strings.Contains(lower, "no such host") || strings.Contains(lower, "connection refused") ||
+		strings.Contains(lower, "dial tcp") || strings.Contains(lower, "timeout") ||
+		strings.Contains(lower, "temporary failure"):
+		return "Network error — check your connection, then retry."
+	}
+	return ""
+}
 
 // agentUnknownEventMsg carries a raw stream-json line whose "type" field we
 // don't recognise yet. Shown in the TUI so we can discover new event formats
@@ -91,14 +142,30 @@ type permissionRequestMsg struct {
 
 // ─── buffer context snippet ──────────────────────────────────────────────────
 
-// bufferSnippet reads ±radius lines around line (0-indexed) from filePath and
-// returns a fenced block with the cursor line marked. Returns "" on error.
-func bufferSnippet(filePath string, line, radius int) string {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return ""
+// bufferSnippet returns ±radius lines around line (0-indexed) of filePath as a
+// fenced block with the cursor line marked. Content comes from the live editor
+// buffer (so unsaved edits are reflected and edit anchors match reality),
+// falling back to disk when the RPC is unavailable. Returns "" on error.
+func bufferSnippet(rpc *client.RPC, filePath string, line, radius int) string {
+	var content string
+	if rpc != nil && filePath != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if bufID, c, _, _, err := rpc.OpenFile(ctx, filePath); err == nil {
+			content = c
+			if count, cerr := rpc.BufferClientCount(ctx, bufID); cerr == nil && count == 1 {
+				rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
+			}
+		}
 	}
-	fileLines := strings.Split(string(data), "\n")
+	if content == "" {
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return ""
+		}
+		content = string(data)
+	}
+	fileLines := strings.Split(content, "\n")
 	start := max(0, line-radius)
 	end := min(len(fileLines), line+radius+1)
 
@@ -131,6 +198,9 @@ Use them liberally — don't make assumptions about code you haven't read.
 
 Rules:
 - Always read a file before editing it.
+- Line numbers in snippets are 1-based. When the user names a line number (or
+  says "at the cursor"), use insert_at_line — the inserted text becomes exactly
+  that line. Use apply_edits only for replacing existing text.
 - Prefer small, focused edits over large rewrites.
 - Explain your reasoning before using apply_edits.
 - Each apply_edits call requires user approval; batch related edits into one call when possible.
@@ -156,11 +226,18 @@ func buildUserMessage(text string, ac client.ActiveContext, snippet string) apiM
 	return userText(sb.String())
 }
 
-// runAgent runs the direct-API agentic loop in a goroutine.
-func runAgent(prog *programLink, rpc *client.RPC, apiKey, workDir string, history []apiMessage, ac client.ActiveContext, snippet string) {
+// runAgent runs the direct-API agentic loop in a goroutine. It builds the
+// cursor snippet itself (an RPC call) so the UI loop never blocks on it.
+func runAgent(prog *programLink, rpc *client.RPC, apiKey, workDir string, history []apiMessage, text string, ac client.ActiveContext) {
 	ctx, cancel := context.WithCancel(context.Background())
 	prog.setCancel(cancel)
 	defer prog.setCancel(nil)
+
+	var snippet string
+	if ac.Found {
+		snippet = bufferSnippet(rpc, ac.FilePath, int(ac.Line), 20)
+	}
+	history = append(history, buildUserMessage(text, ac, snippet))
 
 	system := buildSystemPrompt(workDir, ac)
 	tools := allTools()
@@ -180,12 +257,17 @@ func runAgent(prog *programLink, rpc *client.RPC, apiKey, workDir string, histor
 			case streamToolEvent:
 				toolCalls = append(toolCalls, e)
 				prog.emit(agentToolStartMsg{name: e.name})
+			case streamUsageEvent:
+				prog.emit(agentUsageMsg{ctxTokens: e.ctxTokens})
 			case streamStopEvent:
 				stopReason = e.stopReason
 			}
 		})
 		if err != nil {
-			prog.emit(agentErrorMsg{err: fmt.Errorf("API error: %w", err)})
+			prog.emit(agentErrorMsg{
+				err:      fmt.Errorf("API error: %w", err),
+				friendly: classifyAgentError(err.Error()),
+			})
 			return
 		}
 
@@ -271,7 +353,12 @@ func toolDisplayName(name string, input json.RawMessage) string {
 // runClaudeSubprocess runs `claude -p` as a subprocess and emits agent events.
 // sessionID is empty for the first turn; subsequent turns pass --resume so Claude
 // Code continues the conversation with full context.
-func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, ac client.ActiveContext, snippet string) {
+func runClaudeSubprocess(prog *programLink, rpc *client.RPC, workDir, prompt, sessionID string, ac client.ActiveContext) {
+	var snippet string
+	if ac.Found {
+		snippet = bufferSnippet(rpc, ac.FilePath, int(ac.Line), 20)
+	}
+
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
@@ -297,15 +384,19 @@ func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, a
 		"Never ask for a screenshot."
 	if prog.mcpConfig != "" {
 		sysPrompt += " File access goes through the indigo editor:" +
-			" use mcp__indigo__read_file to read files (returns live buffer content, including unsaved edits)" +
-			" and mcp__indigo__apply_edits to edit files (edits apply to the live buffer and the user sees a diff to approve)." +
+			" use mcp__indigo__read_file to read files (returns live buffer content, including unsaved edits)," +
+			" mcp__indigo__apply_edits to replace existing text," +
+			" and mcp__indigo__insert_at_line to insert new lines at an exact 1-based line number" +
+			" (the inserted text becomes that line; always prefer it when the user names a line or says 'at the cursor')." +
+			" Edits apply to the live buffer and the user sees a diff to approve." +
 			" The built-in Read, Edit, Write, MultiEdit, and NotebookEdit tools are disabled in this session;" +
 			" Glob, Grep, and Bash remain available."
 	}
 	if ac.Found {
 		sysPrompt += fmt.Sprintf(
 			" The user is currently editing %s at line %d, column %d."+
-				" When suggesting edits to this file, prefer editing that file first.",
+				" When suggesting edits to this file, prefer editing that file first."+
+				" Line numbers in the provided snippet are 1-based and reflect the live buffer.",
 			ac.FilePath, ac.Line+1, ac.Col+1,
 		)
 	}
@@ -389,10 +480,20 @@ func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, a
 						Name  string          `json:"name"`
 						Input json.RawMessage `json:"input"`
 					} `json:"content"`
+					Usage struct {
+						InputTokens              int `json:"input_tokens"`
+						CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+						CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+						OutputTokens             int `json:"output_tokens"`
+					} `json:"usage"`
 				} `json:"message"`
 			}
 			if json.Unmarshal([]byte(line), &wrapper) != nil {
 				continue
+			}
+			u := wrapper.Message.Usage
+			if ctx := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens + u.OutputTokens; ctx > 0 {
+				prog.emit(agentUsageMsg{ctxTokens: ctx})
 			}
 			var fullText strings.Builder
 			for _, blk := range wrapper.Message.Content {
@@ -446,13 +547,32 @@ func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, a
 
 		case "result":
 			var result struct {
-				IsError bool   `json:"is_error"`
-				Result  string `json:"result"`
+				IsError      bool    `json:"is_error"`
+				Result       string  `json:"result"`
+				TotalCostUSD float64 `json:"total_cost_usd"`
+				Usage        struct {
+					InputTokens              int `json:"input_tokens"`
+					CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+					CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+					OutputTokens             int `json:"output_tokens"`
+				} `json:"usage"`
 			}
-			if json.Unmarshal([]byte(line), &result) == nil && result.IsError {
-				prog.emit(agentErrorMsg{err: fmt.Errorf("%s", result.Result)})
+			if json.Unmarshal([]byte(line), &result) != nil {
+				continue
+			}
+			if result.IsError {
+				prog.emit(agentErrorMsg{
+					err:      fmt.Errorf("%s", result.Result),
+					friendly: classifyAgentError(result.Result),
+					prompt:   prompt,
+				})
 				cmd.Wait() //nolint:errcheck
 				return
+			}
+			u := result.Usage
+			ctx := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens + u.OutputTokens
+			if ctx > 0 || result.TotalCostUSD > 0 {
+				prog.emit(agentUsageMsg{ctxTokens: ctx, costUSD: result.TotalCostUSD})
 			}
 
 		default:
@@ -469,7 +589,11 @@ func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, a
 		if msg == "" {
 			msg = err.Error()
 		}
-		prog.emit(agentErrorMsg{err: fmt.Errorf("%s", msg)})
+		prog.emit(agentErrorMsg{
+			err:      fmt.Errorf("%s", msg),
+			friendly: classifyAgentError(msg),
+			prompt:   prompt,
+		})
 		return
 	}
 	prog.emit(agentDoneMsg{sessionID: newSessionID})

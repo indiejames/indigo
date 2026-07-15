@@ -2645,6 +2645,23 @@ func (c EditorService) SetStatusBarText(ctx context.Context, params func(EditorS
 	return EditorService_setStatusBarText_Results_Future{Future: ans.Future()}, release
 }
 
+func (c EditorService) ApplyOps(ctx context.Context, params func(EditorService_applyOps_Params) error) (EditorService_applyOps_Results_Future, capnp.ReleaseFunc) {
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      36,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "applyOps",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 16, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_applyOps_Params(s)) }
+	}
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_applyOps_Results_Future{Future: ans.Future()}, release
+}
+
 func (c EditorService) WaitStreaming() error {
 	return capnp.Client(c).WaitStreaming()
 }
@@ -2789,6 +2806,8 @@ type EditorService_Server interface {
 	GetActiveContext(context.Context, EditorService_getActiveContext) error
 
 	SetStatusBarText(context.Context, EditorService_setStatusBarText) error
+
+	ApplyOps(context.Context, EditorService_applyOps) error
 }
 
 // EditorService_NewServer creates a new Server from an implementation of EditorService_Server.
@@ -3239,6 +3258,18 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
 			return s.SetStatusBarText(ctx, EditorService_setStatusBarText{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      36,
+			InterfaceName: "internal/proto/editor.capnp:EditorService",
+			MethodName:    "applyOps",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.ApplyOps(ctx, EditorService_applyOps{call})
 		},
 	})
 
@@ -12773,4 +12804,113 @@ func RegisterSchema(reg *schemas.Registry) {
 		},
 		Compressed: true,
 	})
+}
+
+// ─── applyOps (manually added, mirrors applyOp) ──────────────────────────────
+
+// EditorService_applyOps holds the state for a server call to EditorService.applyOps.
+// See server.Call for documentation.
+type EditorService_applyOps struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_applyOps) Args() EditorService_applyOps_Params {
+	return EditorService_applyOps_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_applyOps) AllocResults() (EditorService_applyOps_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_applyOps_Results(r), err
+}
+
+type EditorService_applyOps_Params capnp.Struct
+
+func NewEditorService_applyOps_Params(s *capnp.Segment) (EditorService_applyOps_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	return EditorService_applyOps_Params(st), err
+}
+
+func (s EditorService_applyOps_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_applyOps_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_applyOps_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+func (s EditorService_applyOps_Params) ClientId() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s EditorService_applyOps_Params) SetClientId(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
+func (s EditorService_applyOps_Params) BufferId() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s EditorService_applyOps_Params) SetBufferId(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+func (s EditorService_applyOps_Params) Ops() (EditOp_List, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return EditOp_List(p.List()), err
+}
+
+func (s EditorService_applyOps_Params) HasOps() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+// NewOps sets the ops field to a newly allocated EditOp_List of the given
+// size, preferring placement in s's segment.
+func (s EditorService_applyOps_Params) NewOps(n int32) (EditOp_List, error) {
+	l, err := NewEditOp_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return EditOp_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, l.ToPtr())
+	return l, err
+}
+
+type EditorService_applyOps_Results capnp.Struct
+
+func NewEditorService_applyOps_Results(s *capnp.Segment) (EditorService_applyOps_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_applyOps_Results(st), err
+}
+
+func (s EditorService_applyOps_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_applyOps_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_applyOps_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+func (s EditorService_applyOps_Results) Version() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s EditorService_applyOps_Results) SetVersion(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
+// EditorService_applyOps_Results_Future is a wrapper for a EditorService_applyOps_Results promised by a client call.
+type EditorService_applyOps_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_applyOps_Results_Future) Struct() (EditorService_applyOps_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_applyOps_Results(p.Struct()), err
 }

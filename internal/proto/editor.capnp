@@ -53,6 +53,9 @@ interface EditorService {
   setActiveContext   @33 (clientId :UInt64, bufId :UInt32, filePath :Text, line :UInt32, col :UInt32) -> ();
   getActiveContext   @34 () -> (result :ActiveContext);
   setStatusBarText   @35 (key :Text, text :Text) -> ();
+  # Apply a batch of ops atomically: once the server receives the call, all
+  # ops are applied even if the client dies mid-request.
+  applyOps           @36 (clientId :UInt64, bufferId :UInt32, ops :List(EditOp)) -> (version :UInt64);
 }
 
 struct PluginEdit {

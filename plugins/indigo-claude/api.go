@@ -81,6 +81,10 @@ type streamToolEvent struct {
 }
 type streamStopEvent struct{ stopReason string }
 
+// streamUsageEvent carries token counts for the request: input side from
+// message_start, output side from the final message_delta.
+type streamUsageEvent struct{ ctxTokens int }
+
 // ─── streaming API call ──────────────────────────────────────────────────────
 
 func streamAPI(ctx context.Context, apiKey, system string, messages []apiMessage, tools []toolDef, onEvent func(any)) error {
@@ -134,6 +138,7 @@ func parseSSE(body interface{ Read([]byte) (int, error) }, onEvent func(any)) er
 		inputBuf strings.Builder
 	}
 	blocks := map[int]*blockState{}
+	inputTokens := 0 // input-side tokens captured from message_start
 
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 512*1024), 512*1024)
@@ -159,6 +164,21 @@ func parseSSE(body interface{ Read([]byte) (int, error) }, onEvent func(any)) er
 		json.Unmarshal(ev["type"], &evType) //nolint:errcheck
 
 		switch evType {
+		case "message_start":
+			var start struct {
+				Message struct {
+					Usage struct {
+						InputTokens              int `json:"input_tokens"`
+						CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+						CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+					} `json:"usage"`
+				} `json:"message"`
+			}
+			if json.Unmarshal([]byte(data), &start) == nil {
+				u := start.Message.Usage
+				inputTokens = u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+			}
+
 		case "content_block_start":
 			var idx int
 			json.Unmarshal(ev["index"], &idx) //nolint:errcheck
@@ -211,8 +231,14 @@ func parseSSE(body interface{ Read([]byte) (int, error) }, onEvent func(any)) er
 				Delta struct {
 					StopReason string `json:"stop_reason"`
 				} `json:"delta"`
+				Usage struct {
+					OutputTokens int `json:"output_tokens"`
+				} `json:"usage"`
 			}
 			json.Unmarshal([]byte(data), &delta) //nolint:errcheck
+			if total := inputTokens + delta.Usage.OutputTokens; total > 0 {
+				onEvent(streamUsageEvent{ctxTokens: total})
+			}
 			onEvent(streamStopEvent{stopReason: delta.Delta.StopReason})
 		}
 	}

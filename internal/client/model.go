@@ -630,8 +630,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case updatesMsg:
+		// Ops from other clients (agents, other windows) are undoable locally:
+		// record inverses as a single undo entry so `u` reverts the whole batch.
+		// GetUpdates never echoes this client's own ops back.
+		before := m.cursorSnap()
+		var inverses []document.Op
 		for _, op := range msg.ops {
+			if op.Type == document.OpInsert || op.Type == document.OpDelete {
+				inverses = append(inverses, inverseOp(m, op)) // must precede Apply
+			}
 			m.buf.Apply(op)
+		}
+		if len(inverses) > 0 {
+			m.undoStack = append(m.undoStack, undoEntry{ops: inverses, before: before})
+			m.redoStack = nil
 		}
 		m.version = msg.version
 		m.clampCursor()

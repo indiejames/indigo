@@ -25,6 +25,11 @@ type programLink struct {
 	mu     sync.Mutex
 	send   func(tea.Msg)
 	cancel context.CancelFunc
+
+	// mcpConfig is the path of the --mcp-config file for the claude subprocess.
+	// Set once in main() before the program starts; empty when the MCP bridge
+	// could not be set up (subprocess then falls back to built-in file tools).
+	mcpConfig string
 }
 
 func (pl *programLink) emit(msg tea.Msg) {
@@ -221,6 +226,14 @@ func toolDisplayName(name string, input json.RawMessage) string {
 	var args map[string]string
 	json.Unmarshal(input, &args) //nolint:errcheck
 
+	// Our own MCP tools: "mcp__indigo__read_file" → "read_file: main.go".
+	if bare, ok := strings.CutPrefix(name, "mcp__indigo__"); ok {
+		if p := args["path"]; p != "" {
+			return bare + ": " + filepath.Base(p)
+		}
+		return bare
+	}
+
 	switch name {
 	case "Read", "Edit", "Write", "MultiEdit", "NotebookEdit":
 		if f := args["file_path"]; f != "" {
@@ -269,10 +282,26 @@ func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, a
 	if sessionID != "" {
 		args = append(args, "--resume", sessionID)
 	}
+	if prog.mcpConfig != "" {
+		// Route file reads/edits through the indigo editor's live buffers.
+		// Built-in disk-based file tools are disabled so reads always match
+		// the buffer content that apply_edits operates on.
+		args = append(args,
+			"--mcp-config", prog.mcpConfig,
+			"--disallowedTools", "Read,Edit,Write,MultiEdit,NotebookEdit",
+		)
+	}
 	sysPrompt := "This is indigo-claude, a text-only terminal interface. " +
 		"The user cannot share screenshots, images, or any visual media. " +
 		"If you need visual information, use your file-reading tools to inspect the source code directly. " +
 		"Never ask for a screenshot."
+	if prog.mcpConfig != "" {
+		sysPrompt += " File access goes through the indigo editor:" +
+			" use mcp__indigo__read_file to read files (returns live buffer content, including unsaved edits)" +
+			" and mcp__indigo__apply_edits to edit files (edits apply to the live buffer and the user sees a diff to approve)." +
+			" The built-in Read, Edit, Write, MultiEdit, and NotebookEdit tools are disabled in this session;" +
+			" Glob, Grep, and Bash remain available."
+	}
 	if ac.Found {
 		sysPrompt += fmt.Sprintf(
 			" The user is currently editing %s at line %d, column %d."+
@@ -296,6 +325,12 @@ func runClaudeSubprocess(prog *programLink, workDir, prompt, sessionID string, a
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = workDir
+	// apply_edits blocks on the in-editor approval popup, so give MCP tool
+	// calls a generous timeout (values in milliseconds).
+	cmd.Env = append(os.Environ(),
+		"MCP_TIMEOUT=30000",
+		"MCP_TOOL_TIMEOUT=600000",
+	)
 	// strings.NewReader closes stdin (returns EOF) as soon as the prompt is
 	// consumed. That's needed because claude reads stdin until EOF to get the
 	// full prompt. Permission responses via stdin require a different approach

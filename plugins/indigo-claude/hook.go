@@ -2,12 +2,15 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/indiejames/indigo/internal/client"
 )
 
 // ─── hook client mode ─────────────────────────────────────────────────────────
@@ -69,35 +72,51 @@ func decisionJSON(approved bool) []byte {
 	return b
 }
 
-// ─── permission socket server ─────────────────────────────────────────────────
+// ─── permission / tool socket server ──────────────────────────────────────────
 
-// startPermissionServer listens on socketPath and routes incoming hook requests
-// to the TUI as shellPermissionRequestMsg values. Returns the listener so the
-// caller can close it on exit.
-func startPermissionServer(socketPath string, prog *programLink) (net.Listener, error) {
+// startPermissionServer listens on socketPath and routes incoming requests to
+// the TUI: PreToolUse hook events become shellPermissionRequestMsg values, and
+// mcp_tool_call requests (from the --mcp subprocess) execute buffer-aware
+// tools via execTool. Returns the listener so the caller can close it on exit.
+func startPermissionServer(socketPath string, prog *programLink, rpc *client.RPC, workDir string) (net.Listener, error) {
 	os.Remove(socketPath) //nolint:errcheck
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return nil, fmt.Errorf("permission socket: %w", err)
 	}
+	// Owner-only, independent of umask. The parent directory is already 0700;
+	// this is defense in depth for platforms that enforce socket file modes.
+	os.Chmod(socketPath, 0600) //nolint:errcheck
 	go func() {
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			go handlePermConn(conn, prog)
+			go handlePermConn(conn, prog, rpc, workDir)
 		}
 	}()
 	return ln, nil
 }
 
-func handlePermConn(conn net.Conn, prog *programLink) {
+func handlePermConn(conn net.Conn, prog *programLink, rpc *client.RPC, workDir string) {
 	defer conn.Close() //nolint:errcheck
 
 	line, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
 		conn.Write(append(decisionJSON(true), '\n')) //nolint:errcheck
+		return
+	}
+	trimmed := strings.TrimSpace(line)
+
+	// MCP tool calls share this socket with hook events; they carry an explicit
+	// type marker while hook JSON has tool_name/tool_input.
+	var probe struct {
+		Type string `json:"type"`
+	}
+	json.Unmarshal([]byte(trimmed), &probe) //nolint:errcheck
+	if probe.Type == "mcp_tool_call" {
+		handleMCPToolCall(conn, trimmed, prog, rpc, workDir)
 		return
 	}
 
@@ -107,7 +126,7 @@ func handlePermConn(conn net.Conn, prog *programLink) {
 			Command string `json:"command"`
 		} `json:"tool_input"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &ev); err != nil {
+	if err := json.Unmarshal([]byte(trimmed), &ev); err != nil {
 		conn.Write(append(decisionJSON(true), '\n')) //nolint:errcheck
 		return
 	}
@@ -120,6 +139,27 @@ func handlePermConn(conn net.Conn, prog *programLink) {
 
 	approved := <-replyCh
 	conn.Write(append(decisionJSON(approved), '\n')) //nolint:errcheck
+}
+
+// handleMCPToolCall executes one forwarded MCP tool call against the live
+// editor buffers and writes the single-line JSON reply. apply_edits blocks on
+// the in-editor approval popup, so this can wait on the user.
+func handleMCPToolCall(conn net.Conn, line string, prog *programLink, rpc *client.RPC, workDir string) {
+	writeReply := func(result string, isError bool) {
+		b, _ := json.Marshal(map[string]any{"result": result, "is_error": isError})
+		conn.Write(append(b, '\n')) //nolint:errcheck
+	}
+
+	var req struct {
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal([]byte(line), &req); err != nil {
+		writeReply("bad tool call request: "+err.Error(), true)
+		return
+	}
+	result, isError := execTool(context.Background(), rpc, prog, workDir, req.Name, req.Input)
+	writeReply(result, isError)
 }
 
 // ─── hook script + settings ───────────────────────────────────────────────────
@@ -214,7 +254,8 @@ func removeHook(workDir string) {
 }
 
 // isOurHookEntry identifies entries written by indigo-claude by their command
-// path, which always contains "indigo-claude-hook-".
+// path, which always contains "indigo-claude-hook" (also matches the older
+// "indigo-claude-hook-<pid>.sh" naming so stale entries still get cleaned up).
 func isOurHookEntry(entry any) bool {
 	e, ok := entry.(map[string]any)
 	if !ok {
@@ -223,7 +264,7 @@ func isOurHookEntry(entry any) bool {
 	hs, _ := e["hooks"].([]any)
 	for _, h := range hs {
 		if hm, ok := h.(map[string]any); ok {
-			if strings.Contains(fmt.Sprint(hm["command"]), "indigo-claude-hook-") {
+			if strings.Contains(fmt.Sprint(hm["command"]), "indigo-claude-hook") {
 				return true
 			}
 		}

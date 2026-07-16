@@ -126,7 +126,7 @@ func (b *Bookmarks) onAltB(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
 	b.mu.Unlock()
 
 	if len(items) == 0 {
-		b.api.ShowMessage("No bookmarks") //nolint:errcheck
+		b.api.ShowMessageTo(ctx.ClientID, "No bookmarks") //nolint:errcheck
 		return sdk.KeyResponse{Handled: true}
 	}
 

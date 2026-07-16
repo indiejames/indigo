@@ -223,7 +223,8 @@ func (s *editorApiServer) ShowMessage(_ context.Context, call pluginproto.Editor
 	if err != nil {
 		return err
 	}
-	s.bridge.PluginShowMessage(text)
+	// clientID 0 broadcasts; non-zero targets a single client.
+	s.bridge.PluginShowMessage(call.Args().ClientId(), text)
 	_, err = call.AllocResults()
 	return err
 }

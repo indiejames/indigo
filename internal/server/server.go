@@ -323,9 +323,7 @@ type Server struct {
 // triggerShutdown closes the done channel exactly once, causing Wait() to unblock.
 func (s *Server) triggerShutdown() {
 	s.shutdownOnce.Do(func() {
-		buf := make([]byte, 16*1024)
-		n := runtime.Stack(buf, false)
-		serverLog("triggerShutdown: closing done channel, caller stack:\n%s", buf[:n])
+		serverLog("triggerShutdown: closing done channel")
 		close(s.done)
 	})
 }
@@ -462,9 +460,7 @@ func (s *Server) serve() {
 			defer conn.Close() //nolint:errcheck
 			select {
 			case <-conn.Done():
-				buf := make([]byte, 64*1024)
-				n := runtime.Stack(buf, true)
-				serverLog("serve: conn.Done() fired! goroutines:\n%s", buf[:n])
+				serverLog("serve: connection dropped by peer")
 			case <-s.done:
 				serverLog("serve: s.done fired")
 			}

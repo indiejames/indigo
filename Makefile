@@ -44,6 +44,21 @@ PLUGINS_DIR := plugins
 GOOS   := $(shell go env GOOS)
 GOARCH := $(shell go env GOARCH)
 
+HELLO_DIR   := $(PLUGINS_DIR)/hello
+HELLO_OUT   := $(HELLO_DIR)/hello-$(GOOS)-$(GOARCH)
+HELLO_INSTALL := $(HOME)/.config/indigo/plugins/hello
+
+build-hello:
+	go build -o $(HELLO_OUT) ./$(HELLO_DIR)
+
+install-hello: build-hello
+	mkdir -p $(HELLO_INSTALL)
+	mv $(HELLO_OUT) $(HELLO_INSTALL)/
+	cp $(HELLO_DIR)/plugin.toml $(HELLO_INSTALL)/
+
+uninstall-hello:
+	rm -rf $(HELLO_INSTALL)
+
 JUMPY_DIR   := $(PLUGINS_DIR)/jumpy
 JUMPY_OUT   := $(JUMPY_DIR)/jumpy-$(GOOS)-$(GOARCH)
 JUMPY_INSTALL := $(HOME)/.config/indigo/plugins/jumpy

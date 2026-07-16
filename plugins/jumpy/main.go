@@ -44,7 +44,7 @@ func (j *Jumpy) Init(api *sdk.Api) sdk.Info {
 	j.api = api
 	api.OnKey("f", j.onKey)        //nolint:errcheck
 	api.Decorations(j.decorations) //nolint:errcheck
-	api.ShowMessage("jumpy ready: press f to jump") //nolint:errcheck
+	api.BroadcastMessage("jumpy ready: press f to jump") //nolint:errcheck
 	return sdk.Info{Name: "jumpy", Version: "0.1.0"}
 }
 
@@ -81,7 +81,7 @@ func (j *Jumpy) trigger(ctx sdk.KeyContext) sdk.KeyResponse {
 	j.char1 = 0
 	j.mu.Unlock()
 
-	j.api.ShowMessage("jumpy: activated — type label chars") //nolint:errcheck
+	j.api.ShowMessageTo(ctx.ClientID, "jumpy: activated — type label chars") //nolint:errcheck
 	return sdk.KeyResponse{Handled: true, CaptureKeys: 2}
 }
 

@@ -15,19 +15,19 @@ Each plugin runs as a **separate OS process**, started by the indigo server when
 ┌──────────────────────────────────────────────┐
 │                indigo server                 │
 │                                              │
-│  ┌─────────────┐    ┌────────────────────┐  │
-│  │   plugin    │    │   editor service   │  │
-│  │   manager   │    │  (buffers, LSP,    │  │
-│  └──────┬──────┘    │   formatting, …)   │  │
-│         │ Cap'n     └────────────────────┘  │
+│  ┌─────────────┐    ┌────────────────────┐   │
+│  │   plugin    │    │   editor service   │   │
+│  │   manager   │    │  (buffers, LSP,    │   │
+│  └──────┬──────┘    │   formatting, …)   │   │
+│         │ Cap'n     └────────────────────┘   │
 │         │ Proto                              │
 └─────────┼────────────────────────────────────┘
           │  Unix domain sockets (one per plugin)
     ┌─────┴──────────────────────────┐
     │                                │
 ┌───▼──────────────┐  ┌─────────────▼────────────┐
-│  plugin process  │  │    plugin process         │
-│  (jumpy)         │  │    (git-blame)            │
+│  plugin process  │  │    plugin process        │
+│  (jumpy)         │  │    (git)                 │
 └──────────────────┘  └──────────────────────────┘
 ```
 
@@ -51,7 +51,7 @@ Stdio with JSON (the LSP model) works well for request/response tools. Plugin co
 
 Rather than defining a large interface that every plugin must implement, or an untyped event bus, indigo uses **Cap'n Proto's object-capability model**.
 
-During initialization, a plugin receives an `EditorApi` capability and uses it to **register specific handler objects** for only the events it cares about. The server holds references to those handler objects and calls into them when relevant events occur.
+During initialization, a plugin receives an `EditorApi` capability and uses it to register specific handler objects for only the events it cares about. The server holds references to those handler objects and calls into them when relevant events occur.
 
 ```
 Plugin.initialize(api: EditorApi):
@@ -71,18 +71,18 @@ This means:
 
 The render loop and keypress path **never block** on plugin I/O. Snappiness is enforced at the architecture level, not by convention:
 
-| Event type | Delivery | Timeout |
-|---|---|---|
-| Buffer opened / closed | Fire and forget | none |
-| Buffer changed | Fire and forget | none |
-| Buffer saved | Fire and forget | none |
-| Cursor moved | Fire and forget (throttled) | none |
-| Gutter decorations | Async, cached last result | none |
-| Overlay / virtual text | Async, cached last result | none |
-| Status bar items | Async, cached last result | none |
-| **Key binding handler** | Await response | 30 ms |
-| **Insert-mode hook** (e.g. bracket close) | Await response | 30 ms |
-| **Command handler** (`:blame`) | Await response | 5 s |
+| Event type                                | Delivery                    | Timeout |
+|-------------------------------------------|-----------------------------|---------|
+| Buffer opened / closed                    | Fire and forget             | none    |
+| Buffer changed                            | Fire and forget             | none    |
+| Buffer saved                              | Fire and forget             | none    |
+| Cursor moved                              | Fire and forget (throttled) | none    |
+| Gutter decorations                        | Async, cached last result   | none    |
+| Overlay / virtual text                    | Async, cached last result   | none    |
+| Status bar items                          | Async, cached last result   | none    |
+| **Key binding handler**                   | Await response              | 30 ms   |
+| **Insert-mode hook** (e.g. bracket close) | Await response              | 30 ms   |
+| **Command handler** (`:blame`)            | Await response              | 5 s     |
 
 For the two interactive cases (key bindings and insert hooks), the server dispatches to the plugin in a goroutine and awaits the response with a deadline. If the deadline expires, the keypress falls through as if no plugin handled it. A plugin that consistently times out gets its key binding de-registered until it recovers.
 
@@ -94,33 +94,33 @@ Overlay decorations are rendered in a single pass through each visible line's ru
 
 ### UI contributions
 
-| Surface | Description |
-|---|---|
-| Gutter decorations | Per-line icons or text (git blame, error counts) |
-| Inline overlays | Virtual text overlaid on buffer content (jumpy labels, type hints) |
-| Status bar items | Text segments in the mode line |
-| Popup / hover augmentation | Extra content added to the K hover popup |
+| Surface                    | Description                                                        |
+|----------------------------|--------------------------------------------------------------------|
+| Gutter decorations         | Per-line icons or text (git blame, error counts)                   |
+| Inline overlays            | Virtual text overlaid on buffer content (jumpy labels, type hints) |
+| Status bar items           | Text segments in the mode line                                     |
+| Popup / hover augmentation | Extra content added to the K hover popup                           |
 
 ### Editor interactions
 
-| API | Description |
-|---|---|
-| Apply text edits | Insert, delete, or replace ranges in a buffer |
-| Move cursor | Jump to a position or selection |
-| Open file | Open a file in a new buffer |
-| Show message | Write to the status bar transiently |
-| Register key binding | Own a key sequence in normal or insert mode |
-| Register command | Add a `:commandname` callable from command mode |
-| Register insert hook | Intercept a specific character in insert mode |
+| API                  | Description                                     |
+|----------------------|-------------------------------------------------|
+| Apply text edits     | Insert, delete, or replace ranges in a buffer   |
+| Move cursor          | Jump to a position or selection                 |
+| Open file            | Open a file in a new buffer                     |
+| Show message         | Write to the status bar transiently             |
+| Register key binding | Own a key sequence in normal or insert mode     |
+| Register command     | Add a `:commandname` callable from command mode |
+| Register insert hook | Intercept a specific character in insert mode   |
 
 ### Workspace access
 
-| API | Description |
-|---|---|
-| Read buffer content | Get full text or a line range |
-| Buffer events | Subscribe to open / change / save / close |
+| API                  | Description                                              |
+|----------------------|----------------------------------------------------------|
+| Read buffer content  | Get full text or a line range                            |
+| Buffer events        | Subscribe to open / change / save / close                |
 | Run external process | Spawn a shell command and receive stdout (for git, etc.) |
-| Read files | Read arbitrary workspace files |
+| Read files           | Read arbitrary workspace files                           |
 
 ## SDK design
 
@@ -241,14 +241,14 @@ A future `io plugin install <source>` command would automate downloading and unp
 
 Plugins access buffer content through the Cap'n Proto document query API — they never touch the rope or gap buffer directly. The server-side `Buffer` type exposes the following operations to the plugin layer:
 
-| Query | Description |
-| ----- | ----------- |
-| `readBuffer(bufId)` | Full text of the buffer |
-| `readLines(bufId, start, end)` | Text of a line range (efficient for large files) |
-| `readRange(bufId, from, to)` | Text of an arbitrary (line, col) → (line, col) range |
-| `wordAt(bufId, pos)` | Start and end position of the word at a cursor position |
-| `bufferInfo(bufId)` | Path, language ID, line count, dirty flag |
-| `visibleRange(clientId)` | First and last visible line in a connected client's viewport |
+| Query                          | Description                                                  |
+|--------------------------------|--------------------------------------------------------------|
+| `readBuffer(bufId)`            | Full text of the buffer                                      |
+| `readLines(bufId, start, end)` | Text of a line range (efficient for large files)             |
+| `readRange(bufId, from, to)`   | Text of an arbitrary (line, col) → (line, col) range         |
+| `wordAt(bufId, pos)`           | Start and end position of the word at a cursor position      |
+| `bufferInfo(bufId)`            | Path, language ID, line count, dirty flag                    |
+| `visibleRange(clientId)`       | First and last visible line in a connected client's viewport |
 
 `wordAt` and `readRange` require two small additions to `internal/document/buffer.go` (`TextRange` and `WordAt` methods). The internal machinery (`logicalSlice`, `logicalOffset`) is already present; these are thin wrappers over it.
 
@@ -278,4 +278,4 @@ Keeping all plugins server-side avoids the complexity of two plugin systems and 
 ## Open questions
 
 - **Plugin sandboxing**: plugins have full OS access. This is consistent with VS Code's current model. Sandboxing (e.g. via WASM) is a possible future direction but is not in scope for the initial implementation.
-- **Event bus vs capability pattern**: the design above uses the capability pattern. An alternative is a pub/sub event bus where plugins subscribe to named event topics and the server fans out. This is simpler to implement but loses the type safety and backpressure properties of the capability approach. Decision pending.
+- **Event bus vs capability pattern**: the design above uses the capability pattern. An alternative is a pub/sub event bus where plugins subscribe to named event topics and the server fans out. This is simpler to implement but loses the type safety and backpressure properties of the capability approach.

@@ -675,6 +675,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = "ERR: " + msg.err.Error()
 		return m, nil
 
+	case PluginShowMsgMsg:
+		// Plugin messages show in the status bar (center segment).
+		m.status = msg.Text
+		return m, nil
+
 	case savedMsg:
 		m.buf.SetClean()
 		m.status = ""

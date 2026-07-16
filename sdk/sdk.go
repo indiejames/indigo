@@ -31,7 +31,7 @@
 //   - [Api.ApplyEdit] — apply text edits to a buffer
 //   - [Api.MoveCursor] — move the cursor
 //   - [Api.OpenFile] — tell the editor to open a file
-//   - [Api.ShowMessage] — display text in the status bar
+//   - [Api.ShowMessageTo] / [Api.BroadcastMessage] — display text in the status bar
 //   - [Api.RunProcess] — run an external command
 //   - [Api.ShowPopup] — show a modal list popup and receive the selection
 //   - [Api.ShowInputPrompt] — show a modal text-input dialog and receive the text
@@ -396,9 +396,22 @@ func (a *Api) OpenFile(path string, line uint32) error {
 	return err
 }
 
-// ShowMessage displays text in the editor status bar.
-func (a *Api) ShowMessage(text string) error {
+// BroadcastMessage displays text in the status bar of every connected editor.
+// Prefer [Api.ShowMessageTo] when responding to a key or event that carries a
+// ClientID — broadcasts show up in windows that didn't ask for anything.
+func (a *Api) BroadcastMessage(text string) error {
+	return a.showMessage(0, text)
+}
+
+// ShowMessageTo displays text in the status bar of one editor client, e.g.
+// the client whose key press triggered a handler (see [KeyContext.ClientID]).
+func (a *Api) ShowMessageTo(clientID uint64, text string) error {
+	return a.showMessage(clientID, text)
+}
+
+func (a *Api) showMessage(clientID uint64, text string) error {
 	fut, rel := a.api.ShowMessage(context.Background(), func(p pluginproto.EditorApi_showMessage_Params) error {
+		p.SetClientId(clientID)
 		return p.SetText(text)
 	})
 	defer rel()

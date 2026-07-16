@@ -504,9 +504,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	// ---- server push (plugin effects) ----
-	case client.PluginShowMsgMsg:
-		// Plugins are not allowed to write to the tab bar.
-		return a, nil
+	// client.PluginShowMsgMsg is deliberately NOT handled here: it falls
+	// through to the active buffer, which shows it in the status bar.
+	// (Plugins are not allowed to write to the tab bar.)
 
 	case client.PluginMoveCursorMsg:
 		for i, buf := range a.buffers {

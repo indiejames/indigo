@@ -8,16 +8,6 @@ import (
 	"github.com/indiejames/indigo/sdk"
 )
 
-// labelChars defines the character set used for 2-char labels.
-// Home-row characters first for ergonomics.
-const labelChars = "asdfjkl;ghqwertyuiopzxcvbnm"
-
-type target struct {
-	label string
-	line  uint32
-	col   uint32
-}
-
 // Hello holds all state for one running plugin instance.
 type Hello struct {
 	mu  sync.Mutex
@@ -58,11 +48,6 @@ func (h *Hello) trigger(ctx sdk.KeyContext) sdk.KeyResponse {
 	h.api.BroadcastMessage("hello: activated") //nolint:errcheck
 
 	return sdk.KeyResponse{Handled: true}
-}
-
-
-func (j *Hello) reset() {
-	j.active = false
 }
 
 func main() {

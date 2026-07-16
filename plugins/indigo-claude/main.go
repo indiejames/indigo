@@ -581,14 +581,8 @@ func (m Model) handleShellPermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 var (
 	headerStyle    = lipgloss.NewStyle().Background(lipgloss.Color("#087AC8")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
-	youStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFDD44")).Bold(true)
-	claudeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#44DDAA")).Bold(true)
 	statusStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#667788"))
 	toolStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#AABBCC"))
-	permStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF8844")).Bold(true)
-	diffOldStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555"))
-	diffNewStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#55FF55"))
-	dividerStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#334455"))
 	inputBorderSty  = lipgloss.NewStyle().Foreground(lipgloss.Color("#335577"))
 	inputPromptSty  = lipgloss.NewStyle().Foreground(lipgloss.Color("#087AC8")).Bold(true)
 	cursorStyle    = lipgloss.NewStyle().Reverse(true)
@@ -927,11 +921,6 @@ func (m Model) renderAllLinesIndexed() (lines []string, starts []userMsgStart) {
 	return
 }
 
-func (m Model) renderAllLines() []string {
-	lines, _ := m.renderAllLinesIndexed()
-	return lines
-}
-
 // renderUserMsg renders a user message as a full-width rounded bubble with
 // progressive dimming when collapsed. collapseThreshold is the minimum number
 // of content lines before collapsing takes effect.
@@ -1062,18 +1051,6 @@ func (m Model) renderMsg(msg ConvMsg, w int) []string {
 
 	}
 	return nil
-}
-
-func (m Model) renderDivider() string {
-	var hint string
-	switch {
-	case m.agentRunning:
-		hint = statusStyle.Render(" thinking…")
-	case m.scroll > 0:
-		hint = statusStyle.Render(" PgUp/PgDn to scroll · PgDn for latest")
-	}
-	dashes := max(0, m.width-lipgloss.Width(hint))
-	return dividerStyle.Render(strings.Repeat("─", dashes)) + hint
 }
 
 func (m Model) renderInput() string {

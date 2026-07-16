@@ -45,6 +45,28 @@ func (r *RPC) DiscardRecovery(ctx context.Context, bufID uint32) (string, error)
 	return content, nil
 }
 
+// encodeOp writes a document.Op into a wire EditOp.
+func encodeOp(protoOp proto.EditOp, op document.Op) error {
+	protoOp.SetClientId(op.ClientID)
+	protoOp.SetVersion(op.Version)
+	switch op.Type {
+	case document.OpInsert:
+		protoOp.SetType(proto.EditOp_OpType_insert)
+		protoOp.SetInsertLine(uint32(op.InsertLine))
+		protoOp.SetInsertCol(uint32(op.InsertCol))
+		return protoOp.SetInsertText(op.InsertText)
+	case document.OpDelete:
+		protoOp.SetType(proto.EditOp_OpType_delete)
+		protoOp.SetFromLine(uint32(op.FromLine))
+		protoOp.SetFromCol(uint32(op.FromCol))
+		protoOp.SetToLine(uint32(op.ToLine))
+		protoOp.SetToCol(uint32(op.ToCol))
+	default:
+		protoOp.SetType(proto.EditOp_OpType_noop)
+	}
+	return nil
+}
+
 // ApplyOp sends an edit operation to the server and returns the new version.
 func (r *RPC) ApplyOp(ctx context.Context, bufID uint32, op document.Op) (uint64, error) {
 	fut, rel := r.svc.ApplyOp(ctx, func(p proto.EditorService_applyOp_Params) error {
@@ -54,24 +76,31 @@ func (r *RPC) ApplyOp(ctx context.Context, bufID uint32, op document.Op) (uint64
 		if err != nil {
 			return err
 		}
-		protoOp.SetClientId(op.ClientID)
-		protoOp.SetVersion(op.Version)
-		switch op.Type {
-		case document.OpInsert:
-			protoOp.SetType(proto.EditOp_OpType_insert)
-			protoOp.SetInsertLine(uint32(op.InsertLine))
-			protoOp.SetInsertCol(uint32(op.InsertCol))
-			if err := protoOp.SetInsertText(op.InsertText); err != nil {
+		return encodeOp(protoOp, op)
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return 0, err
+	}
+	return res.Version(), nil
+}
+
+// ApplyOps sends a batch of edit operations in one request. The server applies
+// the whole batch even if this client dies mid-call, so paired ops (e.g. a
+// delete+insert replace) can never be left half-applied.
+func (r *RPC) ApplyOps(ctx context.Context, bufID uint32, ops []document.Op) (uint64, error) {
+	fut, rel := r.svc.ApplyOps(ctx, func(p proto.EditorService_applyOps_Params) error {
+		p.SetClientId(r.clientID)
+		p.SetBufferId(bufID)
+		list, err := p.NewOps(int32(len(ops)))
+		if err != nil {
+			return err
+		}
+		for i, op := range ops {
+			if err := encodeOp(list.At(i), op); err != nil {
 				return err
 			}
-		case document.OpDelete:
-			protoOp.SetType(proto.EditOp_OpType_delete)
-			protoOp.SetFromLine(uint32(op.FromLine))
-			protoOp.SetFromCol(uint32(op.FromCol))
-			protoOp.SetToLine(uint32(op.ToLine))
-			protoOp.SetToCol(uint32(op.ToCol))
-		default:
-			protoOp.SetType(proto.EditOp_OpType_noop)
 		}
 		return nil
 	})
@@ -84,7 +113,7 @@ func (r *RPC) ApplyOp(ctx context.Context, bufID uint32, op document.Op) (uint64
 }
 
 // GetUpdates polls for ops on bufID that arrived after sinceVersion.
-func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]document.Op, uint64, error) {
+func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]document.Op, uint64, []byte, error) {
 	fut, rel := r.svc.GetUpdates(ctx, func(p proto.EditorService_getUpdates_Params) error {
 		p.SetClientId(r.clientID)
 		p.SetBufferId(bufID)
@@ -94,12 +123,13 @@ func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]doc
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
+	savedHash, _ := res.SavedHash()
 
 	opList, err := res.Ops()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 
 	ops := make([]document.Op, opList.Len())
@@ -127,7 +157,7 @@ func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]doc
 		}
 		ops[i] = op
 	}
-	return ops, res.Version(), nil
+	return ops, res.Version(), savedHash, nil
 }
 
 // Save asks the server to flush bufID to disk.

@@ -6,7 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
+	"strings"
 	"sync"
 
 	capnp "capnproto.org/go/capnp/v3"
@@ -23,7 +23,13 @@ type rpcLogger struct{}
 func (l *rpcLogger) Debug(msg string, args ...any) { clientLog("rpc debug: %s %v", msg, args) }
 func (l *rpcLogger) Info(msg string, args ...any)  { clientLog("rpc info: %s %v", msg, args) }
 func (l *rpcLogger) Warn(msg string, args ...any)  { clientLog("rpc warn: %s %v", msg, args) }
-func (l *rpcLogger) Error(msg string, args ...any) { clientLog("rpc error: %s %v", msg, args) }
+func (l *rpcLogger) Error(msg string, args ...any) {
+	// "context canceled" release errors are normal teardown noise on disconnect.
+	if strings.Contains(fmt.Sprint(args...), "context canceled") {
+		return
+	}
+	clientLog("rpc error: %s %v", msg, args)
+}
 
 func clientLog(format string, args ...any) {
 	path := filepath.Join(os.TempDir(), "indigo-plugins.log")
@@ -165,9 +171,7 @@ func Dial(socketPath string) (*RPC, error) {
 	// Monitor connection lifecycle.
 	go func() {
 		<-r.conn.Done()
-		buf := make([]byte, 64*1024)
-		n := runtime.Stack(buf, true)
-		clientLog("client conn.Done() fired! goroutines:\n%s", buf[:n])
+		clientLog("server connection closed")
 	}()
 
 	// Fetch keys that plugins registered before this client connected.

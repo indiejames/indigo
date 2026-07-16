@@ -372,7 +372,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return a, nil
+		return a, a.buffers[a.active].ReportActiveContextCmd()
 
 	// ---- file opened ----
 	case bufferOpenedMsg:
@@ -411,14 +411,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.active = (a.active + 1) % len(a.buffers)
 			a.status = ""
 		}
-		return a, nil
+		return a, a.buffers[a.active].ReportActiveContextCmd()
 
 	case client.PrevBufferMsg:
 		if len(a.buffers) > 1 {
 			a.active = (a.active - 1 + len(a.buffers)) % len(a.buffers)
 			a.status = ""
 		}
-		return a, nil
+		return a, a.buffers[a.active].ReportActiveContextCmd()
 
 	// ---- cleanup done ----
 	case appQuitMsg:
@@ -504,9 +504,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	// ---- server push (plugin effects) ----
-	case client.PluginShowMsgMsg:
-		// Plugins are not allowed to write to the tab bar.
-		return a, nil
+	// client.PluginShowMsgMsg is deliberately NOT handled here: it falls
+	// through to the active buffer, which shows it in the status bar.
+	// (Plugins are not allowed to write to the tab bar.)
 
 	case client.PluginMoveCursorMsg:
 		for i, buf := range a.buffers {
@@ -624,6 +624,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return a, nil
+	}
+	// The tab bar occupies terminal row 0 when visible, so mouse coordinates
+	// must shift up one row to be buffer-relative. Clicks landing on the tab
+	// bar itself are not forwarded (wheel events pass through — scrolling
+	// should work wherever the pointer is).
+	if mm, ok := msg.(tea.MouseMsg); ok && a.showTabBar() {
+		wheel := mm.Button == tea.MouseButtonWheelUp || mm.Button == tea.MouseButtonWheelDown
+		if mm.Y == 0 && !wheel {
+			return a, nil
+		}
+		mm.Y--
+		msg = mm
 	}
 	updated, cmd := a.buffers[a.active].Update(msg)
 	a.buffers[a.active] = updated.(client.Model)

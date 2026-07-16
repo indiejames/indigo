@@ -20,7 +20,10 @@ interface EditorService {
   connect         @0 (callback :ClientCallback)                                -> (clientId :UInt64);
   disconnect      @1 (clientId :UInt64)                                        -> ();
   openFile        @2 (clientId :UInt64, path :Text)                            -> (bufferId :UInt32, content :Text, version :UInt64, fromRecovery :Bool);
-  getUpdates      @3 (clientId :UInt64, bufferId :UInt32, sinceVersion :UInt64) -> (ops :List(EditOp), version :UInt64);
+  # savedHash is the sha256 of the buffer content at its last save; clients
+  # compare it against their own content hash to keep dirty markers accurate
+  # when another client (e.g. an agent) saves the buffer.
+  getUpdates      @3 (clientId :UInt64, bufferId :UInt32, sinceVersion :UInt64) -> (ops :List(EditOp), version :UInt64, savedHash :Data);
   applyOp         @4 (clientId :UInt64, bufferId :UInt32, op :EditOp)          -> (version :UInt64);
   save            @5 (clientId :UInt64, bufferId :UInt32)                      -> ();
   closeBuffer     @6 (clientId :UInt64, bufferId :UInt32)                      -> ();
@@ -49,7 +52,17 @@ interface EditorService {
   references       @29 (bufId :UInt32, line :UInt32, col :UInt32) -> (locations :List(FileLocation));
   workspaceSymbols @30 (bufId :UInt32, query :Text)               -> (symbols :List(SymbolResult));
   documentSymbols  @31 (bufId :UInt32)                            -> (symbols :List(SymbolResult));
-  lspCodeActions   @32 (bufId :UInt32, line :UInt32, col :UInt32) -> (actions :List(LspCodeAction));
+  lspCodeActions     @32 (bufId :UInt32, line :UInt32, col :UInt32) -> (actions :List(LspCodeAction));
+  setActiveContext   @33 (clientId :UInt64, bufId :UInt32, filePath :Text, line :UInt32, col :UInt32) -> ();
+  getActiveContext   @34 () -> (result :ActiveContext);
+  setStatusBarText   @35 (key :Text, text :Text) -> ();
+  # Apply a batch of ops atomically: once the server receives the call, all
+  # ops are applied even if the client dies mid-request.
+  applyOps           @36 (clientId :UInt64, bufferId :UInt32, ops :List(EditOp)) -> (version :UInt64);
+  # Report / query the active editor selection (start/end in document order,
+  # end column inclusive; isLine = whole-line selection; active=false clears).
+  setActiveSelection @37 (clientId :UInt64, bufId :UInt32, startLine :UInt32, startCol :UInt32, endLine :UInt32, endCol :UInt32, isLine :Bool, active :Bool) -> ();
+  getActiveSelection @38 () -> (bufId :UInt32, startLine :UInt32, startCol :UInt32, endLine :UInt32, endCol :UInt32, isLine :Bool, found :Bool);
 }
 
 struct PluginEdit {
@@ -190,6 +203,16 @@ struct CompletionItem {
   kind       @1 :UInt8;
   detail     @2 :Text;
   insertText @3 :Text;
+}
+
+struct ActiveContext {
+  clientId  @0 :UInt64;
+  bufId     @1 :UInt32;
+  filePath  @2 :Text;
+  line      @3 :UInt32;
+  col       @4 :UInt32;
+  updatedAt @5 :Int64;  # Unix nanoseconds
+  found     @6 :Bool;
 }
 
 struct EditOp {

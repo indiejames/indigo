@@ -59,6 +59,7 @@ require (
 
 require (
 	github.com/alecthomas/chroma/v2 v2.20.0 // indirect
+	github.com/alexaandru/go-sitter-forest/gitcommit v1.9.4 // indirect
 	github.com/alexaandru/go-sitter-forest/make v1.9.1 // indirect
 	github.com/alexaandru/go-sitter-forest/markdown_inline v1.9.3 // indirect
 	github.com/alexaandru/go-sitter-forest/php_only v1.9.6 // indirect

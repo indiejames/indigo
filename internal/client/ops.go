@@ -11,6 +11,42 @@ import (
 	"github.com/indiejames/indigo/internal/highlight"
 )
 
+// ReportActiveContextCmd returns a Cmd that tells the server this client's
+// current buffer, cursor position, and selection are the active context.
+// Returns nil when rpc is nil (e.g. in tests).
+func (m Model) ReportActiveContextCmd() tea.Cmd {
+	if m.rpc == nil {
+		return nil
+	}
+	clientID := m.rpc.ClientID()
+	bufID := m.bufID
+	filePath := m.filePath
+	line := uint32(m.cursor.Line)
+	col := uint32(m.cursor.Col)
+
+	var sel ActiveSelection
+	if m.sel != nil {
+		start, end := m.sel.ordered()
+		sel = ActiveSelection{
+			Found:     true,
+			BufID:     bufID,
+			StartLine: uint32(start.Line),
+			StartCol:  uint32(start.Col),
+			EndLine:   uint32(end.Line),
+			EndCol:    uint32(end.Col), // inclusive, matching selectedText
+			IsLine:    m.sel.IsLine,
+		}
+	}
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = m.rpc.SetActiveContext(ctx, clientID, bufID, filePath, line, col)
+		_ = m.rpc.SetActiveSelection(ctx, clientID, bufID, sel)
+		return nil
+	}
+}
+
 // sendOp applies the op locally and sends it to the server.
 func (m Model) sendOp(op document.Op) tea.Cmd {
 	m.buf.Apply(op)
@@ -192,11 +228,13 @@ func (m Model) fetchUpdates() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		ops, ver, err := m.rpc.GetUpdates(ctx, m.bufID, m.version)
-		if err != nil || len(ops) == 0 {
+		ops, ver, savedHash, err := m.rpc.GetUpdates(ctx, m.bufID, m.version)
+		if err != nil {
 			return nil
 		}
-		return updatesMsg{ops: ops, version: ver}
+		// Deliver even with zero ops: savedHash keeps the dirty marker
+		// accurate when another client (e.g. an agent) saves this buffer.
+		return updatesMsg{ops: ops, version: ver, savedHash: savedHash}
 	}
 }
 
@@ -239,18 +277,6 @@ func (m Model) doSaveAsNow(newPath string, thenClose bool) tea.Cmd {
 	}
 }
 
-func (m Model) fetchClientCount() tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		count, err := m.rpc.BufferClientCount(ctx, m.bufID)
-		if err != nil {
-			// On error, assume we're alone and warn.
-			return clientCountMsg{count: 1}
-		}
-		return clientCountMsg{count: count}
-	}
-}
 
 func (m Model) reparseHighlight() tea.Cmd {
 	if m.hlr == nil {

@@ -170,3 +170,41 @@ func TestDoubleClickOutsideWindowDoesNotSelect(t *testing.T) {
 		t.Error("slow second click should not expand selection to a word")
 	}
 }
+
+// Regression test: mouse wheel must scroll the viewport, dragging the cursor
+// only as far as needed to keep it on screen.
+func TestScrollWheel(t *testing.T) {
+	var content string
+	for i := 0; i < 100; i++ {
+		content += "line\n"
+	}
+	m := newTestModel(content) // height 24 → 23 visible rows
+
+	// Scroll down: viewport moves, cursor (line 0) gets pulled to topLine.
+	m.scrollWheel(wheelScrollLines)
+	if m.topLine != wheelScrollLines {
+		t.Errorf("topLine = %d, want %d", m.topLine, wheelScrollLines)
+	}
+	if m.cursor.Line != m.topLine {
+		t.Errorf("cursor.Line = %d, want %d (pulled to top)", m.cursor.Line, m.topLine)
+	}
+
+	// Cursor in the middle of the view stays put on a small scroll.
+	m.cursor.Line = m.topLine + 10 // 13, still visible after scrolling to 6
+	m.scrollWheel(wheelScrollLines)
+	if m.cursor.Line != 13 {
+		t.Errorf("cursor.Line = %d, want 13 (untouched)", m.cursor.Line)
+	}
+
+	// Scroll up past the start clamps to 0.
+	m.scrollWheel(-1000)
+	if m.topLine != 0 {
+		t.Errorf("topLine = %d, want 0 after clamped scroll up", m.topLine)
+	}
+
+	// Scroll down past the end clamps to the last displayable line.
+	m.scrollWheel(100000)
+	if want := m.displayLineCount() - 1; m.topLine != want {
+		t.Errorf("topLine = %d, want %d after clamped scroll down", m.topLine, want)
+	}
+}

@@ -1,0 +1,12 @@
+name        = "hello"
+version     = "0.1.0"
+sdk_version = "0.1.0"
+description = "Sample plugin that prints 'hello' in the status bar"
+trigger_key     = "H"
+key_description = "Say hello"
+
+[binaries]
+"darwin/arm64" = "hello-darwin-arm64"
+"darwin/amd64" = "hello-darwin-amd64"
+"linux/amd64"  = "hello-linux-amd64"
+"linux/arm64"  = "hello-linux-arm64"

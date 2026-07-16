@@ -66,7 +66,17 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, recordCmd
 
 	case "ctrl+c":
-		return m, m.doCloseBuffer()
+		// Escape to normal mode (vim convention) — never close from insert mode.
+		m.mode = ModeNormal
+		m.sigHelp = nil
+		if m.cursor.Col > 0 {
+			m.cursor.Col--
+		}
+		if len(m.currentGroup) > 0 {
+			m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: m.groupBefore})
+		}
+		m.currentGroup = nil
+		return m, nil
 
 	case "ctrl+s":
 		return m, m.doSave()

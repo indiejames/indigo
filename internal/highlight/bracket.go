@@ -65,18 +65,20 @@ func BracketSpans(content []byte) LineSpans {
 			}
 
 		case stDoubleStr:
-			if ch == '\\' {
+			switch ch {
+			case '\\':
 				i++
 				col++ // skip escaped char
-			} else if ch == '"' {
+			case '"':
 				st = stNormal
 			}
 
 		case stSingleStr:
-			if ch == '\\' {
+			switch ch {
+			case '\\':
 				i++
 				col++ // skip escaped char
-			} else if ch == '\'' {
+			case '\'':
 				st = stNormal
 			}
 

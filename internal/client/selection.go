@@ -43,6 +43,24 @@ func (m *Model) selectedText() string {
 	return sb.String()
 }
 
+// copySel returns an independent copy of s. Selection handlers mutate the
+// pointed-to struct in place, so change detection needs a snapshot.
+func copySel(s *Selection) *Selection {
+	if s == nil {
+		return nil
+	}
+	c := *s
+	return &c
+}
+
+// selEqual reports whether two selections cover the same range.
+func selEqual(a, b *Selection) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
 // ordered returns (start, end) in document order (start <= end).
 func (s *Selection) ordered() (start, end document.Pos) {
 	if s.Anchor.Line < s.Head.Line ||

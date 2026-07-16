@@ -386,6 +386,11 @@ func fileTypeName(path string) string {
 	case "capnp":
 		return "Cap'n Proto"
 	default:
+		// Match git edit files by base filename (no extension).
+		switch strings.ToLower(filepath.Base(path)) {
+		case "commit_editmsg", "merge_msg", "squash_msg", "tag_editmsg":
+			return "Git Commit"
+		}
 		ext := strings.TrimPrefix(filepath.Ext(path), ".")
 		if ext != "" {
 			return ext
@@ -458,9 +463,19 @@ func (m Model) renderStatusBar() string {
 		ms = insertModeStyle
 	}
 	left := ms.Render("  " + modeLabel + "  ")
+
+	// Plugin status bar decorations (e.g. git branch, claude indicator) go on
+	// the left, after the mode label, so the right side stays fixed-width and
+	// the centered file path does not shift when decorations appear/disappear.
+	for _, d := range m.decorations {
+		if d.Kind == ClientDecorationStatusBar && d.Text != "" {
+			left += barStyle.Render(d.Text)
+		}
+	}
+
 	leftW := lipgloss.Width(left)
 
-	// Right side: [file type] [lsp] [line:col]
+	// Right side: [diag counts] [lsp] [file type] [line:col]
 	posStr := fmt.Sprintf("  %d:%d  ", m.cursor.Line+1, m.cursor.Col+1)
 	right := barStyle.Render(posStr)
 
@@ -499,13 +514,6 @@ func (m Model) renderStatusBar() string {
 		right = barDiagErrorStyle.Render(fmt.Sprintf(" %dE ", errCnt)) + right
 	}
 
-	// Plugin status bar decorations (e.g. git branch) go on the right, before file type.
-	for _, d := range m.decorations {
-		if d.Kind == ClientDecorationStatusBar && d.Text != "" {
-			right = barStyle.Render(d.Text) + right
-		}
-	}
-
 	rightW := lipgloss.Width(right)
 
 	dp := displayPath(m.workDir, m.filePath)
@@ -518,9 +526,7 @@ func (m Model) renderStatusBar() string {
 	switch {
 	case m.recoveryPrompt:
 		centerContent = "Recovery file found!   Use it [y]   Ignore and delete [n]"
-	case m.warnQuit:
-		centerContent = "Unsaved changes!   Save [s]   Discard [q]   Cancel [esc]"
-	case m.status != "":
+case m.status != "":
 		centerContent = dp + dirtyMark + "   " + m.status
 	default:
 		centerContent = dp + dirtyMark

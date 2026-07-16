@@ -317,13 +317,21 @@ func (s *editorService) PluginOpenFile(path string, line uint32) error {
 }
 
 // PluginShowMessage implements plugin.ServerBridge.
-// Pushes a status message to all connected clients.
-func (s *editorService) PluginShowMessage(text string) {
+// Pushes a status message to one client (clientID != 0) or to every
+// connected client (clientID == 0).
+func (s *editorService) PluginShowMessage(clientID uint64, text string) {
 	s.mu.Lock()
-	callbacks := s.allCallbacks()
+	var callbacks []proto.ClientCallback
+	if clientID != 0 {
+		if ce, ok := s.clientMap[clientID]; ok && ce.callback.IsValid() {
+			callbacks = []proto.ClientCallback{ce.callback}
+		}
+	} else {
+		callbacks = s.allCallbacks()
+	}
 	s.mu.Unlock()
 
-	serverLog("PluginShowMessage: text=%q, clients=%d", text, len(callbacks))
+	serverLog("PluginShowMessage: clientID=%d text=%q, targets=%d", clientID, text, len(callbacks))
 
 	ctx := context.Background()
 	for i, cb := range callbacks {
@@ -332,7 +340,7 @@ func (s *editorService) PluginShowMessage(text string) {
 		})
 		_, err := fut.Struct()
 		rel()
-		serverLog("PluginShowMessage: ShowMessage to client %d: err=%v", i, err)
+		serverLog("PluginShowMessage: ShowMessage to target %d: err=%v", i, err)
 	}
 }
 

@@ -190,15 +190,6 @@ func TestRenderStatusBarDirtyFlag(t *testing.T) {
 	}
 }
 
-func TestRenderStatusBarWarnQuit(t *testing.T) {
-	m := newTestModel("")
-	m.warnQuit = true
-	bar := m.renderStatusBar()
-	stripped := ansiStrip(bar)
-	if !strings.Contains(stripped, "Unsaved") {
-		t.Errorf("warnQuit bar should contain 'Unsaved': %q", stripped)
-	}
-}
 
 func TestRenderStatusBarZeroWidth(t *testing.T) {
 	m := newTestModel("")
@@ -288,17 +279,6 @@ func TestHandleKeyClearsStatus(t *testing.T) {
 	}
 }
 
-func TestHandleKeyWarnQuitTakesPriority(t *testing.T) {
-	m := newTestModel("")
-	m.warnQuit = true
-	m.mode = ModeNormal
-	// When warnQuit is set, handleWarnQuit handles 'n'
-	m2, _ := m.handleKey(fakeKey("n"))
-	got := m2.(Model)
-	if got.warnQuit {
-		t.Error("handleKey with warnQuit: 'n' should clear warnQuit")
-	}
-}
 
 // ansiStrip removes ANSI escape sequences for plain-text assertions.
 func ansiStrip(s string) string {

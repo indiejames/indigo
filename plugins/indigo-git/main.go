@@ -215,9 +215,31 @@ func (g *GitPlugin) updateBranch(root string) {
 	g.mu.Unlock()
 }
 
+// clearLines zeroes the diff state for a buffer (no gutter markers shown).
+func (g *GitPlugin) clearLines(bufID uint32) {
+	g.mu.Lock()
+	if bs, ok := g.bufs[bufID]; ok {
+		bs.lines = map[int]lineKind{}
+		g.bufs[bufID] = bs
+	}
+	g.mu.Unlock()
+}
+
+// isTracked returns true if path is tracked by git (committed or staged).
+// Files that are not in the index (untracked, inside .git/, temp files) return false.
+func isTracked(root, path string) bool {
+	out, err := runGit(root, "ls-files", "--", path)
+	return err == nil && strings.TrimSpace(out) != ""
+}
+
 // updateDiffFromBuffer reads the in-memory buffer content and diffs it against
 // HEAD, so gutter markers reflect unsaved edits.
 func (g *GitPlugin) updateDiffFromBuffer(bufID uint32, path, root string) {
+	if !isTracked(root, path) {
+		g.clearLines(bufID)
+		return
+	}
+
 	content, err := g.api.ReadBuffer(bufID)
 	if err != nil {
 		gitLog("updateDiffFromBuffer ReadBuffer bufID=%d err=%v", bufID, err)
@@ -232,7 +254,7 @@ func (g *GitPlugin) updateDiffFromBuffer(bufID uint32, path, root string) {
 	// Extract the HEAD version of the file into a temp file.
 	headContent, _, _, err := g.api.RunProcess("git", "-C", root, "show", "HEAD:"+relPath)
 	if err != nil {
-		// File not tracked in HEAD (new file) — treat HEAD as empty.
+		// Staged new file not yet in HEAD — treat HEAD as empty.
 		headContent = ""
 	}
 	origTmp, err := os.CreateTemp("", "indigo-git-orig-*")
@@ -268,19 +290,18 @@ func (g *GitPlugin) updateDiffFromBuffer(bufID uint32, path, root string) {
 
 // updateDiff runs git diff HEAD -- <path> and stores the result.
 func (g *GitPlugin) updateDiff(bufID uint32, path, root string) {
+	if !isTracked(root, path) {
+		g.clearLines(bufID)
+		return
+	}
 	out, err := runGit(root, "diff", "HEAD", "--unified=0", "--", path)
 	gitLog("updateDiff bufID=%d path=%s root=%s err=%v outputLen=%d", bufID, path, root, err, len(out))
 	if err != nil {
-		// Might be a new file not yet committed — try diff against empty tree.
-		out, err = runGit(root, "diff", "--unified=0", "--", path)
+		// Staged new file not yet in HEAD — diff against empty to show added lines.
+		out, err = runGit(root, "diff", "--unified=0", "--cached", "--", path)
 		gitLog("updateDiff fallback bufID=%d err=%v outputLen=%d", bufID, err, len(out))
 		if err != nil {
-			g.mu.Lock()
-			if bs, ok := g.bufs[bufID]; ok {
-				bs.lines = map[int]lineKind{}
-				g.bufs[bufID] = bs
-			}
-			g.mu.Unlock()
+			g.clearLines(bufID)
 			return
 		}
 	}
@@ -321,7 +342,7 @@ func (g *GitPlugin) decorations(bufID uint32, _ uint64, r sdk.Range) []sdk.Decor
 	if branch != "" {
 		out = append(out, sdk.Decoration{
 			Kind: sdk.DecorationStatusBar,
-			Text: "  " + branch, // nf-pl-branch glyph; falls back gracefully
+			Text: "  " + branch + "  ", // nf-pl-branch glyph; falls back gracefully
 		})
 	}
 

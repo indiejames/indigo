@@ -180,7 +180,7 @@ func (s *Spell) Init(api *sdk.Api) sdk.Info {
 		bytes.NewReader(dicData),
 	)
 	if err != nil {
-		api.ShowMessage(fmt.Sprintf("indigo-spell: failed to load dictionary: %v", err)) //nolint:errcheck
+		api.BroadcastMessage(fmt.Sprintf("indigo-spell: failed to load dictionary: %v", err)) //nolint:errcheck
 		return sdk.Info{Name: "indigo-spell", Version: "0.1.0"}
 	}
 	s.checker = checker
@@ -509,7 +509,7 @@ func (s *Spell) invalidateAll() {
 
 func (s *Spell) cmdAddGlobal(args []string, _ sdk.CommandContext) {
 	if len(args) == 0 {
-		s.api.ShowMessage("Usage: :spell-add <word>") //nolint:errcheck
+		s.api.BroadcastMessage("Usage: :spell-add <word>") //nolint:errcheck
 		return
 	}
 	word := args[0]
@@ -517,16 +517,16 @@ func (s *Spell) cmdAddGlobal(args []string, _ sdk.CommandContext) {
 	s.addUserWord(word)
 	s.mu.Unlock()
 	if err := persistWord(s.globalDictPath, word); err != nil {
-		s.api.ShowMessage(fmt.Sprintf("spell-add: %v", err)) //nolint:errcheck
+		s.api.BroadcastMessage(fmt.Sprintf("spell-add: %v", err)) //nolint:errcheck
 		return
 	}
 	s.invalidateAll()
-	s.api.ShowMessage(fmt.Sprintf("Added \"%s\" to global dictionary", word)) //nolint:errcheck
+	s.api.BroadcastMessage(fmt.Sprintf("Added \"%s\" to global dictionary", word)) //nolint:errcheck
 }
 
 func (s *Spell) cmdAddWorkspace(args []string, _ sdk.CommandContext) {
 	if len(args) == 0 {
-		s.api.ShowMessage("Usage: :spell-add-workspace <word>") //nolint:errcheck
+		s.api.BroadcastMessage("Usage: :spell-add-workspace <word>") //nolint:errcheck
 		return
 	}
 	word := args[0]
@@ -534,11 +534,11 @@ func (s *Spell) cmdAddWorkspace(args []string, _ sdk.CommandContext) {
 	s.addUserWord(word)
 	s.mu.Unlock()
 	if err := persistWord(s.workspaceDictPath, word); err != nil {
-		s.api.ShowMessage(fmt.Sprintf("spell-add-workspace: %v", err)) //nolint:errcheck
+		s.api.BroadcastMessage(fmt.Sprintf("spell-add-workspace: %v", err)) //nolint:errcheck
 		return
 	}
 	s.invalidateAll()
-	s.api.ShowMessage(fmt.Sprintf("Added \"%s\" to workspace dictionary", word)) //nolint:errcheck
+	s.api.BroadcastMessage(fmt.Sprintf("Added \"%s\" to workspace dictionary", word)) //nolint:errcheck
 }
 
 // --- Identifier splitting ---

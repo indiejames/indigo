@@ -37,7 +37,9 @@ type ServerBridge interface {
 	PluginApplyEdit(bufID uint32, edits []TextEdit) error
 	PluginMoveCursor(bufID uint32, line, col uint32) error
 	PluginOpenFile(path string, line uint32) error
-	PluginShowMessage(text string)
+	// PluginShowMessage shows text in the status bar of one client, or of
+	// every connected client when clientID is 0.
+	PluginShowMessage(clientID uint64, text string)
 	PluginRunProcess(cmd string, args []string) (stdout, stderr string, exitCode int32, err error)
 
 	// Plugin-driven UI — generic popup and text-input overlays.

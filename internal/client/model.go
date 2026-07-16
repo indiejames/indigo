@@ -1,6 +1,7 @@
 package client
 
 import (
+	"crypto/sha256"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,10 +25,12 @@ const (
 // tickMsg is sent periodically to poll for remote updates.
 type tickMsg struct{}
 
-// updatesMsg carries ops received from the server.
+// updatesMsg carries ops received from the server, plus the sha256 of the
+// buffer content at its last save (for dirty-marker reconciliation).
 type updatesMsg struct {
-	ops     []document.Op
-	version uint64
+	ops       []document.Op
+	version   uint64
+	savedHash []byte
 }
 
 // errorMsg carries a non-fatal error to display in the status bar.
@@ -42,8 +45,6 @@ type savedAsMsg struct {
 	thenClose  bool
 }
 
-// clientCountMsg carries the result of a bufferClientCount RPC.
-type clientCountMsg struct{ count uint32 }
 
 // discardRecoveryMsg carries original file content after the server discards the recovery file.
 type discardRecoveryMsg struct{ content string }
@@ -416,8 +417,6 @@ type Model struct {
 	filePath       string
 	workDir        string // project root, used for display-path shortening
 	status         string // transient error message shown in modeline
-	warnQuit       bool   // showing unsaved-changes warning
-	checkingQuit   bool // client-count RPC in flight
 	sel            *Selection
 	dragging       bool
 	lastClickAt    time.Time
@@ -489,6 +488,13 @@ type Model struct {
 	// flashTick counts down after a jump (AtPos); the cursor line is highlighted
 	// while it is odd, creating a brief alternating flash effect.
 	flashTick int
+
+	// lastReportedLine/Col track the cursor position last sent to the server via
+	// SetActiveContext. Initialized to -1 so the first cursor move always reports.
+	// Reset to -1 on blur so re-focus always triggers a fresh report.
+	lastReportedLine int
+	lastReportedCol  int
+
 }
 
 // WithConfig returns a copy of the model with a new config applied.
@@ -517,6 +523,8 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 		recoveryPrompt:      fromRecovery,
 		pluginBindings:      rpc.PluginBindings(),
 		reservePluginGutter: rpc != nil,
+		lastReportedLine:    -1,
+		lastReportedCol:     -1,
 	}
 }
 
@@ -598,7 +606,7 @@ func tick() tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(tick(), m.reparseHighlight(), m.fetchDecorations())
+	return tea.Batch(tick(), m.reparseHighlight(), m.fetchDecorations(), m.ReportActiveContextCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -625,10 +633,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case updatesMsg:
+		// Ops from other clients (agents, other windows) are undoable locally:
+		// record inverses as a single undo entry so `u` reverts the whole batch.
+		// GetUpdates never echoes this client's own ops back.
+		before := m.cursorSnap()
+		var inverses []document.Op
 		for _, op := range msg.ops {
+			if op.Type == document.OpInsert || op.Type == document.OpDelete {
+				inverses = append(inverses, inverseOp(m, op)) // must precede Apply
+			}
 			m.buf.Apply(op)
 		}
+		if len(inverses) > 0 {
+			m.undoStack = append(m.undoStack, undoEntry{ops: inverses, before: before})
+			m.redoStack = nil
+		}
 		m.version = msg.version
+		// Reconcile the dirty marker: if another client saved this buffer, our
+		// content now matches disk exactly when its hash equals savedHash. The
+		// hash check makes this race-free — an in-flight local keystroke means
+		// the hashes differ, so a stale response can never mask dirtiness.
+		if m.buf.Dirty() && len(msg.savedHash) == sha256.Size {
+			if sha256.Sum256([]byte(m.buf.Content())) == [sha256.Size]byte(msg.savedHash) {
+				m.buf.SetClean()
+				m.savedUndoDepth = len(m.undoStack)
+			}
+		}
+		if len(msg.ops) == 0 {
+			return m, nil
+		}
 		m.clampCursor()
 		return m, m.reparseHighlight()
 
@@ -640,6 +673,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errorMsg:
 		m.status = "ERR: " + msg.err.Error()
+		return m, nil
+
+	case PluginShowMsgMsg:
+		// Plugin messages show in the status bar (center segment).
+		m.status = msg.Text
 		return m, nil
 
 	case savedMsg:
@@ -655,16 +693,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = ""
 		m.savedUndoDepth = len(m.undoStack)
 		if msg.thenClose {
-			return m, m.doCloseBuffer()
-		}
-		return m, nil
-
-	case clientCountMsg:
-		m.checkingQuit = false
-		if msg.count <= 1 {
-			m.warnQuit = true
-		} else {
-			// Another client has the buffer — safe to close without warning.
 			return m, m.doCloseBuffer()
 		}
 		return m, nil
@@ -813,9 +841,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_ = bufID
 		return m, func() tea.Msg { return OpenDocSymbolPickerMsg{BufID: bufID, Syms: syms} }
 
+	case tea.FocusMsg:
+		return m, m.ReportActiveContextCmd()
+
+	case tea.BlurMsg:
+		m.lastReportedLine = -1
+		m.lastReportedCol = -1
+		return m, nil
+
 	case tea.MouseMsg:
 		prevTopLine := m.topLine
+		prevCursor := m.cursor
+		prevSel := copySel(m.sel)
 		switch {
+		case msg.Button == tea.MouseButtonWheelUp:
+			m.scrollWheel(-wheelScrollLines)
+		case msg.Button == tea.MouseButtonWheelDown:
+			m.scrollWheel(wheelScrollLines)
 		case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
 			m.handleMousePress(msg.X, msg.Y)
 		case msg.Action == tea.MouseActionMotion && m.dragging:
@@ -827,10 +869,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sel = nil
 			}
 		}
+		var cmds []tea.Cmd
 		if m.topLine != prevTopLine {
-			return m, m.updateViewportCmd()
+			cmds = append(cmds, m.updateViewportCmd())
 		}
-		return m, nil
+		reported := false
+		if m.cursor != prevCursor && (m.cursor.Line != m.lastReportedLine || m.cursor.Col != m.lastReportedCol) {
+			m.lastReportedLine = m.cursor.Line
+			m.lastReportedCol = m.cursor.Col
+			cmds = append(cmds, m.ReportActiveContextCmd())
+			reported = true
+		}
+		// Selection changes without a cursor move (e.g. click clearing a
+		// selection, drag extension) also report.
+		if !reported && !selEqual(prevSel, m.sel) {
+			cmds = append(cmds, m.ReportActiveContextCmd())
+		}
+		return m, tea.Batch(cmds...)
 
 	case decorationsMsg:
 		if msg.bufID != m.bufID {
@@ -873,6 +928,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		prevLine := m.cursor.Line
 		prevTopLine := m.topLine
+		prevSel := copySel(m.sel)
 		newModel, cmd := m.handleKey(msg)
 		nm, ok := newModel.(Model)
 		if !ok {
@@ -894,6 +950,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Entered a range (not suppressed): schedule show.
 				cmd = tea.Batch(cmd, scheduleShowDiagPopup())
 			}
+		}
+		// Fallback focus detection: if terminal focus events aren't working,
+		// the first cursor move or edit after focus switches panes reports the
+		// active context. Once reported, skip until BlurMsg clears the flag.
+		// Selection changes (start, extend, clear — e.g. Esc) also report so
+		// external tools never see a stale selection.
+		needReport := false
+		if nm.cursor.Line != nm.lastReportedLine || nm.cursor.Col != nm.lastReportedCol {
+			nm.lastReportedLine = nm.cursor.Line
+			nm.lastReportedCol = nm.cursor.Col
+			needReport = true
+		}
+		if !selEqual(prevSel, nm.sel) {
+			needReport = true
+		}
+		if needReport {
+			cmd = tea.Batch(cmd, nm.ReportActiveContextCmd())
 		}
 		return nm, cmd
 	}

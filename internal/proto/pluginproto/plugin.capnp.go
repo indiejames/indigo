@@ -524,7 +524,7 @@ func (c EditorApi) ShowMessage(ctx context.Context, params func(EditorApi_showMe
 		},
 	}
 	if params != nil {
-		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 1}
 		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorApi_showMessage_Params(s)) }
 	}
 
@@ -2768,12 +2768,12 @@ type EditorApi_showMessage_Params capnp.Struct
 const EditorApi_showMessage_Params_TypeID = 0xb1c69b5f52095229
 
 func NewEditorApi_showMessage_Params(s *capnp.Segment) (EditorApi_showMessage_Params, error) {
-	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1})
 	return EditorApi_showMessage_Params(st), err
 }
 
 func NewRootEditorApi_showMessage_Params(s *capnp.Segment) (EditorApi_showMessage_Params, error) {
-	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1})
 	return EditorApi_showMessage_Params(st), err
 }
 
@@ -2809,6 +2809,14 @@ func (s EditorApi_showMessage_Params) Message() *capnp.Message {
 func (s EditorApi_showMessage_Params) Segment() *capnp.Segment {
 	return capnp.Struct(s).Segment()
 }
+func (s EditorApi_showMessage_Params) ClientId() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s EditorApi_showMessage_Params) SetClientId(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
 func (s EditorApi_showMessage_Params) Text() (string, error) {
 	p, err := capnp.Struct(s).Ptr(0)
 	return p.Text(), err
@@ -2832,7 +2840,7 @@ type EditorApi_showMessage_Params_List = capnp.StructList[EditorApi_showMessage_
 
 // NewEditorApi_showMessage_Params creates a new list of EditorApi_showMessage_Params.
 func NewEditorApi_showMessage_Params_List(s *capnp.Segment, sz int32) (EditorApi_showMessage_Params_List, error) {
-	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1}, sz)
 	return capnp.StructList[EditorApi_showMessage_Params](l), err
 }
 

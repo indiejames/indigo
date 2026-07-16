@@ -44,6 +44,21 @@ PLUGINS_DIR := plugins
 GOOS   := $(shell go env GOOS)
 GOARCH := $(shell go env GOARCH)
 
+HELLO_DIR   := $(PLUGINS_DIR)/hello
+HELLO_OUT   := $(HELLO_DIR)/hello-$(GOOS)-$(GOARCH)
+HELLO_INSTALL := $(HOME)/.config/indigo/plugins/hello
+
+build-hello:
+	go build -o $(HELLO_OUT) ./$(HELLO_DIR)
+
+install-hello: build-hello
+	mkdir -p $(HELLO_INSTALL)
+	mv $(HELLO_OUT) $(HELLO_INSTALL)/
+	cp $(HELLO_DIR)/plugin.toml $(HELLO_INSTALL)/
+
+uninstall-hello:
+	rm -rf $(HELLO_INSTALL)
+
 JUMPY_DIR   := $(PLUGINS_DIR)/jumpy
 JUMPY_OUT   := $(JUMPY_DIR)/jumpy-$(GOOS)-$(GOARCH)
 JUMPY_INSTALL := $(HOME)/.config/indigo/plugins/jumpy
@@ -106,9 +121,22 @@ uninstall-bookmarks:
 
 build-plugins: build-jumpy build-spell build-git build-bookmarks
 
+CLAUDE_DIR := $(PLUGINS_DIR)/indigo-claude
+CLAUDE_OUT := $(CLAUDE_DIR)/indigo-claude
+
+build-claude:
+	go build -o $(CLAUDE_OUT) ./$(CLAUDE_DIR)
+
+install-claude: build-claude
+	mv $(CLAUDE_OUT) $(shell go env GOPATH)/bin/indigo-claude
+
+uninstall-claude:
+	rm -f $(shell go env GOPATH)/bin/indigo-claude
+
 .PHONY: build build-release build-minimal build-no-heavy build-custom install test vet lint clean \
         build-jumpy install-jumpy uninstall-jumpy \
         build-spell install-spell uninstall-spell \
         build-git install-git uninstall-git \
         build-bookmarks install-bookmarks uninstall-bookmarks \
-        build-plugins
+        build-plugins \
+        build-claude install-claude uninstall-claude

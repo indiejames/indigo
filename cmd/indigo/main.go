@@ -117,7 +117,7 @@ func main() {
 		a = app.New(rpc, bufID, content, version, absTarget, cfg, fromRecovery, workDir, startLine)
 	}
 
-	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus(), tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
 	if _, err := p.Run(); err != nil {
 		fatalf("run: %v", err)
@@ -210,7 +210,7 @@ func openUntitled(startLine int) {
 	}
 
 	a := app.New(rpc, bufID, content, version, "", cfg, false, workDir, startLine)
-	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus(), tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
 	if _, err := p.Run(); err != nil {
 		fatalf("run: %v", err)

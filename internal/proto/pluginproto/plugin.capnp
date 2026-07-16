@@ -37,7 +37,8 @@ interface EditorApi {
   applyEdit    @5 (bufId :UInt32, edits :List(TextEdit))                  -> ();
   moveCursor   @6 (bufId :UInt32, pos :PluginPosition)                    -> ();
   openFile     @7 (path :Text, line :UInt32)                              -> ();
-  showMessage  @8 (text :Text)                                            -> ();
+  # clientId 0 broadcasts to all clients; non-zero targets one client.
+  showMessage  @8 (clientId :UInt64, text :Text)                          -> ();
   runProcess   @9 (cmd :Text, args :List(Text))                           -> (stdout :Text, stderr :Text, exitCode :Int32);
 
   # -- Document model queries --

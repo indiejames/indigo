@@ -131,13 +131,17 @@ func handlePermConn(conn net.Conn, prog *programLink, rpc *client.RPC, workDir s
 		return
 	}
 
-	replyCh := make(chan bool, 1)
-	prog.emit(shellPermissionRequestMsg{
-		command: ev.ToolInput.Command,
-		replyCh: replyCh,
-	})
-
-	approved := <-replyCh
+	var approved bool
+	if _, shellAuto := prog.autoApprove(); shellAuto {
+		approved = true
+	} else {
+		replyCh := make(chan bool, 1)
+		prog.emit(shellPermissionRequestMsg{
+			command: ev.ToolInput.Command,
+			replyCh: replyCh,
+		})
+		approved = <-replyCh
+	}
 	conn.Write(append(decisionJSON(approved), '\n')) //nolint:errcheck
 }
 

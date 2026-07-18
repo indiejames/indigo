@@ -32,6 +32,13 @@ type programLink struct {
 	// Set once in main() before the program starts; empty when the MCP bridge
 	// could not be set up (subprocess then falls back to built-in file tools).
 	mcpConfig string
+
+	// Auto-approve toggles (/autoapprove), read by tool-exec and hook
+	// goroutines before showing a permission popup. Session-only — never
+	// persisted — so a forgotten "on" from a previous run can't silently
+	// skip approval later.
+	autoApproveEdits bool
+	autoApproveShell bool
 }
 
 func (pl *programLink) emit(msg tea.Msg) {
@@ -41,6 +48,30 @@ func (pl *programLink) emit(msg tea.Msg) {
 	if fn != nil {
 		fn(msg)
 	}
+}
+
+// setAutoApproveEdits sets whether file-edit tools (apply_edits,
+// insert_at_line, save_file) skip the approval popup and proceed as if
+// approved.
+func (pl *programLink) setAutoApproveEdits(on bool) {
+	pl.mu.Lock()
+	pl.autoApproveEdits = on
+	pl.mu.Unlock()
+}
+
+// setAutoApproveShell sets whether shell commands (via the PreToolUse hook)
+// skip the approval popup and proceed as if approved.
+func (pl *programLink) setAutoApproveShell(on bool) {
+	pl.mu.Lock()
+	pl.autoApproveShell = on
+	pl.mu.Unlock()
+}
+
+// autoApprove returns the current (edits, shell) auto-approve state.
+func (pl *programLink) autoApprove() (edits, shell bool) {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	return pl.autoApproveEdits, pl.autoApproveShell
 }
 
 func (pl *programLink) setCancel(fn context.CancelFunc) {

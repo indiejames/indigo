@@ -72,8 +72,9 @@ type Model struct {
 	sessionID string
 
 	// streaming state (both modes)
-	agentRunning     bool
-	streamingConvIdx int
+	agentRunning      bool
+	agentRunningSince time.Time // when the current turn started; drives the rotating status word
+	streamingConvIdx  int
 
 	activeCtx client.ActiveContext
 	activeSel client.ActiveSelection
@@ -109,6 +110,14 @@ type Model struct {
 	// claude CLI is configured for in CLI mode). Set via /model, persisted
 	// across restarts.
 	model string
+}
+
+// onOff renders a bool as "on"/"off" for status messages.
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
 }
 
 // modelDisplay returns the current model for the header/status line, falling
@@ -403,6 +412,42 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.historyIdx = -1
 			return m, m.saveStateCmd()
 		}
+		if text == "/autoapprove" || strings.HasPrefix(text, "/autoapprove ") {
+			arg := strings.TrimSpace(strings.TrimPrefix(text, "/autoapprove"))
+			edits, shell := m.prog.autoApprove()
+			switch arg {
+			case "":
+				m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: fmt.Sprintf(
+					"Auto-approve — edits: %s, shell: %s. Usage: /autoapprove [edits|shell|all] [on|off]. Resets to off on restart.",
+					onOff(edits), onOff(shell))})
+			case "on", "all on":
+				m.prog.setAutoApproveEdits(true)
+				m.prog.setAutoApproveShell(true)
+				m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Auto-approve ON for edits and shell commands (this session only)."})
+			case "off", "all off":
+				m.prog.setAutoApproveEdits(false)
+				m.prog.setAutoApproveShell(false)
+				m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Auto-approve OFF — every edit and shell command will prompt again."})
+			case "edits on":
+				m.prog.setAutoApproveEdits(true)
+				m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Auto-approve ON for edits (this session only). Shell commands still prompt."})
+			case "edits off":
+				m.prog.setAutoApproveEdits(false)
+				m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Auto-approve OFF for edits."})
+			case "shell on":
+				m.prog.setAutoApproveShell(true)
+				m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Auto-approve ON for shell commands (this session only). Edits still prompt."})
+			case "shell off":
+				m.prog.setAutoApproveShell(false)
+				m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Auto-approve OFF for shell commands."})
+			default:
+				m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Usage: /autoapprove [edits|shell|all] [on|off]"})
+			}
+			m.input = nil
+			m.inputPos = 0
+			m.historyIdx = -1
+			return m, nil
+		}
 
 		// Save to history (skip consecutive duplicates).
 		if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != text {
@@ -418,6 +463,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scroll = 0
 		m.streamingConvIdx = -1
 		m.agentRunning = true
+		m.agentRunningSince = time.Now()
 
 		prog := m.prog
 		ac := m.activeCtx
@@ -621,8 +667,8 @@ var (
 	headerStyle    = lipgloss.NewStyle().Background(lipgloss.Color("#087AC8")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
 	statusStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#667788"))
 	toolStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#AABBCC"))
-	inputBorderSty  = lipgloss.NewStyle().Foreground(lipgloss.Color("#335577"))
-	inputPromptSty  = lipgloss.NewStyle().Foreground(lipgloss.Color("#087AC8")).Bold(true)
+	inputBorderSty = lipgloss.NewStyle().Foreground(lipgloss.Color("#335577"))
+	inputPromptSty = lipgloss.NewStyle().Foreground(lipgloss.Color("#087AC8")).Bold(true)
 	cursorStyle    = lipgloss.NewStyle().Reverse(true)
 
 	// User message bubble — slightly elevated surface colour.
@@ -664,9 +710,37 @@ func (m Model) View() string {
 	return base
 }
 
+// expandTabs replaces tab characters with spaces out to the next 4-column
+// tab stop. lipgloss.Width counts a tab as a single narrow rune, but a
+// terminal renders it at a tab stop — so a diff line containing a literal
+// tab (near-guaranteed in tab-indented source) throws off the popup's
+// fixed-width padding and leaves its right border ragged. Expanding tabs to
+// spaces before measuring/rendering keeps the counted and rendered widths in
+// sync.
+func expandTabs(s string) string {
+	if !strings.ContainsRune(s, '\t') {
+		return s
+	}
+	const tabWidth = 4
+	var sb strings.Builder
+	col := 0
+	for _, r := range s {
+		if r == '\t' {
+			n := tabWidth - (col % tabWidth)
+			sb.WriteString(strings.Repeat(" ", n))
+			col += n
+			continue
+		}
+		sb.WriteRune(r)
+		col++
+	}
+	return sb.String()
+}
+
 // buildPermPopup returns the styled lines of the permission popup box.
 func (m Model) buildPermPopup() []string {
 	const maxInnerW = 64
+	const maxBodyRows = 20 // absolute cap; a permission prompt should stay skimmable
 
 	var title string
 	var bodyLines []string // plain text, styled during render
@@ -699,6 +773,30 @@ func (m Model) buildPermPopup() []string {
 		bodyLines = append(bodyLines, "  $ "+m.shellPermQueue[0].command)
 	default:
 		return nil
+	}
+
+	for i, l := range bodyLines {
+		bodyLines[i] = expandTabs(l)
+	}
+
+	// Cap the body height so the popup (footer included) always fits above
+	// the input box, however large the diff is. availRows leaves room for
+	// the title, the separator above the footer, the footer itself, and the
+	// bottom border.
+	availRows := m.convHeight() - 4
+	if availRows < 3 {
+		availRows = 3
+	}
+	capRows := min(maxBodyRows, availRows)
+	if len(bodyLines) > capRows {
+		shown := max(capRows-1, 1) // reserve one row for the "more" indicator
+		hidden := len(bodyLines) - shown
+		more := fmt.Sprintf("  … %d more line", hidden)
+		if hidden != 1 {
+			more += "s"
+		}
+		more += " (approve to apply the full change)"
+		bodyLines = append(bodyLines[:shown], more)
 	}
 
 	footerStr := "  ◀ approve ▶   ◀ reject ▶"
@@ -750,7 +848,7 @@ func (m Model) buildPermPopup() []string {
 	var approveStyled, rejectStyled string
 	if !m.permChoice { // approve highlighted
 		approveStyled = selStyle.Render("◀ approve ▶")
-		rejectStyled = dimStyle.Render("  reject   ")
+		rejectStyled = dimStyle.Render("  reject  ")
 	} else { // reject highlighted
 		approveStyled = dimStyle.Render("  approve  ")
 		rejectStyled = selStyle.Render("◀ reject ▶")
@@ -804,6 +902,49 @@ func (m Model) overlayPermPopup(base string) string {
 	return strings.Join(lines, "\n")
 }
 
+// thinkingWords rotates through while the agent is working, in the spirit of
+// Claude.ai / the VS Code extension's status line: a mix of plausible verbs
+// and a few goofy ones, so a long-running turn doesn't just sit on
+// "Thinking…" the whole time.
+var thinkingWords = []string{
+	"Thinking",
+	"Pondering",
+	"Percolating",
+	"Noodling",
+	"Ruminating",
+	"Cogitating",
+	"Marinating",
+	"Contemplating",
+	"Puzzling",
+	"Mulling",
+	"Synthesizing",
+	"Deliberating",
+	"Channeling",
+	"Conjuring",
+	"Divining",
+	"Wrangling",
+	"Untangling",
+	"Brewing",
+	"Excogitating",
+	"Vibing",
+	"Ruminating further",
+	"Herding electrons",
+	"Consulting the rubber duck",
+	"Summoning tokens",
+}
+
+// thinkingWord picks a status word based on how long the current turn has
+// been running, rotating to the next word every few seconds. A zero since
+// (no turn in progress yet) always returns the first word.
+func thinkingWord(since time.Time) string {
+	if since.IsZero() {
+		return thinkingWords[0]
+	}
+	const rotateEvery = 2500 * time.Millisecond
+	idx := int(time.Since(since)/rotateEvery) % len(thinkingWords)
+	return thinkingWords[idx]
+}
+
 func (m Model) renderHeader() string {
 	label := " indigo-claude"
 	if m.activeCtx.Found {
@@ -816,7 +957,7 @@ func (m Model) renderHeader() string {
 	if m.pendingPerm != nil || len(m.shellPermQueue) > 0 {
 		label += "  [approve? y/n]"
 	} else if m.agentRunning {
-		label += "  [thinking…]"
+		label += "  [" + thinkingWord(m.agentRunningSince) + "…]"
 	}
 
 	// Right side: model (only shown once overridden via /model, to avoid
@@ -828,6 +969,19 @@ func (m Model) renderHeader() string {
 	var ctxSeg string
 	if m.model != "" {
 		ctxSeg = m.model
+	}
+	if autoEdits, autoShell := m.prog.autoApprove(); autoEdits || autoShell {
+		if ctxSeg != "" {
+			ctxSeg += " · "
+		}
+		switch {
+		case autoEdits && autoShell:
+			ctxSeg += "⚠ auto-approve: all"
+		case autoEdits:
+			ctxSeg += "⚠ auto-approve: edits"
+		default:
+			ctxSeg += "⚠ auto-approve: shell"
+		}
 	}
 	if m.ctxTokens > 0 {
 		if ctxSeg != "" {

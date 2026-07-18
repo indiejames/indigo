@@ -293,20 +293,30 @@ func isGitRepo(dir string) bool {
 	return err == nil && strings.TrimSpace(string(out)) == "true"
 }
 
+// requestEditApproval blocks the calling (agent/tool-exec) goroutine for user
+// approval, unless auto-approve for edits is on (/autoapprove edits on), in
+// which case it returns true immediately without showing a popup. req.replyCh
+// is set here — callers should leave it unset.
+func requestEditApproval(prog *programLink, req permissionRequestMsg) bool {
+	if edits, _ := prog.autoApprove(); edits {
+		return true
+	}
+	replyCh := make(chan bool, 1)
+	req.replyCh = replyCh
+	prog.emit(req)
+	return <-replyCh
+}
+
 // ─── apply_edits ──────────────────────────────────────────────────────────────
 
 func execApplyEdits(ctx context.Context, rpc *client.RPC, prog *programLink, workDir string, in applyEditsInput) (string, bool) {
 	abs := absPath(workDir, in.Path)
 
-	// Block the agent goroutine until the user approves or rejects.
-	replyCh := make(chan bool, 1)
-	prog.emit(permissionRequestMsg{
-		file:    in.Path,
-		reason:  in.Reason,
-		edits:   []editSpec{{path: abs, oldText: in.OldText, newText: in.NewText}},
-		replyCh: replyCh,
-	})
-	if !<-replyCh {
+	if !requestEditApproval(prog, permissionRequestMsg{
+		file:   in.Path,
+		reason: in.Reason,
+		edits:  []editSpec{{path: abs, oldText: in.OldText, newText: in.NewText}},
+	}) {
 		return "edit rejected by user", true
 	}
 
@@ -394,15 +404,11 @@ func insertLineOp(content, text string, line int) document.Op {
 func execInsertAtLine(ctx context.Context, rpc *client.RPC, prog *programLink, workDir string, in insertAtLineInput) (string, bool) {
 	abs := absPath(workDir, in.Path)
 
-	// Block the agent goroutine until the user approves or rejects.
-	replyCh := make(chan bool, 1)
-	prog.emit(permissionRequestMsg{
-		file:    fmt.Sprintf("%s (insert at line %d)", in.Path, in.Line),
-		reason:  in.Reason,
-		edits:   []editSpec{{path: abs, oldText: "", newText: in.Text}},
-		replyCh: replyCh,
-	})
-	if !<-replyCh {
+	if !requestEditApproval(prog, permissionRequestMsg{
+		file:   fmt.Sprintf("%s (insert at line %d)", in.Path, in.Line),
+		reason: in.Reason,
+		edits:  []editSpec{{path: abs, oldText: "", newText: in.Text}},
+	}) {
 		return "edit rejected by user", true
 	}
 
@@ -448,13 +454,10 @@ func execSaveFile(ctx context.Context, rpc *client.RPC, prog *programLink, workD
 	weOpened := count == 1
 
 	if !weOpened {
-		replyCh := make(chan bool, 1)
-		prog.emit(permissionRequestMsg{
-			file:    path,
-			reason:  "Save buffer to disk so builds/tests see the edits. Any of your own unsaved changes in this file will be saved too.",
-			replyCh: replyCh,
-		})
-		if !<-replyCh {
+		if !requestEditApproval(prog, permissionRequestMsg{
+			file:   path,
+			reason: "Save buffer to disk so builds/tests see the edits. Any of your own unsaved changes in this file will be saved too.",
+		}) {
 			return "save rejected by user — on-disk file unchanged; buffer edits remain applied in the editor", true
 		}
 	}

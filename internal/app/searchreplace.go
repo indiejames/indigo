@@ -305,7 +305,8 @@ var (
 	sraDialogBorderStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color("#4488CC")).
-				Background(lipgloss.Color("#1E2A38")).
+				// Background(lipgloss.Color("#1E2A38")).
+				// Background(lipgloss.Color("#000000")).
 				Padding(0, 1)
 )
 

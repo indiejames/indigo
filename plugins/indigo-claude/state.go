@@ -36,6 +36,7 @@ type persistedState struct {
 	History      []apiMessage `json:"history,omitempty"`
 	InputHistory []string     `json:"input_history,omitempty"`
 	CtxTokens    int          `json:"ctx_tokens,omitempty"`
+	Model        string       `json:"model,omitempty"`
 }
 
 func modeName(apiKey string) string {
@@ -82,6 +83,7 @@ func snapshotState(m Model) persistedState {
 		History:      hist,
 		InputHistory: inputs,
 		CtxTokens:    m.ctxTokens,
+		Model:        m.model,
 	}
 }
 
@@ -158,5 +160,6 @@ func (m Model) restoreState(st *persistedState) Model {
 	m.history = st.History
 	m.inputHistory = st.InputHistory
 	m.ctxTokens = st.CtxTokens
+	m.model = st.Model
 	return m
 }

@@ -51,6 +51,9 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+p":
 		return m, func() tea.Msg { return OpenPickerMsg{} }
 
+	case "s":
+		return m, func() tea.Msg { return OpenSearchReplaceMsg{} }
+
 	case ":":
 		m.mode = ModeCommand
 		m.cmdBuf = ""

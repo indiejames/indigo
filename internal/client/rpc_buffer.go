@@ -112,6 +112,65 @@ func (r *RPC) ApplyOps(ctx context.Context, bufID uint32, ops []document.Op) (ui
 	return res.Version(), nil
 }
 
+// WorkspaceEdit is a single verified text replacement within one file, used
+// by ApplyWorkspaceEdits for global search-and-replace: the server applies it
+// only if OldText still matches the file's current content at (Line, Col).
+type WorkspaceEdit struct {
+	Path    string
+	Line    int
+	Col     int
+	OldText string
+	NewText string
+}
+
+// ApplyWorkspaceEdits sends a batch of workspace-wide search-and-replace
+// edits. Returns how many were applied and the indices into edits that were
+// skipped because OldText no longer matched (a concurrent change since the
+// edit was queued).
+func (r *RPC) ApplyWorkspaceEdits(ctx context.Context, edits []WorkspaceEdit) (applied int, skippedIdx []int, err error) {
+	fut, rel := r.svc.ApplyWorkspaceEdits(ctx, func(p proto.EditorService_applyWorkspaceEdits_Params) error {
+		// clientID 0 (never assigned to a real connection) rather than
+		// r.clientID: a "replace all" can touch a file this same client
+		// already has open as a live tab, and that tab's own poll loop
+		// filters out ops whose ClientID matches its own — using our real ID
+		// here would leave such a tab showing stale content forever.
+		p.SetClientId(0)
+		list, err := p.NewEdits(int32(len(edits)))
+		if err != nil {
+			return err
+		}
+		for i, e := range edits {
+			item := list.At(i)
+			if err := item.SetPath(e.Path); err != nil {
+				return err
+			}
+			item.SetLine(uint32(e.Line))
+			item.SetCol(uint32(e.Col))
+			if err := item.SetOldText(e.OldText); err != nil {
+				return err
+			}
+			if err := item.SetNewText(e.NewText); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return 0, nil, err
+	}
+	idxList, err := res.SkippedIdx()
+	if err != nil {
+		return int(res.AppliedCount()), nil, nil
+	}
+	skipped := make([]int, idxList.Len())
+	for i := range skipped {
+		skipped[i] = int(idxList.At(i))
+	}
+	return int(res.AppliedCount()), skipped, nil
+}
+
 // GetUpdates polls for ops on bufID that arrived after sinceVersion.
 func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]document.Op, uint64, []byte, error) {
 	fut, rel := r.svc.GetUpdates(ctx, func(p proto.EditorService_getUpdates_Params) error {

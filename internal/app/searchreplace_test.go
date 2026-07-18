@@ -101,3 +101,30 @@ func TestSetFocusManagesTextInputFocus(t *testing.T) {
 		t.Error("replaceInput still focused after setFocus(Search)")
 	}
 }
+
+func TestSraResultsAutoFocusesResultsList(t *testing.T) {
+	a := App{searchReplace: newSearchReplaceDialog("/tmp", 100, 40)}
+
+	updated, _ := a.Update(sraResultsMsg{results: []GrepResult{
+		{RelPath: "a.go", Line: 0, Col: 0, MatchLen: 3, LineText: "foo bar"},
+	}})
+	a2 := updated.(App)
+
+	if a2.searchReplace.focus != sraFocusResults {
+		t.Errorf("focus after non-empty results = %v, want sraFocusResults", a2.searchReplace.focus)
+	}
+	if a2.searchReplace.searchInput.Focused() {
+		t.Error("searchInput should be blurred once focus moves to results")
+	}
+}
+
+func TestSraResultsNoAutoFocusWhenEmpty(t *testing.T) {
+	a := App{searchReplace: newSearchReplaceDialog("/tmp", 100, 40)}
+
+	updated, _ := a.Update(sraResultsMsg{results: nil})
+	a2 := updated.(App)
+
+	if a2.searchReplace.focus != sraFocusSearch {
+		t.Errorf("focus after empty results = %v, want sraFocusSearch", a2.searchReplace.focus)
+	}
+}

@@ -301,6 +301,13 @@ var (
 	sraSelStyle         = lipgloss.NewStyle().Background(lipgloss.Color("#2D5F8A")).Foreground(lipgloss.Color("#FFFFFF"))
 	sraDimStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("#778899"))
 	sraErrStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6B6B"))
+
+	sraDialogBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#4488CC")).
+				// Background(lipgloss.Color("#1E2A38")).
+				// Background(lipgloss.Color("#000000")).
+				Padding(0, 1)
 )
 
 func checkbox(label string, checked, focused bool) string {
@@ -443,5 +450,5 @@ func (d *searchReplaceDialog) render() string {
 		sb.WriteString(sraBorderStyle.Width(innerW).Render(d.viewport.View()))
 	}
 
-	return sb.String()
+	return sraDialogBorderStyle.Render(sb.String())
 }

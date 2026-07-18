@@ -354,6 +354,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.searchReplace.errMsg = ""
 				a.searchReplace.results = msg.results
 				a.searchReplace.cursor = 0
+				if len(msg.results) > 0 {
+					// Land straight on the results list so arrow keys / j,k
+					// work immediately — no need to Tab through every control.
+					a.searchReplace.setFocus(sraFocusResults)
+				}
 				a.searchReplace.refreshResultsView()
 			}
 		}
@@ -663,6 +668,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if a.searchReplace != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handleSearchReplaceKey(km)
+		}
+		if _, ok := msg.(tea.MouseMsg); ok {
+			return a, nil // modal: don't let clicks reach the buffer underneath
 		}
 	}
 	if a.pluginInput != nil {

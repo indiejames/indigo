@@ -161,6 +161,116 @@ func (a App) handlePluginInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+// handleSearchReplaceKey routes key events to the global search & replace dialog.
+func (a App) handleSearchReplaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	d := a.searchReplace
+	if d == nil {
+		return a, nil
+	}
+
+	if d.confirmingAll {
+		switch msg.String() {
+		case "y", "enter":
+			d.confirmingAll = false
+			a.searchReplace = d
+			return a, a.startApplyAll(d)
+		case "n", "esc":
+			d.confirmingAll = false
+			a.searchReplace = d
+		}
+		return a, nil
+	}
+
+	if d.focus == sraFocusResults {
+		switch msg.String() {
+		case "esc":
+			a.searchReplace = nil
+			return a, nil
+		case "up", "ctrl+p", "k":
+			d.moveCursor(-1)
+			a.searchReplace = d
+			return a, nil
+		case "down", "ctrl+n", "j":
+			d.moveCursor(1)
+			a.searchReplace = d
+			return a, nil
+		case "tab":
+			d.advanceFocus(1)
+			a.searchReplace = d
+			return a, nil
+		case "shift+tab":
+			d.advanceFocus(-1)
+			a.searchReplace = d
+			return a, nil
+		case "enter":
+			return a, a.acceptSearchReplaceMatch(d)
+		}
+		return a, nil
+	}
+
+	switch msg.String() {
+	case "esc":
+		a.searchReplace = nil
+		return a, nil
+	case "tab":
+		d.advanceFocus(1)
+		a.searchReplace = d
+		return a, nil
+	case "shift+tab":
+		d.advanceFocus(-1)
+		a.searchReplace = d
+		return a, nil
+	case " ":
+		switch d.focus {
+		case sraFocusCase:
+			d.caseSensitive = !d.caseSensitive
+			a.searchReplace = d
+			return a, nil
+		case sraFocusRegex:
+			d.useRegex = !d.useRegex
+			a.searchReplace = d
+			return a, nil
+		case sraFocusToggle:
+			d.replaceOpen = !d.replaceOpen
+			if !d.replaceOpen {
+				d.replaceInput.Blur()
+			}
+			a.searchReplace = d
+			return a, nil
+		}
+	case "enter":
+		switch d.focus {
+		case sraFocusSearch:
+			cmd := a.startSearchReplaceSearch(d)
+			a.searchReplace = d
+			return a, cmd
+		case sraFocusToggle:
+			d.replaceOpen = !d.replaceOpen
+			a.searchReplace = d
+			return a, nil
+		case sraFocusAll:
+			if len(d.results) > 0 {
+				d.confirmingAll = true
+			}
+			a.searchReplace = d
+			return a, nil
+		}
+		a.searchReplace = d
+		return a, nil
+	}
+
+	var cmd tea.Cmd
+	switch d.focus {
+	case sraFocusSearch:
+		d.searchInput, cmd = d.searchInput.Update(msg)
+	case sraFocusReplace:
+		d.replaceInput, cmd = d.replaceInput.Update(msg)
+		d.refreshResultsView()
+	}
+	a.searchReplace = d
+	return a, cmd
+}
+
 // handleGrepKey routes key events to the workspace search picker.
 func (a App) handleGrepKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {

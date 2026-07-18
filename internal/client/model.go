@@ -41,10 +41,9 @@ type savedMsg struct{}
 
 // savedAsMsg signals a successful save-as; carries the new path.
 type savedAsMsg struct {
-	newPath    string
-	thenClose  bool
+	newPath   string
+	thenClose bool
 }
-
 
 // discardRecoveryMsg carries original file content after the server discards the recovery file.
 type discardRecoveryMsg struct{ content string }
@@ -130,6 +129,9 @@ type OpenFileAtMsg struct {
 
 // OpenPickerMsg signals the App to open the file picker.
 type OpenPickerMsg struct{}
+
+// OpenSearchReplaceMsg signals the App to open the global search & replace dialog.
+type OpenSearchReplaceMsg struct{}
 
 // JumpBackMsg signals the App to jump to the previous edit position in the jump list.
 type JumpBackMsg struct{}
@@ -404,47 +406,47 @@ type undoEntry struct {
 
 // Model is the Bubble Tea model for a single buffer view.
 type Model struct {
-	rpc            *RPC
-	buf            *document.Buffer
-	cfg            *config.Config
-	bufID          uint32
-	version        uint64
-	mode           Mode
-	cursor         document.Pos
-	topLine        int // first visible line
-	width          int
-	height         int
-	filePath       string
-	workDir        string // project root, used for display-path shortening
-	status         string // transient error message shown in modeline
-	sel            *Selection
-	dragging       bool
-	lastClickAt    time.Time
-	lastClickPos   document.Pos
-	undoStack      []undoEntry   // each entry is inverse ops + pre-edit cursor snapshot
-	redoStack      []undoEntry   // mirrors undoStack; cleared on any new edit
-	currentGroup    []document.Op  // non-nil while accumulating ops for the current Insert session
-	groupBefore     cursorSnapshot // cursor state when currentGroup was opened
-	insertLineCount int            // buf line count at the start of the insert session
-	savedUndoDepth int           // len(undoStack) at the time of the last save
-	cmdBuf             string // text typed after ':' while in ModeCommand
-	cmdCompletionIdx   int    // selected item in command completion popup (−1 = none)
-	diagPopup          bool   // when true, show diagnostic detail popup for cursor line
-	diagPopupSuppressed bool  // Escape pressed; don't re-show until cursor leaves the range
-	prefixSeq          []rune // keys typed so far for a multi-key Normal-mode command
-	searchQuery    string
-	searchMatches  []searchMatch
-	searchIdx      int
-	searchOrigin   document.Pos
-	searchErr      string // non-empty when regex fails to compile
-	hlr            *highlight.Highlighter
-	hlSpans        highlight.LineSpans
-	metrics        *metricsData
-	recoveryPrompt bool // waiting for user to accept or discard recovery content
+	rpc                 *RPC
+	buf                 *document.Buffer
+	cfg                 *config.Config
+	bufID               uint32
+	version             uint64
+	mode                Mode
+	cursor              document.Pos
+	topLine             int // first visible line
+	width               int
+	height              int
+	filePath            string
+	workDir             string // project root, used for display-path shortening
+	status              string // transient error message shown in modeline
+	sel                 *Selection
+	dragging            bool
+	lastClickAt         time.Time
+	lastClickPos        document.Pos
+	undoStack           []undoEntry    // each entry is inverse ops + pre-edit cursor snapshot
+	redoStack           []undoEntry    // mirrors undoStack; cleared on any new edit
+	currentGroup        []document.Op  // non-nil while accumulating ops for the current Insert session
+	groupBefore         cursorSnapshot // cursor state when currentGroup was opened
+	insertLineCount     int            // buf line count at the start of the insert session
+	savedUndoDepth      int            // len(undoStack) at the time of the last save
+	cmdBuf              string         // text typed after ':' while in ModeCommand
+	cmdCompletionIdx    int            // selected item in command completion popup (−1 = none)
+	diagPopup           bool           // when true, show diagnostic detail popup for cursor line
+	diagPopupSuppressed bool           // Escape pressed; don't re-show until cursor leaves the range
+	prefixSeq           []rune         // keys typed so far for a multi-key Normal-mode command
+	searchQuery         string
+	searchMatches       []searchMatch
+	searchIdx           int
+	searchOrigin        document.Pos
+	searchErr           string // non-empty when regex fails to compile
+	hlr                 *highlight.Highlighter
+	hlSpans             highlight.LineSpans
+	metrics             *metricsData
+	recoveryPrompt      bool // waiting for user to accept or discard recovery content
 
 	// Plugin decorations
-	decorations        []ClientDecoration
-	decorTick          int  // poll every 3 ticks (~360ms)
+	decorations         []ClientDecoration
+	decorTick           int  // poll every 3 ticks (~360ms)
 	reservePluginGutter bool // latched true once gutter decorations have been seen; never resets
 
 	// Capture mode: plugin owns the next N keypresses.
@@ -460,10 +462,10 @@ type Model struct {
 
 	// LSP state
 	diagnostics []ClientDiag
-	diagTick         int            // counter; fetch every 10 ticks (~1.2s)
-	lspActive        bool           // true once first diagnostic poll returns (LSP is running)
-	helpVisible  bool // true = help popup visible
-	helpScroll   int  // scroll offset within the help popup
+	diagTick    int  // counter; fetch every 10 ticks (~1.2s)
+	lspActive   bool // true once first diagnostic poll returns (LSP is running)
+	helpVisible bool // true = help popup visible
+	helpScroll  int  // scroll offset within the help popup
 
 	hoverContent     *string        // non-nil = hover popup visible
 	hoverScroll      int            // scroll offset within the hover popup
@@ -494,7 +496,6 @@ type Model struct {
 	// Reset to -1 on blur so re-focus always triggers a fresh report.
 	lastReportedLine int
 	lastReportedCol  int
-
 }
 
 // WithConfig returns a copy of the model with a new config applied.
@@ -972,4 +973,3 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
-

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
 
@@ -19,7 +20,7 @@ func appLog(format string, args ...any) {
 	if err != nil {
 		return
 	}
-	defer f.Close() //nolint:errcheck
+	defer f.Close()                               //nolint:errcheck
 	fmt.Fprintf(f, "[app] "+format+"\n", args...) //nolint:errcheck
 }
 
@@ -75,9 +76,10 @@ type App struct {
 	active  int
 	status  string // app-level transient message (e.g. ":qa" error)
 
-	picker    *filePicker // non-nil when file picker is open
-	grep      *grepPicker // non-nil when workspace search picker is open
-	bufPicker *bufPicker  // non-nil when buffer picker popup is open
+	picker        *filePicker          // non-nil when file picker is open
+	grep          *grepPicker          // non-nil when workspace search picker is open
+	bufPicker     *bufPicker           // non-nil when buffer picker popup is open
+	searchReplace *searchReplaceDialog // non-nil when the global search & replace dialog is open
 
 	symbolPicker    *symbolPickerState    // non-nil when workspace symbol picker is open
 	docSymbolPicker *docSymbolPickerState // non-nil when document symbol picker is open
@@ -245,6 +247,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.bufPicker.width = msg.Width
 			a.bufPicker.height = msg.Height
 		}
+		if a.searchReplace != nil {
+			a.searchReplace.width = msg.Width
+			a.searchReplace.height = msg.Height
+			a.searchReplace.viewport.Width = dialogInnerW(msg.Width)
+		}
 		if a.pluginPopup != nil {
 			a.pluginPopup.width = msg.Width
 			a.pluginPopup.height = msg.Height
@@ -330,6 +337,72 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case grepCancelledMsg:
 		a.grep = nil
+		return a, nil
+
+	// ---- search & replace dialog ----
+	case client.OpenSearchReplaceMsg:
+		a.searchReplace = newSearchReplaceDialog(a.workDir, a.width, a.height)
+		return a, nil
+
+	case sraResultsMsg:
+		if a.searchReplace != nil {
+			a.searchReplace.searching = false
+			a.searchReplace.searched = true
+			if msg.err != nil {
+				a.searchReplace.errMsg = msg.err.Error()
+			} else {
+				a.searchReplace.errMsg = ""
+				a.searchReplace.results = msg.results
+				a.searchReplace.cursor = 0
+				a.searchReplace.refreshResultsView()
+			}
+		}
+		return a, nil
+
+	case spinner.TickMsg:
+		if a.searchReplace != nil && a.searchReplace.searching {
+			var cmd tea.Cmd
+			a.searchReplace.spinner, cmd = a.searchReplace.spinner.Update(msg)
+			return a, cmd
+		}
+		return a, nil
+
+	case sraSingleResultMsg:
+		if msg.err != nil {
+			if a.searchReplace != nil {
+				a.searchReplace.errMsg = msg.err.Error()
+			}
+			return a, nil
+		}
+		a.searchReplace = nil
+		if msg.applied != nil {
+			am := msg.applied
+			a.buffers[am.idx] = am.model
+			a.active = am.idx
+			a.buffers[a.active] = a.buffers[a.active].AtMatch(am.line, am.col, max(am.matchLen, 1), a.bufHeight())
+			return a, tea.Batch(am.cmd, a.buffers[a.active].ReportActiveContextCmd())
+		}
+		if msg.opened != nil {
+			return a.Update(*msg.opened)
+		}
+		return a, nil
+
+	case sraApplyAllDoneMsg:
+		if a.searchReplace == nil {
+			return a, nil
+		}
+		if msg.err != nil {
+			a.searchReplace.errMsg = msg.err.Error()
+			return a, nil
+		}
+		if msg.skipped > 0 {
+			a.searchReplace.applyMsg = fmt.Sprintf("Replaced %d matches (%d skipped — file changed since search).", msg.applied, msg.skipped)
+		} else {
+			a.searchReplace.applyMsg = fmt.Sprintf("Replaced %d matches.", msg.applied)
+		}
+		a.searchReplace.results = nil
+		a.searchReplace.cursor = 0
+		a.searchReplace.refreshResultsView()
 		return a, nil
 
 	// ---- buffer picker ----
@@ -585,6 +658,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if a.bufPicker != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handleBufPickerKey(km)
+		}
+	}
+	if a.searchReplace != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleSearchReplaceKey(km)
 		}
 	}
 	if a.pluginInput != nil {

@@ -127,6 +127,13 @@ func applyOp(m Model, op document.Op) (Model, tea.Cmd) {
 	return m, tea.Batch(m.sendOp(op), m.reparseHighlight(), recordCmd)
 }
 
+// ApplyExternalOps applies ops (e.g. a delete+insert replace pair from a
+// workspace search-and-replace) as a single undoable action, through the same
+// path as any other multi-op edit.
+func (m Model) ApplyExternalOps(ops []document.Op) (Model, tea.Cmd) {
+	return applyBatch(m, ops)
+}
+
 // applyBatch applies a slice of ops as a single undoable action.
 // Inverses are computed before each apply, so the ops must not share lines.
 // Always emits an EditRecordMsg so the App can update the jump list.
@@ -276,7 +283,6 @@ func (m Model) doSaveAsNow(newPath string, thenClose bool) tea.Cmd {
 		return savedAsMsg{newPath: newPath, thenClose: thenClose}
 	}
 }
-
 
 func (m Model) reparseHighlight() tea.Cmd {
 	if m.hlr == nil {

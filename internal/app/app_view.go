@@ -10,11 +10,11 @@ import (
 )
 
 var (
-	tabBarBg         = lipgloss.Color("#065A96")
-	tabActiveStyle   = lipgloss.NewStyle().
-				Background(lipgloss.Color("#087AC8")).
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Bold(true)
+	tabBarBg       = lipgloss.Color("#065A96")
+	tabActiveStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#087AC8")).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Bold(true)
 	tabInactiveStyle = lipgloss.NewStyle().
 				Background(tabBarBg).
 				Foreground(lipgloss.Color("#AABBCC"))
@@ -46,6 +46,9 @@ func (a App) View() string {
 	}
 	if a.bufPicker != nil {
 		return overlayCenter(base, a.bufPicker.render(), a.width, a.height)
+	}
+	if a.searchReplace != nil {
+		return overlayCenter(base, a.searchReplace.render(), a.width, a.height)
 	}
 	if a.pluginPopup != nil {
 		return overlayCenter(base, a.pluginPopup.render(), a.width, a.height)

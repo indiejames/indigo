@@ -103,6 +103,24 @@ type Model struct {
 	plan          planUsage
 	warnedSession float64
 	warnedWeekly  float64
+
+	// model is an alias ("opus", "sonnet", "haiku", "fable") or a full model
+	// ID; "" means the mode's default (defaultModel in API mode, whatever the
+	// claude CLI is configured for in CLI mode). Set via /model, persisted
+	// across restarts.
+	model string
+}
+
+// modelDisplay returns the current model for the header/status line, falling
+// back to a mode-appropriate default label when unset.
+func (m Model) modelDisplay() string {
+	if m.model != "" {
+		return m.model
+	}
+	if m.apiKey != "" {
+		return defaultModel
+	}
+	return "default"
 }
 
 // contextWindowTokens is the assumed model context window for warnings.
@@ -366,6 +384,25 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.historyIdx = -1
 			return m, nil
 		}
+		if text == "/model" || strings.HasPrefix(text, "/model ") {
+			arg := strings.TrimSpace(strings.TrimPrefix(text, "/model"))
+			switch arg {
+			case "":
+				m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: fmt.Sprintf(
+					"Model: %s. Aliases: %s — or a full model ID. /model default to reset.",
+					m.modelDisplay(), strings.Join(modelAliasOrder, ", "))})
+			case "default", "reset":
+				m.model = ""
+				m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Model reset to default (" + m.modelDisplay() + ")."})
+			default:
+				m.model = arg
+				m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Model set to " + arg + " — takes effect on your next message."})
+			}
+			m.input = nil
+			m.inputPos = 0
+			m.historyIdx = -1
+			return m, m.saveStateCmd()
+		}
 
 		// Save to history (skip consecutive duplicates).
 		if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != text {
@@ -385,14 +422,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		prog := m.prog
 		ac := m.activeCtx
 		sel := m.activeSel
+		model := m.model
 		if m.apiKey != "" {
 			// Copy history so the goroutine's append can't share a backing
 			// array with m.history.
 			history := make([]apiMessage, len(m.history))
 			copy(history, m.history)
-			go runAgent(prog, m.rpc, m.apiKey, m.workDir, history, text, ac, sel)
+			go runAgent(prog, m.rpc, m.apiKey, model, m.workDir, history, text, ac, sel)
 		} else {
-			go runClaudeSubprocess(prog, m.rpc, m.workDir, text, m.sessionID, ac, sel)
+			go runClaudeSubprocess(prog, m.rpc, m.workDir, text, m.sessionID, model, ac, sel)
 		}
 		return m, nil
 
@@ -781,15 +819,23 @@ func (m Model) renderHeader() string {
 		label += "  [thinking…]"
 	}
 
-	// Right side: context stats plus the plan-limit warning. Cost appears only
-	// in API mode where tokens are billed directly. The plan warning prefers
-	// its full text with reset times; on narrow terminals it degrades to
-	// compact chips, then drops entirely rather than truncating the label.
+	// Right side: model (only shown once overridden via /model, to avoid
+	// clutter for the common case) plus context stats and the plan-limit
+	// warning. Cost appears only in API mode where tokens are billed
+	// directly. The plan warning prefers its full text with reset times; on
+	// narrow terminals it degrades to compact chips, then drops entirely
+	// rather than truncating the label.
 	var ctxSeg string
+	if m.model != "" {
+		ctxSeg = m.model
+	}
 	if m.ctxTokens > 0 {
+		if ctxSeg != "" {
+			ctxSeg += " · "
+		}
 		pct := m.ctxTokens * 100 / contextWindowTokens
 		if pct >= ctxWarnPct {
-			ctxSeg = "⚠ "
+			ctxSeg += "⚠ "
 		}
 		ctxSeg += fmt.Sprintf("%s ctx (%d%%)", fmtTokens(m.ctxTokens), pct)
 		if m.apiKey != "" && m.sessionCost > 0 {
@@ -886,8 +932,13 @@ func (m Model) renderConversation() string {
 
 	if scrollH > 0 {
 		rows.WriteByte('\n') // separator between pinned and scrolled content
-		end := min(visibleStart+scrollH, total)
-		visible := allLines[visibleStart:end]
+		// Recompute the window for the reduced height scrollH — reusing the
+		// outer visibleStart (sized for the full height h) would leave the
+		// window pinH lines short of the true bottom, clipping the tail of
+		// the most recent content.
+		scrollStart := max(0, total-scrollH-scroll)
+		end := min(scrollStart+scrollH, total)
+		visible := allLines[scrollStart:end]
 		writeLines(&rows, visible, scrollH)
 	}
 

@@ -63,6 +63,23 @@ interface EditorService {
   # end column inclusive; isLine = whole-line selection; active=false clears).
   setActiveSelection @37 (clientId :UInt64, bufId :UInt32, startLine :UInt32, startCol :UInt32, endLine :UInt32, endCol :UInt32, isLine :Bool, active :Bool) -> ();
   getActiveSelection @38 () -> (bufId :UInt32, startLine :UInt32, startCol :UInt32, endLine :UInt32, endCol :UInt32, isLine :Bool, found :Bool);
+  # Apply a batch of workspace-wide search-and-replace edits, one file write
+  # (or shared-buffer update) per affected path. Each edit's oldText is
+  # verified against the file's current content immediately before applying
+  # it; edits whose oldText no longer matches (concurrent change since the
+  # edit was queued) are skipped and reported back via skippedIdx rather than
+  # applied blindly. Paths that already have a shared open buffer are edited
+  # in place and left dirty (not saved); paths with no open buffer are
+  # patched directly on disk.
+  applyWorkspaceEdits @39 (clientId :UInt64, edits :List(WorkspaceEdit)) -> (appliedCount :UInt32, skippedIdx :List(UInt32));
+}
+
+struct WorkspaceEdit {
+  path    @0 :Text;
+  line    @1 :UInt32;
+  col     @2 :UInt32;
+  oldText @3 :Text;
+  newText @4 :Text;
 }
 
 struct PluginEdit {

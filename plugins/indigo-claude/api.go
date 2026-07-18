@@ -12,9 +12,36 @@ import (
 
 const (
 	anthropicAPIURL = "https://api.anthropic.com/v1/messages"
-	claudeModel     = "claude-opus-4-8"
+	defaultModel    = "claude-opus-4-8"
 	maxTokens       = 8096
 )
+
+// modelAliases maps short names to full Anthropic model IDs. In API mode
+// user input is resolved through this table before the request is sent; in
+// CLI mode the raw alias is passed straight to the claude CLI, which
+// resolves these (and more) itself.
+var modelAliases = map[string]string{
+	"opus":   "claude-opus-4-8",
+	"sonnet": "claude-sonnet-5",
+	"haiku":  "claude-haiku-4-5-20251001",
+	"fable":  "claude-fable-5",
+}
+
+// modelAliasOrder lists aliases in display order for the /model help text.
+var modelAliasOrder = []string{"opus", "sonnet", "haiku", "fable"}
+
+// resolveModel returns the full model ID for API mode: an alias lookup, or
+// the input unchanged when it isn't a known alias (so a full ID typed
+// directly still works), or defaultModel when input is empty.
+func resolveModel(input string) string {
+	if input == "" {
+		return defaultModel
+	}
+	if full, ok := modelAliases[input]; ok {
+		return full
+	}
+	return input
+}
 
 // ─── message types ───────────────────────────────────────────────────────────
 
@@ -87,9 +114,9 @@ type streamUsageEvent struct{ ctxTokens int }
 
 // ─── streaming API call ──────────────────────────────────────────────────────
 
-func streamAPI(ctx context.Context, apiKey, system string, messages []apiMessage, tools []toolDef, onEvent func(any)) error {
+func streamAPI(ctx context.Context, apiKey, model, system string, messages []apiMessage, tools []toolDef, onEvent func(any)) error {
 	body := map[string]any{
-		"model":      claudeModel,
+		"model":      resolveModel(model),
 		"max_tokens": maxTokens,
 		"system":     system,
 		"messages":   messages,

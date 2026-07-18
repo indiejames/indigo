@@ -132,6 +132,7 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 | `K`          | Show hover documentation (LSP)               |
 | `/`          | Enter search mode                            |
 | `n` / `N`    | Next / previous search match                 |
+| `s`          | Open the global search & replace dialog      |
 | `Esc`        | Clear selection and search highlights        |
 | `Ctrl+s`     | Save                                         |
 | `Ctrl+p`     | Open file picker                             |
@@ -204,6 +205,26 @@ Each result is shown as `file:line: content`. Ignored directories (`.git`, `vend
 
 When [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) is on your PATH it is used as the search backend — it is significantly faster on large repos and automatically respects `.gitignore`. indigo falls back to a built-in Go walker if `rg` is not available.
 
+### Search & replace dialog
+
+Press `s` in normal mode to open a floating search & replace dialog for the whole workspace.
+
+```
+ ╭────────────────────────────╮  [ ] Aa
+ │ Search                     │  [ ] .*
+ ╰────────────────────────────╯
+ ▸ Replace
+```
+
+- Type a pattern and press **Enter** to search across the workspace (same backend as `:grep` — ripgrep when available).
+- The **Aa** checkbox toggles case sensitivity; **.*** toggles regex mode. Unlike `/` and `:grep`, these are explicit checkboxes rather than inferred from the pattern text.
+- The **▸ Replace** disclosure expands a second field for the replacement text, plus an **All** button.
+- **Tab** / **Shift+Tab** cycle focus between the search field, the two checkboxes, the replace disclosure, the replace field, the All button, and the results list. **Space** toggles whichever checkbox/disclosure is focused.
+- Results appear below as a scrollable list, one line per match. Once a replacement is typed, each line shows the matched text struck through followed by the replacement.
+- With focus on a result, **Enter** applies that one replacement and jumps to it — opening the file as a normal buffer if it wasn't already open, so the change is undoable with `u` like any other edit.
+- **All** applies the replacement to every result at once, after a confirmation showing how many files/lines will change. Files already open elsewhere are edited in memory (left dirty, not saved); files with no open buffer are written to disk directly. Any match whose text no longer matches what was found (e.g. edited concurrently) is skipped and reported rather than applied blindly.
+- **Esc** closes the dialog.
+
 ### Command mode
 
 Type `:` in normal mode, then one of:
@@ -234,6 +255,8 @@ Type `:` in normal mode, then one of:
 ## Features
 
 **Search** — Press `/` to search within the current buffer. Supports incremental literal search with smart-case and regex search (prefix with `\`). Match count displayed in the status bar; `n` / `N` navigates between matches. Use `:grep [pattern]` for workspace-wide search across all files.
+
+**Search & replace** — Press `s` for a floating dialog that searches and replaces across the whole workspace, with independent case/regex checkboxes, a live per-match diff preview, and either one-at-a-time or all-at-once apply.
 
 **Syntax highlighting** — 40+ languages via Tree-sitter grammars. See [Language Support](docs/language-support.md).
 

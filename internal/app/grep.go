@@ -31,10 +31,23 @@ type GrepResult struct {
 // built-in Go walker otherwise. glob optionally restricts which files are
 // searched (e.g. "*.go", "src/", "**/*.ts"); empty string means all files.
 func searchWorkspace(workDir, pattern, glob string) ([]GrepResult, error) {
-	if rgAvailable() {
-		return searchWithRg(workDir, pattern, glob)
+	expr, isRegex := grepRegexExpr(pattern)
+	if isRegex {
+		pattern = expr
 	}
-	return searchBuiltin(workDir, pattern, glob)
+	caseSensitive := isRegex || grepSmartCase(pattern)
+	return searchWorkspaceExplicit(workDir, pattern, glob, caseSensitive, isRegex)
+}
+
+// searchWorkspaceExplicit is searchWorkspace with regex-ness and
+// case-sensitivity passed explicitly rather than inferred from a \pattern\
+// prefix convention — used by the search/replace dialog's checkboxes, where
+// the user sets those independently of what they type.
+func searchWorkspaceExplicit(workDir, pattern, glob string, caseSensitive, isRegex bool) ([]GrepResult, error) {
+	if rgAvailable() {
+		return searchWithRg(workDir, pattern, glob, caseSensitive, isRegex)
+	}
+	return searchBuiltin(workDir, pattern, glob, caseSensitive, isRegex)
 }
 
 // rgAvailable reports whether rg is on the PATH.
@@ -69,7 +82,7 @@ type rgSubmatch struct {
 
 // searchWithRg runs rg --json and parses its output into GrepResults.
 // rg exit code 1 means "no matches" — not an error.
-func searchWithRg(workDir, pattern, glob string) ([]GrepResult, error) {
+func searchWithRg(workDir, pattern, glob string, caseSensitive, isRegex bool) ([]GrepResult, error) {
 	if pattern == "" {
 		return nil, nil
 	}
@@ -80,13 +93,15 @@ func searchWithRg(workDir, pattern, glob string) ([]GrepResult, error) {
 	if glob != "" {
 		args = append(args, "--glob", glob)
 	}
-	if expr, isRe := grepRegexExpr(pattern); isRe {
-		if expr == "" {
-			return nil, nil
-		}
-		args = append(args, "--regexp", expr)
+	if caseSensitive {
+		args = append(args, "--case-sensitive")
 	} else {
-		args = append(args, "--fixed-strings", "--smart-case", "--", pattern)
+		args = append(args, "--ignore-case")
+	}
+	if isRegex {
+		args = append(args, "--regexp", pattern)
+	} else {
+		args = append(args, "--fixed-strings", "--", pattern)
 	}
 	args = append(args, workDir)
 
@@ -133,17 +148,21 @@ func searchWithRg(workDir, pattern, glob string) ([]GrepResult, error) {
 
 // ---- built-in Go walker (fallback) ----
 
-// searchBuiltin searches all text files under workDir for pattern.
-// Pattern syntax is the same as within-buffer search: plain text (smart-case)
-// or \expr\ for a Go regexp. Only the first match per line is reported.
-func searchBuiltin(workDir, pattern, glob string) ([]GrepResult, error) {
+// searchBuiltin searches all text files under workDir for pattern, using
+// caseSensitive/isRegex exactly as given. Only the first match per line is
+// reported.
+func searchBuiltin(workDir, pattern, glob string, caseSensitive, isRegex bool) ([]GrepResult, error) {
 	if pattern == "" {
 		return nil, nil
 	}
 
 	// Build a per-line matcher function.
 	var matchLine func(line string) (col, length int, ok bool)
-	if expr, isRe := grepRegexExpr(pattern); isRe {
+	if isRegex {
+		expr := pattern
+		if !caseSensitive {
+			expr = "(?i)" + expr
+		}
 		re, err := regexp.Compile(expr)
 		if err != nil {
 			return nil, err
@@ -158,7 +177,7 @@ func searchBuiltin(workDir, pattern, glob string) ([]GrepResult, error) {
 			return start, end - start, true
 		}
 	} else {
-		sensitive := grepSmartCase(pattern)
+		sensitive := caseSensitive
 		patRunes := []rune(pattern)
 		if !sensitive {
 			for i, r := range patRunes {

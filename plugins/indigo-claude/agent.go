@@ -297,8 +297,8 @@ func buildUserMessage(text string, ac client.ActiveContext, snippet, selNote str
 
 // runAgent runs the direct-API agentic loop in a goroutine. It builds the
 // cursor snippet and selection note itself (RPC calls) so the UI loop never
-// blocks on them.
-func runAgent(prog *programLink, rpc *client.RPC, apiKey, workDir string, history []apiMessage, text string, ac client.ActiveContext, sel client.ActiveSelection) {
+// blocks on them. model is an alias or full model ID; "" uses defaultModel.
+func runAgent(prog *programLink, rpc *client.RPC, apiKey, model, workDir string, history []apiMessage, text string, ac client.ActiveContext, sel client.ActiveSelection) {
 	ctx, cancel := context.WithCancel(context.Background())
 	prog.setCancel(cancel)
 	defer prog.setCancel(nil)
@@ -319,7 +319,7 @@ func runAgent(prog *programLink, rpc *client.RPC, apiKey, workDir string, histor
 			stopReason string
 		)
 
-		err := streamAPI(ctx, apiKey, system, history, tools, func(ev any) {
+		err := streamAPI(ctx, apiKey, model, system, history, tools, func(ev any) {
 			switch e := ev.(type) {
 			case streamTextEvent:
 				textBuf.WriteString(e.text)
@@ -423,7 +423,9 @@ func toolDisplayName(name string, input json.RawMessage) string {
 // runClaudeSubprocess runs `claude -p` as a subprocess and emits agent events.
 // sessionID is empty for the first turn; subsequent turns pass --resume so Claude
 // Code continues the conversation with full context.
-func runClaudeSubprocess(prog *programLink, rpc *client.RPC, workDir, prompt, sessionID string, ac client.ActiveContext, sel client.ActiveSelection) {
+// model is an alias ("opus", "sonnet", …) or full model ID as understood by
+// the claude CLI's own --model flag; "" lets claude use its configured default.
+func runClaudeSubprocess(prog *programLink, rpc *client.RPC, workDir, prompt, sessionID, model string, ac client.ActiveContext, sel client.ActiveSelection) {
 	var snippet string
 	if ac.Found {
 		snippet = bufferSnippet(rpc, ac.FilePath, int(ac.Line), 20)
@@ -439,6 +441,9 @@ func runClaudeSubprocess(prog *programLink, rpc *client.RPC, workDir, prompt, se
 	}
 	if sessionID != "" {
 		args = append(args, "--resume", sessionID)
+	}
+	if model != "" {
+		args = append(args, "--model", model)
 	}
 	if prog.mcpConfig != "" {
 		// Route file reads/edits through the indigo editor's live buffers.

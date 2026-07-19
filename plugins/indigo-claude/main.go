@@ -354,8 +354,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func validateSlashCommand(command string) bool {
-	validCommands := []string{"help", "?", "clear", "copy", "model", "/autoapprove", "quit"}
+	validCommands := []string{"help", "?", "clear", "copy", "model", "autoapprove", "quit"}
 	trimmed := strings.TrimLeft(command, "/")
+	trimmed = strings.Split(trimmed, " ")[0]
 	return slices.Contains(validCommands, trimmed)
 }
 

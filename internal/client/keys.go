@@ -66,6 +66,7 @@ var prefixCmds = []command{
 			}},
 		},
 	},
+	commandMenuRoot,
 	{
 		key:       'm',
 		label:     "Match",
@@ -104,9 +105,35 @@ var prefixCmds = []command{
 	},
 }
 
+// commandMenuRoot is the top-level node for the Command (space) menu. Its
+// children are the editor's built-in entries; plugin-contributed entries
+// (declared via plugin.toml menu_item and invoked through OnMenuAction) are
+// merged in at lookup time by resolveCommand, not listed here.
+var commandMenuRoot = command{
+	key:       ' ',
+	label:     "Command",
+	menuTitle: "Command",
+	children: []command{
+		{key: 's', label: "Search & Replace", execute: func(m Model) (tea.Model, tea.Cmd) {
+			return m, func() tea.Msg { return OpenSearchReplaceMsg{} }
+		}},
+		{key: 'p', label: "Symbol picker", execute: func(m Model) (tea.Model, tea.Cmd) {
+			return m, func() tea.Msg { return OpenSymbolPickerMsg{BufID: m.bufID} }
+		}},
+		{key: 'f', label: "File picker", execute: func(m Model) (tea.Model, tea.Cmd) {
+			return m, func() tea.Msg { return OpenPickerMsg{} }
+		}},
+	},
+}
+
 // findCommand navigates prefixCmds following seq and returns the final node.
 func findCommand(seq []rune) (*command, bool) {
-	cmds := prefixCmds
+	return findIn(prefixCmds, seq)
+}
+
+// findIn walks cmds following seq and returns the final node, recursing into
+// each matched node's children for the next rune in seq.
+func findIn(cmds []command, seq []rune) (*command, bool) {
 	var found *command
 	for _, r := range seq {
 		matched := false
@@ -123,6 +150,83 @@ func findCommand(seq []rune) (*command, bool) {
 		}
 	}
 	return found, found != nil
+}
+
+// resolveCommand is like findCommand but, when seq starts at the Command
+// (space) menu, merges plugin-contributed menu items into its children before
+// resolving the rest of seq against it. This lets plugins add entries (and
+// submenus) without the core prefixCmds tree knowing about them ahead of time.
+func (m Model) resolveCommand(seq []rune) (*command, bool) {
+	if len(seq) == 0 || seq[0] != ' ' {
+		return findCommand(seq)
+	}
+	node := commandMenuRoot
+	node.children = append(append([]command{}, node.children...), m.pluginMenuCommands()...)
+	if len(seq) == 1 {
+		return &node, true
+	}
+	return findIn(node.children, seq[1:])
+}
+
+// pluginMenuCommands converts the cached plugin-contributed menu tree into
+// []command, recursively. Leaf items dispatch through handleMenuActionRPC;
+// group items (Command == "" with children) just descend further.
+func (m Model) pluginMenuCommands() []command {
+	if m.rpc == nil {
+		return nil
+	}
+	return clientMenuItemsToCommands(m.rpc.MenuItems())
+}
+
+func clientMenuItemsToCommands(items []ClientMenuItem) []command {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]command, len(items))
+	for i, it := range items {
+		r := keyRune(it.Key, it.Label)
+		c := command{key: r, label: it.Label}
+		if len(it.Children) > 0 {
+			c.menuTitle = it.Label
+			c.children = clientMenuItemsToCommands(it.Children)
+		} else {
+			pluginName, action := it.PluginName, it.Command
+			c.execute = func(m Model) (tea.Model, tea.Cmd) {
+				return m.handleMenuActionRPC(pluginName, action)
+			}
+		}
+		out[i] = c
+	}
+	return out
+}
+
+// keyRune picks the popup-selector rune for a plugin menu item: the declared
+// Key if set, otherwise the lowercased first rune of Label.
+func keyRune(key, label string) rune {
+	if r := []rune(key); len(r) > 0 {
+		return r[0]
+	}
+	for _, r := range strings.ToLower(label) {
+		return r
+	}
+	return 0
+}
+
+// handleMenuActionRPC dispatches a Command-menu selection to the plugin that
+// registered it, mirroring handlePluginKeyRPC's result handling.
+func (m Model) handleMenuActionRPC(pluginName, action string) (tea.Model, tea.Cmd) {
+	bufID := m.bufID
+	curLine := uint32(m.cursor.Line)
+	curCol := uint32(m.cursor.Col)
+	return m, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		result, err := m.rpc.InvokeMenuAction(ctx, pluginName, action, bufID, curLine, curCol)
+		if err != nil {
+			return errorMsg{err}
+		}
+		return pluginKeyResultMsg{result: result}
+	}
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

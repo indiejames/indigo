@@ -1,8 +1,9 @@
 // Jumpy is an EasyMotion-style jump plugin for indigo.
 //
-// Press "f" in normal mode to activate. Every jump target on the visible screen
-// gets a 2-character label drawn over it. Type the two label characters to jump
-// there instantly. Press Esc at any time to cancel.
+// Open the Command menu (space) and pick "Jumpy" to activate. Every jump
+// target on the visible screen gets a 2-character label drawn over it. Type
+// the two label characters to jump there instantly. Press Esc at any time to
+// cancel.
 //
 // Jump targets are any non-whitespace character that immediately follows
 // whitespace or appears at the start of a line — essentially the first
@@ -42,13 +43,12 @@ type Jumpy struct {
 
 func (j *Jumpy) Init(api *sdk.Api) sdk.Info {
 	j.api = api
-	api.OnKey("f", j.onKey)        //nolint:errcheck
-	api.Decorations(j.decorations) //nolint:errcheck
-	api.BroadcastMessage("jumpy ready: press f to jump") //nolint:errcheck
+	api.OnMenuAction("jumpy.start", j.onKey) //nolint:errcheck
+	api.Decorations(j.decorations)           //nolint:errcheck
 	return sdk.Info{Name: "jumpy", Version: "0.1.0"}
 }
 
-// onKey is the single handler registered for "f". It dispatches on ctx.Mode:
+// onKey is the trigger/capture handler. It dispatches on ctx.Mode:
 //   - "normal"  → trigger: start a new jump session
 //   - "capture" → label input: first or second label character (or Esc to cancel)
 func (j *Jumpy) onKey(key string, ctx sdk.KeyContext) sdk.KeyResponse {

@@ -120,6 +120,7 @@ type RPC struct {
 	pluginKeysMu   sync.RWMutex
 	pluginKeys     map[string]bool
 	pluginBindings []ClientPluginBinding
+	menuItems      []ClientMenuItem
 }
 
 // ClientPluginBinding is a key binding contributed by a plugin, for the help popup.
@@ -127,6 +128,17 @@ type ClientPluginBinding struct {
 	PluginName  string
 	Key         string
 	Description string
+}
+
+// ClientMenuItem is one node in the Command-menu (space menu) tree contributed
+// by a plugin manifest. A leaf node has a non-empty Command; a group node has
+// Children and an empty Command.
+type ClientMenuItem struct {
+	Label      string
+	Key        string
+	PluginName string
+	Command    string
+	Children   []ClientMenuItem
 }
 
 // Dial connects to the server at socketPath and registers this client.
@@ -213,7 +225,50 @@ func Dial(socketPath string) (*RPC, error) {
 	}
 	brel()
 
+	// Fetch plugin-contributed Command (space) menu items.
+	mfut, mrel := svc.GetMenuItems(context.Background(), func(_ proto.EditorService_getMenuItems_Params) error {
+		return nil
+	})
+	if mres, err := mfut.Struct(); err == nil {
+		if rawList, err := mres.Items(); err == nil {
+			r.menuItems = decodeMenuItems(rawList)
+		}
+	}
+	mrel()
+
 	return r, nil
+}
+
+// decodeMenuItems recursively converts a capnp MenuItemInfo_List into
+// []ClientMenuItem.
+func decodeMenuItems(rawList proto.MenuItemInfo_List) []ClientMenuItem {
+	out := make([]ClientMenuItem, rawList.Len())
+	for i := range out {
+		item := rawList.At(i)
+		label, _ := item.Label()
+		key, _ := item.Key()
+		pluginName, _ := item.PluginName()
+		command, _ := item.Command()
+		var children []ClientMenuItem
+		if rawChildren, err := item.Children(); err == nil {
+			children = decodeMenuItems(rawChildren)
+		}
+		out[i] = ClientMenuItem{
+			Label:      label,
+			Key:        key,
+			PluginName: pluginName,
+			Command:    command,
+			Children:   children,
+		}
+	}
+	return out
+}
+
+// MenuItems returns the cached plugin-contributed Command-menu tree from startup.
+func (r *RPC) MenuItems() []ClientMenuItem {
+	r.pluginKeysMu.RLock()
+	defer r.pluginKeysMu.RUnlock()
+	return r.menuItems
 }
 
 func (r *RPC) ClientID() uint64 { return r.clientID }

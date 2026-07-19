@@ -1,9 +1,14 @@
 name        = "bookmarks"
 version     = "0.1.0"
 sdk_version = "0.1.0"
-description     = "Set bookmarks with alt+m, open the bookmark list with alt+b."
+description     = "Set bookmarks with alt+m; open the bookmark list from the Command menu (space)."
 trigger_key     = "alt+m"
 key_description = "Toggle bookmark at current line (prompts for name)"
+
+[[menu_item]]
+label   = "Bookmarks"
+command = "bookmarks.open"
+key     = "b"
 
 [binaries]
 "darwin/arm64" = "bookmarks-darwin-arm64"

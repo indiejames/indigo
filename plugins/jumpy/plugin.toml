@@ -1,9 +1,12 @@
 name        = "jumpy"
 version     = "0.1.0"
 sdk_version = "0.1.0"
-description = "EasyMotion-style jump-to-token plugin. Press 'J' in normal mode, then type the 2-char label shown over your target."
-trigger_key     = "J"
-key_description = "EasyMotion jump to visible token"
+description = "EasyMotion-style jump-to-token plugin. Open the Command menu (space) and pick Jumpy, then type the 2-char label shown over your target."
+
+[[menu_item]]
+label   = "Jumpy"
+command = "jumpy.start"
+key     = "j"
 
 [binaries]
 "darwin/arm64" = "jumpy-darwin-arm64"

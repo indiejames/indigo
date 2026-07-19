@@ -25,7 +25,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if len(msg.Runes) > 0 {
 			newSeq := append(append([]rune(nil), m.prefixSeq...), msg.Runes[0])
-			if cmd, ok := findCommand(newSeq); ok {
+			if cmd, ok := m.resolveCommand(newSeq); ok {
 				if cmd.execute != nil {
 					m.prefixSeq = nil
 					return cmd.execute(m)
@@ -50,9 +50,6 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = "Use :q to quit"
 	case "ctrl+p":
 		return m, func() tea.Msg { return OpenPickerMsg{} }
-
-	case "s":
-		return m, func() tea.Msg { return OpenSearchReplaceMsg{} }
 
 	case ":":
 		m.mode = ModeCommand

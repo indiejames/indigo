@@ -14,6 +14,8 @@ bin/
 dist/
 out/
 
+.DS_Store
+
 # Test binaries and coverage reports
 *.test
 *.out

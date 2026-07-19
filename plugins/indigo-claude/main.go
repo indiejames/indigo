@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -93,11 +94,14 @@ type Model struct {
 	// Permission dialog: false = "approve" highlighted, true = "reject" highlighted.
 	permChoice bool
 
-	// Token/cost tracking. ctxTokens approximates the conversation's context
-	// size; sessionCost accumulates across turns (CLI mode reports cost).
+	// Token/cost tracking. In API mode ctxTokens is a live snapshot of the
+	// most recent request's context size (meaningful as a % of the window);
+	// in CLI mode it's cumulative tokens spent this session (NOT context
+	// occupancy — see renderHeader/agentUsageMsg). sessionCost accumulates
+	// across turns.
 	ctxTokens   int
 	sessionCost float64
-	ctxWarned   bool // 80% context warning already shown
+	ctxWarned   bool // 80% context warning already shown (API mode only)
 
 	// Subscription plan usage (CLI mode). warned* hold the highest warn level
 	// already announced for the current window; they reset when the window does.
@@ -110,6 +114,21 @@ type Model struct {
 	// claude CLI is configured for in CLI mode). Set via /model, persisted
 	// across restarts.
 	model string
+}
+
+// helpText lists every slash command indigo-claude recognizes itself, for
+// /help. Kept in sync by hand with the command checks in handleKey — there
+// are few enough of these that a generated table would be more machinery
+// than the thing it replaces.
+func helpText() string {
+	return "**Commands**\n\n" +
+		"- `/help`, `/?` — show this list\n" +
+		"- `/clear` — clear the conversation and start fresh\n" +
+		"- `/copy` — copy the last response to the clipboard\n" +
+		"- `/model [" + strings.Join(modelAliasOrder, "|") + "|<full-id>|default]` — show or change the model\n" +
+		"- `/autoapprove [edits|shell|all] [on|off]` — show or change auto-approve; bare form shows current state\n" +
+		"- `/quit` - quit indigo-claude\n\n" +
+		"Anything else is sent to Claude as a normal message." 
 }
 
 // onOff renders a bool as "on"/"off" for status messages.
@@ -286,7 +305,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ctxTokens = msg.ctxTokens
 		}
 		m.sessionCost += msg.costUSD
-		if !m.ctxWarned && m.ctxTokens >= contextWindowTokens*ctxWarnPct/100 {
+		// Only API mode's ctxTokens is a live context-window snapshot (see
+		// renderHeader). CLI mode's is cumulative tokens spent this session —
+		// comparing it to contextWindowTokens would fire this warning almost
+		// immediately on any real session and wrongly tell the user to
+		// /clear, discarding a conversation that was likely never actually
+		// close to the real limit.
+		if m.apiKey != "" && !m.ctxWarned && m.ctxTokens >= contextWindowTokens*ctxWarnPct/100 {
 			m.ctxWarned = true
 			m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: fmt.Sprintf(
 				"⚠ Context is %d%% full (%s of %s tokens). Consider /clear to start fresh.",
@@ -328,6 +353,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func validateSlashCommand(command string) bool {
+	validCommands := []string{"help", "?", "clear", "copy", "model", "/autoapprove", "quit"}
+	trimmed := strings.TrimLeft(command, "/")
+	return slices.Contains(validCommands, trimmed)
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.pendingPerm != nil {
 		return m.handlePermissionKey(msg)
@@ -363,6 +394,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		text := strings.TrimSpace(string(m.input))
 		if text == "" || m.agentRunning {
 			return m, nil
+		}
+
+		if strings.HasPrefix(text, "/") {
+			if !validateSlashCommand(text) {
+				cmd := strings.Split(text, " ")[0]
+				m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: fmt.Sprintf("Unknown command %s", cmd)})
+				return m, nil
+			}
 		}
 
 		// Slash commands.
@@ -447,6 +486,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.inputPos = 0
 			m.historyIdx = -1
 			return m, nil
+		}
+		if text == "/help" || text == "/?" {
+			m.conv = append(m.conv, ConvMsg{Role: RoleAssistant, Content: helpText()})
+			m.input = nil
+			m.inputPos = 0
+			m.historyIdx = -1
+			return m, nil
+		}
+
+		if text == "/quit" {
+			 return m, tea.Quit
 		}
 
 		// Save to history (skip consecutive duplicates).
@@ -948,8 +998,8 @@ func thinkingWord(since time.Time) string {
 func (m Model) renderHeader() string {
 	label := " indigo-claude"
 	if m.activeCtx.Found {
-		label = fmt.Sprintf(" indigo-claude  ·  %s  line %d",
-			m.displayPath(m.activeCtx.FilePath), m.activeCtx.Line+1)
+		label = fmt.Sprintf(" indigo-claude   %s %d:%d",
+			m.displayPath(m.activeCtx.FilePath), m.activeCtx.Line+1, m.activeCtx.Col+1)
 		if m.activeSel.Found && m.activeSel.BufID == m.activeCtx.BufID {
 			label += fmt.Sprintf("  ·  sel %d–%d", m.activeSel.StartLine+1, m.activeSel.EndLine+1)
 		}
@@ -987,13 +1037,27 @@ func (m Model) renderHeader() string {
 		if ctxSeg != "" {
 			ctxSeg += " · "
 		}
-		pct := m.ctxTokens * 100 / contextWindowTokens
-		if pct >= ctxWarnPct {
-			ctxSeg += "⚠ "
-		}
-		ctxSeg += fmt.Sprintf("%s ctx (%d%%)", fmtTokens(m.ctxTokens), pct)
-		if m.apiKey != "" && m.sessionCost > 0 {
-			ctxSeg += fmt.Sprintf(" · $%.2f", m.sessionCost)
+		if m.apiKey != "" {
+			// API mode: ctxTokens is a snapshot of the most recent request's
+			// actual context size (see streamUsageEvent in api.go), so a
+			// percentage of the window is meaningful.
+			pct := m.ctxTokens * 100 / contextWindowTokens
+			if pct >= ctxWarnPct {
+				ctxSeg += "⚠ "
+			}
+			ctxSeg += fmt.Sprintf("%s ctx (%d%%)", fmtTokens(m.ctxTokens), pct)
+			if m.sessionCost > 0 {
+				ctxSeg += fmt.Sprintf(" · $%.2f", m.sessionCost)
+			}
+		} else {
+			// CLI mode: the stream-json "result" event's usage sums every
+			// internal tool-call round-trip within a turn, so ctxTokens is
+			// cumulative tokens spent this session, not live context
+			// occupancy — showing it as "% of contextWindowTokens" compares
+			// unrelated quantities and reliably overshoots 100%. Claude
+			// Code's own CLI process handles real context/compaction
+			// internally; this is just an FYI spend counter.
+			ctxSeg += fmt.Sprintf("%s tokens this session", fmtTokens(m.ctxTokens))
 		}
 	}
 

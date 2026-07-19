@@ -79,6 +79,30 @@ func allTools() []toolDef {
 			},
 		},
 		{
+			Name:        "goto_file",
+			Description: "Navigate the user's editor window to a file (and optionally a line), so they can see it directly instead of just reading a path in chat. Use this after locating where something is implemented, e.g. in response to 'take me to X' or 'where is X handled'.",
+			InputSchema: toolSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"path": {Type: "string", Description: "File to open, relative to workspace root or absolute."},
+					"line": {Type: "integer", Description: "1-based line number to jump to. Omit or 0 to just open the file."},
+				},
+				Required: []string{"path"},
+			},
+		},
+		{
+			Name:        "goto_file",
+			Description: "Navigate the user's editor window to a file (and optionally a line), so they can see it directly instead of just reading a path in chat. Use this after locating where something is implemented, e.g. in response to 'take me to X' or 'where is X handled'.",
+			InputSchema: toolSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"path": {Type: "string", Description: "File to open, relative to workspace root or absolute."},
+					"line": {Type: "integer", Description: "1-based line number to jump to. Omit or 0 to just open the file."},
+				},
+				Required: []string{"path"},
+			},
+		},
+		{
 			Name:        "save_file",
 			Description: "Write a file's live editor buffer to disk. Approved edits apply to the buffer immediately but the on-disk file stays stale until saved — call this on every file you edited before running disk-based commands (builds, tests, grep). If the file is open in the editor the user is asked to approve the save (it may include their own unsaved changes).",
 			InputSchema: toolSchema{
@@ -117,6 +141,10 @@ type insertAtLineInput struct {
 	Reason string `json:"reason"`
 	Line   int    `json:"line"`
 	Text   string `json:"text"`
+}
+type gotoFileInput struct {
+	Path string `json:"path"`
+	Line int    `json:"line"`
 }
 
 // editSpec is one old→new replacement shown in the permission prompt.
@@ -160,6 +188,12 @@ func execTool(ctx context.Context, rpc *client.RPC, prog *programLink, workDir, 
 			return fmt.Sprintf("bad input: %v", err), true
 		}
 		return execInsertAtLine(ctx, rpc, prog, workDir, in)
+	case "goto_file":
+		var in gotoFileInput
+		if err := json.Unmarshal(rawInput, &in); err != nil {
+			return fmt.Sprintf("bad input: %v", err), true
+		}
+		return execGotoFile(ctx, rpc, workDir, in)
 	case "save_file":
 		var in readFileInput
 		if err := json.Unmarshal(rawInput, &in); err != nil {
@@ -435,6 +469,37 @@ func execInsertAtLine(ctx context.Context, rpc *client.RPC, prog *programLink, w
 		return fmt.Sprintf("inserted at line %d and saved %s", in.Line, in.Path), false
 	}
 	return fmt.Sprintf("inserted at line %d in %s — applied to the live buffer (approved by the user). Not yet on disk: call save_file before disk-based builds/tests.", in.Line, in.Path), false
+}
+
+// ─── goto_file ────────────────────────────────────────────────────────────────
+
+// gotoFileWireLine converts a 1-based line from tool input to the 0-based
+// convention RequestOpenFile uses over the wire. 0 or negative (omitted)
+// becomes 0 — the top of the file, since there's no "no line" sentinel on
+// the wire.
+func gotoFileWireLine(oneBased int) uint32 {
+	if oneBased > 0 {
+		return uint32(oneBased - 1)
+	}
+	return 0
+}
+
+// execGotoFile asks every connected editor client to navigate to path (and
+// optionally a 1-based line), so the user sees the location directly rather
+// than just reading a path in the chat transcript. No approval popup: this
+// only moves the cursor, it never changes file content.
+func execGotoFile(ctx context.Context, rpc *client.RPC, workDir string, in gotoFileInput) (string, bool) {
+	abs := absPath(workDir, in.Path)
+	if _, err := os.Stat(abs); err != nil {
+		return fmt.Sprintf("cannot find %s: %v", in.Path, err), true
+	}
+	if err := rpc.RequestOpenFile(ctx, abs, gotoFileWireLine(in.Line)); err != nil {
+		return fmt.Sprintf("could not navigate to %s: %v", in.Path, err), true
+	}
+	if in.Line > 0 {
+		return fmt.Sprintf("opened %s at line %d in the user's editor", in.Path, in.Line), false
+	}
+	return fmt.Sprintf("opened %s in the user's editor", in.Path), false
 }
 
 // ─── save_file ────────────────────────────────────────────────────────────────

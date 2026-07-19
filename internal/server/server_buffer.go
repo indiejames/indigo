@@ -120,6 +120,22 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	return nil
 }
 
+// RequestOpenFile pushes an open-file command to every connected client,
+// exposing the same broadcast Go-native plugins get via
+// ServerBridge.PluginOpenFile (plugin_bridge.go) to any client over the wire.
+func (s *editorService) RequestOpenFile(_ context.Context, call proto.EditorService_requestOpenFile) error {
+	args := call.Args()
+	path, err := args.Path()
+	if err != nil {
+		return err
+	}
+	if err := s.PluginOpenFile(path, args.Line()); err != nil {
+		return err
+	}
+	_, err = call.AllocResults()
+	return err
+}
+
 func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorService_discardRecovery) error {
 	args := call.Args()
 	bufID := args.BufferId()

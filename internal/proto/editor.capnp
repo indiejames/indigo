@@ -72,6 +72,11 @@ interface EditorService {
   # in place and left dirty (not saved); paths with no open buffer are
   # patched directly on disk.
   applyWorkspaceEdits @39 (clientId :UInt64, edits :List(WorkspaceEdit)) -> (appliedCount :UInt32, skippedIdx :List(UInt32));
+  # Pushes an open-file command (0-based line) to every connected client —
+  # the same broadcast Go-native plugins get via ServerBridge.PluginOpenFile,
+  # exposed over the wire so external clients (e.g. the indigo-claude plugin
+  # process) can ask the user's editor window(s) to navigate somewhere.
+  requestOpenFile     @40 (path :Text, line :UInt32) -> ();
 }
 
 struct WorkspaceEdit {

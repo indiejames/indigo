@@ -72,6 +72,29 @@ interface EditorService {
   # in place and left dirty (not saved); paths with no open buffer are
   # patched directly on disk.
   applyWorkspaceEdits @39 (clientId :UInt64, edits :List(WorkspaceEdit)) -> (appliedCount :UInt32, skippedIdx :List(UInt32));
+  # Pushes an open-file command (0-based line) to every connected client —
+  # the same broadcast Go-native plugins get via ServerBridge.PluginOpenFile,
+  # exposed over the wire so external clients (e.g. the indigo-claude plugin
+  # process) can ask the user's editor window(s) to navigate somewhere.
+  requestOpenFile     @40 (path :Text, line :UInt32) -> ();
+  # getMenuItems returns the declarative Command-menu (space menu) tree
+  # contributed by plugin manifests (plugin.toml menu_item entries).
+  getMenuItems        @41 ()                                                        -> (items :List(MenuItemInfo));
+  # invokePluginMenuAction dispatches a Command-menu selection to the plugin
+  # that registered it via registerMenuAction, identified by pluginName+command.
+  # Reuses PluginKeyResult exactly like handlePluginKey.
+  invokePluginMenuAction @42 (clientId :UInt64, bufId :UInt32, pluginName :Text, command :Text, cursorLine :UInt32, cursorCol :UInt32) -> (result :PluginKeyResult);
+}
+
+# MenuItemInfo is one node in the Command-menu tree contributed by a plugin.
+# A leaf node has a non-empty command (the id passed to registerMenuAction);
+# a group node has children and an empty command.
+struct MenuItemInfo {
+  label      @0 :Text;
+  key        @1 :Text;  # suggested single-char selector within its parent menu
+  pluginName @2 :Text;
+  command    @3 :Text;
+  children   @4 :List(MenuItemInfo);
 }
 
 struct WorkspaceEdit {

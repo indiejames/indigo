@@ -86,7 +86,7 @@ func (m Model) View() string {
 
 	// Overlay prefix-command popup in the bottom-right corner.
 	if len(m.prefixSeq) > 0 {
-		if cmd, ok := findCommand(m.prefixSeq); ok && len(cmd.children) > 0 {
+		if cmd, ok := m.resolveCommand(m.prefixSeq); ok && len(cmd.children) > 0 {
 			popup := renderPopupBox(cmd.menuTitle, cmd.children, m.width)
 			popH := len(popup)
 			popW := lipgloss.Width(popup[0])

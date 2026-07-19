@@ -41,7 +41,7 @@ Communication uses **Cap'n Proto RPC** over a per-plugin Unix domain socket. Thi
 - Native two-directional RPC (both sides can call into the other)
 - Promise pipelining (async by default at the protocol level)
 
-Plugin authors never touch Cap'n Proto directly. The **indigo plugin SDK** (a separate Go module: `github.com/indiejames/indigo-plugin-sdk`) wraps everything behind a clean Go interface.
+Plugin authors never touch Cap'n Proto directly. The **indigo plugin SDK** (package `github.com/indiejames/indigo/sdk`, in this repo) wraps everything behind a clean Go interface.
 
 ### Why not stdio / JSON?
 
@@ -56,8 +56,9 @@ During initialization, a plugin receives an `EditorApi` capability and uses it t
 ```
 Plugin.initialize(api: EditorApi):
     api.registerKeyBinding("ctrl+j", myKeyHandler)
-    api.registerBufferChangeHandler(myBufferHandler)
+    api.registerBufferHandler(myBufferHandler)
     api.registerCommand("blame", myBlameHandler)
+    api.registerMenuAction("myplugin.blame", myBlameMenuHandler)
     # Only these handlers will ever be called
 ```
 
@@ -80,11 +81,16 @@ The render loop and keypress path **never block** on plugin I/O. Snappiness is e
 | Gutter decorations                        | Async, cached last result   | none    |
 | Overlay / virtual text                    | Async, cached last result   | none    |
 | Status bar items                          | Async, cached last result   | none    |
-| **Key binding handler**                   | Await response              | 30 ms   |
-| **Insert-mode hook** (e.g. bracket close) | Await response              | 30 ms   |
-| **Command handler** (`:blame`)            | Await response              | 5 s     |
+| **Key binding handler**                   | Await response              | 300 ms  |
+| **Insert-mode hook** (e.g. bracket close) | Await response              | 300 ms  |
+| **Menu action handler** (Command menu)    | Await response              | 300 ms  |
+| **Action provider** (Shift+F actions)     | Await response              | 500 ms  |
+| **Fix provider** (fixable decorations)    | Await response              | 500 ms  |
+| **Command handler** (`:name`)             | Registered, not yet dispatched — see note | — |
 
-For the two interactive cases (key bindings and insert hooks), the server dispatches to the plugin in a goroutine and awaits the response with a deadline. If the deadline expires, the keypress falls through as if no plugin handled it. A plugin that consistently times out gets its key binding de-registered until it recovers.
+For the interactive cases (key bindings, insert hooks, and menu actions all share one handler shape), the server dispatches to the plugin in a goroutine and awaits the response with a deadline. If the deadline expires, the keypress falls through as if no plugin handled it.
+
+> **Note:** `registerCommand`/`OnCommand` handlers are stored server-side but nothing currently calls them — the client's `:name` command line does not yet route to plugin-registered commands. This is a known gap, not a design choice; treat `OnCommand` as reserved for now.
 
 Decoration updates (gutter annotations, overlays, status bar items) are delivered asynchronously. The editor renders its last cached decoration state every frame; stale decorations are preferable to a frozen editor.
 
@@ -100,6 +106,10 @@ Overlay decorations are rendered in a single pass through each visible line's ru
 | Inline overlays            | Virtual text overlaid on buffer content (jumpy labels, type hints) |
 | Status bar items           | Text segments in the mode line                                     |
 | Popup / hover augmentation | Extra content added to the K hover popup                           |
+| Command-menu item          | An entry (or submenu) under the space Command menu                 |
+| Action popup (Shift+F)     | Context-sensitive actions at the cursor position                   |
+| Modal list popup           | A scrollable list the user picks from (`ShowPopup`)                |
+| Input prompt               | A single-line text-input dialog (`ShowInputPrompt`)                |
 
 ### Editor interactions
 
@@ -112,6 +122,8 @@ Overlay decorations are rendered in a single pass through each visible line's ru
 | Register key binding | Own a key sequence in normal or insert mode     |
 | Register command     | Add a `:commandname` callable from command mode |
 | Register insert hook | Intercept a specific character in insert mode   |
+| Register menu action | Contribute an item to the space Command menu (invoked by selection, never bound to a physical key) |
+| Register action provider | Contribute context-sensitive actions to the Shift+F popup |
 
 ### Workspace access
 
@@ -129,13 +141,13 @@ Plugin authors implement a single interface and call `sdk.Run()`:
 ```go
 package main
 
-import sdk "github.com/indiejames/indigo-plugin-sdk"
+import "github.com/indiejames/indigo/sdk"
 
-type JumpyPlugin struct{ labels map[string]sdk.Pos }
+type JumpyPlugin struct{}
 
-func (p *JumpyPlugin) Initialize(api sdk.EditorAPI) sdk.PluginInfo {
-    api.RegisterKeyBinding("ctrl+j", p.onTrigger)
-    return sdk.PluginInfo{Name: "jumpy", Version: "1.0.0"}
+func (p *JumpyPlugin) Init(api *sdk.Api) sdk.Info {
+    api.OnMenuAction("jumpy.start", p.onTrigger) //nolint:errcheck
+    return sdk.Info{Name: "jumpy", Version: "1.0.0"}
 }
 
 func main() { sdk.Run(&JumpyPlugin{}) }
@@ -156,17 +168,24 @@ interface Plugin {
 
 interface EditorApi {
     # Registration (called during initialize)
-    registerKeyBinding    @0 (trigger: Text, handler: KeyHandler) -> ();
-    registerInsertHook    @1 (char: Text,    handler: KeyHandler) -> ();
-    registerCommand       @2 (name: Text,    handler: CommandHandler) -> ();
-    registerBufferHandler @3 (handler: BufferEventHandler) -> ();
-    registerDecorations   @4 (provider: DecorationProvider) -> ();
+    registerKeyBinding     @0  (trigger: Text, handler: KeyHandler) -> ();
+    registerInsertHook     @1  (char: Text,    handler: KeyHandler) -> ();
+    registerCommand        @2  (name: Text,    handler: CommandHandler) -> ();
+    registerBufferHandler  @3  (handler: BufferEventHandler) -> ();
+    registerDecorations    @4  (provider: DecorationProvider) -> ();
+    registerActionProvider @16 (provider: ActionProvider) -> ();
+    registerMenuAction     @20 (id: Text, handler: KeyHandler) -> ();
+    registerEditHandler    @18 (handler: EditEventHandler) -> ();
+
+    # Plugin-driven UI (callable any time)
+    showPopup       @17 (title: Text, items: List(PopupItem), handler: PopupHandler) -> ();
+    showInputPrompt @19 (title: Text, placeholder: Text, handler: InputPromptHandler) -> ();
 
     # Editor effects (callable any time)
     applyEdit    @5 (bufId: UInt32, edits: List(TextEdit)) -> ();
     moveCursor   @6 (bufId: UInt32, pos: Position) -> ();
     openFile     @7 (path: Text, line: UInt32) -> ();
-    showMessage  @8 (text: Text) -> ();
+    showMessage  @8 (clientId: UInt64, text: Text) -> (); # clientId 0 broadcasts
     runProcess   @9 (cmd: Text, args: List(Text)) -> (stdout: Text, stderr: Text, exitCode: Int32);
 
     # Document model queries
@@ -193,6 +212,23 @@ interface BufferEventHandler {
 }
 interface DecorationProvider {
     getDecorations @0 (bufId: UInt32, visibleRange: Range) -> (decorations: List(Decoration));
+    getFixes       @1 (fixData: Text) -> (items: List(FixItem));
+    applyFix       @2 (fixData: Text, index: UInt32) -> ();
+}
+interface ActionProvider {
+    getActions  @0 (bufId: UInt32, line: UInt32, col: UInt32) -> (items: List(ActionItem));
+    applyAction @1 (bufId: UInt32, line: UInt32, col: UInt32, index: UInt32) -> ();
+}
+interface PopupHandler {
+    selected  @0 (data: Text) -> ();
+    cancelled @1 () -> ();
+}
+interface InputPromptHandler {
+    confirmed @0 (text: Text) -> ();
+    cancelled @1 () -> ();
+}
+interface EditEventHandler {
+    linesChanged @0 (bufId: UInt32, filePath: Text, atLine: UInt32, lineDelta: Int32) -> ();
 }
 ```
 
@@ -213,20 +249,72 @@ Each plugin directory contains:
 
 `plugin.toml`:
 ```toml
-name    = "jumpy"
+name    = "blame"
 version = "1.0.0"
-description = "Jump to any visible word with two keystrokes"
+description = "Show git blame for the current line"
+
+# Optional: if the plugin registers exactly one key binding, trigger_key
+# overrides which physical key it's bound to; key_description is shown for
+# it in the ? help popup (falls back to description, truncated).
+trigger_key     = "ctrl+g"
+key_description = "Show git blame for current line"
 
 [binaries]
-"darwin/arm64" = "jumpy-darwin-arm64"
-"darwin/amd64" = "jumpy-darwin-amd64"
-"linux/amd64"  = "jumpy-linux-amd64"
-"linux/arm64"  = "jumpy-linux-arm64"
+"darwin/arm64" = "blame-darwin-arm64"
+"darwin/amd64" = "blame-darwin-amd64"
+"linux/amd64"  = "blame-linux-amd64"
+"linux/arm64"  = "blame-linux-arm64"
 ```
 
-The plugin manager selects the correct binary for the current `GOOS/GOARCH` at startup.
+The plugin manager selects the correct binary for the current `GOOS/GOARCH` at startup. See [Command-menu contributions](#command-menu-contributions) below for the `menu_item` manifest syntax.
 
 A future `io plugin install <source>` command would automate downloading and unpacking plugin releases.
+
+## Command-menu contributions
+
+Pressing `space` in normal mode opens the **Command menu** — a popup list of actions, analogous to the built-in `g` (Go) menu. Plugins contribute entries to it declaratively, without the editor knowing about them ahead of time.
+
+A plugin adds one or more `[[menu_item]]` tables to its `plugin.toml`:
+
+```toml
+[[menu_item]]
+label   = "Jumpy"
+command = "jumpy.start"
+key     = "j"   # selector shown/typed within the Command menu; optional
+```
+
+`command` is an opaque id chosen by the plugin. At runtime the plugin registers a handler for that id via `OnMenuAction`, which has the same signature as `OnKey` — it receives a `KeyContext` (`ctx.Mode` is always `"normal"`) and returns a `KeyResponse`:
+
+```go
+api.OnMenuAction("jumpy.start", func(key string, ctx sdk.KeyContext) sdk.KeyResponse {
+    // same handler shape as OnKey; a KeyResponse with CaptureKeys > 0 still
+    // enters capture mode for subsequent physical keystrokes, e.g. jumpy's
+    // 2-character jump labels.
+    return sdk.KeyResponse{Handled: true, CaptureKeys: 2}
+})
+```
+
+Unlike `OnKey`, a menu action is **never** bound to a physical key — it's reachable only by selecting it from the Command menu. This is the key difference from `registerKeyBinding` + `trigger_key`: the latter claims a keystroke; `registerMenuAction` only claims a menu slot.
+
+A plugin with multiple actions can group them into a submenu by nesting `[[menu_item.children]]`:
+
+```toml
+[[menu_item]]
+label = "Git"
+key   = "g"
+
+  [[menu_item.children]]
+  label   = "Blame current line"
+  command = "git.blame"
+  key     = "b"
+
+  [[menu_item.children]]
+  label   = "Show log"
+  command = "git.log"
+  key     = "l"
+```
+
+A group node (has `children`, no `command`) opens a submenu when selected; a leaf node (has `command`, no `children`) invokes the registered handler directly. The `jumpy` and `bookmarks` plugins in `plugins/` are the reference examples — both ship as flat single-item entries, converted from what used to be physical key bindings (`J` and `alt+b` respectively).
 
 ## Plugin lifecycle
 
@@ -261,7 +349,7 @@ The apparent problem with this — that jumpy-style plugins need to know what's 
 The data flow for an overlay plugin like jumpy:
 
 ```text
-1. ctrl+j keypress → server → jumpy plugin
+1. space, then j (Command menu → "Jumpy") → server → jumpy plugin's menu action
 2. Plugin calls visibleRange() → gets lines 40–80
 3. Plugin calls readLines(bufId, 40, 80) → gets text
 4. Plugin computes label map, returns overlay decorations + enters capture mode

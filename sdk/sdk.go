@@ -22,6 +22,7 @@
 //   - [Api.OnKey] — handle a normal-mode key binding
 //   - [Api.OnInsert] — handle a character typed in insert mode
 //   - [Api.OnCommand] — add an ex command (`:name`)
+//   - [Api.OnMenuAction] — contribute an item to the Command (space) menu
 //   - [Api.HandleBufferEvents] — react to buffer open/change/save/close
 //   - [Api.Decorations] / [Api.DecorationsFull] — provide gutter/overlay/status-bar decorations
 //   - [Api.RegisterActionProvider] — contribute items to the F-key action popup
@@ -232,6 +233,26 @@ func (a *Api) OnInsert(char string, fn func(char string, ctx KeyContext) KeyResp
 	}})
 	fut, rel := a.api.RegisterInsertHook(context.Background(), func(p pluginproto.EditorApi_registerInsertHook_Params) error {
 		if err := p.SetChar(char); err != nil {
+			return err
+		}
+		return p.SetHandler(h)
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
+// OnMenuAction registers fn as the handler for a Command-menu (space menu)
+// item. Unlike OnKey, this never binds to a physical key — id is an opaque
+// string of the plugin's choosing, referenced by the "command" field of a
+// menu_item entry in the plugin's plugin.toml manifest. fn receives the same
+// KeyContext/KeyResponse shape as a normal-mode key handler; ctx.Mode is
+// always "normal" (a KeyResponse with CaptureKeys > 0 still enters capture
+// mode for subsequent physical keystrokes, same as OnKey).
+func (a *Api) OnMenuAction(id string, fn func(key string, ctx KeyContext) KeyResponse) error {
+	h := pluginproto.KeyHandler_ServerToClient(&keyHandlerServer{fn: fn})
+	fut, rel := a.api.RegisterMenuAction(context.Background(), func(p pluginproto.EditorApi_registerMenuAction_Params) error {
+		if err := p.SetId(id); err != nil {
 			return err
 		}
 		return p.SetHandler(h)

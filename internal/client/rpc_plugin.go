@@ -74,6 +74,37 @@ func (r *RPC) HandlePluginKey(ctx context.Context, key, mode string, bufID uint3
 	}, nil
 }
 
+// InvokeMenuAction asks the server to dispatch a Command-menu selection to the
+// plugin that registered pluginName+command via OnMenuAction.
+func (r *RPC) InvokeMenuAction(ctx context.Context, pluginName, command string, bufID uint32, cursorLine, cursorCol uint32) (PluginKeyResult, error) {
+	fut, rel := r.svc.InvokePluginMenuAction(ctx, func(p proto.EditorService_invokePluginMenuAction_Params) error {
+		p.SetClientId(r.clientID)
+		p.SetBufId(bufID)
+		p.SetCursorLine(cursorLine)
+		p.SetCursorCol(cursorCol)
+		if err := p.SetPluginName(pluginName); err != nil {
+			return err
+		}
+		return p.SetCommand(command)
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return PluginKeyResult{}, err
+	}
+	result, err := res.Result()
+	if err != nil {
+		return PluginKeyResult{}, err
+	}
+	return PluginKeyResult{
+		Handled:     result.Handled(),
+		CursorLine:  result.CursorLine(),
+		CursorCol:   result.CursorCol(),
+		HasCursor:   result.HasCursor(),
+		CaptureKeys: result.CaptureKeys(),
+	}, nil
+}
+
 // UpdateViewport informs the server of this client's current scroll position
 // and visible height so plugins can use visibleRange accurately.
 func (r *RPC) UpdateViewport(ctx context.Context, topLine, height uint32) {

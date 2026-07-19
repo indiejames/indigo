@@ -6,7 +6,9 @@
 // Key bindings (normal mode):
 //
 //	alt+m  toggle a bookmark on the current line (prompts for a name if adding)
-//	alt+b  open the bookmark picker; Enter to jump, Esc to dismiss
+//
+// The bookmark picker (Enter to jump, Esc to dismiss) is reachable from the
+// Command menu (space) as "Bookmarks".
 package main
 
 import (
@@ -48,10 +50,10 @@ func (b *Bookmarks) Init(api *sdk.Api) sdk.Info {
 	b.api = api
 	b.bookmarks = loadBookmarks()
 
-	api.OnKey("alt+m", b.onAltM)         //nolint:errcheck
-	api.OnKey("alt+b", b.onAltB)         //nolint:errcheck
-	api.OnEditEvent(b.onEditEvent)        //nolint:errcheck
-	api.Decorations(b.getDecorations)    //nolint:errcheck
+	api.OnKey("alt+m", b.onAltM)                 //nolint:errcheck
+	api.OnMenuAction("bookmarks.open", b.onAltB) //nolint:errcheck
+	api.OnEditEvent(b.onEditEvent)               //nolint:errcheck
+	api.Decorations(b.getDecorations)            //nolint:errcheck
 
 	return sdk.Info{Name: "bookmarks", Version: "0.2.0"}
 }
@@ -264,8 +266,8 @@ func persistBookmarks(bmarks []bookmark) {
 	if err != nil {
 		return
 	}
-	os.MkdirAll(filepath.Dir(path), 0o755)  //nolint:errcheck
-	os.WriteFile(path, data, 0o644)          //nolint:errcheck
+	os.MkdirAll(filepath.Dir(path), 0o755) //nolint:errcheck
+	os.WriteFile(path, data, 0o644)        //nolint:errcheck
 }
 
 func main() {

@@ -255,6 +255,19 @@ func (r *RPC) CloseBuffer(ctx context.Context, bufID uint32) error {
 	return err
 }
 
+// RequestOpenFile asks every connected client to navigate to path at a
+// 0-based line, the same broadcast Go-native plugins get via
+// ServerBridge.PluginOpenFile.
+func (r *RPC) RequestOpenFile(ctx context.Context, path string, line uint32) error {
+	fut, rel := r.svc.RequestOpenFile(ctx, func(p proto.EditorService_requestOpenFile_Params) error {
+		p.SetLine(line)
+		return p.SetPath(path)
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
 // BufferClientCount returns how many clients currently have bufID open.
 func (r *RPC) BufferClientCount(ctx context.Context, bufID uint32) (uint32, error) {
 	fut, rel := r.svc.BufferClientCount(ctx, func(p proto.EditorService_bufferClientCount_Params) error {

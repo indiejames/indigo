@@ -21,6 +21,13 @@ interface EditorApi {
   registerBufferHandler @3 (handler :BufferEventHandler)                  -> ();
   registerDecorations   @4 (provider :DecorationProvider)                 -> ();
   registerActionProvider @16 (provider :ActionProvider)                    -> ();
+  # registerMenuAction registers a handler invoked when the user selects this
+  # plugin's item in the Command (space) menu. Unlike registerKeyBinding, the
+  # handler is never bound to a physical key — id is an opaque string chosen
+  # by the plugin and referenced by the "command" field of its plugin.toml
+  # menu_item entries. The handler receives the same KeyContext/KeyResponse
+  # shape as a normal-mode key handler (mode is always "normal").
+  registerMenuAction @20 (id :Text, handler :KeyHandler)                   -> ();
 
   # -- Plugin-driven UI --
   # showPopup displays an interactive list; the handler is called when the user

@@ -80,6 +80,26 @@ func (s *editorApiServer) RegisterCommand(_ context.Context, call pluginproto.Ed
 	return err
 }
 
+func (s *editorApiServer) RegisterMenuAction(_ context.Context, call pluginproto.EditorApi_registerMenuAction) error {
+	args := call.Args()
+	id, err := args.Id()
+	if err != nil {
+		return err
+	}
+	handler := args.Handler()
+	if !handler.IsValid() {
+		return fmt.Errorf("invalid menu action handler")
+	}
+	s.reg.mu.Lock()
+	if old, ok := s.reg.menuActions[id]; ok {
+		old.Release()
+	}
+	s.reg.menuActions[id] = handler.AddRef()
+	s.reg.mu.Unlock()
+	_, err = call.AllocResults()
+	return err
+}
+
 func (s *editorApiServer) RegisterBufferHandler(_ context.Context, call pluginproto.EditorApi_registerBufferHandler) error {
 	handler := call.Args().Handler()
 	if !handler.IsValid() {

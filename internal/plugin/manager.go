@@ -133,6 +133,18 @@ type PluginToml struct {
 	// KeyDescription is a short description of the trigger key shown in the ? help popup.
 	// If omitted, the plugin's description field is used (truncated).
 	KeyDescription string `toml:"key_description"`
+	// MenuItems declares entries this plugin contributes to the Command (space)
+	// menu. Each entry's Command must match an id passed to api.OnMenuAction.
+	// A group entry (no Command, non-empty Children) becomes a submenu.
+	MenuItems []MenuItemToml `toml:"menu_item"`
+}
+
+// MenuItemToml is one declarative Command-menu entry from a plugin manifest.
+type MenuItemToml struct {
+	Label    string         `toml:"label"`
+	Key      string         `toml:"key"`
+	Command  string         `toml:"command"`
+	Children []MenuItemToml `toml:"children"`
 }
 
 // registeredPlugin holds a running plugin's process, RPC connection, and
@@ -148,10 +160,15 @@ type registeredPlugin struct {
 	keyBindings    map[string]pluginproto.KeyHandler
 	insertHooks    map[string]pluginproto.KeyHandler
 	commands       map[string]pluginproto.CommandHandler
+	menuActions    map[string]pluginproto.KeyHandler
 	bufHandler     pluginproto.BufferEventHandler
 	decorProvider  pluginproto.DecorationProvider
 	actionProvider pluginproto.ActionProvider
 	editHandler    pluginproto.EditEventHandler
+
+	// menuItems is this plugin's declared Command-menu tree, read once from
+	// the manifest at startup (static — not affected by RegisterMenuAction).
+	menuItems []MenuItemToml
 }
 
 func (p *registeredPlugin) release() {
@@ -164,6 +181,9 @@ func (p *registeredPlugin) release() {
 		h.Release()
 	}
 	for _, h := range p.commands {
+		h.Release()
+	}
+	for _, h := range p.menuActions {
 		h.Release()
 	}
 	p.bufHandler.Release()
@@ -292,6 +312,8 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 		keyBindings:    make(map[string]pluginproto.KeyHandler),
 		insertHooks:    make(map[string]pluginproto.KeyHandler),
 		commands:       make(map[string]pluginproto.CommandHandler),
+		menuActions:    make(map[string]pluginproto.KeyHandler),
+		menuItems:      manifest.MenuItems,
 	}
 
 	apiServer := &editorApiServer{reg: reg, bridge: m.bridge}
@@ -386,6 +408,79 @@ func (m *Manager) AllPluginBindings() []PluginBinding {
 		p.mu.RUnlock()
 	}
 	return bindings
+}
+
+// MenuItem is one node in a plugin's contributed Command-menu tree, with the
+// owning plugin's name stamped onto every node (needed to route invocation).
+type MenuItem struct {
+	Label      string
+	Key        string
+	PluginName string
+	Command    string // action id passed to InvokeMenuAction; empty for group nodes
+	Children   []MenuItem
+}
+
+func toMenuItems(pluginName string, items []MenuItemToml) []MenuItem {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]MenuItem, len(items))
+	for i, it := range items {
+		out[i] = MenuItem{
+			Label:      it.Label,
+			Key:        it.Key,
+			PluginName: pluginName,
+			Command:    it.Command,
+			Children:   toMenuItems(pluginName, it.Children),
+		}
+	}
+	return out
+}
+
+// AllMenuItems returns the Command-menu tree contributed by every loaded
+// plugin's manifest, each top-level item tagged with its owning plugin name.
+func (m *Manager) AllMenuItems() []MenuItem {
+	m.mu.Lock()
+	plugins := m.plugins
+	m.mu.Unlock()
+	var all []MenuItem
+	for _, p := range plugins {
+		all = append(all, toMenuItems(p.name, p.menuItems)...)
+	}
+	return all
+}
+
+// InvokeMenuAction dispatches a Command-menu selection to the handler pluginName
+// registered under actionID via registerMenuAction. It reuses callHandler so the
+// response (edits/cursor/captureKeys) and capture-mode handoff behave exactly
+// like a physical-key plugin dispatch (HandleKey), just with mode fixed to "normal".
+func (m *Manager) InvokeMenuAction(ctx context.Context, pluginName, actionID string, bufID uint32, clientID uint64, curLine, curCol uint32) (
+	handled bool, edits []TextEdit, cursorLine, cursorCol uint32, hasCursor bool, captureKeys uint32, err error,
+) {
+	m.mu.Lock()
+	var handler pluginproto.KeyHandler
+	for _, p := range m.plugins {
+		if p.name != pluginName {
+			continue
+		}
+		p.mu.RLock()
+		handler = p.menuActions[actionID]
+		p.mu.RUnlock()
+		break
+	}
+	m.mu.Unlock()
+
+	if !handler.IsValid() {
+		return false, nil, 0, 0, false, 0, nil
+	}
+	handled, edits, cursorLine, cursorCol, hasCursor, captureKeys, err = m.callHandler(ctx, handler, actionID, "normal", bufID, clientID, curLine, curCol)
+	if err == nil && handled && captureKeys > 0 {
+		m.captureMu.Lock()
+		m.captureHandler.Release()
+		m.captureHandler = handler.AddRef()
+		m.captureMu.Unlock()
+	}
+	return
 }
 
 // GetDecorations calls every registered DecorationProvider and aggregates the results.

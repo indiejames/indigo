@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 
+	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
 
@@ -347,6 +348,89 @@ func (s *editorService) GetPluginBindings(_ context.Context, call proto.EditorSe
 			return err
 		}
 	}
+	return nil
+}
+
+// setMenuItems recursively fills a MenuItemInfo_List from a []plugin.MenuItem tree.
+func setMenuItems(list proto.MenuItemInfo_List, items []plugin.MenuItem) error {
+	for i, it := range items {
+		node := list.At(i)
+		if err := node.SetLabel(it.Label); err != nil {
+			return err
+		}
+		if err := node.SetKey(it.Key); err != nil {
+			return err
+		}
+		if err := node.SetPluginName(it.PluginName); err != nil {
+			return err
+		}
+		if err := node.SetCommand(it.Command); err != nil {
+			return err
+		}
+		if len(it.Children) > 0 {
+			childList, err := node.NewChildren(int32(len(it.Children)))
+			if err != nil {
+				return err
+			}
+			if err := setMenuItems(childList, it.Children); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (s *editorService) GetMenuItems(_ context.Context, call proto.EditorService_getMenuItems) error {
+	items := s.pluginMgr.AllMenuItems()
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	list, err := res.NewItems(int32(len(items)))
+	if err != nil {
+		return err
+	}
+	return setMenuItems(list, items)
+}
+
+func (s *editorService) InvokePluginMenuAction(ctx context.Context, call proto.EditorService_invokePluginMenuAction) error {
+	args := call.Args()
+	pluginName, err := args.PluginName()
+	if err != nil {
+		return err
+	}
+	command, err := args.Command()
+	if err != nil {
+		return err
+	}
+	clientID := args.ClientId()
+	bufID := args.BufId()
+	cursorLine := args.CursorLine()
+	cursorCol := args.CursorCol()
+
+	handled, edits, resLine, resCol, hasCursor, captureKeys, handleErr := s.pluginMgr.InvokeMenuAction(ctx, pluginName, command, bufID, clientID, cursorLine, cursorCol)
+	if handleErr != nil {
+		return handleErr
+	}
+	// Same as HandlePluginKey: plugins should call applyEdit explicitly rather
+	// than relying on edits returned atomically here.
+	_ = edits
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	result, err := res.NewResult()
+	if err != nil {
+		return err
+	}
+	result.SetHandled(handled)
+	result.SetHasCursor(hasCursor)
+	if hasCursor {
+		result.SetCursorLine(resLine)
+		result.SetCursorCol(resCol)
+	}
+	result.SetCaptureKeys(captureKeys)
 	return nil
 }
 

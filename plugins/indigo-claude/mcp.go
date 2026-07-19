@@ -132,14 +132,15 @@ type mcpTool struct {
 	InputSchema toolSchema `json:"inputSchema"`
 }
 
-// mcpTools exposes only the buffer-aware file tools. list_files/search_files
-// are omitted: claude's native Glob/Grep cover those and disk-based search has
-// no buffer-consistency problem.
+// mcpTools exposes the buffer-aware file tools, plus goto_file (no native
+// equivalent — it drives the indigo editor UI, not the filesystem).
+// list_files/search_files are omitted: claude's native Glob/Grep cover those
+// and disk-based search has no buffer-consistency problem.
 func mcpTools() []mcpTool {
 	var out []mcpTool
 	for _, t := range allTools() {
 		switch t.Name {
-		case "read_file", "apply_edits", "insert_at_line", "save_file":
+		case "read_file", "apply_edits", "insert_at_line", "save_file", "goto_file":
 			// out = append(out, mcpTool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
 			out = append(out, mcpTool(t))
 

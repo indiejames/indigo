@@ -216,6 +216,20 @@ func (d *searchReplaceDialog) moveCursor(delta int) {
 
 // ---- apply: single match ----
 
+// openSearchReplaceMatch opens (or switches to) the file for the currently
+// selected result and jumps to the match, without editing anything. Used
+// when the replace field isn't toggled open, so results behave like a plain
+// search that opens files on Enter.
+func (a App) openSearchReplaceMatch(d *searchReplaceDialog) tea.Cmd {
+	if d.cursor < 0 || d.cursor >= len(d.results) {
+		return nil
+	}
+	r := d.results[d.cursor]
+	absPath := filepath.Join(d.workDir, r.RelPath)
+	matchLen := len([]rune(oldTextOf(r)))
+	return a.doOpenFileAtMatch(absPath, r.Line, r.Col, matchLen)
+}
+
 func (a App) acceptSearchReplaceMatch(d *searchReplaceDialog) tea.Cmd {
 	if d.focus != sraFocusResults || d.cursor < 0 || d.cursor >= len(d.results) {
 		return nil

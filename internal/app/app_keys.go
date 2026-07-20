@@ -203,6 +203,11 @@ func (a App) handleSearchReplaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.searchReplace = d
 			return a, nil
 		case "enter":
+			if !d.replaceOpen {
+				cmd := a.openSearchReplaceMatch(d)
+				a.searchReplace = nil
+				return a, cmd
+			}
 			return a, a.acceptSearchReplaceMatch(d)
 		}
 		return a, nil

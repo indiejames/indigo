@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 func TestOldTextOf(t *testing.T) {
 	cases := []struct {
@@ -126,5 +130,61 @@ func TestSraResultsNoAutoFocusWhenEmpty(t *testing.T) {
 
 	if a2.searchReplace.focus != sraFocusSearch {
 		t.Errorf("focus after empty results = %v, want sraFocusSearch", a2.searchReplace.focus)
+	}
+}
+
+
+// TestSearchReplaceEnterOpensMatchWhenReplaceClosed reproduces the bug where
+// selecting a result and pressing Enter in plain-search mode (replace field
+// not toggled open) deleted the matched text — acceptSearchReplaceMatch
+// always replaced with d.replaceInput.Value(), which is empty when the
+// replace field has never been shown. Enter on a result should just open
+// the file, like a search, unless replace is toggled open.
+func TestSearchReplaceEnterOpensMatchWhenReplaceClosed(t *testing.T) {
+	d := newSearchReplaceDialog("/tmp", 100, 40)
+	d.results = []GrepResult{{RelPath: "a.go", Line: 0, Col: 0, MatchLen: 3, LineText: "foo bar"}}
+	d.setFocus(sraFocusResults)
+	d.cursor = 0
+	// d.replaceOpen is false by default.
+
+	a := App{searchReplace: d}
+	updated, cmd := a.handleSearchReplaceKey(tea.KeyMsg{Type: tea.KeyEnter})
+	a2 := updated.(App)
+
+	if a2.searchReplace != nil {
+		t.Error("dialog should close immediately when opening a search result (no replace pending)")
+	}
+	if cmd == nil {
+		t.Error("expected a command to open the matched file")
+	}
+}
+
+// TestSearchReplaceEnterKeepsDialogOpenWhenReplaceOpen checks that toggling
+// the replace field open preserves the existing replace-on-Enter behavior
+// (the dialog itself closes later, once the async apply/open completes).
+func TestSearchReplaceEnterKeepsDialogOpenWhenReplaceOpen(t *testing.T) {
+	d := newSearchReplaceDialog("/tmp", 100, 40)
+	d.results = []GrepResult{{RelPath: "a.go", Line: 0, Col: 0, MatchLen: 3, LineText: "foo bar"}}
+	d.replaceOpen = true
+	d.setFocus(sraFocusResults)
+	d.cursor = 0
+
+	a := App{searchReplace: d}
+	updated, cmd := a.handleSearchReplaceKey(tea.KeyMsg{Type: tea.KeyEnter})
+	a2 := updated.(App)
+
+	if a2.searchReplace == nil {
+		t.Error("dialog should not close synchronously on the replace path")
+	}
+	if cmd == nil {
+		t.Error("expected a command to apply the replacement")
+	}
+}
+
+func TestOpenSearchReplaceMatchOutOfBounds(t *testing.T) {
+	d := newSearchReplaceDialog("/tmp", 100, 40)
+	a := App{searchReplace: d}
+	if cmd := a.openSearchReplaceMatch(d); cmd != nil {
+		t.Error("expected nil command when there are no results")
 	}
 }

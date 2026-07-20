@@ -86,13 +86,17 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return applyBackspaceToAllCursors(m)
 		}
 		if m.cursor.Col > 0 {
+			toCol := m.cursor.Col
+			if closer, ok := autoPairs[m.charBeforeCursor()]; ok && m.charAfterCursor() == closer {
+				toCol++ // also delete the auto-inserted closer right after the cursor
+			}
 			op := document.Op{
 				ClientID: m.rpc.ClientID(),
 				Type:     document.OpDelete,
 				FromLine: m.cursor.Line,
 				FromCol:  m.cursor.Col - 1,
 				ToLine:   m.cursor.Line,
-				ToCol:    m.cursor.Col,
+				ToCol:    toCol,
 			}
 			m.cursor.Col--
 			return applyOp(m, op)
@@ -189,6 +193,43 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				return m2, cmd
 			}
+
+			r := msg.Runes[0]
+
+			// Typing a closer that's already the next character just moves
+			// past it, instead of inserting a duplicate.
+			if len(msg.Runes) == 1 && autoPairClosers[r] && m.charAfterCursor() == r {
+				m.cursor.Col++
+				if r == ')' {
+					m.sigHelp = nil
+				}
+				return m, nil
+			}
+
+			// Typing an opener auto-inserts its closer, leaving the cursor
+			// between the two. '{' additionally expands onto its own
+			// indented line, since braces almost always open a block.
+			if len(msg.Runes) == 1 {
+				if closer, ok := autoPairs[r]; ok && m.shouldAutoPair(r) {
+					if r == '{' {
+						return m.insertBraceBlock()
+					}
+					op := document.Op{
+						ClientID:   m.rpc.ClientID(),
+						Type:       document.OpInsert,
+						InsertLine: m.cursor.Line,
+						InsertCol:  m.cursor.Col,
+						InsertText: string(r) + string(closer),
+					}
+					m.cursor.Col++
+					m2, cmd := applyOp(m, op)
+					if r == '(' {
+						return m2, tea.Batch(cmd, m2.fetchSignatureHelp())
+					}
+					return m2, cmd
+				}
+			}
+
 			op := document.Op{
 				ClientID:   m.rpc.ClientID(),
 				Type:       document.OpInsert,
@@ -198,7 +239,6 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.cursor.Col += len(msg.Runes)
 			m2, cmd := applyOp(m, op)
-			r := msg.Runes[0]
 			// Auto-trigger sig help on '(' or ','.
 			if r == '(' || r == ',' {
 				return m2, tea.Batch(cmd, m2.fetchSignatureHelp())

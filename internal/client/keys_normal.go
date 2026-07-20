@@ -164,9 +164,6 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = "No diagnostics on this line"
 		}
 
-	case "F":
-		return m, m.fetchFixes()
-
 	case "u":
 		if len(m.undoStack) > 0 {
 			entry := m.undoStack[len(m.undoStack)-1]

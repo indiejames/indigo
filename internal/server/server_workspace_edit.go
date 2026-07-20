@@ -54,6 +54,33 @@ func applyWorkspaceEditsToBuffer(buf *document.Buffer, clientID uint64, items []
 	return applied, skippedIdx
 }
 
+// applyItemsToPath applies items (already sorted by line, then col) to path —
+// editing its shared open buffer in place if one exists, or patching the
+// file on disk otherwise — and notifies the LSP server and plugins of the
+// change. Returns how many edits were applied and the (items-relative)
+// indices of any that were skipped because their oldText no longer matched.
+func (s *editorService) applyItemsToPath(clientID uint64, path string, items []workspaceEditItem) (applied int, skippedIdx []int, err error) {
+	s.mu.Lock()
+	var bufID uint32
+	var entry *bufferEntry
+	for id, e := range s.buffers {
+		if e.buf.Path() == path {
+			bufID, entry = id, e
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	if entry != nil {
+		applied, skippedIdx = applyWorkspaceEditsToBuffer(entry.buf, clientID, items)
+		content := entry.buf.Content()
+		go s.lspMgr.DidChange(path, content)
+		go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
+		return applied, skippedIdx, nil
+	}
+	return s.applyWorkspaceEditsOnDisk(path, clientID, items)
+}
+
 // ApplyWorkspaceEdits applies a batch of search-and-replace edits, one file at
 // a time. A path that already has a shared open buffer is edited in place and
 // left dirty (not saved) so it stays consistent with whatever other client has
@@ -106,32 +133,12 @@ func (s *editorService) ApplyWorkspaceEdits(_ context.Context, call proto.Editor
 			return items[a].col < items[b].col
 		})
 
-		s.mu.Lock()
-		var bufID uint32
-		var entry *bufferEntry
-		for id, e := range s.buffers {
-			if e.buf.Path() == path {
-				bufID, entry = id, e
-				break
+		applied, pathSkipped, err := s.applyItemsToPath(clientID, path, items)
+		if err != nil {
+			for _, it := range items {
+				skipped = append(skipped, uint32(it.origIdx))
 			}
-		}
-		s.mu.Unlock()
-
-		var applied int
-		var pathSkipped []int
-		if entry != nil {
-			applied, pathSkipped = applyWorkspaceEditsToBuffer(entry.buf, clientID, items)
-			content := entry.buf.Content()
-			go s.lspMgr.DidChange(path, content)
-			go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
-		} else {
-			applied, pathSkipped, err = s.applyWorkspaceEditsOnDisk(path, clientID, items)
-			if err != nil {
-				for _, it := range items {
-					skipped = append(skipped, uint32(it.origIdx))
-				}
-				continue
-			}
+			continue
 		}
 		appliedCount += uint32(applied)
 		for _, idx := range pathSkipped {

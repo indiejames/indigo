@@ -219,6 +219,12 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 			}
 			return m, m.doSaveAsNow(newPath, true)
 		}
+		if newName, ok := strings.CutPrefix(cmd, "rename "); ok && strings.TrimSpace(newName) != "" {
+			return m, m.doRenameSymbol(strings.TrimSpace(newName))
+		}
+		if destPath, ok := strings.CutPrefix(cmd, "move-to-file "); ok && strings.TrimSpace(destPath) != "" {
+			return m, m.doMoveFunctionToFile(strings.TrimSpace(destPath))
+		}
 		if rest, ok := strings.CutPrefix(cmd, "set ft="); ok {
 			lang := strings.TrimSpace(rest)
 			if lang == "" {

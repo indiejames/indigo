@@ -2,7 +2,8 @@ package client
 
 import (
 	"context"
-	"strings"
+	"fmt"
+	"path/filepath"
 	"time"
 	"unicode"
 
@@ -187,6 +188,81 @@ func (m Model) fetchPluginBindings() tea.Cmd {
 	}
 }
 
+// doMoveFunctionToFile finds the function surrounding the cursor (via the
+// language's tree-sitter grammar, the same text object "af"/"if" use) and
+// moves it server-side to destPath, appending to the end of the file (which
+// is created if it doesn't exist yet). Imports and other cross-file
+// references are not fixed up.
+func (m Model) doMoveFunctionToFile(destPath string) tea.Cmd {
+	if m.hlr == nil {
+		return func() tea.Msg {
+			return moveFunctionDoneMsg{err: fmt.Errorf("no syntax support for this file type")}
+		}
+	}
+	to, ok := m.hlr.TextObjectAround([]byte(m.buf.Content()), m.cursor.Line, m.cursor.Col, "function")
+	if !ok {
+		return func() tea.Msg {
+			return moveFunctionDoneMsg{err: fmt.Errorf("no function found around the cursor")}
+		}
+	}
+	rpc := m.rpc
+	bufID := m.bufID
+	workDir := m.workDir
+	fromLine, fromCol := to.StartLine, to.StartCol
+	toLine, toCol := to.EndLine, to.EndCol+1 // TextObject.EndCol is inclusive; ops are exclusive
+	return func() tea.Msg {
+		abs, err := resolveDestPath(workDir, destPath)
+		if err != nil {
+			return moveFunctionDoneMsg{err: err}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := rpc.MoveTextToFile(ctx, bufID, fromLine, fromCol, toLine, toCol, abs); err != nil {
+			return moveFunctionDoneMsg{err: err}
+		}
+		return moveFunctionDoneMsg{destPath: abs}
+	}
+}
+
+// resolveDestPath makes path absolute, joining it against workDir first when
+// it's relative (mirroring how :w/:wq resolve a save-as path).
+func resolveDestPath(workDir, path string) (string, error) {
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path), nil
+	}
+	return filepath.Abs(filepath.Join(workDir, path))
+}
+
+// doRenameSymbol renames the symbol at the cursor to newName via the
+// language server, applying the resulting edits across every affected file
+// server-side. Any already-open buffer touched by the rename (including
+// this one) picks up the change through the normal getUpdates poll, exactly
+// like a workspace-wide search & replace.
+func (m Model) doRenameSymbol(newName string) tea.Cmd {
+	rpc := m.rpc
+	bufID := m.bufID
+	line, col := m.cursor.Line, m.cursor.Col
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		applied, files, err := rpc.LspRename(ctx, bufID, line, col, newName)
+		return renameSymbolDoneMsg{applied: applied, files: files, err: err}
+	}
+}
+
+// codeActionRange returns the request range for LSP code actions: the active
+// selection's ordered bounds if one exists (letting the server offer
+// range-only actions like Extract Function/Extract Variable), or a
+// zero-width point at the cursor otherwise. Selection.Anchor/Head are
+// inclusive on both ends; LSP ranges are exclusive on the end, hence the +1.
+func codeActionRange(cursor document.Pos, sel *Selection) (startLine, startCol, endLine, endCol int) {
+	if sel == nil {
+		return cursor.Line, cursor.Col, cursor.Line, cursor.Col
+	}
+	start, end := sel.ordered()
+	return start.Line, start.Col, end.Line, end.Col + 1
+}
+
 // fetchFixes collects fix items from the fixable decoration at the cursor (if any)
 // and context-sensitive actions from all registered action providers, then merges
 // them into a single F-popup list.
@@ -195,6 +271,9 @@ func (m Model) fetchFixes() tea.Cmd {
 	bufID := m.bufID
 	line := uint32(m.cursor.Line)
 	col := uint32(m.cursor.Col)
+
+	startLine, startCol, endLine, endCol := codeActionRange(m.cursor, m.sel)
+
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -227,8 +306,9 @@ func (m Model) fetchFixes() tea.Cmd {
 			items = append(items, actions...)
 		}
 
-		// LSP code actions (quick-fixes from the language server).
-		lspActions, err := m.rpc.LspCodeActions(ctx, bufID, int(line), int(col))
+		// LSP code actions (quick-fixes and range-based refactors from the
+		// language server).
+		lspActions, err := m.rpc.LspCodeActions(ctx, bufID, startLine, startCol, endLine, endCol)
 		if err == nil {
 			for _, a := range lspActions {
 				items = append(items, ClientFixItem{
@@ -242,81 +322,48 @@ func (m Model) fetchFixes() tea.Cmd {
 	}
 }
 
-// applyLspEditsToContent applies LSP edits (in reverse order to preserve positions) to a
-// content string and returns the result.
-func applyLspEditsToContent(content string, edits []ClientLspEdit) string {
-	lines := strings.Split(content, "\n")
+// applyLspEdits applies LSP code-action edits through the normal undo-aware
+// batch path (applyBatch), so the change marks the buffer dirty and is
+// undoable like any other edit — unlike the old path, which sent raw ops to
+// the server and rebuilt the buffer wholesale, wiping the undo stack. Edits
+// are converted to delete+insert op pairs in reverse document order so
+// earlier edits don't shift later positions.
+func applyLspEdits(m Model, edits []ClientLspEdit) (Model, tea.Cmd) {
+	clientID := m.clientID()
+	ops := make([]document.Op, 0, len(edits)*2)
 	for i := len(edits) - 1; i >= 0; i-- {
 		e := edits[i]
-		if e.FromLine >= len(lines) {
-			continue
+		if e.FromLine != e.ToLine || e.FromCol != e.ToCol {
+			ops = append(ops, document.Op{
+				Type:     document.OpDelete,
+				FromLine: e.FromLine,
+				FromCol:  e.FromCol,
+				ToLine:   e.ToLine,
+				ToCol:    e.ToCol,
+				ClientID: clientID,
+			})
 		}
-		toLine := e.ToLine
-		if toLine >= len(lines) {
-			toLine = len(lines) - 1
+		if e.NewText != "" {
+			ops = append(ops, document.Op{
+				Type:       document.OpInsert,
+				InsertLine: e.FromLine,
+				InsertCol:  e.FromCol,
+				InsertText: e.NewText,
+				ClientID:   clientID,
+			})
 		}
-		startRunes := []rune(lines[e.FromLine])
-		endRunes := []rune(lines[toLine])
-		sc := min(e.FromCol, len(startRunes))
-		ec := min(e.ToCol, len(endRunes))
-		prefix := string(startRunes[:sc])
-		suffix := string(endRunes[ec:])
-		replacement := strings.Split(prefix+e.NewText+suffix, "\n")
-		updated := make([]string, 0, len(lines)-(toLine-e.FromLine+1)+len(replacement))
-		updated = append(updated, lines[:e.FromLine]...)
-		updated = append(updated, replacement...)
-		updated = append(updated, lines[toLine+1:]...)
-		lines = updated
 	}
-	return strings.Join(lines, "\n")
+	return applyBatch(m, ops)
 }
 
-// applyFixCmd applies the selected fix: either a direct text replacement or a plugin callback.
+// applyFixCmd applies the selected fix: either a direct text replacement or a
+// plugin callback. LSP-edit items are handled synchronously by applyLspEdits
+// in handleFixPopup instead, since they must update the model's undo stack.
 func (m Model) applyFixCmd(idx int) tea.Cmd {
 	if idx < 0 || idx >= len(m.fixItems) {
 		return nil
 	}
 	item := m.fixItems[idx]
-	if len(item.LspEdits) > 0 {
-		edits := item.LspEdits
-		bufID := m.bufID
-		newContent := applyLspEditsToContent(m.buf.Content(), edits)
-		clientID := m.rpc.ClientID()
-		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			// Apply in reverse order so earlier edits don't shift later line numbers.
-			for i := len(edits) - 1; i >= 0; i-- {
-				e := edits[i]
-				if e.FromLine != e.ToLine || e.FromCol != e.ToCol {
-					delOp := document.Op{
-						Type:     document.OpDelete,
-						FromLine: e.FromLine,
-						FromCol:  e.FromCol,
-						ToLine:   e.ToLine,
-						ToCol:    e.ToCol,
-						ClientID: clientID,
-					}
-					if _, err := m.rpc.ApplyOp(ctx, bufID, delOp); err != nil {
-						return errorMsg{err}
-					}
-				}
-				if e.NewText != "" {
-					insOp := document.Op{
-						Type:       document.OpInsert,
-						InsertLine: e.FromLine,
-						InsertCol:  e.FromCol,
-						InsertText: e.NewText,
-						ClientID:   clientID,
-					}
-					if _, err := m.rpc.ApplyOp(ctx, bufID, insOp); err != nil {
-						return errorMsg{err}
-					}
-				}
-			}
-			return formatResultMsg{content: newContent, changed: true}
-		}
-	}
 	if item.Replace != "" {
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

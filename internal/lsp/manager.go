@@ -229,11 +229,22 @@ func (m *Manager) References(path string, line, col int) ([]Location, error) {
 	return nil, nil
 }
 
-// CodeActions returns quick-fix and refactor actions for the cursor position.
-func (m *Manager) CodeActions(path string, line, col int) ([]CodeAction, error) {
+// CodeActions returns quick-fix and refactor actions for the given range
+// (equal start/end for a plain cursor position, or a selection's bounds).
+func (m *Manager) CodeActions(path string, startLine, startCol, endLine, endCol int) ([]CodeAction, error) {
 	if c := m.clientForPath(path); c != nil {
 		m.ensureOpened(c, path)
-		return c.CodeActions(path, line, col)
+		return c.CodeActions(path, startLine, startCol, endLine, endCol)
+	}
+	return nil, nil
+}
+
+// Rename renames the symbol at (line, col) in path via its language server,
+// returning the resulting WorkspaceEdit (nil if unsupported or unavailable).
+func (m *Manager) Rename(path string, line, col int, newName string) (*WorkspaceEdit, error) {
+	if c := m.clientForPath(path); c != nil {
+		m.ensureOpened(c, path)
+		return c.Rename(path, line, col, newName)
 	}
 	return nil, nil
 }

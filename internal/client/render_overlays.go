@@ -758,7 +758,7 @@ var helpEntries = []helpEntry{
 	{key: "LSP / Diagnostics"},
 	{key: "K", desc: "Hover documentation"},
 	{key: "E", desc: "Toggle diagnostic detail"},
-	{key: "F", desc: "Fix suggestions"},
+	{key: "SPC a", desc: "Code actions (fixes & refactors)"},
 	{key: ""},
 	{key: "Files & Buffers"},
 	{key: "Ctrl+p", desc: "File picker"},

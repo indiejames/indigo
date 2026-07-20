@@ -204,6 +204,12 @@ type Manager struct {
 	// with mode "capture" are routed to this handler instead of looking up by name.
 	captureMu      sync.Mutex
 	captureHandler pluginproto.KeyHandler
+
+	// ready is closed once Start has finished attempting to launch every
+	// discovered plugin, so RPC handlers that depend on plugin-contributed
+	// state (menu items, key bindings) can wait for it instead of racing
+	// Start's background goroutine.
+	ready chan struct{}
 }
 
 // NewManager creates a Manager for the given workspace root.
@@ -213,12 +219,24 @@ func NewManager(workDir string, bridge ServerBridge) *Manager {
 	return &Manager{
 		workDir: workDir,
 		bridge:  bridge,
+		ready:   make(chan struct{}),
+	}
+}
+
+// WaitReady blocks until Start has finished attempting to launch all
+// discovered plugins, or ctx is done, whichever comes first.
+func (m *Manager) WaitReady(ctx context.Context) {
+	select {
+	case <-m.ready:
+	case <-ctx.Done():
 	}
 }
 
 // Start discovers all installed plugins and starts them. Plugins that fail to
 // start are skipped; the error is logged but does not propagate.
 func (m *Manager) Start(ctx context.Context) error {
+	defer close(m.ready)
+
 	dir, err := pluginsConfigDir()
 	if err != nil {
 		return nil

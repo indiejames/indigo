@@ -2,10 +2,15 @@ package server
 
 import (
 	"context"
+	"time"
 
 	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
+
+// pluginReadyTimeout bounds how long GetMenuItems/GetPluginBindings wait for
+// plugin startup to finish before returning whatever is available so far.
+const pluginReadyTimeout = 2 * time.Second
 
 func (s *editorService) HandlePluginKey(ctx context.Context, call proto.EditorService_handlePluginKey) error {
 	args := call.Args()
@@ -326,7 +331,11 @@ func (s *editorService) UpdateViewport(_ context.Context, call proto.EditorServi
 	return err
 }
 
-func (s *editorService) GetPluginBindings(_ context.Context, call proto.EditorService_getPluginBindings) error {
+func (s *editorService) GetPluginBindings(ctx context.Context, call proto.EditorService_getPluginBindings) error {
+	waitCtx, cancel := context.WithTimeout(ctx, pluginReadyTimeout)
+	s.pluginMgr.WaitReady(waitCtx)
+	cancel()
+
 	bindings := s.pluginMgr.AllPluginBindings()
 	res, err := call.AllocResults()
 	if err != nil {
@@ -380,7 +389,11 @@ func setMenuItems(list proto.MenuItemInfo_List, items []plugin.MenuItem) error {
 	return nil
 }
 
-func (s *editorService) GetMenuItems(_ context.Context, call proto.EditorService_getMenuItems) error {
+func (s *editorService) GetMenuItems(ctx context.Context, call proto.EditorService_getMenuItems) error {
+	waitCtx, cancel := context.WithTimeout(ctx, pluginReadyTimeout)
+	s.pluginMgr.WaitReady(waitCtx)
+	cancel()
+
 	items := s.pluginMgr.AllMenuItems()
 	res, err := call.AllocResults()
 	if err != nil {

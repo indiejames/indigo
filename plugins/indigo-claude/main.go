@@ -1348,23 +1348,13 @@ func (m Model) renderInput() string {
 	prompt := inputPromptSty.Render("▶ ")
 	pw := lipgloss.Width(prompt)
 	cont := strings.Repeat(" ", pw)
-	avail := innerW - pw
-	if avail < 1 {
-		avail = 1
-	}
 
-	inputText := string(m.input)
-	inputLines := strings.Split(inputText, "\n")
+	dispLines, cursorRow, cursorCol := wrapInputDisplay(m.input, m.inputPos, m.inputAvailWidth())
 
-	beforeCursor := string(m.input[:m.inputPos])
-	beforeLines := strings.Split(beforeCursor, "\n")
-	cursorLine := len(beforeLines) - 1
-	cursorCol := len([]rune(beforeLines[cursorLine]))
-
-	totalLines := len(inputLines)
+	totalLines := len(dispLines)
 	winStart := 0
 	if totalLines > contentH {
-		winStart = cursorLine - contentH + 1
+		winStart = cursorRow - contentH + 1
 		if winStart < 0 {
 			winStart = 0
 		}
@@ -1386,39 +1376,20 @@ func (m Model) renderInput() string {
 			prefix = cont
 		}
 
-		lineRunes := []rune(inputLines[i])
+		lineRunes := dispLines[i]
 		var lineContent string
-		if i == cursorLine {
-			col := cursorCol
-			viewStart := 0
-			if col >= avail {
-				viewStart = col - avail + 1
-			}
-			if viewStart > 0 {
-				lineRunes = lineRunes[viewStart:]
-				col -= viewStart
-			}
-			if len(lineRunes) > avail {
-				lineRunes = lineRunes[:avail]
-			}
-			before := string(lineRunes[:min(col, len(lineRunes))])
+		if i == cursorRow {
+			col := min(cursorCol, len(lineRunes))
+			before := string(lineRunes[:col])
 			var curChar, after string
 			if col < len(lineRunes) {
 				curChar = cursorStyle.Render(string(lineRunes[col]))
-				remaining := avail - col - 1
-				tail := lineRunes[col+1:]
-				if len(tail) > remaining {
-					tail = tail[:remaining]
-				}
-				after = string(tail)
+				after = string(lineRunes[col+1:])
 			} else {
 				curChar = cursorStyle.Render(" ")
 			}
 			lineContent = before + curChar + after
 		} else {
-			if len(lineRunes) > avail {
-				lineRunes = lineRunes[:avail]
-			}
 			lineContent = string(lineRunes)
 		}
 
@@ -1449,8 +1420,8 @@ func (m Model) renderInput() string {
 // Grows with content up to a third of the screen height.
 func (m Model) inputHeight() int {
 	maxContentH := max(1, m.height/3-2) // max inner content rows
-	n := strings.Count(string(m.input), "\n") + 1
-	return min(n, maxContentH) + 2 // +2 for top and bottom border
+	dispLines, _, _ := wrapInputDisplay(m.input, m.inputPos, m.inputAvailWidth())
+	return min(len(dispLines), maxContentH) + 2 // +2 for top and bottom border
 }
 
 // convHeight returns the number of rows available for conversation display.
@@ -1517,6 +1488,93 @@ func inputLineEnd(input []rune, pos int) int {
 		pos++
 	}
 	return pos
+}
+
+// inputAvailWidth returns the number of columns available for input text
+// content inside the input box, after the border and prompt/continuation gutter.
+func (m Model) inputAvailWidth() int {
+	innerW := m.width - 2
+	if innerW < 1 {
+		innerW = 1
+	}
+	pw := lipgloss.Width(inputPromptSty.Render("▶ "))
+	avail := innerW - pw
+	if avail < 1 {
+		avail = 1
+	}
+	return avail
+}
+
+// wrapLineOffsets returns the rune offsets, within a single logical (no '\n')
+// line, at which word-wrapped display rows begin. Every rune of line belongs
+// to exactly one resulting row, so cursor positions map back exactly.
+func wrapLineOffsets(line []rune, width int) []int {
+	if width < 1 {
+		width = 1
+	}
+	n := len(line)
+	if n == 0 {
+		return []int{0}
+	}
+	offsets := []int{0}
+	start := 0
+	for n-start > width {
+		end := start + width - 1 // last index that keeps the row within width
+		breakAt := -1
+		for k := end; k > start; k-- {
+			if line[k] == ' ' {
+				breakAt = k
+				break
+			}
+		}
+		var next int
+		if breakAt == -1 {
+			next = start + width
+		} else {
+			next = breakAt + 1
+		}
+		// Trailing spaces at a wrap point are invisible either way, so fold
+		// them into the row being closed rather than starting a blank row.
+		for next < n && line[next] == ' ' {
+			next++
+		}
+		offsets = append(offsets, next)
+		start = next
+	}
+	return offsets
+}
+
+// wrapInputDisplay word-wraps input (which may contain '\n') into display
+// rows no wider than width runes, and reports the display row/col of pos.
+func wrapInputDisplay(input []rune, pos int, width int) (lines [][]rune, cursorRow, cursorCol int) {
+	n := len(input)
+	i := 0
+	for {
+		j := i
+		for j < n && input[j] != '\n' {
+			j++
+		}
+		line := input[i:j]
+		offsets := wrapLineOffsets(line, width)
+		for k, off := range offsets {
+			segEnd := len(line)
+			if k+1 < len(offsets) {
+				segEnd = offsets[k+1]
+			}
+			lines = append(lines, line[off:segEnd])
+
+			absStart, absEnd := i+off, i+segEnd
+			isLastSeg := k == len(offsets)-1
+			if (pos >= absStart && pos < absEnd) || (isLastSeg && pos == absEnd) {
+				cursorRow, cursorCol = len(lines)-1, pos-absStart
+			}
+		}
+		if j >= n {
+			break
+		}
+		i = j + 1
+	}
+	return lines, cursorRow, cursorCol
 }
 
 // ─── commands ────────────────────────────────────────────────────────────────

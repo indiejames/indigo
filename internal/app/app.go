@@ -169,6 +169,7 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 	if startLine > 0 {
 		m = m.AtLine(startLine)
 	}
+	recordRecentFile(workDir, absPath)
 	cfgPath, cfgMod := configPathAndMtime()
 	a := &App{
 		rpc:            rpc,
@@ -187,6 +188,18 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 		a.resizeAllBuffers()
 	}
 	return a
+}
+
+// newDirectoryPicker creates the file picker for the "no buffers open yet"
+// case, defaulting to the recent-files view when workDir has a non-empty
+// recent-files list recorded from a previous session.
+func (a App) newDirectoryPicker() *filePicker {
+	fp := newFilePicker(a.workDir, "", a.width, a.height, a.cfg.FuzzySearch)
+	if recents := loadRecentFiles(a.workDir); len(recents) > 0 {
+		fp.recentFiles = recents
+		fp.recentMode = true
+	}
+	return fp
 }
 
 // NewWithPicker creates an App with the file picker open immediately
@@ -234,7 +247,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = msg.Height
 		// Auto-open picker when started with a directory (no buffers yet).
 		if len(a.buffers) == 0 && a.picker == nil {
-			a.picker = newFilePicker(a.workDir, "", a.width, a.height, a.cfg.FuzzySearch)
+			a.picker = a.newDirectoryPicker()
 		}
 		if a.picker != nil {
 			a.picker.width = msg.Width
@@ -456,6 +469,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ---- file opened ----
 	case bufferOpenedMsg:
 		m := msg.model
+		recordRecentFile(a.workDir, m.FilePath())
 		if msg.line >= 0 {
 			if msg.col >= 0 && msg.matchLen > 0 {
 				m = m.AtMatch(msg.line, msg.col, msg.matchLen, a.bufHeight())
@@ -705,7 +719,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			switch km.String() {
 			case "ctrl+p":
-				a.picker = newFilePicker(a.workDir, "", a.width, a.height, a.cfg.FuzzySearch)
+				a.picker = a.newDirectoryPicker()
 			case "ctrl+c", "q":
 				return a, a.doDisconnectAndQuit()
 			}

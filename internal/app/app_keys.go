@@ -15,6 +15,12 @@ func (a App) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, func() tea.Msg { return pickerCancelledMsg{} }
 
 	case "enter":
+		if a.picker.showingRecent() {
+			if path := a.picker.selectedPath(); path != "" {
+				return a, func() tea.Msg { return pickedMsg{absPath: path} }
+			}
+			return a, nil
+		}
 		if a.picker.browseMode() {
 			e := a.picker.selectedEntry()
 			if e == nil {
@@ -52,6 +58,12 @@ func (a App) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.picker.moveUp()
 	case "down", "ctrl+n":
 		a.picker.moveDown()
+
+	case "tab":
+		if a.picker.browseMode() && len(a.picker.recentFiles) > 0 {
+			a.picker.recentMode = !a.picker.recentMode
+			a.picker.cursor = 0
+		}
 
 	case "backspace":
 		q := []rune(a.picker.query)

@@ -26,10 +26,12 @@ type pickerEntry struct {
 // filePicker is the file-selection overlay.
 //
 // Browse mode (query == ""): shows the contents of currentDir — directories
-// first, then files, with ".." prepended when not at the project root.
+// first, then files, with ".." prepended when not at the project root. If
+// recentMode is set, it shows recentFiles (a flat MRU list) instead.
 //
 // Search mode (query != ""): shows a globally fuzzy-filtered flat file list,
-// same as the previous behaviour. Clearing the query returns to browse mode.
+// same as the previous behaviour. Clearing the query returns to browse mode
+// (recentMode, if set, is preserved across the round trip).
 type filePicker struct {
 	workDir     string
 	currentDir  string        // workspace-relative path; "" = project root
@@ -41,7 +43,13 @@ type filePicker struct {
 	width       int
 	height      int
 	fuzzySearch bool
+
+	recentMode  bool     // showing recentFiles instead of the directory browser
+	recentFiles []string // workspace-relative paths, most-recently-opened first
 }
+
+// showingRecent reports whether the recent-files list is currently displayed.
+func (fp *filePicker) showingRecent() bool { return fp.browseMode() && fp.recentMode }
 
 // pickedMsg is sent when the user selects a file.
 type pickedMsg struct{ absPath string }
@@ -218,7 +226,10 @@ func (fp *filePicker) moveUp() {
 
 func (fp *filePicker) moveDown() {
 	limit := len(fp.entries) - 1
-	if !fp.browseMode() {
+	switch {
+	case fp.showingRecent():
+		limit = len(fp.recentFiles) - 1
+	case !fp.browseMode():
 		limit = len(fp.filtered) - 1
 	}
 	if fp.cursor < limit {
@@ -237,6 +248,12 @@ func (fp *filePicker) selectedEntry() *pickerEntry {
 // selectedPath returns the absolute path for the highlighted item.
 // Returns "" in browse mode when a directory is selected.
 func (fp *filePicker) selectedPath() string {
+	if fp.showingRecent() {
+		if fp.cursor < 0 || fp.cursor >= len(fp.recentFiles) {
+			return ""
+		}
+		return filepath.Join(fp.workDir, fp.recentFiles[fp.cursor])
+	}
 	if fp.browseMode() {
 		e := fp.selectedEntry()
 		if e == nil || e.isDir {
@@ -325,9 +342,12 @@ func (fp *filePicker) View() string {
 	var sb strings.Builder
 
 	// Title / breadcrumb row.
-	if fp.browseMode() {
+	switch {
+	case fp.showingRecent():
+		sb.WriteString(pickerTitleStyle.Render(clamp("  Recent Files")))
+	case fp.browseMode():
 		sb.WriteString(pickerTitleStyle.Render(clamp("  " + fp.breadcrumb())))
-	} else {
+	default:
 		sb.WriteString(pickerTitleStyle.Render(clamp("  Open File")))
 	}
 	sb.WriteByte('\n')
@@ -343,7 +363,11 @@ func (fp *filePicker) View() string {
 	// Collect display strings and dir flags for the current mode.
 	var labels []string
 	var isDir []bool
-	if fp.browseMode() {
+	switch {
+	case fp.showingRecent():
+		labels = append(labels, fp.recentFiles...)
+		isDir = make([]bool, len(fp.recentFiles))
+	case fp.browseMode():
 		for _, e := range fp.entries {
 			if e.isDir {
 				labels = append(labels, e.name+"/")
@@ -352,7 +376,7 @@ func (fp *filePicker) View() string {
 			}
 			isDir = append(isDir, e.isDir)
 		}
-	} else {
+	default:
 		for _, p := range fp.filtered {
 			labels = append(labels, p)
 			isDir = append(isDir, false)
@@ -393,9 +417,15 @@ func (fp *filePicker) View() string {
 
 	// Hint row.
 	var hint string
-	if fp.browseMode() {
+	switch {
+	case fp.showingRecent():
+		hint = "  ↑/↓ navigate   Enter open   Tab show all   Esc cancel"
+	case fp.browseMode():
 		hint = "  ↑/↓ navigate   Enter open/cd   Bksp up   Esc cancel"
-	} else {
+		if len(fp.recentFiles) > 0 {
+			hint = "  ↑/↓ navigate   Enter open/cd   Bksp up   Tab recent   Esc cancel"
+		}
+	default:
 		hint = "  ↑/↓ navigate   Enter open   Bksp clear/up   Esc cancel"
 	}
 	sb.WriteString(pickerItemStyle.Render(clamp(hint)))

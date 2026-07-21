@@ -204,3 +204,46 @@ func TestSelectedEmpty(t *testing.T) {
 		t.Errorf("selectedPath() on empty search picker = %q, want empty string", got)
 	}
 }
+
+// TestShowingRecentSelectedPath verifies that selectedPath() resolves the
+// highlighted recent-files entry, and only while in recent mode.
+func TestShowingRecentSelectedPath(t *testing.T) {
+	fp := &filePicker{
+		workDir:     "/workspace",
+		recentMode:  true,
+		recentFiles: []string{"internal/app/app.go", "cmd/main.go"},
+		cursor:      1,
+	}
+	if !fp.showingRecent() {
+		t.Fatal("showingRecent() = false, want true")
+	}
+	want := "/workspace/cmd/main.go"
+	if got := fp.selectedPath(); got != want {
+		t.Errorf("selectedPath() = %q, want %q", got, want)
+	}
+
+	// A non-empty query exits recent mode even if recentMode is still set.
+	fp.query = "main"
+	if fp.showingRecent() {
+		t.Fatal("showingRecent() = true while query is non-empty, want false")
+	}
+}
+
+// TestShowingRecentMoveDown verifies moveDown() is bounded by len(recentFiles)
+// rather than len(entries) while showing the recent-files list.
+func TestShowingRecentMoveDown(t *testing.T) {
+	fp := &filePicker{
+		workDir:     "/workspace",
+		recentMode:  true,
+		recentFiles: []string{"a.go", "b.go"},
+		entries:     []pickerEntry{{name: "unrelated_dir", isDir: true}},
+	}
+	fp.moveDown()
+	if fp.cursor != 1 {
+		t.Fatalf("cursor after moveDown() = %d, want 1", fp.cursor)
+	}
+	fp.moveDown() // already at the last recent entry — should not advance further
+	if fp.cursor != 1 {
+		t.Fatalf("cursor after second moveDown() = %d, want 1 (clamped)", fp.cursor)
+	}
+}

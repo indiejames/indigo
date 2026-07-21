@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -233,7 +234,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = msg.Height
 		// Auto-open picker when started with a directory (no buffers yet).
 		if len(a.buffers) == 0 && a.picker == nil {
-			a.picker = newFilePicker(a.workDir, a.width, a.height, a.cfg.FuzzySearch)
+			a.picker = newFilePicker(a.workDir, "", a.width, a.height, a.cfg.FuzzySearch)
 		}
 		if a.picker != nil {
 			a.picker.width = msg.Width
@@ -284,7 +285,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ---- picker open ----
 	case client.OpenPickerMsg:
-		a.picker = newFilePicker(a.workDir, a.width, a.height, a.cfg.FuzzySearch)
+		a.picker = newFilePicker(a.workDir, a.activeFileDir(), a.width, a.height, a.cfg.FuzzySearch)
 		return a, nil
 
 	// ---- picker result ----
@@ -704,7 +705,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			switch km.String() {
 			case "ctrl+p":
-				a.picker = newFilePicker(a.workDir, a.width, a.height, a.cfg.FuzzySearch)
+				a.picker = newFilePicker(a.workDir, "", a.width, a.height, a.cfg.FuzzySearch)
 			case "ctrl+c", "q":
 				return a, a.doDisconnectAndQuit()
 			}
@@ -743,6 +744,21 @@ func (a *App) resizeAllBuffers() tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	return tea.Batch(cmds...)
+}
+
+// activeFileDir returns the workspace-relative directory containing the
+// active buffer's file, or "" (project root) if there is no active buffer
+// or its file lies outside workDir.
+func (a App) activeFileDir() string {
+	if len(a.buffers) == 0 {
+		return ""
+	}
+	dir := filepath.Dir(a.buffers[a.active].FilePath())
+	rel, err := filepath.Rel(a.workDir, dir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return rel
 }
 
 // handleCloseBuffer closes the active buffer and switches to the next, or quits.

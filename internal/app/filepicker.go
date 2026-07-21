@@ -49,9 +49,12 @@ type pickedMsg struct{ absPath string }
 // pickerCancelledMsg is sent when the user presses Esc.
 type pickerCancelledMsg struct{}
 
-func newFilePicker(workDir string, w, h int, fuzzySearch bool) *filePicker {
+// startDir is the workspace-relative directory to browse into initially;
+// "" opens at the project root.
+func newFilePicker(workDir, startDir string, w, h int, fuzzySearch bool) *filePicker {
 	fp := &filePicker{
 		workDir:     workDir,
+		currentDir:  startDir,
 		width:       w,
 		height:      h,
 		fuzzySearch: fuzzySearch,

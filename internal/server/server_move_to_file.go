@@ -164,6 +164,6 @@ func (s *editorService) appendTextToFile(clientID uint64, path, text string) err
 	if err := atomicWriteFile(path, []byte(appendedContent(existing, text)), 0644); err != nil {
 		return err
 	}
-	s.rewatch(path)
+	s.addPathWatch(path)
 	return nil
 }

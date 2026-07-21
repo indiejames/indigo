@@ -50,7 +50,6 @@ func SocketPath(dir string) string {
 	return filepath.Join(socketDir(dir), "server.sock")
 }
 
-
 // IsRunning returns true if a server socket exists and is accepting connections.
 func IsRunning(socketPath string) bool {
 	conn, err := net.Dial("unix", socketPath)
@@ -87,9 +86,11 @@ type editorService struct {
 	pluginMgr *plugin.Manager
 	cfg       *config.Config
 
-	watcher      *fsnotify.Watcher
-	savingMu     sync.Mutex
-	savingPaths  map[string]time.Time // paths currently being saved by indigo
+	watcher     *fsnotify.Watcher
+	watchMu     sync.Mutex
+	dirWatches  map[string]int // containing dir -> number of watched paths inside it
+	savingMu    sync.Mutex
+	savingPaths map[string]time.Time // paths currently being saved by indigo
 
 	// Plugin-driven popup state. Stored while a popup is visible on clients.
 	popupOnSelect func(data string)
@@ -130,6 +131,7 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 		recDir:          recDir,
 		lspMgr:          lspMgr,
 		watcher:         watcher,
+		dirWatches:      make(map[string]int),
 		savingPaths:     make(map[string]time.Time),
 		fmtMgr:          format.NewManager(lspMgr, cfg, workspaceDir),
 		cfg:             cfg,
@@ -209,6 +211,46 @@ func (s *editorService) handleExternalWrite(path string) {
 		_, err := fut.Struct()
 		rel()
 		serverLog("handleExternalWrite: client[%d] FileChanged returned err=%v", i, err)
+	}
+}
+
+// addPathWatch registers path for external-change notifications by watching
+// its containing directory rather than the file itself. kqueue-style watches
+// (used by fsnotify on macOS) are tied to a specific inode: when a file is
+// replaced — as `git checkout` does, via unlink+create rather than an
+// in-place write — the watch on that inode is stranded, and fsnotify's own
+// best-effort recovery for this case is racy and can silently drop the watch
+// for good. Watching the containing directory sidesteps the problem entirely
+// since the directory's inode isn't replaced when a file inside it is.
+func (s *editorService) addPathWatch(path string) {
+	if s.watcher == nil || path == "" {
+		return
+	}
+	dir := filepath.Dir(path)
+	s.watchMu.Lock()
+	defer s.watchMu.Unlock()
+	if s.dirWatches[dir] == 0 {
+		s.watcher.Add(dir) //nolint:errcheck
+	}
+	s.dirWatches[dir]++
+}
+
+// removePathWatch undoes a prior addPathWatch, dropping the directory watch
+// once no watched path inside it remains.
+func (s *editorService) removePathWatch(path string) {
+	if s.watcher == nil || path == "" {
+		return
+	}
+	dir := filepath.Dir(path)
+	s.watchMu.Lock()
+	defer s.watchMu.Unlock()
+	if s.dirWatches[dir] == 0 {
+		return
+	}
+	s.dirWatches[dir]--
+	if s.dirWatches[dir] == 0 {
+		delete(s.dirWatches, dir)
+		s.watcher.Remove(dir) //nolint:errcheck
 	}
 }
 

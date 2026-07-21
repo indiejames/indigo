@@ -494,6 +494,12 @@ type Model struct {
 	fixDecor *ClientDecoration // decoration being fixed (nil for action-only items)
 	fixIdx   int
 
+	// pendingExtract holds a range-extract action's (Extract Function/
+	// Extract Variable) edits while the user is prompted for the new
+	// symbol's name on the command line; see startExtractRenamePrompt and
+	// the "extract-rename " command-line prefix in executeCommand.
+	pendingExtract *pendingExtractRename
+
 	// Mark for deferred selection: set with z, select-to with Z.
 	mark *document.Pos
 

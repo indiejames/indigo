@@ -314,6 +314,7 @@ func (m Model) fetchFixes() tea.Cmd {
 				items = append(items, ClientFixItem{
 					Label:    a.Title,
 					LspEdits: a.Edits,
+					LspKind:  a.Kind,
 				})
 			}
 		}
@@ -354,6 +355,46 @@ func applyLspEdits(m Model, edits []ClientLspEdit) (Model, tea.Cmd) {
 		}
 	}
 	return applyBatch(m, ops)
+}
+
+// doApplyExtractAndRename applies a pending range-extract action's edits
+// (Extract Function/Extract Variable), then immediately renames the
+// server's default name for the newly introduced symbol (e.g.
+// "newFunction"/"newVar") to newName via a real LSP rename — so the user
+// only ever sees the final name, and the rename is cross-file-capable like
+// any other Rename Symbol, not a local text-only substitution.
+func (m Model) doApplyExtractAndRename(edits []ClientLspEdit, kind, newName string) (Model, tea.Cmd) {
+	oldContent := m.buf.Content()
+	m2, applyCmd := applyLspEdits(m, edits)
+
+	name := ""
+	if len(edits) == 1 {
+		name = detectExtractedName(oldContent, edits[0].NewText)
+	}
+	if name == "" {
+		name = defaultExtractedName(kind)
+	}
+	if name == "" {
+		m2.status = "Extracted (couldn't determine the new name to rename automatically)"
+		return m2, applyCmd
+	}
+
+	positions := findWholeWordOccurrences(m2, name)
+	if len(positions) == 0 {
+		m2.status = "Extracted (couldn't locate the new symbol to rename automatically)"
+		return m2, applyCmd
+	}
+	// Definition-vs-call-site order isn't guaranteed (gopls typically places
+	// the extracted definition after the call site in the file), but any
+	// occurrence resolves the same symbol for LSP rename purposes.
+	m2.cursor = positions[0]
+
+	// tea.Sequence, not tea.Batch: the rename request must not reach the
+	// server until the extraction's ops have actually been applied and
+	// acknowledged there — otherwise it can race the (fire-and-forget)
+	// gopls notification and rename against a stale pre-extraction view of
+	// the file, silently missing occurrences.
+	return m2, tea.Sequence(applyCmd, m2.doRenameSymbol(newName))
 }
 
 // applyFixCmd applies the selected fix: either a direct text replacement or a

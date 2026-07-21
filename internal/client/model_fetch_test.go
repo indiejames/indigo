@@ -2,6 +2,7 @@ package client
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/indiejames/indigo/internal/document"
@@ -105,5 +106,59 @@ func TestApplyLspEditsMultipleEdits(t *testing.T) {
 
 	if got := m2.buf.Content(); got != "AAA\nbbb\nCCC\n" {
 		t.Errorf("content = %q, want %q", got, "AAA\nbbb\nCCC\n")
+	}
+}
+
+func TestDoApplyExtractAndRenameAppliesEditAndPositionsCursorForRename(t *testing.T) {
+	m := newTestModel("func example() {\n\tx := 1\n\ty := 2\n\tz := x + y\n\tfmt.Println(z)\n}\n")
+	m.rpc = &RPC{}
+
+	edits := []ClientLspEdit{{
+		FromLine: 0, FromCol: 0, ToLine: 5, ToCol: 1,
+		NewText: "func example() {\n\tz := newFunction()\n\tfmt.Println(z)\n}\n\nfunc newFunction() int {\n\tx := 1\n\ty := 2\n\tz := x + y\n\treturn z\n}",
+	}}
+
+	m2, cmd := m.doApplyExtractAndRename(edits, "refactor.extract.function", "sum")
+
+	if !m2.buf.Dirty() {
+		t.Error("buffer should be dirty after applying the extract edit")
+	}
+	if len(m2.undoStack) != 1 {
+		t.Errorf("undoStack len = %d, want 1", len(m2.undoStack))
+	}
+	// Cursor lands on "newFunction"'s definition (first occurrence), ready
+	// for doRenameSymbol to target it.
+	line := m2.buf.Line(m2.cursor.Line)
+	if !strings.Contains(line, "newFunction") {
+		t.Errorf("cursor line = %q, want it to contain newFunction's definition", line)
+	}
+	if cmd == nil {
+		t.Error("expected a non-nil cmd batching the apply + rename")
+	}
+}
+
+func TestDoApplyExtractAndRenameFallsBackToDefaultName(t *testing.T) {
+	// The extracted body has no new repeated identifier of its own (e.g. a
+	// single-expression extract-variable where detectExtractedName can't
+	// find a def+use pair inside this one edit) -- fall back to the
+	// well-known gopls default for the action kind.
+	m := newTestModel("x := 1 + 2\n")
+	m.rpc = &RPC{}
+
+	edits := []ClientLspEdit{{
+		FromLine: 0, FromCol: 5, ToLine: 0, ToCol: 10,
+		NewText: "newVar",
+	}}
+
+	m2, cmd := m.doApplyExtractAndRename(edits, "refactor.extract.variable", "sum")
+
+	if got := m2.buf.Content(); got != "x := newVar\n" {
+		t.Fatalf("content = %q, want %q", got, "x := newVar\n")
+	}
+	if m2.cursor.Line != 0 || m2.cursor.Col != 5 {
+		t.Errorf("cursor = (%d,%d), want (0,5) at newVar's position", m2.cursor.Line, m2.cursor.Col)
+	}
+	if cmd == nil {
+		t.Error("expected a non-nil cmd batching the apply + rename")
 	}
 }

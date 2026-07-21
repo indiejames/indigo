@@ -451,6 +451,9 @@ func (s *editorService) LspCodeActions(_ context.Context, call proto.EditorServi
 		if err := item.SetTitle(ae.action.Title); err != nil {
 			return err
 		}
+		if err := item.SetKind(ae.action.Kind); err != nil {
+			return err
+		}
 		edits := ae.edits
 		el, err := item.NewEdits(int32(len(edits)))
 		if err != nil {
@@ -560,16 +563,34 @@ func (s *editorService) LspRename(_ context.Context, call proto.EditorService_ls
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 	path := entry.buf.Path()
+	content := entry.buf.Content()
 	s.mu.Unlock()
+
+	if line >= 0 && line < entry.buf.LineCount() {
+		serverLog("LspRename: DEBUG path=%q line=%d col=%d target-line-content=%q buf-version=%d", path, line, col, entry.buf.Line(line), entry.buf.Version())
+	}
 
 	res, err := call.AllocResults()
 	if err != nil {
 		return err
 	}
 
-	edit, err := s.lspMgr.Rename(path, line, col, newName)
-	if err != nil || edit == nil {
+	// RenameAfterChange (not a separate DidChange + Rename) ensures gopls
+	// (or whichever server) has this buffer's *current* content before
+	// computing the rename, and that nothing else can slip a stale
+	// DidChange in between the two — see its doc comment. A rename issued
+	// immediately after an edit (e.g. right after Extract Function) has to
+	// guard against exactly that, or it silently computes against a stale
+	// pre-edit view of the file, missing occurrences like the
+	// just-introduced definition.
+	edit, err := s.lspMgr.RenameAfterChange(path, content, line, col, newName)
+	if err != nil {
+		serverLog("LspRename: path=%q line=%d col=%d newName=%q failed: %v", path, line, col, newName, err)
 		return err
+	}
+	if edit == nil {
+		serverLog("LspRename: path=%q line=%d col=%d newName=%q: server returned no edit", path, line, col, newName)
+		return nil
 	}
 
 	byURI := lspEditsByURI(edit)

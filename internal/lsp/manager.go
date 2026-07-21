@@ -249,6 +249,19 @@ func (m *Manager) Rename(path string, line, col int, newName string) (*Workspace
 	return nil, nil
 }
 
+// RenameAfterChange is like Rename, but first notifies the server of
+// content's current state and performs the rename request atomically with
+// that notification (see Client.RenameAfterChange) — used right after an
+// edit that a rename immediately depends on, e.g. Extract Function's
+// automatic follow-up rename of the server's default name.
+func (m *Manager) RenameAfterChange(path, content string, line, col int, newName string) (*WorkspaceEdit, error) {
+	if c := m.clientForPath(path); c != nil {
+		m.ensureOpened(c, path)
+		return c.RenameAfterChange(path, content, line, col, newName)
+	}
+	return nil, nil
+}
+
 // Format requests formatting for path from its language server.
 // Returns (content, false, nil) when no server is configured or formatting is unsupported.
 func (m *Manager) Format(path, content string) (string, bool, error) {

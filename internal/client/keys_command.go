@@ -18,6 +18,7 @@ func (m Model) handleCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = ModeNormal
 		m.cmdBuf = ""
 		m.cmdCompletionIdx = -1
+		m.pendingExtract = nil
 
 	case "tab", "down":
 		matches := filteredCmds(m.cmdBuf)
@@ -219,6 +220,12 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 			}
 			return m, m.doSaveAsNow(newPath, true)
 		}
+		if newName, ok := strings.CutPrefix(cmd, "extract-rename "); ok && strings.TrimSpace(newName) != "" && m.pendingExtract != nil {
+			p := m.pendingExtract
+			m.pendingExtract = nil
+			return m.doApplyExtractAndRename(p.edits, p.kind, strings.TrimSpace(newName))
+		}
+		m.pendingExtract = nil
 		if newName, ok := strings.CutPrefix(cmd, "rename "); ok && strings.TrimSpace(newName) != "" {
 			return m, m.doRenameSymbol(strings.TrimSpace(newName))
 		}

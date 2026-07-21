@@ -134,6 +134,12 @@ struct PluginEdit {
 struct LspCodeAction {
   title       @0 :Text;
   edits       @1 :List(PluginEdit);
+  # kind is the LSP CodeActionKind (e.g. "refactor.extract.function"). Used
+  # client-side to detect range-extract refactors that introduce a new,
+  # not-yet-named symbol, so the client can prompt for a name and rename it
+  # immediately via a real LSP rename instead of leaving gopls's default
+  # ("newFunction"/"newVar") in place.
+  kind        @2 :Text;
 }
 
 enum PluginDecorationKind {

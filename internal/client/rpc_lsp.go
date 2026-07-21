@@ -421,6 +421,7 @@ func (r *RPC) LspRename(ctx context.Context, bufID uint32, line, col int, newNam
 // ClientLspCodeAction is a code action returned by the LSP server.
 type ClientLspCodeAction struct {
 	Title string
+	Kind  string
 	Edits []ClientLspEdit
 }
 
@@ -464,7 +465,8 @@ func (r *RPC) LspCodeActions(ctx context.Context, bufID uint32, startLine, start
 				NewText:  nt,
 			}
 		}
-		out[i] = ClientLspCodeAction{Title: title, Edits: editList}
+		kind, _ := item.Kind()
+		out[i] = ClientLspCodeAction{Title: title, Kind: kind, Edits: editList}
 	}
 	return out, nil
 }

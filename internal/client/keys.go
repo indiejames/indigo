@@ -471,10 +471,17 @@ func (m Model) handleFixPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// path (they must mutate the model's undo stack and buffer);
 		// plugin fixes/replacements go through the async command as before.
 		if idx >= 0 && idx < len(m.fixItems) && len(m.fixItems[idx].LspEdits) > 0 {
-			edits := m.fixItems[idx].LspEdits
+			item := m.fixItems[idx]
 			m.fixItems = nil
 			m.fixDecor = nil
-			return applyLspEdits(m, edits)
+			// Range-extract refactors (Extract Function/Extract Variable)
+			// introduce a brand-new symbol the server names itself
+			// ("newFunction"/"newVar") — prompt for the real name instead
+			// of applying that default.
+			if strings.HasPrefix(item.LspKind, "refactor.extract.") {
+				return startExtractRenamePrompt(m, item.LspEdits, item.LspKind)
+			}
+			return applyLspEdits(m, item.LspEdits)
 		}
 		cmd := m.applyFixCmd(idx)
 		m.fixItems = nil

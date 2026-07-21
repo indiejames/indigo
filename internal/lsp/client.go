@@ -144,13 +144,22 @@ func (c *Client) DidOpen(path, content string) error {
 }
 
 // DidChange notifies the server of a content change (full-text sync).
+//
+// The version bump and the notification write happen under the same lock
+// (not just the bump) so concurrent DidChange calls for this client — e.g.
+// ApplyOp/ApplyOps each fire one in their own goroutine — can't reach the
+// server out of version order. LSP servers key their document snapshot on
+// this version; two calls racing past the old bump-then-unlock split could
+// hand out version 5 and 6 but write 6 before 5, leaving the server's
+// documented state one edit behind (and any request sent right after,
+// like a rename, silently computed against stale content).
 func (c *Client) DidChange(path, content string) error {
 	uri := pathToURI(path)
 
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.docVersions[uri]++
 	ver := c.docVersions[uri]
-	c.mu.Unlock()
 
 	return c.conn.Notify("textDocument/didChange", DidChangeTextDocumentParams{
 		TextDocument: VersionedTextDocumentIdentifier{URI: uri, Version: ver},
@@ -441,7 +450,53 @@ func (c *Client) Rename(path string, line, col int, newName string) (*WorkspaceE
 	if !supported {
 		return nil, nil
 	}
+	return c.rename(path, line, col, newName)
+}
 
+// RenameAfterChange notifies the server of content's current state and then
+// immediately requests a rename at (line, col) — holding the client's lock
+// across both the notification and the rename round trip, not just the
+// notification's write.
+//
+// A rename issued right after an edit (e.g. Extract Function's automatic
+// follow-up rename) needs the server's snapshot to reflect that edit before
+// it computes the rename. DidChange alone isn't enough to guarantee that:
+// nothing stops some other, unrelated DidChange call for this same client
+// — most plausibly a slow-to-schedule goroutine from one of the edit's own
+// ApplyOp calls — from landing in the gap between "my fresh notification"
+// and "my rename request", invalidating the snapshot right as the rename
+// arrives (observed as gopls returning "no identifier found" for a
+// position that is in fact exactly on the target identifier). Holding the
+// lock for the whole call, not just DidChange's write, closes that gap:
+// every DidChange this client sends goes through the same lock, so none can
+// interleave between the two calls made here.
+func (c *Client) RenameAfterChange(path, content string, line, col int, newName string) (*WorkspaceEdit, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	supported := c.caps.RenameProvider != nil
+	if !supported {
+		return nil, nil
+	}
+
+	uri := pathToURI(path)
+	c.docVersions[uri]++
+	ver := c.docVersions[uri]
+	if err := c.conn.Notify("textDocument/didChange", DidChangeTextDocumentParams{
+		TextDocument: VersionedTextDocumentIdentifier{URI: uri, Version: ver},
+		ContentChanges: []TextDocumentContentChangeEvent{
+			{Text: content},
+		},
+	}); err != nil {
+		return nil, err
+	}
+
+	return c.rename(path, line, col, newName)
+}
+
+// rename performs the textDocument/rename round trip. Callers are
+// responsible for checking RenameProvider support first.
+func (c *Client) rename(path string, line, col int, newName string) (*WorkspaceEdit, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

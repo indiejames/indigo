@@ -43,16 +43,6 @@ func atomicWriteFile(path string, data []byte, defaultMode os.FileMode) error {
 	return os.Rename(tmpName, path)
 }
 
-// rewatch re-establishes the fsnotify watch on path. Rename-based saves
-// replace the inode, which strands kqueue-style watches on the old file.
-func (s *editorService) rewatch(path string) {
-	if s.watcher == nil {
-		return
-	}
-	s.watcher.Remove(path) //nolint:errcheck // may already be gone
-	s.watcher.Add(path)    //nolint:errcheck
-}
-
 func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_openFile) error {
 	args := call.Args()
 	clientID := args.ClientId()
@@ -113,9 +103,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	if path != "" {
 		go s.lspMgr.DidOpen(path, content)
 		go s.pluginMgr.DispatchBufferOpen(context.Background(), bufID, path)
-		if s.watcher != nil {
-			s.watcher.Add(path) //nolint:errcheck
-		}
+		s.addPathWatch(path)
 	}
 	return nil
 }
@@ -421,7 +409,6 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 		s.unmarkSaving(path)
 		return err
 	}
-	s.rewatch(path)
 	s.unmarkSaving(path)
 	entry.buf.SetClean()
 	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
@@ -448,14 +435,17 @@ func (s *editorService) SaveAs(_ context.Context, call proto.EditorService_saveA
 	}
 
 	content := entry.buf.Content()
+	oldPath := entry.buf.Path()
 	s.markSaving(newPath)
 	if err := atomicWriteFile(newPath, []byte(content), 0o644); err != nil {
 		s.unmarkSaving(newPath)
 		return err
 	}
-	s.rewatch(newPath)
 	s.unmarkSaving(newPath)
-	oldPath := entry.buf.Path()
+	if oldPath != newPath {
+		s.removePathWatch(oldPath)
+		s.addPathWatch(newPath)
+	}
 	entry.buf = document.New(newPath, content)
 	entry.buf.SetClean()
 	s.mu.Lock()
@@ -510,9 +500,7 @@ func (s *editorService) CloseBuffer(_ context.Context, call proto.EditorService_
 	// sha256("") recovery entry so it isn't replayed on the next invocation.
 	os.Remove(recoveryFilePath(s.recDir, removedPath)) //nolint:errcheck
 	if removedPath != "" {
-		if s.watcher != nil {
-			s.watcher.Remove(removedPath) //nolint:errcheck
-		}
+		s.removePathWatch(removedPath)
 		go s.lspMgr.DidClose(removedPath)
 		go s.pluginMgr.DispatchBufferClose(context.Background(), bufID, removedPath)
 	}

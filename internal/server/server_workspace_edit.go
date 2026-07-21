@@ -166,8 +166,8 @@ func (s *editorService) ApplyWorkspaceEdits(_ context.Context, call proto.Editor
 // applyWorkspaceEditsOnDisk reads path fresh from disk, applies items via a
 // throwaway document.Buffer (reusing the same verify-then-apply logic as the
 // live-buffer path), and atomically writes the result back — using the same
-// markSaving/rewatch bookkeeping as a normal save so indigo's own write
-// doesn't re-trigger the fsnotify watcher.
+// markSaving bookkeeping as a normal save so indigo's own write doesn't
+// re-trigger the fsnotify watcher.
 func (s *editorService) applyWorkspaceEditsOnDisk(path string, clientID uint64, items []workspaceEditItem) (applied int, skippedIdx []int, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -185,6 +185,6 @@ func (s *editorService) applyWorkspaceEditsOnDisk(path string, clientID uint64, 
 	if err := atomicWriteFile(path, []byte(buf.Content()), 0644); err != nil {
 		return 0, nil, err
 	}
-	s.rewatch(path)
+	s.addPathWatch(path)
 	return applied, skippedIdx, nil
 }

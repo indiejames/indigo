@@ -2,6 +2,7 @@ package app
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -100,5 +101,89 @@ func TestRecordRecentFileIgnoresOutsideWorkDirAndUntitled(t *testing.T) {
 
 	if got := loadRecentFiles(workDir); len(got) != 0 {
 		t.Fatalf("loadRecentFiles = %v, want empty", got)
+	}
+}
+
+// TestRecordRecentFileExcludesGitInternalPath is a regression test: opening
+// a file like .git/COMMIT_EDITMSG (e.g. via the indigo-git plugin) must not
+// pollute the recent-files list, since it's not a project file.
+func TestRecordRecentFileExcludesGitInternalPath(t *testing.T) {
+	withTempHome(t)
+	workDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	commitMsgPath := filepath.Join(workDir, ".git", "COMMIT_EDITMSG")
+	os.WriteFile(commitMsgPath, []byte("msg"), 0644) //nolint:errcheck
+
+	recordRecentFile(workDir, commitMsgPath)
+
+	if got := loadRecentFiles(workDir); len(got) != 0 {
+		t.Fatalf("loadRecentFiles = %v, want empty (.git paths must be excluded)", got)
+	}
+}
+
+// runGit runs a git command in dir, failing the test on error.
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func TestRecordRecentFileExcludesGitignoredPath(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	withTempHome(t)
+	workDir := t.TempDir()
+	runGit(t, workDir, "init", "-q")
+	if err := os.WriteFile(filepath.Join(workDir, ".gitignore"), []byte("build/\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(workDir, "build"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ignoredPath := filepath.Join(workDir, "build", "output.go")
+	os.WriteFile(ignoredPath, nil, 0644) //nolint:errcheck
+	keptPath := filepath.Join(workDir, "main.go")
+	os.WriteFile(keptPath, nil, 0644) //nolint:errcheck
+
+	recordRecentFile(workDir, ignoredPath)
+	recordRecentFile(workDir, keptPath)
+
+	got := loadRecentFiles(workDir)
+	want := []string{"main.go"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("loadRecentFiles = %v, want %v (build/output.go must be gitignored out)", got, want)
+	}
+}
+
+// TestLoadRecentFilesSelfHealsNewlyGitignoredEntry verifies that an entry
+// which was fine when recorded, but is later added to .gitignore, drops out
+// on the next load without needing any migration of the persisted list.
+func TestLoadRecentFilesSelfHealsNewlyGitignoredEntry(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	withTempHome(t)
+	workDir := t.TempDir()
+	runGit(t, workDir, "init", "-q")
+	genPath := filepath.Join(workDir, "generated.go")
+	os.WriteFile(genPath, nil, 0644) //nolint:errcheck
+
+	recordRecentFile(workDir, genPath)
+	if got := loadRecentFiles(workDir); len(got) != 1 {
+		t.Fatalf("loadRecentFiles before gitignore = %v, want [generated.go]", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(workDir, ".gitignore"), []byte("generated.go\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := loadRecentFiles(workDir); len(got) != 0 {
+		t.Fatalf("loadRecentFiles after gitignore = %v, want empty", got)
 	}
 }

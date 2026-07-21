@@ -87,6 +87,10 @@ type ClientFixItem struct {
 
 	// LspEdits is set for LSP code actions; applied in reverse order to preserve offsets.
 	LspEdits []ClientLspEdit
+	// LspKind is the LSP CodeActionKind for LspEdits items (e.g.
+	// "refactor.extract.function"), used to detect range-extract refactors
+	// that introduce a new, not-yet-named symbol.
+	LspKind string
 }
 
 // ClientDecoration is one decoration item returned by a plugin provider.

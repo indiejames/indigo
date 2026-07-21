@@ -52,7 +52,11 @@ interface EditorService {
   references       @29 (bufId :UInt32, line :UInt32, col :UInt32) -> (locations :List(FileLocation));
   workspaceSymbols @30 (bufId :UInt32, query :Text)               -> (symbols :List(SymbolResult));
   documentSymbols  @31 (bufId :UInt32)                            -> (symbols :List(SymbolResult));
-  lspCodeActions     @32 (bufId :UInt32, line :UInt32, col :UInt32) -> (actions :List(LspCodeAction));
+  # line/col and endLine/endCol give the request range: equal for a plain
+  # cursor position, or the ordered bounds of an active selection so the
+  # language server can offer range-only actions like Extract Function/
+  # Extract Variable in addition to point-based quick-fixes.
+  lspCodeActions     @32 (bufId :UInt32, line :UInt32, col :UInt32, endLine :UInt32, endCol :UInt32) -> (actions :List(LspCodeAction));
   setActiveContext   @33 (clientId :UInt64, bufId :UInt32, filePath :Text, line :UInt32, col :UInt32) -> ();
   getActiveContext   @34 () -> (result :ActiveContext);
   setStatusBarText   @35 (key :Text, text :Text) -> ();
@@ -84,6 +88,20 @@ interface EditorService {
   # that registered it via registerMenuAction, identified by pluginName+command.
   # Reuses PluginKeyResult exactly like handlePluginKey.
   invokePluginMenuAction @42 (clientId :UInt64, bufId :UInt32, pluginName :Text, command :Text, cursorLine :UInt32, cursorCol :UInt32) -> (result :PluginKeyResult);
+  # Renames the symbol at (line, col) via the language server, applying the
+  # resulting edits across every affected file (same apply semantics as
+  # applyWorkspaceEdits: a path with a shared open buffer is edited in place,
+  # a path with no open buffer is patched on disk). appliedCount and
+  # fileCount are both 0 if there's no language server for this buffer, or
+  # it doesn't support renaming, or there was nothing to rename.
+  lspRename @43 (clientId :UInt64, bufId :UInt32, line :UInt32, col :UInt32, newName :Text) -> (appliedCount :UInt32, fileCount :UInt32);
+  # Moves the text in [fromLine,fromCol, toLine,toCol) (end exclusive) out of
+  # bufId and appends it to destPath, creating the file if it doesn't exist.
+  # destPath with a shared open buffer is edited in place; otherwise it's
+  # patched directly on disk (same semantics as applyWorkspaceEdits). No
+  # attempt is made to fix up imports or other cross-file references — the
+  # caller is responsible for that.
+  moveTextToFile @44 (clientId :UInt64, bufId :UInt32, fromLine :UInt32, fromCol :UInt32, toLine :UInt32, toCol :UInt32, destPath :Text) -> ();
 }
 
 # MenuItemInfo is one node in the Command-menu tree contributed by a plugin.
@@ -116,6 +134,12 @@ struct PluginEdit {
 struct LspCodeAction {
   title       @0 :Text;
   edits       @1 :List(PluginEdit);
+  # kind is the LSP CodeActionKind (e.g. "refactor.extract.function"). Used
+  # client-side to detect range-extract refactors that introduce a new,
+  # not-yet-named symbol, so the client can prompt for a name and rename it
+  # immediately via a real LSP rename instead of leaving gopls's default
+  # ("newFunction"/"newVar") in place.
+  kind        @2 :Text;
 }
 
 enum PluginDecorationKind {

@@ -396,18 +396,46 @@ type ClientLspEdit struct {
 	NewText           string
 }
 
-// ClientLspCodeAction is a code action returned by the LSP server.
-type ClientLspCodeAction struct {
-	Title string
-	Edits []ClientLspEdit
-}
-
-// LspCodeActions fetches quick-fix and refactor actions for the cursor position.
-func (r *RPC) LspCodeActions(ctx context.Context, bufID uint32, line, col int) ([]ClientLspCodeAction, error) {
-	fut, rel := r.svc.LspCodeActions(ctx, func(p proto.EditorService_lspCodeActions_Params) error {
+// LspRename renames the symbol at (line, col) via the language server,
+// applying the resulting edits across every affected file server-side.
+// Returns how many edits were applied and across how many files; both are 0
+// if there's no language server for this buffer, it doesn't support
+// renaming, or there was nothing to rename.
+func (r *RPC) LspRename(ctx context.Context, bufID uint32, line, col int, newName string) (applied, files int, err error) {
+	fut, rel := r.svc.LspRename(ctx, func(p proto.EditorService_lspRename_Params) error {
+		p.SetClientId(0) // see ApplyWorkspaceEdits: 0 so this client's own open tabs still refresh
 		p.SetBufId(bufID)
 		p.SetLine(uint32(line))
 		p.SetCol(uint32(col))
+		return p.SetNewName(newName)
+	})
+	defer rel()
+
+	res, err := fut.Struct()
+	if err != nil {
+		return 0, 0, err
+	}
+	return int(res.AppliedCount()), int(res.FileCount()), nil
+}
+
+// ClientLspCodeAction is a code action returned by the LSP server.
+type ClientLspCodeAction struct {
+	Title string
+	Kind  string
+	Edits []ClientLspEdit
+}
+
+// LspCodeActions fetches quick-fix and refactor actions for the given range.
+// startLine/startCol and endLine/endCol may be equal (a plain cursor
+// position) or span a selection, letting the server offer range-only
+// actions like Extract Function/Extract Variable too.
+func (r *RPC) LspCodeActions(ctx context.Context, bufID uint32, startLine, startCol, endLine, endCol int) ([]ClientLspCodeAction, error) {
+	fut, rel := r.svc.LspCodeActions(ctx, func(p proto.EditorService_lspCodeActions_Params) error {
+		p.SetBufId(bufID)
+		p.SetLine(uint32(startLine))
+		p.SetCol(uint32(startCol))
+		p.SetEndLine(uint32(endLine))
+		p.SetEndCol(uint32(endCol))
 		return nil
 	})
 	defer rel()
@@ -437,7 +465,8 @@ func (r *RPC) LspCodeActions(ctx context.Context, bufID uint32, line, col int) (
 				NewText:  nt,
 			}
 		}
-		out[i] = ClientLspCodeAction{Title: title, Edits: editList}
+		kind, _ := item.Kind()
+		out[i] = ClientLspCodeAction{Title: title, Kind: kind, Edits: editList}
 	}
 	return out, nil
 }

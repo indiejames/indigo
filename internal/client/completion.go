@@ -17,20 +17,22 @@ type cmdDesc struct {
 }
 
 var allCmds = []cmdDesc{
-	{"edit",       "Open file picker",                 false},
-	{"find",       "Workspace search (optional pattern)", true},
-	{"fmt",        "Format current buffer",            false},
-	{"format",     "Format current buffer",            false},
-	{"grep",       "Workspace search (optional pattern)", true},
-	{"metrics",    "Toggle metrics overlay",           false},
-	{"quit",       "Close buffer (fails if unsaved)",  false},
-	{"quit!",      "Close buffer, discarding changes", false},
-	{"quit-all",   "Quit all (fails if any unsaved)",  false},
-	{"quit-all!",  "Quit all, discarding changes",     false},
-	{"save",       "Save file",                        false},
-	{"wqa",        "Save all and quit",                false},
-	{"write",      "Save file",                        false},
-	{"write-quit", "Save and close buffer",            false},
+	{"edit",         "Open file picker",                        false},
+	{"find",         "Workspace search (optional pattern)",     true},
+	{"fmt",          "Format current buffer",                   false},
+	{"format",       "Format current buffer",                   false},
+	{"grep",         "Workspace search (optional pattern)",     true},
+	{"metrics",      "Toggle metrics overlay",                  false},
+	{"move-to-file", "Move function at cursor to another file", true},
+	{"quit",         "Close buffer (fails if unsaved)",         false},
+	{"quit!",        "Close buffer, discarding changes",        false},
+	{"quit-all",     "Quit all (fails if any unsaved)",         false},
+	{"quit-all!",    "Quit all, discarding changes",            false},
+	{"rename",       "Rename symbol via language server",       true},
+	{"save",         "Save file",                               false},
+	{"wqa",          "Save all and quit",                       false},
+	{"write",        "Save file",                               false},
+	{"write-quit",   "Save and close buffer",                   false},
 }
 
 // fuzzyMatch reports whether every rune of pattern appears in s as a subsequence.

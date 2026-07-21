@@ -31,16 +31,23 @@ func (e *jsonrpcError) Error() string { return fmt.Sprintf("jsonrpc error %d: %s
 // notificationHandler is called for incoming notifications (no id).
 type notificationHandler func(method string, params json.RawMessage)
 
+// requestHandler is called for incoming server-to-client requests. The
+// returned value is marshaled as the JSON-RPC result (nil marshals to
+// `null`, matching the old blanket-ack behavior); a non-nil error is sent
+// back as a JSON-RPC error instead.
+type requestHandler func(method string, params json.RawMessage) (any, error)
+
 type jsonrpcConn struct {
-	w       io.Writer
-	wMu     sync.Mutex
-	nextID  atomic.Int64
-	pending sync.Map // int64 → chan *jsonrpcMsg
-	handler notificationHandler
+	w          io.Writer
+	wMu        sync.Mutex
+	nextID     atomic.Int64
+	pending    sync.Map // int64 → chan *jsonrpcMsg
+	handler    notificationHandler
+	reqHandler requestHandler
 }
 
-func newJSONRPCConn(r io.Reader, w io.Writer, handler notificationHandler) *jsonrpcConn {
-	c := &jsonrpcConn{w: w, handler: handler}
+func newJSONRPCConn(r io.Reader, w io.Writer, handler notificationHandler, reqHandler requestHandler) *jsonrpcConn {
+	c := &jsonrpcConn{w: w, handler: handler, reqHandler: reqHandler}
 	go c.readLoop(r)
 	return c
 }
@@ -132,13 +139,27 @@ func (c *jsonrpcConn) readLoop(r io.Reader) {
 				c.handler(msg.Method, msg.Params)
 			}
 		} else if msg.ID != nil && msg.Method != "" {
-			// Server-to-client request (e.g. window/workDoneProgress/create).
-			// Acknowledge with a null result so the server isn't left waiting.
-			c.write(jsonrpcMsg{ //nolint:errcheck
-				JSONRPC: "2.0",
-				ID:      msg.ID,
-				Result:  json.RawMessage("null"),
-			})
+			// Server-to-client request. reqHandler returning (nil, nil) for
+			// an unrecognized method still acks with a null result so the
+			// server isn't left waiting (e.g. window/workDoneProgress/create).
+			go func(msg jsonrpcMsg) {
+				var result any
+				var handlerErr error
+				if c.reqHandler != nil {
+					result, handlerErr = c.reqHandler(msg.Method, msg.Params)
+				}
+				resp := jsonrpcMsg{JSONRPC: "2.0", ID: msg.ID}
+				if handlerErr != nil {
+					resp.Error = &jsonrpcError{Code: -32603, Message: handlerErr.Error()}
+				} else {
+					raw, err := json.Marshal(result)
+					if err != nil {
+						raw = json.RawMessage("null")
+					}
+					resp.Result = raw
+				}
+				c.write(resp) //nolint:errcheck
+			}(msg)
 		}
 	}
 }

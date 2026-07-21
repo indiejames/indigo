@@ -123,6 +123,28 @@ var commandMenuRoot = command{
 		{key: 'f', label: "File picker", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return OpenPickerMsg{} }
 		}},
+		{key: 'a', label: "Code Actions (fixes & refactors)", execute: func(m Model) (tea.Model, tea.Cmd) {
+			// Uses the current selection as the request range when one is
+			// active, so range refactors (Extract Function/Variable) are
+			// offered alongside point-based quick-fixes.
+			return m, m.fetchFixes()
+		}},
+		{key: 'r', label: "Refactor: Rename Symbol", execute: func(m Model) (tea.Model, tea.Cmd) {
+			// Uses the language server if one is running for this buffer;
+			// see doRenameSymbol / EditorService.lspRename.
+			m.mode = ModeCommand
+			m.cmdBuf = "rename "
+			m.cmdCompletionIdx = -1
+			return m, nil
+		}},
+		{key: 'm', label: "Refactor: Move Function to File", execute: func(m Model) (tea.Model, tea.Cmd) {
+			// Tree-sitter based (no language server needed); see
+			// doMoveFunctionToFile / EditorService.moveTextToFile.
+			m.mode = ModeCommand
+			m.cmdBuf = "move-to-file "
+			m.cmdCompletionIdx = -1
+			return m, nil
+		}},
 	},
 }
 
@@ -445,6 +467,22 @@ func (m Model) handleFixPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		idx := m.fixIdx
+		// LSP-edit fixes apply synchronously through the undo-aware batch
+		// path (they must mutate the model's undo stack and buffer);
+		// plugin fixes/replacements go through the async command as before.
+		if idx >= 0 && idx < len(m.fixItems) && len(m.fixItems[idx].LspEdits) > 0 {
+			item := m.fixItems[idx]
+			m.fixItems = nil
+			m.fixDecor = nil
+			// Range-extract refactors (Extract Function/Extract Variable)
+			// introduce a brand-new symbol the server names itself
+			// ("newFunction"/"newVar") — prompt for the real name instead
+			// of applying that default.
+			if strings.HasPrefix(item.LspKind, "refactor.extract.") {
+				return startExtractRenamePrompt(m, item.LspEdits, item.LspKind)
+			}
+			return applyLspEdits(m, item.LspEdits)
+		}
 		cmd := m.applyFixCmd(idx)
 		m.fixItems = nil
 		m.fixDecor = nil

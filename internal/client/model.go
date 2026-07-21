@@ -2,6 +2,7 @@ package client
 
 import (
 	"crypto/sha256"
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -72,6 +73,18 @@ type fixItemsMsg struct {
 
 // completionsMsg carries fresh completion items.
 type completionsMsg struct{ items []ClientCompletion }
+
+// renameSymbolDoneMsg carries the result of an LSP-driven rename.
+type renameSymbolDoneMsg struct {
+	applied, files int
+	err            error
+}
+
+// moveFunctionDoneMsg carries the result of moving a function to another file.
+type moveFunctionDoneMsg struct {
+	destPath string
+	err      error
+}
 
 // triggerCompletionMsg fires after the auto-trigger debounce delay.
 type triggerCompletionMsg struct{}
@@ -481,6 +494,12 @@ type Model struct {
 	fixDecor *ClientDecoration // decoration being fixed (nil for action-only items)
 	fixIdx   int
 
+	// pendingExtract holds a range-extract action's (Extract Function/
+	// Extract Variable) edits while the user is prompted for the new
+	// symbol's name on the command line; see startExtractRenamePrompt and
+	// the "extract-rename " command-line prefix in executeCommand.
+	pendingExtract *pendingExtractRename
+
 	// Mark for deferred selection: set with z, select-to with Z.
 	mark *document.Pos
 
@@ -776,6 +795,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.fixIdx = 0
 		} else {
 			m.status = "No fixes available"
+		}
+		return m, nil
+
+	case renameSymbolDoneMsg:
+		switch {
+		case msg.err != nil:
+			m.status = fmt.Sprintf("E: rename failed: %v", msg.err)
+		case msg.applied == 0:
+			m.status = "Rename: nothing to change (no language server for this file, or rename not supported)"
+		default:
+			m.status = fmt.Sprintf("Renamed %d occurrence(s) across %d file(s)", msg.applied, msg.files)
+		}
+		return m, nil
+
+	case moveFunctionDoneMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("E: move failed: %v", msg.err)
+		} else {
+			m.status = fmt.Sprintf("Moved function to %s", msg.destPath)
 		}
 		return m, nil
 

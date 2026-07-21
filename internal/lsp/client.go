@@ -69,7 +69,7 @@ func NewClient(command string, args []string, rootDir string) (*Client, error) {
 		diagnostics: make(map[string][]Diagnostic),
 		rootURI:     pathToURI(rootDir),
 	}
-	c.conn = newJSONRPCConn(stdout, stdin, c.handleNotification)
+	c.conn = newJSONRPCConn(stdout, stdin, c.handleNotification, nil)
 	return c, nil
 }
 
@@ -79,6 +79,14 @@ func (c *Client) Initialize() error {
 		ProcessID:  os.Getpid(),
 		ClientInfo: ClientInfo{Name: "indigo", Version: "0.1"},
 		RootURI:    c.rootURI,
+		Capabilities: ClientCapabilities{
+			TextDocument: &TextDocumentClientCapabilities{
+				CodeAction: &CodeActionClientCapabilities{
+					DataSupport:    true,
+					ResolveSupport: &CodeActionResolveSupport{Properties: []string{"edit"}},
+				},
+			},
+		},
 		InitializationOptions: map[string]any{
 			// Let typescript-language-server handle files that have no tsconfig.json.
 			"tsserver": map[string]any{
@@ -136,13 +144,22 @@ func (c *Client) DidOpen(path, content string) error {
 }
 
 // DidChange notifies the server of a content change (full-text sync).
+//
+// The version bump and the notification write happen under the same lock
+// (not just the bump) so concurrent DidChange calls for this client — e.g.
+// ApplyOp/ApplyOps each fire one in their own goroutine — can't reach the
+// server out of version order. LSP servers key their document snapshot on
+// this version; two calls racing past the old bump-then-unlock split could
+// hand out version 5 and 6 but write 6 before 5, leaving the server's
+// documented state one edit behind (and any request sent right after,
+// like a rename, silently computed against stale content).
 func (c *Client) DidChange(path, content string) error {
 	uri := pathToURI(path)
 
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.docVersions[uri]++
 	ver := c.docVersions[uri]
-	c.mu.Unlock()
 
 	return c.conn.Notify("textDocument/didChange", DidChangeTextDocumentParams{
 		TextDocument: VersionedTextDocumentIdentifier{URI: uri, Version: ver},
@@ -359,18 +376,25 @@ func (c *Client) References(path string, line, col int) ([]Location, error) {
 	return locs, nil
 }
 
-// CodeActions returns quick-fix and refactor actions for the given cursor position.
-// The server's cached diagnostics for the file are included in the request context
-// so that diagnostic-driven fixes (e.g. "remove unused import") are surfaced.
-func (c *Client) CodeActions(path string, line, col int) ([]CodeAction, error) {
+// CodeActions returns quick-fix and refactor actions for the given range.
+// startLine/startCol and endLine/endCol may be equal (a plain cursor
+// position) or span a selection, which lets the server offer range-only
+// actions like Extract Function/Extract Variable alongside point-based
+// quick-fixes. The server's cached diagnostics for the file are included in
+// the request context so that diagnostic-driven fixes (e.g. "remove unused
+// import") are surfaced too.
+func (c *Client) CodeActions(path string, startLine, startCol, endLine, endCol int) ([]CodeAction, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	pos := Position{Line: line, Character: col}
+	rng := Range{
+		Start: Position{Line: startLine, Character: startCol},
+		End:   Position{Line: endLine, Character: endCol},
+	}
 	diags := c.GetDiagnostics(path)
 	raw, err := c.conn.Call(ctx, "textDocument/codeAction", CodeActionParams{
 		TextDocument: TextDocumentIdentifier{URI: pathToURI(path)},
-		Range:        Range{Start: pos, End: pos},
+		Range:        rng,
 		Context:      CodeActionContext{Diagnostics: diags},
 	})
 	if err != nil || string(raw) == "null" {
@@ -380,7 +404,115 @@ func (c *Client) CodeActions(path string, line, col int) ([]CodeAction, error) {
 	if err := json.Unmarshal(raw, &actions); err != nil {
 		return nil, err
 	}
+	c.resolveCodeActions(actions)
 	return actions, nil
+}
+
+// resolveCodeActions fills in the Edit for any action that came back without
+// one, via codeAction/resolve. Many servers (gopls included) return
+// "expensive" actions like Extract Function/Extract Variable with no edit
+// populated, computing it lazily only once the client asks to resolve that
+// specific action — skipping this step means those actions look like they
+// have nothing to apply and get silently dropped. Resolved concurrently
+// since each is a separate round trip; servers that don't support resolve
+// (or reject a given action) just leave it with no edit, same as before.
+func (c *Client) resolveCodeActions(actions []CodeAction) {
+	var wg sync.WaitGroup
+	for i := range actions {
+		if actions[i].Edit != nil {
+			continue
+		}
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			raw, err := c.conn.Call(ctx, "codeAction/resolve", actions[i])
+			if err != nil || string(raw) == "null" {
+				return
+			}
+			var resolved CodeAction
+			if json.Unmarshal(raw, &resolved) == nil {
+				actions[i] = resolved
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// Rename requests textDocument/rename for the symbol at (line, col) and
+// returns the resulting WorkspaceEdit, or nil if the server doesn't support
+// renaming, or found nothing to rename.
+func (c *Client) Rename(path string, line, col int, newName string) (*WorkspaceEdit, error) {
+	c.mu.Lock()
+	supported := c.caps.RenameProvider != nil
+	c.mu.Unlock()
+	if !supported {
+		return nil, nil
+	}
+	return c.rename(path, line, col, newName)
+}
+
+// RenameAfterChange notifies the server of content's current state and then
+// immediately requests a rename at (line, col) — holding the client's lock
+// across both the notification and the rename round trip, not just the
+// notification's write.
+//
+// A rename issued right after an edit (e.g. Extract Function's automatic
+// follow-up rename) needs the server's snapshot to reflect that edit before
+// it computes the rename. DidChange alone isn't enough to guarantee that:
+// nothing stops some other, unrelated DidChange call for this same client
+// — most plausibly a slow-to-schedule goroutine from one of the edit's own
+// ApplyOp calls — from landing in the gap between "my fresh notification"
+// and "my rename request", invalidating the snapshot right as the rename
+// arrives (observed as gopls returning "no identifier found" for a
+// position that is in fact exactly on the target identifier). Holding the
+// lock for the whole call, not just DidChange's write, closes that gap:
+// every DidChange this client sends goes through the same lock, so none can
+// interleave between the two calls made here.
+func (c *Client) RenameAfterChange(path, content string, line, col int, newName string) (*WorkspaceEdit, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	supported := c.caps.RenameProvider != nil
+	if !supported {
+		return nil, nil
+	}
+
+	uri := pathToURI(path)
+	c.docVersions[uri]++
+	ver := c.docVersions[uri]
+	if err := c.conn.Notify("textDocument/didChange", DidChangeTextDocumentParams{
+		TextDocument: VersionedTextDocumentIdentifier{URI: uri, Version: ver},
+		ContentChanges: []TextDocumentContentChangeEvent{
+			{Text: content},
+		},
+	}); err != nil {
+		return nil, err
+	}
+
+	return c.rename(path, line, col, newName)
+}
+
+// rename performs the textDocument/rename round trip. Callers are
+// responsible for checking RenameProvider support first.
+func (c *Client) rename(path string, line, col int, newName string) (*WorkspaceEdit, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	raw, err := c.conn.Call(ctx, "textDocument/rename", RenameParams{
+		TextDocument: TextDocumentIdentifier{URI: pathToURI(path)},
+		Position:     Position{Line: line, Character: col},
+		NewName:      newName,
+	})
+	if err != nil || string(raw) == "null" {
+		return nil, err
+	}
+	var edit WorkspaceEdit
+	if err := json.Unmarshal(raw, &edit); err != nil {
+		return nil, err
+	}
+	return &edit, nil
 }
 
 // GetDiagnostics returns the most recent diagnostics for path.

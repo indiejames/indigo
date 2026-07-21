@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"sort"
+	"strings"
 
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/format"
@@ -400,6 +403,8 @@ func (s *editorService) LspCodeActions(_ context.Context, call proto.EditorServi
 	bufID := args.BufId()
 	line := int(args.Line())
 	col := int(args.Col())
+	endLine := int(args.EndLine())
+	endCol := int(args.EndCol())
 
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
@@ -415,7 +420,7 @@ func (s *editorService) LspCodeActions(_ context.Context, call proto.EditorServi
 		return err
 	}
 
-	actions, err := s.lspMgr.CodeActions(path, line, col)
+	actions, err := s.lspMgr.CodeActions(path, line, col, endLine, endCol)
 	if err != nil || len(actions) == 0 {
 		return err
 	}
@@ -446,6 +451,9 @@ func (s *editorService) LspCodeActions(_ context.Context, call proto.EditorServi
 		if err := item.SetTitle(ae.action.Title); err != nil {
 			return err
 		}
+		if err := item.SetKind(ae.action.Kind); err != nil {
+			return err
+		}
 		edits := ae.edits
 		el, err := item.NewEdits(int32(len(edits)))
 		if err != nil {
@@ -462,5 +470,165 @@ func (s *editorService) LspCodeActions(_ context.Context, call proto.EditorServi
 			}
 		}
 	}
+	return nil
+}
+
+// lspEditsByURI groups edit's per-file TextEdits by URI, preferring
+// documentChanges (used by gopls) over the legacy changes map — mirrors
+// lspEditsForURI but collects every file touched, not just one.
+func lspEditsByURI(edit *lsp.WorkspaceEdit) map[string][]lsp.TextEdit {
+	if edit == nil {
+		return nil
+	}
+	if len(edit.DocumentChanges) > 0 {
+		out := make(map[string][]lsp.TextEdit, len(edit.DocumentChanges))
+		for _, dc := range edit.DocumentChanges {
+			out[dc.TextDocument.URI] = dc.Edits
+		}
+		return out
+	}
+	return edit.Changes
+}
+
+// workspaceEditItemsFromLSP converts path's TextEdits (from an LSP rename's
+// WorkspaceEdit) into workspaceEditItems by reading path's current content
+// (from its open buffer if any, else disk) to capture the text each edit
+// replaces — LSP TextEdits carry only a range and the new text, not the old.
+// Multi-line edits are skipped: a rename only ever replaces a single
+// identifier on one line, so this keeps the conversion simple and safe.
+func (s *editorService) workspaceEditItemsFromLSP(path string, edits []lsp.TextEdit) ([]workspaceEditItem, error) {
+	s.mu.Lock()
+	var content string
+	var found bool
+	for _, e := range s.buffers {
+		if e.buf.Path() == path {
+			content, found = e.buf.Content(), true
+			break
+		}
+	}
+	s.mu.Unlock()
+	if !found {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		content = string(data)
+	}
+	lines := strings.Split(content, "\n")
+
+	items := make([]workspaceEditItem, 0, len(edits))
+	for i, e := range edits {
+		if e.Range.Start.Line != e.Range.End.Line {
+			continue
+		}
+		ln := e.Range.Start.Line
+		if ln < 0 || ln >= len(lines) {
+			continue
+		}
+		lineRunes := []rune(lines[ln])
+		start, end := e.Range.Start.Character, e.Range.End.Character
+		if start < 0 || end > len(lineRunes) || start > end {
+			continue
+		}
+		items = append(items, workspaceEditItem{
+			origIdx: i,
+			line:    ln,
+			col:     start,
+			oldText: string(lineRunes[start:end]),
+			newText: e.NewText,
+		})
+	}
+	return items, nil
+}
+
+// LspRename renames the symbol at (line, col) via the language server and
+// applies the resulting edits across every affected file, reusing the same
+// per-path apply logic as ApplyWorkspaceEdits (open buffers edited in place,
+// other files patched on disk).
+func (s *editorService) LspRename(_ context.Context, call proto.EditorService_lspRename) error {
+	args := call.Args()
+	clientID := args.ClientId()
+	bufID := args.BufId()
+	line := int(args.Line())
+	col := int(args.Col())
+	newName, err := args.NewName()
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+	content := entry.buf.Content()
+	s.mu.Unlock()
+
+	if line >= 0 && line < entry.buf.LineCount() {
+		serverLog("LspRename: DEBUG path=%q line=%d col=%d target-line-content=%q buf-version=%d", path, line, col, entry.buf.Line(line), entry.buf.Version())
+	}
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+
+	// RenameAfterChange (not a separate DidChange + Rename) ensures gopls
+	// (or whichever server) has this buffer's *current* content before
+	// computing the rename, and that nothing else can slip a stale
+	// DidChange in between the two — see its doc comment. A rename issued
+	// immediately after an edit (e.g. right after Extract Function) has to
+	// guard against exactly that, or it silently computes against a stale
+	// pre-edit view of the file, missing occurrences like the
+	// just-introduced definition.
+	edit, err := s.lspMgr.RenameAfterChange(path, content, line, col, newName)
+	if err != nil {
+		serverLog("LspRename: path=%q line=%d col=%d newName=%q failed: %v", path, line, col, newName, err)
+		return err
+	}
+	if edit == nil {
+		serverLog("LspRename: path=%q line=%d col=%d newName=%q: server returned no edit", path, line, col, newName)
+		return nil
+	}
+
+	byURI := lspEditsByURI(edit)
+	if len(byURI) == 0 {
+		return nil
+	}
+
+	byPath := make(map[string][]workspaceEditItem, len(byURI))
+	var order []string
+	for uri, edits := range byURI {
+		p := lsp.URIToPath(uri)
+		items, err := s.workspaceEditItemsFromLSP(p, edits)
+		if err != nil || len(items) == 0 {
+			continue
+		}
+		byPath[p] = items
+		order = append(order, p)
+	}
+
+	var appliedCount, fileCount uint32
+	for _, path := range order {
+		items := byPath[path]
+		sort.Slice(items, func(a, b int) bool {
+			if items[a].line != items[b].line {
+				return items[a].line < items[b].line
+			}
+			return items[a].col < items[b].col
+		})
+
+		applied, _, err := s.applyItemsToPath(clientID, path, items)
+		if err != nil || applied == 0 {
+			continue
+		}
+		appliedCount += uint32(applied)
+		fileCount++
+	}
+
+	res.SetAppliedCount(appliedCount)
+	res.SetFileCount(fileCount)
 	return nil
 }

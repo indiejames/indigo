@@ -143,11 +143,11 @@ func applyBatch(m Model, ops []document.Op) (Model, tea.Cmd) {
 	}
 	before := m.cursorSnap()
 	inverses := make([]document.Op, len(ops))
-	cmds := make([]tea.Cmd, 0, len(ops)+2)
+	sendCmds := make([]tea.Cmd, 0, len(ops))
 	atLine, delta := -1, 0
 	for i, op := range ops {
 		inverses[i] = inverseOp(m, op) // must be before Apply
-		cmds = append(cmds, m.sendOp(op))
+		sendCmds = append(sendCmds, m.sendOp(op))
 		al, d := opLineDelta(op)
 		if atLine < 0 || al < atLine {
 			atLine = al
@@ -161,10 +161,23 @@ func applyBatch(m Model, ops []document.Op) (Model, tea.Cmd) {
 	m.redoStack = nil
 	fp, line, col := m.filePath, m.cursor.Line, m.cursor.Col
 	depth := len(m.undoStack)
-	cmds = append(cmds, m.reparseHighlight(), func() tea.Msg {
+	recordCmd := func() tea.Msg {
 		return EditRecordMsg{FilePath: fp, Line: line, Col: col, AtLine: atLine, LineDelta: delta, UndoDepth: depth}
-	})
-	return m, tea.Batch(cmds...)
+	}
+	// sendOp already applied every op to the local buffer above, in order,
+	// synchronously — that part was always correct. What's sequenced here
+	// is each op's *network* send to the server: ops in a batch are often
+	// position-dependent (e.g. a delete followed by an insert at the same
+	// spot, the common shape for every LSP-edit/search-replace apply), so
+	// the later op is only valid once the server has actually applied the
+	// earlier one. tea.Batch runs commands concurrently with no ordering
+	// guarantee — if the insert's RPC call reached the server before the
+	// delete's, the delete would then fire with coordinates that no longer
+	// point at the intended text, silently corrupting the buffer. Only the
+	// op sends need this guarantee, so reparseHighlight/recordCmd — which
+	// don't depend on send order — still run concurrently with each other
+	// once the sends finish.
+	return m, tea.Sequence(append(sendCmds, tea.Batch(m.reparseHighlight(), recordCmd))...)
 }
 
 // inverseOp returns the op that reverses op.

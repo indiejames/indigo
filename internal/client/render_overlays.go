@@ -566,6 +566,15 @@ func (m Model) buildSearchOverlays(layout []layoutEntry, cw int) [][]lineOverlay
 	rows := make([][]lineOverlay, vis)
 	for i, sm := range m.searchMatches {
 		lineRunes := []rune(m.buf.Line(sm.line))
+		// Search matches are computed once, at search time, and aren't
+		// recalculated when the buffer changes afterward (e.g. an LSP
+		// refactor edit shrinking or shifting lines out from under a
+		// still-active search). A match whose column no longer fits within
+		// its (now shorter) line is stale — skip it rather than slicing
+		// lineRunes out of bounds below.
+		if sm.col > len(lineRunes) {
+			continue
+		}
 		_, colMap := expandTabsRemap(lineRunes)
 		visCol := sm.col
 		if sm.col < len(colMap) {
@@ -758,7 +767,7 @@ var helpEntries = []helpEntry{
 	{key: "LSP / Diagnostics"},
 	{key: "K", desc: "Hover documentation"},
 	{key: "E", desc: "Toggle diagnostic detail"},
-	{key: "F", desc: "Fix suggestions"},
+	{key: "SPC a", desc: "Code actions (fixes & refactors)"},
 	{key: ""},
 	{key: "Files & Buffers"},
 	{key: "Ctrl+p", desc: "File picker"},

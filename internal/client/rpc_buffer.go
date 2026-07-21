@@ -281,3 +281,22 @@ func (r *RPC) BufferClientCount(ctx context.Context, bufID uint32) (uint32, erro
 	}
 	return res.Count(), nil
 }
+
+// MoveTextToFile deletes [fromLine,fromCol, toLine,toCol) (end exclusive)
+// from bufID and appends it to destPath, creating the file if needed.
+// destPath is resolved server-side against whatever's already open, so it
+// should be an absolute path.
+func (r *RPC) MoveTextToFile(ctx context.Context, bufID uint32, fromLine, fromCol, toLine, toCol int, destPath string) error {
+	fut, rel := r.svc.MoveTextToFile(ctx, func(p proto.EditorService_moveTextToFile_Params) error {
+		p.SetClientId(0) // see ApplyWorkspaceEdits: 0 so this client's own open tabs still refresh
+		p.SetBufId(bufID)
+		p.SetFromLine(uint32(fromLine))
+		p.SetFromCol(uint32(fromCol))
+		p.SetToLine(uint32(toLine))
+		p.SetToCol(uint32(toCol))
+		return p.SetDestPath(destPath)
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}

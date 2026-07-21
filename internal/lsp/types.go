@@ -94,6 +94,7 @@ type ServerCapabilities struct {
 	SignatureHelpProvider      any             `json:"signatureHelpProvider,omitempty"`
 	CompletionProvider         any             `json:"completionProvider,omitempty"`
 	DocumentFormattingProvider any             `json:"documentFormattingProvider,omitempty"`
+	RenameProvider             any             `json:"renameProvider,omitempty"`
 }
 
 type SignatureHelpOptions struct {
@@ -104,12 +105,37 @@ type CompletionOptions struct {
 	TriggerCharacters []string `json:"triggerCharacters,omitempty"`
 }
 
+// CodeActionResolveSupport advertises which CodeAction properties the client
+// can obtain lazily via codeAction/resolve.
+type CodeActionResolveSupport struct {
+	Properties []string `json:"properties"`
+}
+
+// CodeActionClientCapabilities advertises code-action support. Declaring
+// dataSupport + resolveSupport(edit) matters: without them servers like
+// gopls return range refactors (Extract Function/Extract Variable) as
+// opaque Command-style actions whose edits can only be obtained through a
+// workspace/executeCommand + workspace/applyEdit round trip; with them the
+// server returns resolvable actions whose edit codeAction/resolve fills in.
+type CodeActionClientCapabilities struct {
+	DataSupport    bool                      `json:"dataSupport,omitempty"`
+	ResolveSupport *CodeActionResolveSupport `json:"resolveSupport,omitempty"`
+}
+
+type TextDocumentClientCapabilities struct {
+	CodeAction *CodeActionClientCapabilities `json:"codeAction,omitempty"`
+}
+
+type ClientCapabilities struct {
+	TextDocument *TextDocumentClientCapabilities `json:"textDocument,omitempty"`
+}
+
 type InitializeParams struct {
-	ProcessID            int        `json:"processId"`
-	ClientInfo           ClientInfo `json:"clientInfo"`
-	RootURI              string     `json:"rootUri"`
-	Capabilities         struct{}   `json:"capabilities"`
-	InitializationOptions map[string]any `json:"initializationOptions,omitempty"`
+	ProcessID             int                `json:"processId"`
+	ClientInfo            ClientInfo         `json:"clientInfo"`
+	RootURI               string             `json:"rootUri"`
+	Capabilities          ClientCapabilities `json:"capabilities"`
+	InitializationOptions map[string]any     `json:"initializationOptions,omitempty"`
 }
 
 type InitializeResult struct {
@@ -129,8 +155,8 @@ type TextDocumentContentChangeEvent struct {
 }
 
 type DidChangeTextDocumentParams struct {
-	TextDocument   VersionedTextDocumentIdentifier   `json:"textDocument"`
-	ContentChanges []TextDocumentContentChangeEvent  `json:"contentChanges"`
+	TextDocument   VersionedTextDocumentIdentifier  `json:"textDocument"`
+	ContentChanges []TextDocumentContentChangeEvent `json:"contentChanges"`
 }
 
 // ---- textDocument/didSave ----
@@ -260,8 +286,8 @@ type SignatureInformation struct {
 
 type SignatureHelp struct {
 	Signatures      []SignatureInformation `json:"signatures"`
-	ActiveSignature int                   `json:"activeSignature"`
-	ActiveParameter int                   `json:"activeParameter"`
+	ActiveSignature int                    `json:"activeSignature"`
+	ActiveParameter int                    `json:"activeParameter"`
 }
 
 // ---- textDocument/completion ----
@@ -485,6 +511,14 @@ type ReferenceParams struct {
 	Context      ReferenceContext       `json:"context"`
 }
 
+// ---- textDocument/rename ----
+
+type RenameParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	NewName      string                 `json:"newName"`
+}
+
 // ---- textDocument/codeAction ----
 
 type CodeActionContext struct {
@@ -494,7 +528,7 @@ type CodeActionContext struct {
 type CodeActionParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
 	Range        Range                  `json:"range"`
-	Context      CodeActionContext       `json:"context"`
+	Context      CodeActionContext      `json:"context"`
 }
 
 // TextDocumentEdit is a versioned document edit (used in documentChanges).
@@ -516,9 +550,46 @@ type WorkspaceEdit struct {
 // The server may return either WorkspaceEdit-style actions or Command-style
 // actions. We surface only WorkspaceEdit actions (the common case for
 // quick-fixes like "remove unused import" or "add missing import").
+// Command is an LSP Command: an opaque, server-defined action invoked via
+// workspace/executeCommand.
+type Command struct {
+	Title     string            `json:"title"`
+	Command   string            `json:"command"`
+	Arguments []json.RawMessage `json:"arguments,omitempty"`
+}
+
+// CodeAction is a single action returned by textDocument/codeAction. A given
+// action carries at most one of:
+//   - Edit: ready to apply as-is.
+//   - Data: opaque context that must be sent back unchanged via
+//     codeAction/resolve to obtain the edit (e.g. some quick-fixes).
+//   - Command: must be invoked via workspace/executeCommand; the server
+//     then sends the edit back via a workspace/applyEdit request (e.g.
+//     gopls's Extract Function/Extract Variable).
 type CodeAction struct {
-	Title       string         `json:"title"`
-	Kind        string         `json:"kind,omitempty"`
-	IsPreferred bool           `json:"isPreferred,omitempty"`
-	Edit        *WorkspaceEdit `json:"edit,omitempty"`
+	Title       string          `json:"title"`
+	Kind        string          `json:"kind,omitempty"`
+	IsPreferred bool            `json:"isPreferred,omitempty"`
+	Edit        *WorkspaceEdit  `json:"edit,omitempty"`
+	Data        json.RawMessage `json:"data,omitempty"`
+	Command     *Command        `json:"command,omitempty"`
+}
+
+// ---- workspace/executeCommand & workspace/applyEdit ----
+
+type ExecuteCommandParams struct {
+	Command   string            `json:"command"`
+	Arguments []json.RawMessage `json:"arguments,omitempty"`
+}
+
+// ApplyWorkspaceEditParams is what a server sends the client in a
+// workspace/applyEdit request (a server-to-client request, not a response).
+type ApplyWorkspaceEditParams struct {
+	Label string        `json:"label,omitempty"`
+	Edit  WorkspaceEdit `json:"edit"`
+}
+
+// ApplyWorkspaceEditResult is the client's reply to workspace/applyEdit.
+type ApplyWorkspaceEditResult struct {
+	Applied bool `json:"applied"`
 }

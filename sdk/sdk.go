@@ -599,6 +599,19 @@ func (a *Api) VisibleRange(clientID uint64) (startLine, endLine uint32, err erro
 // listens on the socket, and serves until the editor disconnects.
 // Call this from main() — it blocks until the plugin should exit.
 func Run(p Plugin) error {
+	// --warm exits immediately without touching a socket. It exists purely
+	// so install tooling can execute a freshly built binary once right after
+	// building it: on macOS, a locally built binary's first execution pays a
+	// one-time code-signature validation cost (tens to hundreds of ms) that
+	// the OS then caches for that exact file. Paying it during `make install`
+	// means the user's next real launch doesn't pay it during interactive
+	// startup.
+	for _, arg := range os.Args[1:] {
+		if arg == "--warm" {
+			return nil
+		}
+	}
+
 	socketPath := ""
 	for i := 1; i < len(os.Args)-1; i++ {
 		if os.Args[i] == "--socket" {

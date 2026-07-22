@@ -20,6 +20,15 @@ import (
 )
 
 func main() {
+	// --warm exits immediately, touching nothing. Install tooling runs the
+	// freshly built binary with this flag right after building it, so
+	// macOS's one-time first-execution code-signature validation (see the
+	// same mechanism in sdk.Run) happens during `make install` instead of
+	// during the next interactive `indigo` launch.
+	if len(os.Args) == 2 && os.Args[1] == "--warm" {
+		return
+	}
+
 	// Handle --import-theme helix:<path> or --import-theme vscode:<path>.
 	if len(os.Args) == 3 && os.Args[1] == "--import-theme" {
 		cfgDir, _ := config.ConfigDir()
@@ -150,7 +159,7 @@ func waitForServer(sockPath string, timeout time.Duration) error {
 		if server.IsRunning(sockPath) {
 			return nil
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for %s", sockPath)
 }

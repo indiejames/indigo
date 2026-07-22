@@ -63,6 +63,7 @@ func TestStateRoundTrip(t *testing.T) {
 func TestSnapshotStateClearsRunningTools(t *testing.T) {
 	m := Model{
 		workDir: "/w",
+		prog:    &programLink{},
 		conv: []ConvMsg{
 			{Role: RoleTool, Content: "  ⟳ Bash (3s)", StartedAt: time.Now()},
 		},

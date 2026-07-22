@@ -37,6 +37,11 @@ type persistedState struct {
 	InputHistory []string     `json:"input_history,omitempty"`
 	CtxTokens    int          `json:"ctx_tokens,omitempty"`
 	Model        string       `json:"model,omitempty"`
+	// Auto-approve is restored only after explicit confirmation (see
+	// pendingAutoApproveRestore) — unlike Model, a forgotten "on" here would
+	// silently skip approval for file edits or shell commands.
+	AutoApproveEdits bool `json:"auto_approve_edits,omitempty"`
+	AutoApproveShell bool `json:"auto_approve_shell,omitempty"`
 }
 
 func modeName(apiKey string) string {
@@ -73,17 +78,20 @@ func snapshotState(m Model) persistedState {
 	copy(hist, m.history)
 	inputs := make([]string, len(m.inputHistory))
 	copy(inputs, m.inputHistory)
+	edits, shell := m.prog.autoApprove()
 	return persistedState{
-		Version:      stateVersion,
-		WorkDir:      m.workDir,
-		Mode:         modeName(m.apiKey),
-		SavedAt:      time.Now(),
-		SessionID:    m.sessionID,
-		Conv:         conv,
-		History:      hist,
-		InputHistory: inputs,
-		CtxTokens:    m.ctxTokens,
-		Model:        m.model,
+		Version:          stateVersion,
+		WorkDir:          m.workDir,
+		Mode:             modeName(m.apiKey),
+		SavedAt:          time.Now(),
+		SessionID:        m.sessionID,
+		Conv:             conv,
+		History:          hist,
+		InputHistory:     inputs,
+		CtxTokens:        m.ctxTokens,
+		Model:            m.model,
+		AutoApproveEdits: edits,
+		AutoApproveShell: shell,
 	}
 }
 
@@ -161,5 +169,11 @@ func (m Model) restoreState(st *persistedState) Model {
 	m.inputHistory = st.InputHistory
 	m.ctxTokens = st.CtxTokens
 	m.model = st.Model
+	if st.AutoApproveEdits || st.AutoApproveShell {
+		m.pendingAutoApproveRestore = &autoApproveRestoreState{
+			edits: st.AutoApproveEdits,
+			shell: st.AutoApproveShell,
+		}
+	}
 	return m
 }

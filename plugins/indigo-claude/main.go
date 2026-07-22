@@ -94,11 +94,20 @@ type Model struct {
 	// Permission dialog: false = "approve" highlighted, true = "reject" highlighted.
 	permChoice bool
 
-	// Settings panel: nil = closed. Opened/closed with Tab/Esc, reachable
-	// regardless of agentRunning (unlike the main text input) since its
-	// rows — autoapprove and model — are read fresh by their consumers and
-	// don't need the agent to be idle to take effect.
-	settingsPanel *settingsPanelState
+	// pendingAutoApproveRestore is non-nil when a restored workspace session
+	// had auto-approve on, pending explicit confirmation before it's applied
+	// (see restoreState/handleAutoApproveRestoreKey). autoApproveRestoreChoice:
+	// false = "No" highlighted (the default), true = "Yes" highlighted.
+	pendingAutoApproveRestore *autoApproveRestoreState
+	autoApproveRestoreChoice  bool
+
+	// focus selects which control receives non-global key input: the main
+	// text box, or one of the always-visible top control-bar fields.
+	// Tab/Shift+Tab cycle through all of them (see handleKey/handleBarFocusKey),
+	// reachable regardless of agentRunning (unlike text submission) since the
+	// bar's fields — autoapprove and model — are read fresh by their
+	// consumers and don't need the agent to be idle to take effect.
+	focus inputFocus
 
 	// Token/cost tracking. In API mode ctxTokens is a live snapshot of the
 	// most recent request's context size (meaningful as a % of the window);
@@ -134,8 +143,9 @@ func helpText() string {
 		"- `/model [" + strings.Join(modelAliasOrder, "|") + "|<full-id>|default]` — show or change the model\n" +
 		"- `/autoapprove [edits|shell|all] [on|off]` — show or change auto-approve; bare form shows current state\n" +
 		"- `/quit` - quit indigo-claude\n" +
-		"- `Tab` — open the settings panel (auto-approve + model toggles); works even while Claude is running\n\n" +
-		"Anything else is sent to Claude as a normal message." 
+		"- `Tab` — cycle focus between the top control bar (auto-approve, model) and the message input; " +
+		"←/→ change the focused field, Space/Enter also work; Esc returns focus to the input. Works even while Claude is running.\n\n" +
+		"Anything else is sent to Claude as a normal message."
 }
 
 // onOff renders a bool as "on"/"off" for status messages.
@@ -368,22 +378,17 @@ func validateSlashCommand(command string) bool {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pendingAutoApproveRestore != nil {
+		return m.handleAutoApproveRestoreKey(msg)
+	}
 	if m.pendingPerm != nil {
 		return m.handlePermissionKey(msg)
 	}
 	if len(m.shellPermQueue) > 0 {
 		return m.handleShellPermissionKey(msg)
 	}
-	if m.settingsPanel != nil {
-		return m.handleSettingsPanelKey(msg)
-	}
-	if msg.Type == tea.KeyTab {
-		// Tab has no other use in the main input, so it's free to open the
-		// settings panel — including mid-turn, unlike slash commands.
-		m.settingsPanel = &settingsPanelState{}
-		return m, nil
-	}
 
+	// These work regardless of which control has focus.
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		if m.agentRunning {
@@ -399,6 +404,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlQ:
 		return m, tea.Quit
 
+	case tea.KeyTab:
+		// Tab has no other use in the main input, so it's free to cycle
+		// focus into the control bar — including mid-turn, unlike slash
+		// commands, since autoapprove/model are read fresh by consumers.
+		m.focus = (m.focus + 1) % numFocusTargets
+		return m, nil
+
+	case tea.KeyShiftTab:
+		m.focus = (m.focus - 1 + numFocusTargets) % numFocusTargets
+		return m, nil
+	}
+
+	if m.focus != focusTextInput {
+		return m.handleBarFocusKey(msg)
+	}
+
+	switch msg.Type {
 	case tea.KeyEnter:
 		if msg.Alt {
 			// Alt+Enter: insert newline in multi-line input.
@@ -513,7 +535,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 		if text == "/quit" {
-			 return m, tea.Quit
+			return m, tea.Quit
 		}
 
 		// Save to history (skip consecutive duplicates).
@@ -728,68 +750,111 @@ func (m Model) handleShellPermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// ─── settings panel ─────────────────────────────────────────────────────────
+// ─── auto-approve restore confirmation ──────────────────────────────────────
 
-// settingsPanelRowCount is the number of rows in the settings panel: auto-
-// approve edits, auto-approve shell, model.
-const settingsPanelRowCount = 3
-
-// settingsPanelState tracks which row of the settings panel has focus.
-type settingsPanelState struct {
-	focus int
+// autoApproveRestoreState holds the auto-approve values found in a restored
+// workspace session, pending confirmation before they're applied — unlike
+// the model field, silently reapplying this could skip approval for file
+// edits or shell commands without the user noticing.
+type autoApproveRestoreState struct {
+	edits, shell bool
 }
 
-// settingsPanelModelChoices is the model cycle order for the settings panel's
-// model row: "" (mode default) followed by each alias in modelAliasOrder.
-var settingsPanelModelChoices = append([]string{""}, modelAliasOrder...)
+func (m Model) handleAutoApproveRestoreKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyLeft, tea.KeyRight:
+		m.autoApproveRestoreChoice = !m.autoApproveRestoreChoice
+		return m, nil
+	case tea.KeyEnter:
+		// fall through to confirm
+	default:
+		switch msg.String() {
+		case "y", "Y":
+			m.autoApproveRestoreChoice = true
+		case "n", "N":
+			m.autoApproveRestoreChoice = false
+		default:
+			return m, nil
+		}
+	}
+	pending := m.pendingAutoApproveRestore
+	restore := m.autoApproveRestoreChoice
+	m.pendingAutoApproveRestore = nil
+	m.autoApproveRestoreChoice = false
+	if restore {
+		m.prog.setAutoApproveEdits(pending.edits)
+		m.prog.setAutoApproveShell(pending.shell)
+		m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Auto-approve restored from last session."})
+	} else {
+		m.conv = append(m.conv, ConvMsg{Role: RoleStatus, Content: "Auto-approve left off."})
+	}
+	// Persist the decision either way, so declining doesn't leave a stale
+	// "on" in the state file that would just ask again next time.
+	return m, m.saveStateCmd()
+}
 
-// nextModelChoice steps current by dir (+1/-1) through settingsPanelModelChoices,
+// ─── control bar focus ──────────────────────────────────────────────────────
+
+// inputFocus selects which control receives non-global key input.
+type inputFocus int
+
+const (
+	focusTextInput inputFocus = iota
+	focusAutoApproveEdits
+	focusAutoApproveShell
+	focusModel
+	numFocusTargets // sentinel; keep last
+)
+
+// modelCycleChoices is the model cycle order for the control bar's model
+// field: "" (mode default) followed by each alias in modelAliasOrder.
+var modelCycleChoices = append([]string{""}, modelAliasOrder...)
+
+// nextModelChoice steps current by dir (+1/-1) through modelCycleChoices,
 // wrapping at either end. A value not in the list (e.g. a full model ID set
 // via /model) is treated as if it were "default" for the purposes of cycling.
 func nextModelChoice(current string, dir int) string {
-	idx := slices.Index(settingsPanelModelChoices, current)
+	idx := slices.Index(modelCycleChoices, current)
 	if idx == -1 {
 		idx = 0
 	}
-	n := len(settingsPanelModelChoices)
+	n := len(modelCycleChoices)
 	idx = (idx + dir + n) % n
-	return settingsPanelModelChoices[idx]
+	return modelCycleChoices[idx]
 }
 
-// adjustSettingsRow applies dir (+1/-1) to the currently focused settings
-// panel row: toggles the two auto-approve rows regardless of dir's sign
-// (there are only two states), and steps the model row through
-// settingsPanelModelChoices.
-func (m Model) adjustSettingsRow(dir int) (tea.Model, tea.Cmd) {
-	switch m.settingsPanel.focus {
-	case 0:
+// adjustFocusedControl applies dir (+1/-1) to the currently focused control-bar
+// field: toggles the two auto-approve fields regardless of dir's sign (there
+// are only two states), and steps the model field through modelCycleChoices.
+func (m Model) adjustFocusedControl(dir int) (tea.Model, tea.Cmd) {
+	switch m.focus {
+	case focusAutoApproveEdits:
 		edits, _ := m.prog.autoApprove()
 		m.prog.setAutoApproveEdits(!edits)
-	case 1:
+		return m, m.saveStateCmd()
+	case focusAutoApproveShell:
 		_, shell := m.prog.autoApprove()
 		m.prog.setAutoApproveShell(!shell)
-	case 2:
+		return m, m.saveStateCmd()
+	case focusModel:
 		m.model = nextModelChoice(m.model, dir)
 		return m, m.saveStateCmd()
 	}
 	return m, nil
 }
 
-func (m Model) handleSettingsPanelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// handleBarFocusKey handles key input while a control-bar field (rather than
+// the text input) has focus. Tab/Shift+Tab/Ctrl+C/Ctrl+Q are handled by the
+// caller before this is reached, so they still work from here too.
+func (m Model) handleBarFocusKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.settingsPanel = nil
-		return m, nil
-	case tea.KeyTab:
-		m.settingsPanel.focus = (m.settingsPanel.focus + 1) % settingsPanelRowCount
-		return m, nil
-	case tea.KeyShiftTab:
-		m.settingsPanel.focus = (m.settingsPanel.focus - 1 + settingsPanelRowCount) % settingsPanelRowCount
+		m.focus = focusTextInput
 		return m, nil
 	case tea.KeyLeft:
-		return m.adjustSettingsRow(-1)
+		return m.adjustFocusedControl(-1)
 	case tea.KeyRight, tea.KeyEnter, tea.KeySpace:
-		return m.adjustSettingsRow(1)
+		return m.adjustFocusedControl(1)
 	}
 	return m, nil
 }
@@ -797,12 +862,17 @@ func (m Model) handleSettingsPanelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // ─── view ────────────────────────────────────────────────────────────────────
 
 var (
-	headerStyle    = lipgloss.NewStyle().Background(lipgloss.Color("#087AC8")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
-	statusStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#667788"))
-	toolStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#AABBCC"))
-	inputBorderSty = lipgloss.NewStyle().Foreground(lipgloss.Color("#335577"))
-	inputPromptSty = lipgloss.NewStyle().Foreground(lipgloss.Color("#087AC8")).Bold(true)
-	cursorStyle    = lipgloss.NewStyle().Reverse(true)
+	headerStyle = lipgloss.NewStyle().Background(lipgloss.Color("#087AC8")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#667788"))
+	toolStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#AABBCC"))
+	// Input box: brighter border/prompt when it has focus (focusTextInput),
+	// dimmer border/prompt/text when focus has moved to the control bar.
+	inputBorderSty      = lipgloss.NewStyle().Foreground(lipgloss.Color("#335577"))            // unfocused
+	inputBorderFocusSty = lipgloss.NewStyle().Foreground(lipgloss.Color("#4488CC"))            // focused
+	inputPromptSty      = lipgloss.NewStyle().Foreground(lipgloss.Color("#087AC8")).Bold(true) // focused
+	inputPromptDimSty   = lipgloss.NewStyle().Foreground(lipgloss.Color("#335577")).Bold(true) // unfocused
+	inputTextDimSty     = lipgloss.NewStyle().Foreground(lipgloss.Color("#667788"))            // unfocused
+	cursorStyle         = lipgloss.NewStyle().Reverse(true)
 
 	// User message bubble — slightly elevated surface colour.
 	bubbleBg = lipgloss.AdaptiveColor{Dark: "#1B2939", Light: "#DDE8F4"}
@@ -831,6 +901,8 @@ func (m Model) View() string {
 		return ""
 	}
 	var sb strings.Builder
+	sb.WriteString(m.renderControlBar()) // k9s-style: always visible, top of screen
+	sb.WriteByte('\n')
 	sb.WriteString(m.renderConversation())
 	sb.WriteByte('\n')
 	sb.WriteString(m.renderInput()) // bordered box; always exactly inputHeight() rows
@@ -839,8 +911,8 @@ func (m Model) View() string {
 	base := sb.String()
 	if m.pendingPerm != nil || len(m.shellPermQueue) > 0 {
 		base = m.overlayPermPopup(base)
-	} else if m.settingsPanel != nil {
-		base = m.overlaySettingsPanel(base)
+	} else if m.pendingAutoApproveRestore != nil {
+		base = m.overlayPopupAbove(base, m.buildAutoApproveRestorePopup())
 	}
 	return base
 }
@@ -997,6 +1069,70 @@ func (m Model) buildPermPopup() []string {
 	return out
 }
 
+// buildAutoApproveRestorePopup returns the styled lines of the restore
+// confirmation dialog, shown once at startup when a restored workspace
+// session had auto-approve on. "No" is the default-highlighted choice.
+func (m Model) buildAutoApproveRestorePopup() []string {
+	p := m.pendingAutoApproveRestore
+	if p == nil {
+		return nil
+	}
+	var which []string
+	if p.edits {
+		which = append(which, "edits")
+	}
+	if p.shell {
+		which = append(which, "shell")
+	}
+
+	const title = "⚠ Restore auto-approve?"
+	bodyLines := []string{
+		"  Auto-approve (" + strings.Join(which, ", ") + ") was on last time",
+		"  you used this workspace. Restore it?",
+	}
+	const footerStr = "  ◀ No ▶   ◀ Yes ▶"
+
+	innerW := lipgloss.Width(title) + 3
+	for _, l := range bodyLines {
+		if w := lipgloss.Width(l); w > innerW {
+			innerW = w
+		}
+	}
+	if w := lipgloss.Width(footerStr); w > innerW {
+		innerW = w
+	}
+	innerW = min(innerW, min(64, m.width-8))
+	innerW = max(innerW, 32)
+
+	titleStyled := ppKey.Render("⚠") + ppLabel.Render(strings.TrimPrefix(title, "⚠"))
+	remainDashes := max(0, innerW-lipgloss.Width(title)-3)
+	topLine := ppBorder.Render("╭─ ") + titleStyled + ppBorder.Render(" "+strings.Repeat("─", remainDashes)+"╮")
+
+	var out []string
+	out = append(out, topLine)
+	for _, bl := range bodyLines {
+		pad := max(0, innerW-lipgloss.Width(bl))
+		out = append(out, ppBorder.Render("│")+ppText.Render(bl+strings.Repeat(" ", pad))+ppBorder.Render("│"))
+	}
+
+	selStyle := lipgloss.NewStyle().Background(ppBg).Foreground(lipgloss.Color("#FFDD44")).Bold(true)
+	dimStyle := ppText
+	var noStyled, yesStyled string
+	if !m.autoApproveRestoreChoice { // "No" highlighted — the safe default
+		noStyled = selStyle.Render("◀ No ▶")
+		yesStyled = dimStyle.Render("  Yes  ")
+	} else {
+		noStyled = dimStyle.Render("  No  ")
+		yesStyled = selStyle.Render("◀ Yes ▶")
+	}
+	footerRendered := ppText.Render("  ") + noStyled + ppText.Render("   ") + yesStyled
+	footerPad := max(0, innerW-lipgloss.Width(footerStr))
+	out = append(out, ppBorder.Render("├"+strings.Repeat("─", innerW)+"┤"))
+	out = append(out, ppBorder.Render("│")+footerRendered+ppText.Render(strings.Repeat(" ", footerPad))+ppBorder.Render("│"))
+	out = append(out, ppBorder.Render("╰"+strings.Repeat("─", innerW)+"╯"))
+	return out
+}
+
 // overlayPopupAbove places popup's lines just above the input box, horizontally
 // centered. Shared by the permission popup and the settings panel.
 func (m Model) overlayPopupAbove(base string, popup []string) string {
@@ -1042,80 +1178,55 @@ func (m Model) overlayPermPopup(base string) string {
 	return m.overlayPopupAbove(base, m.buildPermPopup())
 }
 
-// overlaySettingsPanel places the settings panel just above the input box.
-func (m Model) overlaySettingsPanel(base string) string {
-	return m.overlayPopupAbove(base, m.buildSettingsPopup())
-}
+// controlBarBg is the background for the always-visible top control bar
+// (k9s-style): auto-approve edits/shell and the model selector, editable
+// without needing the agent to be idle — see focusAutoApproveEdits etc.
+var (
+	controlBarBg      = lipgloss.Color("#12202E")
+	controlBarStyle   = lipgloss.NewStyle().Background(controlBarBg).Foreground(lipgloss.Color("#88AACC"))
+	controlBarFocus   = lipgloss.NewStyle().Background(controlBarBg).Foreground(lipgloss.Color("#FFDD44")).Bold(true)
+	controlBarHintSty = lipgloss.NewStyle().Background(controlBarBg).Foreground(lipgloss.Color("#556677"))
+)
 
-// buildSettingsPopup returns the styled lines of the settings panel box:
-// auto-approve edits/shell toggles and the model selector, all editable
-// without needing the agent to be idle.
-func (m Model) buildSettingsPopup() []string {
-	if m.settingsPanel == nil {
-		return nil
-	}
+// renderControlBar renders the always-visible top bar: auto-approve edits,
+// auto-approve shell, and model, each highlighted when focused. Edits/Shell
+// are grouped under a shared "Auto-approve:" label — dropped first on a
+// narrow terminal, then the Tab hint, falling back to the bare fields.
+func (m Model) renderControlBar() string {
 	edits, shell := m.prog.autoApprove()
 	modelLabel := m.model
 	if modelLabel == "" {
 		modelLabel = "default"
 	}
-	rows := []struct{ label, value string }{
-		{"Auto-approve edits", onOff(edits)},
-		{"Auto-approve shell", onOff(shell)},
-		{"Model", modelLabel},
-	}
 
-	labelW := 0
-	for _, r := range rows {
-		if w := lipgloss.Width(r.label); w > labelW {
-			labelW = w
+	styleFor := func(f inputFocus) lipgloss.Style {
+		if m.focus == f {
+			return controlBarFocus
+		}
+		return controlBarStyle
+	}
+	editsField := styleFor(focusAutoApproveEdits).Render(fmt.Sprintf(" Edits: %s ", onOff(edits)))
+	shellField := styleFor(focusAutoApproveShell).Render(fmt.Sprintf(" Shell: %s ", onOff(shell)))
+	modelField := styleFor(focusModel).Render(fmt.Sprintf(" Model: %s ", modelLabel))
+	sep := controlBarStyle.Render(" ")
+	groupSep := controlBarStyle.Render("   ") // wider gap: separates the auto-approve group from Model
+
+	fieldsOnly := editsField + sep + shellField + groupSep + modelField
+	withLabel := controlBarHintSty.Render(" Auto-approve: ") + editsField + sep + shellField + groupSep + modelField
+
+	const hint = "Tab: cycle focus  ·  ←/→ change  ·  Space/Enter toggle "
+	candidates := []struct{ left, right string }{
+		{withLabel, hint},
+		{withLabel, ""},
+		{fieldsOnly, ""},
+	}
+	for _, c := range candidates {
+		pad := m.width - lipgloss.Width(c.left) - lipgloss.Width(c.right)
+		if pad >= 1 {
+			return c.left + controlBarStyle.Render(strings.Repeat(" ", pad)) + controlBarHintSty.Render(c.right)
 		}
 	}
-	lineFor := func(r struct{ label, value string }) string {
-		label := r.label + strings.Repeat(" ", labelW-lipgloss.Width(r.label))
-		return "  " + label + "  " + r.value
-	}
-
-	const titleText = "⚙ Settings"
-	const footerText = "  Tab next   ←/→ change   Esc close"
-	innerW := lipgloss.Width(titleText) + 3
-	for _, r := range rows {
-		if w := lipgloss.Width(lineFor(r)); w > innerW {
-			innerW = w
-		}
-	}
-	if w := lipgloss.Width(footerText); w > innerW {
-		innerW = w
-	}
-	innerW = min(innerW, m.width-8)
-	innerW = max(innerW, 32)
-
-	titleStyled := ppKey.Render("⚙") + ppLabel.Render(strings.TrimPrefix(titleText, "⚙"))
-	remainDashes := max(0, innerW-lipgloss.Width(titleText)-3)
-	topLine := ppBorder.Render("╭─ ") + titleStyled + ppBorder.Render(" "+strings.Repeat("─", remainDashes)+"╮")
-
-	selStyle := lipgloss.NewStyle().Background(ppBg).Foreground(lipgloss.Color("#FFDD44")).Bold(true)
-
-	var out []string
-	out = append(out, topLine)
-	for i, r := range rows {
-		line := lineFor(r)
-		if i == m.settingsPanel.focus {
-			line = "▸ " + line[len("  "):]
-		}
-		pad := max(0, innerW-lipgloss.Width(line))
-		padded := line + strings.Repeat(" ", pad)
-		style := ppText
-		if i == m.settingsPanel.focus {
-			style = selStyle
-		}
-		out = append(out, ppBorder.Render("│")+style.Render(padded)+ppBorder.Render("│"))
-	}
-	footerPad := max(0, innerW-lipgloss.Width(footerText))
-	out = append(out, ppBorder.Render("├"+strings.Repeat("─", innerW)+"┤"))
-	out = append(out, ppBorder.Render("│")+ppText.Render(footerText+strings.Repeat(" ", footerPad))+ppBorder.Render("│"))
-	out = append(out, ppBorder.Render("╰"+strings.Repeat("─", innerW)+"╯"))
-	return out
+	return controlBarStyle.Width(m.width).Render(fieldsOnly)
 }
 
 // thinkingWords rotates through while the agent is working, in the spirit of
@@ -1176,29 +1287,13 @@ func (m Model) renderHeader() string {
 		label += "  [" + thinkingWord(m.agentRunningSince) + "…]"
 	}
 
-	// Right side: model (only shown once overridden via /model, to avoid
-	// clutter for the common case) plus context stats and the plan-limit
-	// warning. Cost appears only in API mode where tokens are billed
-	// directly. The plan warning prefers its full text with reset times; on
-	// narrow terminals it degrades to compact chips, then drops entirely
-	// rather than truncating the label.
+	// Right side: context stats and the plan-limit warning (model and
+	// auto-approve state live in the top control bar instead). Cost appears
+	// only in API mode where tokens are billed directly. The plan warning
+	// prefers its full text with reset times; on narrow terminals it
+	// degrades to compact chips, then drops entirely rather than truncating
+	// the label.
 	var ctxSeg string
-	if m.model != "" {
-		ctxSeg = m.model
-	}
-	if autoEdits, autoShell := m.prog.autoApprove(); autoEdits || autoShell {
-		if ctxSeg != "" {
-			ctxSeg += " · "
-		}
-		switch {
-		case autoEdits && autoShell:
-			ctxSeg += "⚠ auto-approve: all"
-		case autoEdits:
-			ctxSeg += "⚠ auto-approve: edits"
-		default:
-			ctxSeg += "⚠ auto-approve: shell"
-		}
-	}
 	if m.ctxTokens > 0 {
 		if ctxSeg != "" {
 			ctxSeg += " · "
@@ -1496,6 +1591,16 @@ func (m Model) renderInput() string {
 		innerW = 1
 	}
 
+	focused := m.focus == focusTextInput
+	border := inputBorderSty
+	promptSty := inputPromptDimSty
+	textSty := inputTextDimSty
+	if focused {
+		border = inputBorderFocusSty
+		promptSty = inputPromptSty
+		textSty = lipgloss.NewStyle() // unstyled: default terminal foreground
+	}
+
 	// Embed scroll/thinking hint in the top border. Plan-limit warnings live
 	// in the status bar at the bottom.
 	var hintStr string
@@ -1507,10 +1612,10 @@ func (m Model) renderInput() string {
 	}
 	hintW := lipgloss.Width(hintStr)
 	topDashes := max(0, innerW-1-hintW)
-	topBorder := inputBorderSty.Render("╭─" + hintStr + strings.Repeat("─", topDashes) + "╮")
-	botBorder := inputBorderSty.Render("╰" + strings.Repeat("─", innerW) + "╯")
+	topBorder := border.Render("╭─" + hintStr + strings.Repeat("─", topDashes) + "╮")
+	botBorder := border.Render("╰" + strings.Repeat("─", innerW) + "╯")
 
-	prompt := inputPromptSty.Render("▶ ")
+	prompt := promptSty.Render("▶ ")
 	pw := lipgloss.Width(prompt)
 	cont := strings.Repeat(" ", pw)
 
@@ -1545,32 +1650,36 @@ func (m Model) renderInput() string {
 		var lineContent string
 		if i == cursorRow {
 			col := min(cursorCol, len(lineRunes))
-			before := string(lineRunes[:col])
+			before := textSty.Render(string(lineRunes[:col]))
 			var curChar, after string
 			if col < len(lineRunes) {
-				curChar = cursorStyle.Render(string(lineRunes[col]))
-				after = string(lineRunes[col+1:])
-			} else {
+				after = textSty.Render(string(lineRunes[col+1:]))
+				if focused {
+					curChar = cursorStyle.Render(string(lineRunes[col]))
+				} else {
+					curChar = textSty.Render(string(lineRunes[col]))
+				}
+			} else if focused {
 				curChar = cursorStyle.Render(" ")
 			}
 			lineContent = before + curChar + after
 		} else {
-			lineContent = string(lineRunes)
+			lineContent = textSty.Render(string(lineRunes))
 		}
 
 		lineW := lipgloss.Width(prefix + lineContent)
 		pad := strings.Repeat(" ", max(0, innerW-lineW))
-		sb.WriteString(inputBorderSty.Render("│"))
+		sb.WriteString(border.Render("│"))
 		sb.WriteString(prefix + lineContent + pad)
-		sb.WriteString(inputBorderSty.Render("│"))
+		sb.WriteString(border.Render("│"))
 	}
 
 	// Pad remaining content rows with empty bordered lines.
 	for i := winEnd - winStart; i < contentH; i++ {
 		sb.WriteByte('\n')
-		sb.WriteString(inputBorderSty.Render("│"))
+		sb.WriteString(border.Render("│"))
 		sb.WriteString(strings.Repeat(" ", innerW))
-		sb.WriteString(inputBorderSty.Render("│"))
+		sb.WriteString(border.Render("│"))
 	}
 
 	sb.WriteByte('\n')
@@ -1590,10 +1699,11 @@ func (m Model) inputHeight() int {
 }
 
 // convHeight returns the number of rows available for conversation display.
-// Layout: conv(convHeight) + '\n' + input(inputHeight) + '\n' + header(1)
-// Total rows = convHeight + inputHeight + 1 (header only; no separate divider row).
+// Layout: bar(1) + '\n' + conv(convHeight) + '\n' + input(inputHeight) + '\n' + header(1)
+// Total rows = 1 + convHeight + inputHeight + 1 (bar and header are each a
+// single row; no separate divider rows).
 func (m Model) convHeight() int {
-	return max(1, m.height-m.inputHeight()-1)
+	return max(1, m.height-m.inputHeight()-2)
 }
 
 // ─── input cursor movement helpers ───────────────────────────────────────────

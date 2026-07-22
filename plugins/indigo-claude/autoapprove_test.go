@@ -78,21 +78,35 @@ func TestRequestEditApprovalRoundTripsWhenNotAutoApproved(t *testing.T) {
 	}
 }
 
-func TestRenderHeaderShowsAutoApproveIndicator(t *testing.T) {
+// TestRenderHeaderNoLongerShowsAutoApprove is a regression test: this state
+// now lives exclusively in the always-visible control bar (see
+// TestControlBarReflectsAutoApproveState), so the header must not duplicate it.
+func TestRenderHeaderNoLongerShowsAutoApprove(t *testing.T) {
+	m := newModel(nil, &programLink{}, "", t.TempDir())
+	m.width = 100
+	m.prog.setAutoApproveEdits(true)
+	m.prog.setAutoApproveShell(true)
+
+	if got := m.renderHeader(); strings.Contains(got, "auto-approve") {
+		t.Errorf("header still shows auto-approve indicator: %q", got)
+	}
+}
+
+func TestControlBarReflectsAutoApproveState(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
 	m.width = 100
 
-	if got := m.renderHeader(); strings.Contains(got, "auto-approve") {
-		t.Errorf("header shows auto-approve indicator when it's off: %q", got)
+	if got := m.renderControlBar(); !strings.Contains(got, "Edits: off") || !strings.Contains(got, "Shell: off") {
+		t.Errorf("control bar doesn't show both off: %q", got)
 	}
 
 	m.prog.setAutoApproveEdits(true)
-	if got := m.renderHeader(); !strings.Contains(got, "auto-approve: edits") {
-		t.Errorf("header missing auto-approve: edits indicator: %q", got)
+	if got := m.renderControlBar(); !strings.Contains(got, "Edits: on") {
+		t.Errorf("control bar missing Edits: on: %q", got)
 	}
 
 	m.prog.setAutoApproveShell(true)
-	if got := m.renderHeader(); !strings.Contains(got, "auto-approve: all") {
-		t.Errorf("header missing auto-approve: all indicator: %q", got)
+	if got := m.renderControlBar(); !strings.Contains(got, "Shell: on") {
+		t.Errorf("control bar missing Shell: on: %q", got)
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -44,65 +45,61 @@ func pressKey(m Model, msg tea.KeyMsg) Model {
 	return m2.(Model)
 }
 
-func TestTabOpensSettingsPanelEvenWhileAgentRunning(t *testing.T) {
+func TestTabEntersControlBarEvenWhileAgentRunning(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
 	m.agentRunning = true // the case that matters: mid-turn
 
 	m = pressKey(m, tea.KeyMsg{Type: tea.KeyTab})
 
-	if m.settingsPanel == nil {
-		t.Fatal("Tab did not open the settings panel while agentRunning")
-	}
-	if m.settingsPanel.focus != 0 {
-		t.Errorf("focus = %d, want 0", m.settingsPanel.focus)
+	if m.focus != focusAutoApproveEdits {
+		t.Fatalf("focus = %v, want focusAutoApproveEdits, even while agentRunning", m.focus)
 	}
 }
 
-func TestSettingsPanelTabCyclesFocusWithWrap(t *testing.T) {
+func TestTabCyclesThroughAllFociAndWrapsToTextInput(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
-	m.settingsPanel = &settingsPanelState{}
 
-	for i := 1; i < settingsPanelRowCount; i++ {
+	want := []inputFocus{focusAutoApproveEdits, focusAutoApproveShell, focusModel, focusTextInput}
+	for i, w := range want {
 		m = pressKey(m, tea.KeyMsg{Type: tea.KeyTab})
-		if m.settingsPanel.focus != i {
-			t.Fatalf("after %d Tabs: focus = %d, want %d", i, m.settingsPanel.focus, i)
+		if m.focus != w {
+			t.Fatalf("after %d Tabs: focus = %v, want %v", i+1, m.focus, w)
 		}
 	}
-	// One more Tab should wrap back to 0.
-	m = pressKey(m, tea.KeyMsg{Type: tea.KeyTab})
-	if m.settingsPanel.focus != 0 {
-		t.Errorf("focus after wrap = %d, want 0", m.settingsPanel.focus)
-	}
+}
 
-	// Shift+Tab from 0 should wrap to the last row.
+func TestShiftTabFromTextInputWrapsToLastField(t *testing.T) {
+	m := newModel(nil, &programLink{}, "", t.TempDir())
+
 	m = pressKey(m, tea.KeyMsg{Type: tea.KeyShiftTab})
-	if m.settingsPanel.focus != settingsPanelRowCount-1 {
-		t.Errorf("focus after shift+tab wrap = %d, want %d", m.settingsPanel.focus, settingsPanelRowCount-1)
+
+	if m.focus != focusModel {
+		t.Errorf("focus after shift+tab from text input = %v, want focusModel (wrap backward)", m.focus)
 	}
 }
 
-func TestSettingsPanelEscCloses(t *testing.T) {
+func TestEscFromBarFieldReturnsFocusToTextInput(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
-	m.settingsPanel = &settingsPanelState{}
+	m.focus = focusAutoApproveShell
 
 	m = pressKey(m, tea.KeyMsg{Type: tea.KeyEsc})
 
-	if m.settingsPanel != nil {
-		t.Error("Esc did not close the settings panel")
+	if m.focus != focusTextInput {
+		t.Errorf("focus after Esc = %v, want focusTextInput", m.focus)
 	}
 }
 
-func TestSettingsPanelTogglesAutoApproveEdits(t *testing.T) {
+func TestControlBarTogglesAutoApproveEdits(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
-	m.settingsPanel = &settingsPanelState{focus: 0}
+	m.focus = focusAutoApproveEdits
 
 	m = pressKey(m, tea.KeyMsg{Type: tea.KeyEnter})
 	edits, shell := m.prog.autoApprove()
 	if !edits {
-		t.Error("Enter on row 0 did not turn auto-approve edits on")
+		t.Error("Enter on focusAutoApproveEdits did not turn auto-approve edits on")
 	}
 	if shell {
-		t.Error("row 0 unexpectedly affected auto-approve shell")
+		t.Error("focusAutoApproveEdits unexpectedly affected auto-approve shell")
 	}
 
 	m = pressKey(m, tea.KeyMsg{Type: tea.KeySpace})
@@ -112,20 +109,20 @@ func TestSettingsPanelTogglesAutoApproveEdits(t *testing.T) {
 	}
 }
 
-func TestSettingsPanelTogglesAutoApproveShell(t *testing.T) {
+func TestControlBarTogglesAutoApproveShell(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
-	m.settingsPanel = &settingsPanelState{focus: 1}
+	m.focus = focusAutoApproveShell
 
 	m = pressKey(m, tea.KeyMsg{Type: tea.KeyRight})
 	_, shell := m.prog.autoApprove()
 	if !shell {
-		t.Error("Right on row 1 did not turn auto-approve shell on")
+		t.Error("Right on focusAutoApproveShell did not turn auto-approve shell on")
 	}
 }
 
-func TestSettingsPanelModelRowCyclesWithLeftRight(t *testing.T) {
+func TestControlBarModelFieldCyclesWithLeftRight(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
-	m.settingsPanel = &settingsPanelState{focus: 2}
+	m.focus = focusModel
 
 	m = pressKey(m, tea.KeyMsg{Type: tea.KeyRight})
 	if m.model != modelAliasOrder[0] {
@@ -138,15 +135,14 @@ func TestSettingsPanelModelRowCyclesWithLeftRight(t *testing.T) {
 	}
 }
 
-// TestSettingsPanelKeysDoNotReachTextInput is a regression test: keys
-// consumed by the open settings panel (e.g. Enter) must not also fall
-// through and mutate the conversation/input, the way they would if the
-// panel weren't checked first in handleKey.
-func TestSettingsPanelKeysDoNotReachTextInput(t *testing.T) {
+// TestControlBarKeysDoNotReachTextInput is a regression test: keys consumed
+// while a bar field has focus (e.g. Enter) must not also fall through and
+// mutate the conversation/input, the way they would if focus routing broke.
+func TestControlBarKeysDoNotReachTextInput(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
 	m.input = []rune("hello")
 	m.inputPos = len(m.input)
-	m.settingsPanel = &settingsPanelState{focus: 0}
+	m.focus = focusAutoApproveEdits
 	convLenBefore := len(m.conv)
 
 	m = pressKey(m, tea.KeyMsg{Type: tea.KeyEnter})
@@ -159,20 +155,71 @@ func TestSettingsPanelKeysDoNotReachTextInput(t *testing.T) {
 	}
 }
 
-func TestBuildSettingsPopupShowsFocusedRow(t *testing.T) {
+func TestCtrlCStillCancelsAgentWhileBarFieldFocused(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
-	m.width, m.height = 100, 40
-	m.settingsPanel = &settingsPanelState{focus: 2}
+	m.focus = focusModel
+	m.agentRunning = true
+
+	m = pressKey(m, tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	if m.agentRunning {
+		t.Error("Ctrl+C did not cancel the running agent while a control-bar field had focus")
+	}
+}
+
+func TestRenderControlBarShowsFieldsAndHintWhenRoomAllows(t *testing.T) {
+	m := newModel(nil, &programLink{}, "", t.TempDir())
+	m.width, m.height = 120, 40
 	m.model = "opus"
 
-	lines := m.buildSettingsPopup()
-	if len(lines) == 0 {
-		t.Fatal("buildSettingsPopup() returned no lines")
-	}
-	want := lipgloss.Width(lines[0])
-	for i, l := range lines {
-		if got := lipgloss.Width(l); got != want {
-			t.Errorf("line %d width = %d, want %d (uniform border)\nline: %q", i, got, want, l)
+	bar := m.renderControlBar()
+	for _, want := range []string{"Auto-approve:", "Edits:", "Shell:", "Model:", "opus", "Tab:"} {
+		if !strings.Contains(bar, want) {
+			t.Errorf("renderControlBar() missing %q\ngot: %q", want, bar)
 		}
+	}
+}
+
+// TestRenderControlBarKeepsLabelButDropsHintAtMediumWidth is a regression
+// test for the three-tier degrade: the "Auto-approve:" grouping label
+// (added so first-time users know Edits/Shell are about auto-approval)
+// should survive on terminals too narrow for the Tab hint but wide enough
+// for the label itself.
+func TestRenderControlBarKeepsLabelButDropsHintAtMediumWidth(t *testing.T) {
+	m := newModel(nil, &programLink{}, "", t.TempDir())
+	m.width, m.height = 80, 40
+
+	bar := m.renderControlBar()
+	if !strings.Contains(bar, "Auto-approve:") {
+		t.Errorf("renderControlBar() dropped the grouping label at medium width: %q", bar)
+	}
+	if strings.Contains(bar, "cycle focus") {
+		t.Errorf("renderControlBar() kept the hint at medium width: %q", bar)
+	}
+}
+
+func TestRenderControlBarDropsLabelAndHintWhenNarrow(t *testing.T) {
+	m := newModel(nil, &programLink{}, "", t.TempDir())
+	m.width, m.height = 40, 40
+
+	bar := m.renderControlBar()
+	if strings.Contains(bar, "cycle focus") {
+		t.Errorf("renderControlBar() kept the hint on a narrow terminal: %q", bar)
+	}
+	if strings.Contains(bar, "Auto-approve:") {
+		t.Errorf("renderControlBar() kept the grouping label on a narrow terminal: %q", bar)
+	}
+	if !strings.Contains(bar, "Edits:") {
+		t.Errorf("renderControlBar() dropped the fields themselves: %q", bar)
+	}
+}
+
+func TestRenderControlBarUniformWidth(t *testing.T) {
+	m := newModel(nil, &programLink{}, "", t.TempDir())
+	m.width, m.height = 100, 40
+
+	bar := m.renderControlBar()
+	if got := lipgloss.Width(bar); got != m.width {
+		t.Errorf("renderControlBar() width = %d, want %d", got, m.width)
 	}
 }

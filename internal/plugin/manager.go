@@ -250,27 +250,33 @@ func (m *Manager) Start(ctx context.Context) error {
 		return fmt.Errorf("read plugins dir: %w", err)
 	}
 
+	var wg sync.WaitGroup
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		pluginDir := filepath.Join(dir, entry.Name())
-		manifest, err := loadManifest(pluginDir)
-		if err != nil {
-			pluginLog("plugin %s: manifest error: %v", entry.Name(), err)
-			continue
-		}
-		binaryPath, err := selectBinary(pluginDir, manifest)
-		if err != nil {
-			pluginLog("plugin %s: binary error: %v", manifest.Name, err)
-			continue
-		}
-		if err := m.startPlugin(ctx, manifest, binaryPath); err != nil {
-			pluginLog("plugin %s: start error: %v", manifest.Name, err)
-			continue
-		}
-		pluginLog("plugin %s: started OK (%s)", manifest.Name, binaryPath)
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+			pluginDir := filepath.Join(dir, name)
+			manifest, err := loadManifest(pluginDir)
+			if err != nil {
+				pluginLog("plugin %s: manifest error: %v", name, err)
+				return
+			}
+			binaryPath, err := selectBinary(pluginDir, manifest)
+			if err != nil {
+				pluginLog("plugin %s: binary error: %v", manifest.Name, err)
+				return
+			}
+			if err := m.startPlugin(ctx, manifest, binaryPath); err != nil {
+				pluginLog("plugin %s: start error: %v", manifest.Name, err)
+				return
+			}
+			pluginLog("plugin %s: started OK (%s)", manifest.Name, binaryPath)
+		}(entry.Name())
 	}
+	wg.Wait()
 	return nil
 }
 
@@ -1113,7 +1119,7 @@ func waitForSocket(path string, timeout time.Duration) error {
 		if _, err := os.Stat(path); err == nil {
 			return nil
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for %s", path)
 }

@@ -190,12 +190,25 @@ func Dial(socketPath string) (*RPC, error) {
 		clientLog("server connection closed")
 	}()
 
-	// Fetch keys that plugins registered before this client connected.
-	// This handles the race where the plugin starts and registers keys before
-	// the first client calls Connect.
+	// Fetch plugin keys/bindings/menu items in one round trip's worth of
+	// latency instead of three: issue all three calls before blocking on any
+	// of their results, so the server processes them concurrently. The
+	// bindings/menu-items handlers each wait for plugin startup to finish
+	// (see pluginReadyTimeout server-side); firing them together means that
+	// wait is paid once, not stacked three times.
 	kfut, krel := svc.GetPluginKeys(context.Background(), func(_ proto.EditorService_getPluginKeys_Params) error {
 		return nil
 	})
+	bfut, brel := svc.GetPluginBindings(context.Background(), func(_ proto.EditorService_getPluginBindings_Params) error {
+		return nil
+	})
+	mfut, mrel := svc.GetMenuItems(context.Background(), func(_ proto.EditorService_getMenuItems_Params) error {
+		return nil
+	})
+
+	// Keys that plugins registered before this client connected. This handles
+	// the race where the plugin starts and registers keys before the first
+	// client calls Connect.
 	if kres, err := kfut.Struct(); err != nil {
 		clientLog("GetPluginKeys RPC error: %v", err)
 	} else if keys, err := kres.Keys(); err != nil {
@@ -211,10 +224,7 @@ func Dial(socketPath string) (*RPC, error) {
 	}
 	krel()
 
-	// Fetch plugin bindings for the help popup.
-	bfut, brel := svc.GetPluginBindings(context.Background(), func(_ proto.EditorService_getPluginBindings_Params) error {
-		return nil
-	})
+	// Plugin bindings for the help popup.
 	if bres, err := bfut.Struct(); err == nil {
 		if rawList, err := bres.Bindings(); err == nil {
 			r.pluginBindings = make([]ClientPluginBinding, rawList.Len())
@@ -229,10 +239,7 @@ func Dial(socketPath string) (*RPC, error) {
 	}
 	brel()
 
-	// Fetch plugin-contributed Command (space) menu items.
-	mfut, mrel := svc.GetMenuItems(context.Background(), func(_ proto.EditorService_getMenuItems_Params) error {
-		return nil
-	})
+	// Plugin-contributed Command (space) menu items.
 	if mres, err := mfut.Struct(); err == nil {
 		if rawList, err := mres.Items(); err == nil {
 			r.menuItems = decodeMenuItems(rawList)

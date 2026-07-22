@@ -1,6 +1,7 @@
 BINARY  := indigo
 CMD     := ./cmd/indigo
 OUT     := $(BINARY)
+GOBIN   := $(shell go env GOPATH)/bin
 
 # Default: all languages included.
 build:
@@ -24,7 +25,8 @@ build-custom:
 	go build -tags "$(LANGS)" -o $(OUT) $(CMD)
 
 install: build-release
-	mv $(OUT) $(shell go env GOPATH)/bin/$(BINARY)
+	mv $(OUT) $(GOBIN)/$(BINARY)
+	$(GOBIN)/$(BINARY) --warm
 
 test:
 	go test -tags lang_all ./...
@@ -55,6 +57,7 @@ install-hello: build-hello
 	mkdir -p $(HELLO_INSTALL)
 	mv $(HELLO_OUT) $(HELLO_INSTALL)/
 	cp $(HELLO_DIR)/plugin.toml $(HELLO_INSTALL)/
+	$(HELLO_INSTALL)/hello-$(GOOS)-$(GOARCH) --warm
 
 uninstall-hello:
 	rm -rf $(HELLO_INSTALL)
@@ -70,6 +73,7 @@ install-jumpy: build-jumpy
 	mkdir -p $(JUMPY_INSTALL)
 	mv $(JUMPY_OUT) $(JUMPY_INSTALL)/
 	cp $(JUMPY_DIR)/plugin.toml $(JUMPY_INSTALL)/
+	$(JUMPY_INSTALL)/jumpy-$(GOOS)-$(GOARCH) --warm
 
 uninstall-jumpy:
 	rm -rf $(JUMPY_INSTALL)
@@ -85,6 +89,7 @@ install-spell: build-spell
 	mkdir -p $(SPELL_INSTALL)
 	mv $(SPELL_OUT) $(SPELL_INSTALL)/
 	cp $(SPELL_DIR)/plugin.toml $(SPELL_INSTALL)/
+	$(SPELL_INSTALL)/indigo-spell-$(GOOS)-$(GOARCH) --warm
 
 uninstall-spell:
 	rm -rf $(SPELL_INSTALL)
@@ -100,6 +105,7 @@ install-git: build-git
 	mkdir -p $(GIT_INSTALL)
 	mv $(GIT_OUT) $(GIT_INSTALL)/
 	cp $(GIT_DIR)/plugin.toml $(GIT_INSTALL)/
+	$(GIT_INSTALL)/indigo-git-$(GOOS)-$(GOARCH) --warm
 
 uninstall-git:
 	rm -rf $(GIT_INSTALL)
@@ -115,6 +121,7 @@ install-bookmarks: build-bookmarks
 	mkdir -p $(BOOKMARKS_INSTALL)
 	mv $(BOOKMARKS_OUT) $(BOOKMARKS_INSTALL)/
 	cp $(BOOKMARKS_DIR)/plugin.toml $(BOOKMARKS_INSTALL)/
+	$(BOOKMARKS_INSTALL)/bookmarks-$(GOOS)-$(GOARCH) --warm
 
 uninstall-bookmarks:
 	rm -rf $(BOOKMARKS_INSTALL)

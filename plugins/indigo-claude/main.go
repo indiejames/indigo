@@ -94,6 +94,12 @@ type Model struct {
 	// Permission dialog: false = "approve" highlighted, true = "reject" highlighted.
 	permChoice bool
 
+	// Settings panel: nil = closed. Opened/closed with Tab/Esc, reachable
+	// regardless of agentRunning (unlike the main text input) since its
+	// rows — autoapprove and model — are read fresh by their consumers and
+	// don't need the agent to be idle to take effect.
+	settingsPanel *settingsPanelState
+
 	// Token/cost tracking. In API mode ctxTokens is a live snapshot of the
 	// most recent request's context size (meaningful as a % of the window);
 	// in CLI mode it's cumulative tokens spent this session (NOT context
@@ -127,7 +133,8 @@ func helpText() string {
 		"- `/copy` — copy the last response to the clipboard\n" +
 		"- `/model [" + strings.Join(modelAliasOrder, "|") + "|<full-id>|default]` — show or change the model\n" +
 		"- `/autoapprove [edits|shell|all] [on|off]` — show or change auto-approve; bare form shows current state\n" +
-		"- `/quit` - quit indigo-claude\n\n" +
+		"- `/quit` - quit indigo-claude\n" +
+		"- `Tab` — open the settings panel (auto-approve + model toggles); works even while Claude is running\n\n" +
 		"Anything else is sent to Claude as a normal message." 
 }
 
@@ -366,6 +373,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if len(m.shellPermQueue) > 0 {
 		return m.handleShellPermissionKey(msg)
+	}
+	if m.settingsPanel != nil {
+		return m.handleSettingsPanelKey(msg)
+	}
+	if msg.Type == tea.KeyTab {
+		// Tab has no other use in the main input, so it's free to open the
+		// settings panel — including mid-turn, unlike slash commands.
+		m.settingsPanel = &settingsPanelState{}
+		return m, nil
 	}
 
 	switch msg.Type {
@@ -712,6 +728,72 @@ func (m Model) handleShellPermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// ─── settings panel ─────────────────────────────────────────────────────────
+
+// settingsPanelRowCount is the number of rows in the settings panel: auto-
+// approve edits, auto-approve shell, model.
+const settingsPanelRowCount = 3
+
+// settingsPanelState tracks which row of the settings panel has focus.
+type settingsPanelState struct {
+	focus int
+}
+
+// settingsPanelModelChoices is the model cycle order for the settings panel's
+// model row: "" (mode default) followed by each alias in modelAliasOrder.
+var settingsPanelModelChoices = append([]string{""}, modelAliasOrder...)
+
+// nextModelChoice steps current by dir (+1/-1) through settingsPanelModelChoices,
+// wrapping at either end. A value not in the list (e.g. a full model ID set
+// via /model) is treated as if it were "default" for the purposes of cycling.
+func nextModelChoice(current string, dir int) string {
+	idx := slices.Index(settingsPanelModelChoices, current)
+	if idx == -1 {
+		idx = 0
+	}
+	n := len(settingsPanelModelChoices)
+	idx = (idx + dir + n) % n
+	return settingsPanelModelChoices[idx]
+}
+
+// adjustSettingsRow applies dir (+1/-1) to the currently focused settings
+// panel row: toggles the two auto-approve rows regardless of dir's sign
+// (there are only two states), and steps the model row through
+// settingsPanelModelChoices.
+func (m Model) adjustSettingsRow(dir int) (tea.Model, tea.Cmd) {
+	switch m.settingsPanel.focus {
+	case 0:
+		edits, _ := m.prog.autoApprove()
+		m.prog.setAutoApproveEdits(!edits)
+	case 1:
+		_, shell := m.prog.autoApprove()
+		m.prog.setAutoApproveShell(!shell)
+	case 2:
+		m.model = nextModelChoice(m.model, dir)
+		return m, m.saveStateCmd()
+	}
+	return m, nil
+}
+
+func (m Model) handleSettingsPanelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.settingsPanel = nil
+		return m, nil
+	case tea.KeyTab:
+		m.settingsPanel.focus = (m.settingsPanel.focus + 1) % settingsPanelRowCount
+		return m, nil
+	case tea.KeyShiftTab:
+		m.settingsPanel.focus = (m.settingsPanel.focus - 1 + settingsPanelRowCount) % settingsPanelRowCount
+		return m, nil
+	case tea.KeyLeft:
+		return m.adjustSettingsRow(-1)
+	case tea.KeyRight, tea.KeyEnter, tea.KeySpace:
+		return m.adjustSettingsRow(1)
+	}
+	return m, nil
+}
+
 // ─── view ────────────────────────────────────────────────────────────────────
 
 var (
@@ -757,6 +839,8 @@ func (m Model) View() string {
 	base := sb.String()
 	if m.pendingPerm != nil || len(m.shellPermQueue) > 0 {
 		base = m.overlayPermPopup(base)
+	} else if m.settingsPanel != nil {
+		base = m.overlaySettingsPanel(base)
 	}
 	return base
 }
@@ -913,9 +997,9 @@ func (m Model) buildPermPopup() []string {
 	return out
 }
 
-// overlayPermPopup places the permission popup just above the input box.
-func (m Model) overlayPermPopup(base string) string {
-	popup := m.buildPermPopup()
+// overlayPopupAbove places popup's lines just above the input box, horizontally
+// centered. Shared by the permission popup and the settings panel.
+func (m Model) overlayPopupAbove(base string, popup []string) string {
 	if len(popup) == 0 {
 		return base
 	}
@@ -951,6 +1035,87 @@ func (m Model) overlayPermPopup(base string) string {
 		lines[row] = left + popLine
 	}
 	return strings.Join(lines, "\n")
+}
+
+// overlayPermPopup places the permission popup just above the input box.
+func (m Model) overlayPermPopup(base string) string {
+	return m.overlayPopupAbove(base, m.buildPermPopup())
+}
+
+// overlaySettingsPanel places the settings panel just above the input box.
+func (m Model) overlaySettingsPanel(base string) string {
+	return m.overlayPopupAbove(base, m.buildSettingsPopup())
+}
+
+// buildSettingsPopup returns the styled lines of the settings panel box:
+// auto-approve edits/shell toggles and the model selector, all editable
+// without needing the agent to be idle.
+func (m Model) buildSettingsPopup() []string {
+	if m.settingsPanel == nil {
+		return nil
+	}
+	edits, shell := m.prog.autoApprove()
+	modelLabel := m.model
+	if modelLabel == "" {
+		modelLabel = "default"
+	}
+	rows := []struct{ label, value string }{
+		{"Auto-approve edits", onOff(edits)},
+		{"Auto-approve shell", onOff(shell)},
+		{"Model", modelLabel},
+	}
+
+	labelW := 0
+	for _, r := range rows {
+		if w := lipgloss.Width(r.label); w > labelW {
+			labelW = w
+		}
+	}
+	lineFor := func(r struct{ label, value string }) string {
+		label := r.label + strings.Repeat(" ", labelW-lipgloss.Width(r.label))
+		return "  " + label + "  " + r.value
+	}
+
+	const titleText = "⚙ Settings"
+	const footerText = "  Tab next   ←/→ change   Esc close"
+	innerW := lipgloss.Width(titleText) + 3
+	for _, r := range rows {
+		if w := lipgloss.Width(lineFor(r)); w > innerW {
+			innerW = w
+		}
+	}
+	if w := lipgloss.Width(footerText); w > innerW {
+		innerW = w
+	}
+	innerW = min(innerW, m.width-8)
+	innerW = max(innerW, 32)
+
+	titleStyled := ppKey.Render("⚙") + ppLabel.Render(strings.TrimPrefix(titleText, "⚙"))
+	remainDashes := max(0, innerW-lipgloss.Width(titleText)-3)
+	topLine := ppBorder.Render("╭─ ") + titleStyled + ppBorder.Render(" "+strings.Repeat("─", remainDashes)+"╮")
+
+	selStyle := lipgloss.NewStyle().Background(ppBg).Foreground(lipgloss.Color("#FFDD44")).Bold(true)
+
+	var out []string
+	out = append(out, topLine)
+	for i, r := range rows {
+		line := lineFor(r)
+		if i == m.settingsPanel.focus {
+			line = "▸ " + line[len("  "):]
+		}
+		pad := max(0, innerW-lipgloss.Width(line))
+		padded := line + strings.Repeat(" ", pad)
+		style := ppText
+		if i == m.settingsPanel.focus {
+			style = selStyle
+		}
+		out = append(out, ppBorder.Render("│")+style.Render(padded)+ppBorder.Render("│"))
+	}
+	footerPad := max(0, innerW-lipgloss.Width(footerText))
+	out = append(out, ppBorder.Render("├"+strings.Repeat("─", innerW)+"┤"))
+	out = append(out, ppBorder.Render("│")+ppText.Render(footerText+strings.Repeat(" ", footerPad))+ppBorder.Render("│"))
+	out = append(out, ppBorder.Render("╰"+strings.Repeat("─", innerW)+"╯"))
+	return out
 }
 
 // thinkingWords rotates through while the agent is working, in the spirit of

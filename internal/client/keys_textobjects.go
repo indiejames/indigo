@@ -190,13 +190,35 @@ func executeSelectInsideBrackets(m Model) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	// Select inside: from just after open to just before close.
+	// Select inside: from just after open to just before close (exclusive
+	// of both bracket characters). posBefore can land before anchor when
+	// the brackets are adjacent ("()"); clamp so the selection doesn't
+	// invert and swallow the brackets instead.
 	anchor := document.Pos{Line: openL, Col: openC + 1}
-	head := document.Pos{Line: closeL, Col: closeC}
+	head := posBefore(m, closeL, closeC)
+	if head.Line < anchor.Line || (head.Line == anchor.Line && head.Col < anchor.Col) {
+		head = anchor
+	}
 	m.sel = &Selection{Anchor: anchor, Head: head}
 	m.cursor = head
 	m.scrollToCursor()
 	return m, nil
+}
+
+// posBefore returns the position immediately before (line, col) in
+// inclusive-selection terms: col > 0 is simply col-1 on the same line;
+// col == 0 means "through the end of the previous line" (using that
+// line's rune length, matching how selectedText/rendering already treat
+// an end column equal to a line's length as extending through its end).
+func posBefore(m Model, line, col int) document.Pos {
+	if col > 0 {
+		return document.Pos{Line: line, Col: col - 1}
+	}
+	if line == 0 {
+		return document.Pos{Line: 0, Col: 0}
+	}
+	prevLine := line - 1
+	return document.Pos{Line: prevLine, Col: len([]rune(m.buf.Line(prevLine)))}
 }
 
 func executeSelectInsideChar(m Model) (tea.Model, tea.Cmd) {
@@ -230,9 +252,16 @@ func executeSelectInsideChar(m Model) (tea.Model, tea.Cmd) {
 		if right < 0 {
 			continue
 		}
-		// Select inside: from just after left delim to just before right.
+		// Select inside: from just after left delim to just before right
+		// delim (exclusive of both delimiter characters). right-1 can land
+		// before anchor when the quoted text is empty (""); clamp so the
+		// selection doesn't invert.
 		anchor := document.Pos{Line: line, Col: left + 1}
-		head := document.Pos{Line: line, Col: right}
+		headCol := right - 1
+		if headCol < anchor.Col {
+			headCol = anchor.Col
+		}
+		head := document.Pos{Line: line, Col: headCol}
 		m.sel = &Selection{Anchor: anchor, Head: head}
 		m.cursor = head
 		return m, nil

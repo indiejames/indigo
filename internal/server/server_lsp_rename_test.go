@@ -60,7 +60,7 @@ func rangeAt(line, startCol, endCol int) lsp.Range {
 func TestWorkspaceEditItemsFromLSPReadsOpenBuffer(t *testing.T) {
 	s := &editorService{
 		buffers: map[uint32]*bufferEntry{
-			1: {buf: document.New("/a.go", "foo bar\nfoo baz\n")},
+			1: {buf: document.New("/a.go", "foo bar\nfoo baz\n"), canonPath: "/a.go"},
 		},
 	}
 
@@ -104,7 +104,7 @@ func TestWorkspaceEditItemsFromLSPReadsDisk(t *testing.T) {
 func TestWorkspaceEditItemsFromLSPSkipsMultiLineEdit(t *testing.T) {
 	s := &editorService{
 		buffers: map[uint32]*bufferEntry{
-			1: {buf: document.New("/a.go", "foo\nbar\n")},
+			1: {buf: document.New("/a.go", "foo\nbar\n"), canonPath: "/a.go"},
 		},
 	}
 
@@ -122,7 +122,7 @@ func TestWorkspaceEditItemsFromLSPSkipsMultiLineEdit(t *testing.T) {
 func TestWorkspaceEditItemsFromLSPSkipsOutOfRangeEdit(t *testing.T) {
 	s := &editorService{
 		buffers: map[uint32]*bufferEntry{
-			1: {buf: document.New("/a.go", "foo\n")},
+			1: {buf: document.New("/a.go", "foo\n"), canonPath: "/a.go"},
 		},
 	}
 

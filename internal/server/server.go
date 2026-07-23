@@ -50,6 +50,36 @@ func SocketPath(dir string) string {
 	return filepath.Join(socketDir(dir), "server.sock")
 }
 
+// canonicalPath resolves path to a symlink-free absolute form, purely for
+// deciding whether two path strings refer to the same underlying file — it
+// is never used for display or storage; a buffer keeps whichever path
+// spelling first opened it (see bufferEntry.canonPath).
+//
+// This matters because nothing upstream of the server guarantees path
+// strings are already equivalent-comparable: a file opened once through the
+// workspace's literal directory structure (file picker, grep results, the
+// initial CLI argument) and once through a language server's report of the
+// "same" file (go-to-definition, references, rename) can arrive as two
+// different strings for the identical file on disk. TypeScript's tsserver
+// in particular resolves symlinks by default when reporting locations
+// (its preserveSymlinks option defaults to false), which bites hardest in
+// exactly the projects most likely to have symlinked node_modules or
+// workspace packages — pnpm and monorepo setups. Without this, the two
+// spellings silently created two independent bufferEntry values for one
+// file, with independent (and divergent) dirty state.
+//
+// Returns path unchanged if it can't be resolved (e.g. the file doesn't
+// exist yet, as for a brand-new buffer that hasn't been saved).
+func canonicalPath(path string) string {
+	if path == "" {
+		return path
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
+}
+
 // IsRunning returns true if a server socket exists and is accepting connections.
 func IsRunning(socketPath string) bool {
 	conn, err := net.Dial("unix", socketPath)
@@ -64,6 +94,10 @@ func IsRunning(socketPath string) bool {
 type bufferEntry struct {
 	buf     *document.Buffer
 	clients map[uint64]struct{}
+	// canonPath is buf.Path() resolved via canonicalPath, computed once when
+	// the entry is created (or renamed via SaveAs) — see canonicalPath's doc
+	// comment for why this exists.
+	canonPath string
 }
 
 // clientEntry holds connection metadata for a connected client.
@@ -181,11 +215,12 @@ func (s *editorService) handleExternalWrite(path string) {
 		return
 	}
 
+	canonPath := canonicalPath(path)
 	s.mu.Lock()
 	var bufID uint32
 	var entry *bufferEntry
 	for id, e := range s.buffers {
-		if e.buf.Path() == path {
+		if e.canonPath == canonPath {
 			bufID = id
 			entry = e
 			break

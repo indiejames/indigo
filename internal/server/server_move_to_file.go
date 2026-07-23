@@ -132,11 +132,12 @@ func appendedContent(existing, text string) string {
 // place and left dirty; a path with no open buffer (which may not exist yet)
 // is patched directly on disk.
 func (s *editorService) appendTextToFile(clientID uint64, path, text string) error {
+	canonPath := canonicalPath(path)
 	s.mu.Lock()
 	var bufID uint32
 	var entry *bufferEntry
 	for id, e := range s.buffers {
-		if e.buf.Path() == path {
+		if e.canonPath == canonPath {
 			bufID, entry = id, e
 			break
 		}

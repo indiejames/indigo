@@ -143,10 +143,11 @@ func (m Model) renderLine(i int, overlays []lineOverlay) string {
 	cw := m.contentWidth()
 	vis := m.visibleLines()
 	layout := m.buildScreenLayout(vis, cw)
+	matchLine, matchCol, matchOK := matchingPairPos(m)
 	if i < len(layout) {
-		return m.renderLineChunk(layout[i], cw, overlays)
+		return m.renderLineChunk(layout[i], cw, overlays, matchLine, matchCol, matchOK)
 	}
-	return m.renderLineChunk(layoutEntry{bufLine: m.topLine + i}, cw, overlays)
+	return m.renderLineChunk(layoutEntry{bufLine: m.topLine + i}, cw, overlays, matchLine, matchCol, matchOK)
 }
 
 // renderPopupBox builds the styled lines of a popup menu with rounded borders.

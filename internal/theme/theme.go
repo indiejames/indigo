@@ -56,6 +56,10 @@ type UI struct {
 	DiagWarnFg  string `toml:"diag_warn_fg"`
 	DiagInfoFg  string `toml:"diag_info_fg"`
 
+	// MatchPairFg underlines the other half of a bracket/quote pair when the
+	// cursor sits on one side of it.
+	MatchPairFg string `toml:"match_pair_fg"`
+
 	// Non-color options
 	PopupBorder string `toml:"popup_border"` // rounded | square | double | none
 }

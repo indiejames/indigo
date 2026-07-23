@@ -21,6 +21,7 @@ search_cur_fg   = "#282C34"
 diag_error_fg   = "#E06C75"
 diag_warn_fg    = "#E5C07B"
 diag_info_fg    = "#61AFEF"
+match_pair_fg   = "#AAAAAA"
 popup_border    = "rounded"
 
 [syntax]

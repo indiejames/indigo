@@ -80,8 +80,9 @@ func (m Model) View() string {
 			}
 		}
 	}
+	matchLine, matchCol, matchOK := matchingPairPos(m)
 	for i := range vis {
-		lines[i] = m.renderLineChunk(layout[i], cw, rowOverlays[i])
+		lines[i] = m.renderLineChunk(layout[i], cw, rowOverlays[i], matchLine, matchCol, matchOK)
 	}
 
 	// Overlay prefix-command popup in the bottom-right corner.

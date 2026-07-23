@@ -490,7 +490,7 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 // renderLineChunk renders one wrap-chunk of a buffer line. overlays must have
 // chunk-relative column indices (i.e. already adjusted by chunkStart). Each
 // row is padded to m.width so prior terminal content is always overwritten.
-func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay) string {
+func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay, matchLine, matchCol int, matchOK bool) string {
 	lineNum := entry.bufLine
 	chunk := entry.chunk
 	chunkStart := entry.chunkStart
@@ -667,6 +667,24 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 	// Collect underline decoration ranges for this line (separate from syntax spans).
 	// Diagnostic underlines are prepended so they take precedence over plugin underlines.
 	var underlines []underlineRange
+	if matchOK && matchLine == lineNum {
+		startVis := len(expandedRunes)
+		if matchCol < len(colMap) {
+			startVis = colMap[matchCol]
+		}
+		endVis := len(expandedRunes)
+		if matchCol+1 < len(colMap) {
+			endVis = colMap[matchCol+1]
+		}
+		if startVis < chunkStart+cw && endVis > chunkStart {
+			seq := underlineANSI(ClientUnderlineStraight, activeMatchPair)
+			underlines = append(underlines, underlineRange{
+				StartCol: max(0, startVis-chunkStart),
+				EndCol:   min(cw, endVis-chunkStart),
+				StartSeq: seq,
+			})
+		}
+	}
 	for _, d := range m.diagnostics {
 		// Handle single-line and multi-line diagnostics.
 		var startCol, endCol int

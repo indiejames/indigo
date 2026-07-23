@@ -85,6 +85,7 @@ func (c *Client) Initialize() error {
 					DataSupport:    true,
 					ResolveSupport: &CodeActionResolveSupport{Properties: []string{"edit"}},
 				},
+				PublishDiagnostics: &PublishDiagnosticsClientCapabilities{RelatedInformation: true},
 			},
 		},
 		InitializationOptions: map[string]any{

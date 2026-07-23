@@ -146,6 +146,7 @@ search_cur_fg   = "#FFFFFF"
 diag_error_fg   = "#FF5555"
 diag_warn_fg    = "#FFDD44"
 diag_info_fg    = "#88AAFF"
+match_pair_fg   = "#AAAAAA"   # underlines the other half of a bracket/quote pair under the cursor
 popup_border    = "rounded"   # rounded | square | double | none
 
 [syntax]

@@ -118,6 +118,62 @@ func scanMatchingOpen(m Model, line, col int, open, close rune) (int, int, bool)
 	return -1, -1, false
 }
 
+// matchingPairPos returns the position of the other half of the bracket or
+// quote pair the cursor currently sits on top of — used to underline it as
+// a scope indicator (see renderLineChunk). ok is false when the cursor
+// isn't on a bracket/quote character, or no partner is found.
+func matchingPairPos(m Model) (line, col int, ok bool) {
+	runes := []rune(m.buf.Line(m.cursor.Line))
+	if m.cursor.Col >= len(runes) {
+		return 0, 0, false
+	}
+	ch := runes[m.cursor.Col]
+
+	if close, isOpen := openBrackets[ch]; isOpen {
+		return scanMatchingClose(m, m.cursor.Line, m.cursor.Col, ch, close)
+	}
+	if open, isClose := closeBrackets[ch]; isClose {
+		return scanMatchingOpen(m, m.cursor.Line, m.cursor.Col, open, ch)
+	}
+	switch ch {
+	case '"', '\'', '`':
+		return matchingQuotePos(runes, m.cursor.Line, m.cursor.Col, ch)
+	}
+	return 0, 0, false
+}
+
+// matchingQuotePos pairs up same-line occurrences of delim by position (1st
+// with 2nd, 3rd with 4th, ...) and returns the partner of the occurrence at
+// col, if col itself is one of them. Quotes aren't directional like
+// brackets, so unlike scanMatchingClose/Open this doesn't track nesting —
+// same convention executeSelectInsideChar/AroundChar already use.
+func matchingQuotePos(runes []rune, line, col int, delim rune) (int, int, bool) {
+	var occurrences []int
+	for i, r := range runes {
+		if r == delim {
+			occurrences = append(occurrences, i)
+		}
+	}
+	idx := -1
+	for i, c := range occurrences {
+		if c == col {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return 0, 0, false
+	}
+	partner := idx + 1
+	if idx%2 == 1 {
+		partner = idx - 1
+	}
+	if partner < 0 || partner >= len(occurrences) {
+		return 0, 0, false
+	}
+	return line, occurrences[partner], true
+}
+
 func executeGotoMatchingBracket(m Model) (tea.Model, tea.Cmd) {
 	line := m.cursor.Line
 	runes := []rune(m.buf.Line(line))

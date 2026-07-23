@@ -272,6 +272,9 @@ var (
 	activeDiagWarn  = "#FFDD44"
 	activeDiagInfo  = "#88AAFF"
 
+	// Hex color for the matching-bracket/quote underline (updated by ApplyTheme).
+	activeMatchPair = "#AAAAAA"
+
 	// Popup border characters (updated by ApplyTheme).
 	bdrTL       = "╭"
 	bdrTR       = "╮"
@@ -325,6 +328,7 @@ func ApplyTheme(t *theme.Theme) {
 	activeDiagError = t.UI.DiagErrorFg
 	activeDiagWarn = t.UI.DiagWarnFg
 	activeDiagInfo = t.UI.DiagInfoFg
+	activeMatchPair = t.UI.MatchPairFg
 
 	bc := t.BorderChars()
 	bdrTL, bdrTR, bdrBL, bdrBR, bdrH, bdrV = bc[0], bc[1], bc[2], bc[3], bc[4], bc[5]
@@ -380,6 +384,7 @@ func applyDefaultDark() {
 	activeDiagError = "#FF5555"
 	activeDiagWarn = "#FFDD44"
 	activeDiagInfo = "#88AAFF"
+	activeMatchPair = "#AAAAAA"
 
 	bdrTL, bdrTR, bdrBL, bdrBR, bdrH, bdrV = "╭", "╮", "╰", "╯", "─", "│"
 	bdrLipgloss = lipgloss.RoundedBorder()

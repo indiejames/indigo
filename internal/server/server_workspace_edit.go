@@ -60,11 +60,12 @@ func applyWorkspaceEditsToBuffer(buf *document.Buffer, clientID uint64, items []
 // change. Returns how many edits were applied and the (items-relative)
 // indices of any that were skipped because their oldText no longer matched.
 func (s *editorService) applyItemsToPath(clientID uint64, path string, items []workspaceEditItem) (applied int, skippedIdx []int, err error) {
+	canonPath := canonicalPath(path)
 	s.mu.Lock()
 	var bufID uint32
 	var entry *bufferEntry
 	for id, e := range s.buffers {
-		if e.buf.Path() == path {
+		if e.canonPath == canonPath {
 			bufID, entry = id, e
 			break
 		}

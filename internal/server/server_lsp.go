@@ -497,11 +497,12 @@ func lspEditsByURI(edit *lsp.WorkspaceEdit) map[string][]lsp.TextEdit {
 // Multi-line edits are skipped: a rename only ever replaces a single
 // identifier on one line, so this keeps the conversion simple and safe.
 func (s *editorService) workspaceEditItemsFromLSP(path string, edits []lsp.TextEdit) ([]workspaceEditItem, error) {
+	canonPath := canonicalPath(path)
 	s.mu.Lock()
 	var content string
 	var found bool
 	for _, e := range s.buffers {
-		if e.buf.Path() == path {
+		if e.canonPath == canonPath {
 			content, found = e.buf.Content(), true
 			break
 		}

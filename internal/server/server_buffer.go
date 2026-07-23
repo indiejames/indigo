@@ -57,8 +57,9 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	s.mu.Lock()
 	// Check if file is already open (skip dedup for untitled buffers).
 	if path != "" {
+		canonPath := canonicalPath(path)
 		for id, e := range s.buffers {
-			if e.buf.Path() == path {
+			if e.canonPath == canonPath {
 				e.clients[clientID] = struct{}{}
 				ver := e.buf.Version()
 				s.mu.Unlock()
@@ -84,8 +85,9 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 		buf.MarkDirty()
 	}
 	s.buffers[bufID] = &bufferEntry{
-		buf:     buf,
-		clients: map[uint64]struct{}{clientID: {}},
+		buf:       buf,
+		clients:   map[uint64]struct{}{clientID: {}},
+		canonPath: canonicalPath(path),
 	}
 	ver := buf.Version()
 	s.mu.Unlock()
@@ -448,6 +450,7 @@ func (s *editorService) SaveAs(_ context.Context, call proto.EditorService_saveA
 	}
 	entry.buf = document.New(newPath, content)
 	entry.buf.SetClean()
+	entry.canonPath = canonicalPath(newPath)
 	s.mu.Lock()
 	s.buffers[bufID] = entry
 	s.mu.Unlock()

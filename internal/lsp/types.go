@@ -122,8 +122,19 @@ type CodeActionClientCapabilities struct {
 	ResolveSupport *CodeActionResolveSupport `json:"resolveSupport,omitempty"`
 }
 
+// PublishDiagnosticsClientCapabilities advertises that the client wants
+// textDocument/publishDiagnostics notifications. This isn't optional in
+// practice: gopls pushes diagnostics regardless of whether the client
+// declares this, but typescript-language-server checks for it and silently
+// never sends a single publishDiagnostics notification without it — no
+// error, just permanent silence for that document.
+type PublishDiagnosticsClientCapabilities struct {
+	RelatedInformation bool `json:"relatedInformation,omitempty"`
+}
+
 type TextDocumentClientCapabilities struct {
-	CodeAction *CodeActionClientCapabilities `json:"codeAction,omitempty"`
+	CodeAction         *CodeActionClientCapabilities         `json:"codeAction,omitempty"`
+	PublishDiagnostics *PublishDiagnosticsClientCapabilities `json:"publishDiagnostics,omitempty"`
 }
 
 type ClientCapabilities struct {

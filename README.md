@@ -28,6 +28,8 @@ Also, I wanted to build something real in Go, and to use some of the great proje
 
 ## Install
 
+Currently `indigo` has only been tested on macOS. It is highly likely to work on Linux, less likely to work on Windows.
+
 > **Note:** Binary releases are not yet available. For now, build from source:
 
 ```

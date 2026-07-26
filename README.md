@@ -1,6 +1,6 @@
 # indigo
 
-A terminal text editor with modal editing and built-in language server support. Inspired by [Vim](https://www.vim.org/), [Kakoune](https://kakoune.org/), and [Helix](https://helix-editor.com/).
+A terminal text editor written in go with modal editing and built-in language server support. Inspired by [Vim](https://www.vim.org/), [Kakoune](https://kakoune.org/), and [Helix](https://helix-editor.com/).
 
 ## Who it's for
 
@@ -16,14 +16,19 @@ If you want an editor that does the right thing for your language automatically 
 
 Mostly I just wanted to try some design ideas I had for an editor. Specifically a terminal based client-server
 architecture with core features that everyone seems to agree on (like syntax highlighting) and
-a fast plugin system for extensibility. None of these ideas are new. Helix provides great core features,
-but doesn't use a client-server model. Kakoune does, but I wanted a different extension system.
+a fast plugin system for the features that not everyone needs (but some people want). None of these ideas are new. Helix provides great core features,
+but doesn't use a client-server model and doesn't have plugins (yet). Kakoune does, but I wanted a different extension system and more out of the box.
 [Visual Studio Code](https://code.visualstudio.com/) is great and it's easy to build extensions for it,
-but it doesn't run in the terminal.
+but it doesn't run in the terminal and has a pretty big footprint.
+
+In my day-to-day work, I always found myself working on big project code in VS Code, and using Vim or Helix for quick edits to single files, 
+especially over ssh. I wanted something that worked for _me_ for both types of editing.
 
 Also, I wanted to build something real in Go, and to use some of the great projects I have read about, like [Cap'n Proto](https://capnproto.org/) and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
 ## Install
+
+Currently `indigo` has only been tested on macOS. It is highly likely to work on Linux, less likely to work on Windows.
 
 > **Note:** Binary releases are not yet available. For now, build from source:
 
@@ -35,16 +40,23 @@ The binary is named `indigo`. Requires Go 1.21+.
 
 ## Quick start
 
+I highly recommend that you alias `indigo` to `io`
 ```
-indigo file.go          # open a file
-indigo .                # open directory (shows file picker)
-indigo +42 file.go      # open a file at line 42
+alias io indigo
+```
+
+After that
+
+```
+io file.go          # open a file
+io .                # open directory (shows file picker)
+io +42 file.go      # open a file at line 42
 ```
 
 indigo uses a **client/server model** similar to Kakoune: the first invocation starts a background server for your workspace (rooted at the nearest `.git` directory or the directory of the edited file if not part of a git repository); subsequent `indigo` sessions in the same workspace connect to the existing server. The server exits automatically when all editor sessions close. If two client windows have the same file open,
 changes in one will show up in the other.
 
-The upshot of this is that instead of `indigo` managing editor panes, you can use your current terminal window/pane system to manage layout.
+The upshot of this is that instead of `indigo` managing editor panes, you can use your current terminal window/pane system to manage layout. I use [zellij](https://zellij.dev/).
 
 ### Editing model
 
@@ -65,7 +77,7 @@ x x x    select three lines (repeat extends to the next line)
 X        extend the selection backward to include the previous line
 ```
 
-If you're coming from Vim, the main adjustment is that `d` and `c` act on whatever is currently selected, not on a following motion. If nothing is selected, `d` deletes the character under the cursor.
+If you're coming from Vim, the main adjustment is that `d` and `c` act on whatever is currently selected, not on a following motion. If nothing is selected, `d` deletes the character under the cursor, and `c` modifies the character under the cursor.
 
 ## Architecture
 

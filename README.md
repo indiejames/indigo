@@ -36,7 +36,7 @@ Currently `indigo` has only been tested on macOS. It is highly likely to work on
 make install
 ```
 
-The binary is named `indigo`. Requires Go 1.21+.
+The binary is named `indigo`. It requires Go 1.21+.
 
 ## Quick start
 

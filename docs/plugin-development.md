@@ -91,6 +91,9 @@ func (p *TodoPlugin) Init(api *sdk.Api) sdk.Info {
 
 // jumpToNext moves the cursor to the next TODO/FIXME after the current line.
 func (p *TodoPlugin) jumpToNext(key string, ctx sdk.KeyContext) sdk.KeyResponse {
+	// ReadBuffer is used in this example for simplicity, but a real plugin would 
+    // probably use Readlines or ReadRange to avoid holding the entire document
+    // in memory.
     content, err := p.api.ReadBuffer(ctx.BufID)
     if err != nil {
         return sdk.KeyResponse{}

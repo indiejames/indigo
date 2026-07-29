@@ -105,6 +105,25 @@ func (m Model) fetchCompletions() tea.Cmd {
 	}
 }
 
+// resolveCompletionCmd resolves the accepted completion item off the UI thread
+// to fetch its additionalTextEdits (the auto-import line), then applies it via
+// completionResolvedMsg. at and prefix are captured at accept time so the apply
+// lands correctly regardless of later cursor movement. On error the item is
+// applied unresolved, so the primary insert still happens without the import.
+func (m Model) resolveCompletionCmd(item ClientCompletion, at document.Pos, prefix string) tea.Cmd {
+	bufID := m.bufID
+	rpc := m.rpc
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		resolved, err := rpc.ResolveCompletion(ctx, bufID, item)
+		if err != nil {
+			resolved = item
+		}
+		return completionResolvedMsg{item: resolved, at: at, prefix: prefix}
+	}
+}
+
 func (m Model) fetchDefinition() tea.Cmd {
 	bufID := m.bufID
 	line, col := m.cursor.Line, m.cursor.Col

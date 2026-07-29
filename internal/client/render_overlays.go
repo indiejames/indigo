@@ -441,18 +441,22 @@ func renderCompletionPopup(items []ClientCompletion, selected, maxW int) []strin
 	// innerW = 1(lead) + kindW + 1(sep) + labelW + 2(sep) + detailW + 1(trail)
 	// If no items have detail, omit the detail columns.
 	hasDetail := detailW > 0
+	// Row layout: lead(1) + kind(kindW) + sep(1) + label + [detailSep + detail] + trail(1).
+	// detailSep must match the "  " the row renderer puts before detail, or the
+	// row overflows the right border by one column.
+	const detailSep = 2
 	innerW := 1 + kindW + 1 + labelW + 1
 	if hasDetail {
-		innerW += 1 + detailW // extra sep + detail
+		innerW += detailSep + detailW
 	}
 	// Cap to screen: total box = innerW+2 must fit in maxW.
 	if innerW+2 > maxW {
 		innerW = max(20, maxW-2)
 		// Trim detail first, then label.
-		available := innerW - 1 - kindW - 1 - 1 // subtract fixed cols
+		available := innerW - 1 - kindW - 1 - 1 // subtract lead + kind + sep + trail
 		if hasDetail {
 			detailW = min(detailW, available/3)
-			labelW = available - detailW - 1 // 1 for detail sep
+			labelW = available - detailW - detailSep
 			if labelW < 5 {
 				labelW = 5
 				detailW = 0
@@ -463,7 +467,7 @@ func renderCompletionPopup(items []ClientCompletion, selected, maxW int) []strin
 		}
 		innerW = 1 + kindW + 1 + labelW + 1
 		if hasDetail {
-			innerW += 1 + detailW
+			innerW += detailSep + detailW
 		}
 	}
 

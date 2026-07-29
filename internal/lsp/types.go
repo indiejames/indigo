@@ -132,8 +132,32 @@ type PublishDiagnosticsClientCapabilities struct {
 	RelatedInformation bool `json:"relatedInformation,omitempty"`
 }
 
+// CompletionItemResolveSupport advertises which CompletionItem properties the
+// client can obtain lazily via completionItem/resolve.
+type CompletionItemResolveSupport struct {
+	Properties []string `json:"properties"`
+}
+
+// CompletionItemClientCapabilities advertises per-item completion support.
+// Declaring resolveSupport with "additionalTextEdits" is what lets a server
+// defer the auto-import edit to completionItem/resolve rather than computing
+// it eagerly for every candidate (prohibitively expensive) or not at all;
+// indigo resolves the single accepted item to fetch it. snippetSupport is
+// false because the client inserts completion text literally and does not
+// interpret ${1:…}-style snippet placeholders.
+type CompletionItemClientCapabilities struct {
+	SnippetSupport bool                          `json:"snippetSupport"`
+	ResolveSupport *CompletionItemResolveSupport `json:"resolveSupport,omitempty"`
+}
+
+// CompletionClientCapabilities advertises textDocument/completion support.
+type CompletionClientCapabilities struct {
+	CompletionItem *CompletionItemClientCapabilities `json:"completionItem,omitempty"`
+}
+
 type TextDocumentClientCapabilities struct {
 	CodeAction         *CodeActionClientCapabilities         `json:"codeAction,omitempty"`
+	Completion         *CompletionClientCapabilities         `json:"completion,omitempty"`
 	PublishDiagnostics *PublishDiagnosticsClientCapabilities `json:"publishDiagnostics,omitempty"`
 }
 
@@ -387,6 +411,30 @@ type CompletionItem struct {
 	Kind       CompletionItemKind `json:"kind,omitempty"`
 	Detail     string             `json:"detail,omitempty"`
 	InsertText string             `json:"insertText,omitempty"`
+
+	// SortText and FilterText drive client-side ranking and filtering. Servers
+	// deprioritize auto-import candidates via SortText (tsserver prefixes theirs
+	// with U+FFFF so they sort last), and the client is expected to filter the
+	// full list by the typed prefix — without that, auto-imports stay buried.
+	// FilterText falls back to Label when empty.
+	SortText   string `json:"sortText,omitempty"`
+	FilterText string `json:"filterText,omitempty"`
+
+	// TextEdit, when present, is the authoritative primary edit for accepting
+	// this item (its range may differ from the typed prefix); prefer it over
+	// InsertText/Label when applying.
+	TextEdit *TextEdit `json:"textEdit,omitempty"`
+
+	// AdditionalTextEdits are edits to apply elsewhere in the document when
+	// this item is accepted — for TypeScript this is the auto-import line.
+	// Servers omit these from the initial completion response and only fill
+	// them in on completionItem/resolve, so Data must be round-tripped back
+	// unchanged to obtain them. See Client.ResolveCompletion.
+	AdditionalTextEdits []TextEdit `json:"additionalTextEdits,omitempty"`
+
+	// Data is opaque server state that must be sent back unchanged via
+	// completionItem/resolve to obtain AdditionalTextEdits.
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 type CompletionList struct {

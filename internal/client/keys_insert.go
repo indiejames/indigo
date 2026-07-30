@@ -299,6 +299,27 @@ func completionAddsParens(kind uint8) bool {
 	return false
 }
 
+// signatureIsCallable reports whether a resolved completion detail describes a
+// callable symbol, so call parentheses are inserted even when the LSP kind
+// doesn't say so. An imported function comes back as kind Variable with detail
+// like "(alias) function greetLoudly(name: string): string", and a
+// function-typed value as "const cb: (x: number) => void". Only the first line
+// is inspected — tsserver appends "\nimport X" and similar after it.
+func signatureIsCallable(detail string) bool {
+	if i := strings.IndexByte(detail, '\n'); i >= 0 {
+		detail = detail[:i]
+	}
+	switch {
+	case strings.Contains(detail, "function "):
+		return true
+	case strings.Contains(detail, "(method)"):
+		return true
+	case strings.Contains(detail, ") => "):
+		return true // arrow function type, e.g. `(x: number) => void`
+	}
+	return false
+}
+
 // bufCharAfterIs reports whether the character immediately after position at is ch.
 func (m Model) bufCharAfterIs(at document.Pos, ch rune) bool {
 	if at.Line < 0 || at.Line >= m.buf.LineCount() {
@@ -391,7 +412,7 @@ func (m Model) applyCompletionItem(item ClientCompletion, at document.Pos, prefi
 	// leave the cursor between them, then trigger signature help so the
 	// parameters are visible. Skipped when the text already has a '(' or one
 	// already follows the edit, to avoid doubling.
-	addParens := completionAddsParens(item.Kind) &&
+	addParens := (completionAddsParens(item.Kind) || signatureIsCallable(item.Detail)) &&
 		!strings.ContainsRune(baseText, '(') &&
 		!strings.Contains(baseText, "\n") &&
 		!m.bufCharAfterIs(document.Pos{Line: pToLine, Col: pToCol}, '(')

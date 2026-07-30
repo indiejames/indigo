@@ -203,6 +203,17 @@ func (m *Manager) Complete(path string, line, col int) ([]CompletionItem, error)
 	return nil, nil
 }
 
+// ResolveCompletion resolves a completion item for path, filling in lazily
+// computed fields such as AdditionalTextEdits (the auto-import line). Returns
+// the item unchanged if no server is configured for path.
+func (m *Manager) ResolveCompletion(path string, item CompletionItem) (CompletionItem, error) {
+	if c := m.clientForPath(path); c != nil {
+		m.ensureOpened(c, path)
+		return c.ResolveCompletion(item)
+	}
+	return item, nil
+}
+
 // WorkspaceSymbols queries the language server for path's workspace for symbols matching query.
 func (m *Manager) WorkspaceSymbols(path, query string) ([]SymbolInformation, error) {
 	if c := m.clientForPath(path); c != nil {

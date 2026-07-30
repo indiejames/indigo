@@ -85,6 +85,14 @@ func (c *Client) Initialize() error {
 					DataSupport:    true,
 					ResolveSupport: &CodeActionResolveSupport{Properties: []string{"edit"}},
 				},
+				Completion: &CompletionClientCapabilities{
+					CompletionItem: &CompletionItemClientCapabilities{
+						SnippetSupport: false,
+						ResolveSupport: &CompletionItemResolveSupport{
+							Properties: []string{"additionalTextEdits", "detail", "documentation"},
+						},
+					},
+				},
 				PublishDiagnostics: &PublishDiagnosticsClientCapabilities{RelatedInformation: true},
 			},
 		},
@@ -261,6 +269,30 @@ func (c *Client) Complete(path string, line, col int) ([]CompletionItem, error) 
 		return nil, err
 	}
 	return items, nil
+}
+
+// ResolveCompletion asks the server to fill in the lazily-computed fields of a
+// completion item — most importantly AdditionalTextEdits, which is how servers
+// like typescript-language-server deliver the `import { X } from "…"` line for
+// an auto-imported symbol. The top-level textDocument/completion response omits
+// those edits (computing them for every candidate would be far too expensive);
+// they only appear once the client resolves the single item it is about to
+// insert, sending the item's opaque Data back unchanged. Returns the item
+// unchanged if the server doesn't support completionItem/resolve or has nothing
+// to add.
+func (c *Client) ResolveCompletion(item CompletionItem) (CompletionItem, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	raw, err := c.conn.Call(ctx, "completionItem/resolve", item)
+	if err != nil || string(raw) == "null" {
+		return item, err
+	}
+	var resolved CompletionItem
+	if err := json.Unmarshal(raw, &resolved); err != nil {
+		return item, err
+	}
+	return resolved, nil
 }
 
 // Definition returns the definition location(s) for the symbol at (line, col).

@@ -102,6 +102,11 @@ interface EditorService {
   # attempt is made to fix up imports or other cross-file references — the
   # caller is responsible for that.
   moveTextToFile @44 (clientId :UInt64, bufId :UInt32, fromLine :UInt32, fromCol :UInt32, toLine :UInt32, toCol :UInt32, destPath :Text) -> ();
+  # Resolves a completion item returned by `complete`, filling in the lazily
+  # computed additionalTextEdits (the auto-import line for a symbol imported
+  # from another module). The item's data blob must be passed back unchanged
+  # so the language server can identify which candidate to resolve.
+  resolveCompletion @45 (bufId :UInt32, item :CompletionItem) -> (item :CompletionItem);
 }
 
 # MenuItemInfo is one node in the Command-menu tree contributed by a plugin.
@@ -267,6 +272,22 @@ struct CompletionItem {
   kind       @1 :UInt8;
   detail     @2 :Text;
   insertText @3 :Text;
+  # data is the opaque resolve token from the language server, sent back
+  # unchanged via resolveCompletion to obtain additionalTextEdits. Empty when
+  # the server provides no resolve data.
+  data                @4 :Data;
+  # additionalTextEdits are edits to apply elsewhere in the document when the
+  # item is accepted (the auto-import line). Empty in `complete` results;
+  # populated by resolveCompletion.
+  additionalTextEdits @5 :List(PluginEdit);
+  # sortText/filterText drive client-side ranking and filtering. filterText
+  # falls back to label when empty.
+  sortText   @6 :Text;
+  filterText @7 :Text;
+  # textEdit, when present (HasTextEdit), is the authoritative primary edit for
+  # accepting this item (its range may cover more than the typed prefix, e.g.
+  # the whole identifier when completing mid-word). Preferred over insertText.
+  textEdit @8 :PluginEdit;
 }
 
 struct ActiveContext {

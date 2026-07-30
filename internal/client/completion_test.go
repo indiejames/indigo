@@ -204,3 +204,24 @@ func TestCmdPopupPadTruncatesLong(t *testing.T) {
 		t.Errorf("truncated width = %d, want <= 20", w)
 	}
 }
+
+// TestRenderCompletionPopupUniformWidth is a regression test for a border
+// off-by-one: rows carrying a detail column were rendered one cell wider than
+// the border because innerW budgeted a 1-space detail separator while the row
+// used two. Every line of the popup must have identical visual width.
+func TestRenderCompletionPopupUniformWidth(t *testing.T) {
+	items := []ClientCompletion{
+		{Label: "greetLoudly", Detail: "./helper", Kind: 3},
+		{Label: "x", Detail: "a", Kind: 6},
+	}
+	lines := renderCompletionPopup(items, 0, 80)
+	if len(lines) < 3 {
+		t.Fatalf("want top border + rows + bottom border, got %d lines", len(lines))
+	}
+	want := lipgloss.Width(lines[0])
+	for i, ln := range lines {
+		if w := lipgloss.Width(ln); w != want {
+			t.Errorf("line %d width = %d, want %d (border misaligned)", i, w, want)
+		}
+	}
+}

@@ -40,6 +40,19 @@ type ClientSigHelp struct {
 type ClientCompletion struct {
 	Label, Detail, InsertText string
 	Kind                      uint8
+	// SortText/FilterText drive client-side ranking and filtering; FilterText
+	// falls back to Label when empty.
+	SortText, FilterText string
+	// TextEdit, when non-nil, is the authoritative primary edit for accepting
+	// this item (its range may cover more than the typed prefix). Preferred over
+	// InsertText/Label.
+	TextEdit *ClientLspEdit
+	// Data is the opaque resolve token; pass it back to ResolveCompletion to
+	// obtain AdditionalEdits. Empty when the server has no resolve data.
+	Data []byte
+	// AdditionalEdits are edits to apply elsewhere when this item is accepted
+	// (the auto-import line). Empty until ResolveCompletion fills them in.
+	AdditionalEdits []ClientLspEdit
 }
 
 // DiagnosticsResult bundles diagnostics with the server's lspReady flag.
@@ -165,13 +178,93 @@ func (r *RPC) Complete(ctx context.Context, bufID uint32, line, col int) ([]Clie
 	}
 	out := make([]ClientCompletion, list.Len())
 	for i := range out {
-		it := list.At(i)
-		label, _ := it.Label()
-		detail, _ := it.Detail()
-		insert, _ := it.InsertText()
-		out[i] = ClientCompletion{Label: label, Detail: detail, InsertText: insert, Kind: it.Kind()}
+		out[i] = completionFromProto(list.At(i))
 	}
 	return out, nil
+}
+
+// completionFromProto decodes a proto CompletionItem, copying the opaque data
+// token and any additionalTextEdits out of the capnp message so they stay valid
+// after it's released.
+func completionFromProto(it proto.CompletionItem) ClientCompletion {
+	label, _ := it.Label()
+	detail, _ := it.Detail()
+	insert, _ := it.InsertText()
+	sortText, _ := it.SortText()
+	filterText, _ := it.FilterText()
+	c := ClientCompletion{
+		Label: label, Detail: detail, InsertText: insert, Kind: it.Kind(),
+		SortText: sortText, FilterText: filterText,
+	}
+	if data, err := it.Data(); err == nil && len(data) > 0 {
+		c.Data = append([]byte(nil), data...)
+	}
+	if it.HasTextEdit() {
+		if te, err := it.TextEdit(); err == nil {
+			nt, _ := te.NewText()
+			c.TextEdit = &ClientLspEdit{
+				FromLine: int(te.FromLine()), FromCol: int(te.FromCol()),
+				ToLine: int(te.ToLine()), ToCol: int(te.ToCol()),
+				NewText: nt,
+			}
+		}
+	}
+	if edits, err := it.AdditionalTextEdits(); err == nil && edits.Len() > 0 {
+		c.AdditionalEdits = make([]ClientLspEdit, edits.Len())
+		for j := range c.AdditionalEdits {
+			e := edits.At(j)
+			nt, _ := e.NewText()
+			c.AdditionalEdits[j] = ClientLspEdit{
+				FromLine: int(e.FromLine()),
+				FromCol:  int(e.FromCol()),
+				ToLine:   int(e.ToLine()),
+				ToCol:    int(e.ToCol()),
+				NewText:  nt,
+			}
+		}
+	}
+	return c
+}
+
+// ResolveCompletion resolves item (as returned by Complete) for bufID, filling
+// in AdditionalEdits — the auto-import line for a symbol from another module.
+// The item's Data token is sent back unchanged so the language server can
+// identify which candidate to resolve. Returns the item unchanged on error.
+func (r *RPC) ResolveCompletion(ctx context.Context, bufID uint32, item ClientCompletion) (ClientCompletion, error) {
+	fut, rel := r.svc.ResolveCompletion(ctx, func(p proto.EditorService_resolveCompletion_Params) error {
+		p.SetBufId(bufID)
+		ci, err := p.NewItem()
+		if err != nil {
+			return err
+		}
+		if err := ci.SetLabel(item.Label); err != nil {
+			return err
+		}
+		ci.SetKind(item.Kind)
+		if err := ci.SetDetail(item.Detail); err != nil {
+			return err
+		}
+		if err := ci.SetInsertText(item.InsertText); err != nil {
+			return err
+		}
+		if len(item.Data) > 0 {
+			if err := ci.SetData(item.Data); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	defer rel()
+
+	res, err := fut.Struct()
+	if err != nil {
+		return item, err
+	}
+	out, err := res.Item()
+	if err != nil {
+		return item, err
+	}
+	return completionFromProto(out), nil
 }
 
 // ClientLocation is a resolved definition location.

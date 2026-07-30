@@ -74,6 +74,16 @@ type fixItemsMsg struct {
 // completionsMsg carries fresh completion items.
 type completionsMsg struct{ items []ClientCompletion }
 
+// completionResolvedMsg carries a completion item resolved on accept, along with
+// the cursor position and typed prefix captured when the user accepted it, so
+// the deferred apply lands at the right place regardless of the current cursor.
+type completionResolvedMsg struct {
+	item   ClientCompletion
+	at     document.Pos
+	prefix string
+	bufID  uint32
+}
+
 // renameSymbolDoneMsg carries the result of an LSP-driven rename.
 type renameSymbolDoneMsg struct {
 	applied, files int
@@ -86,8 +96,10 @@ type moveFunctionDoneMsg struct {
 	err      error
 }
 
-// triggerCompletionMsg fires after the auto-trigger debounce delay.
-type triggerCompletionMsg struct{}
+// triggerCompletionMsg fires after the auto-trigger debounce delay. seq is the
+// completionSeq captured when it was scheduled; a stale seq (a newer keystroke
+// has since been typed) is ignored so a burst of typing causes one fetch.
+type triggerCompletionMsg struct{ seq int }
 
 // definitionMsg carries the result of a go-to-definition request.
 type definitionMsg struct {
@@ -489,10 +501,12 @@ type Model struct {
 	hoverScroll      int            // scroll offset within the hover popup
 	hoverTotalLines  int            // total rendered body lines; used to clamp scroll
 	sigHelp          *ClientSigHelp // non-nil = signature help popup visible
-	completions      []ClientCompletion
+	completions      []ClientCompletion // filtered/sorted view shown in the popup
+	completionsRaw   []ClientCompletion // full unfiltered list from the last fetch
 	completionOn     bool
 	completionIdx    int
 	completionPrefix string
+	completionSeq    int // debounce token; only the latest auto-trigger fetches
 
 	// Fix popup state (Shift+F)
 	fixItems []ClientFixItem   // non-empty = popup visible
@@ -783,15 +797,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case completionsMsg:
-		if len(msg.items) == 0 {
+		// Recompute the prefix from the live buffer: the fetch was async and the
+		// cursor may have advanced (auto-trigger debounce), so filter against
+		// what's actually typed now, not what was typed when the fetch started.
+		m.completionPrefix = m.currentWordPrefix()
+		m.completionsRaw = msg.items
+		m.completions = filterCompletions(msg.items, m.completionPrefix)
+		if len(m.completions) == 0 {
 			m.completionOn = false
-			m.completions = nil
+			m.completionsRaw = nil
 		} else {
-			m.completions = msg.items
 			m.completionOn = true
 			m.completionIdx = 0
 		}
 		return m, nil
+
+	case completionResolvedMsg:
+		// Drop a resolution that came back for a different buffer, or after the
+		// cursor moved (the user kept typing or navigated): applying at the stale
+		// position could target the wrong buffer or corrupt the text.
+		if msg.bufID != m.bufID || m.cursor != msg.at {
+			return m, nil
+		}
+		return m.applyCompletionItem(msg.item, msg.at, msg.prefix)
 
 	case fixItemsMsg:
 		if len(msg.items) > 0 {
@@ -823,6 +851,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case triggerCompletionMsg:
+		if msg.seq != m.completionSeq {
+			return m, nil // superseded by a later keystroke
+		}
 		return m, m.fetchCompletions()
 
 	case formatResultMsg:

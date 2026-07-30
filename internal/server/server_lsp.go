@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -172,13 +173,145 @@ func (s *editorService) Complete(_ context.Context, call proto.EditorService_com
 		return err
 	}
 	for i, it := range items {
-		ci := list.At(i)
-		ci.SetLabel(it.Label) //nolint:errcheck
-		ci.SetKind(uint8(it.Kind))
-		ci.SetDetail(it.Detail)         //nolint:errcheck
-		ci.SetInsertText(it.InsertText) //nolint:errcheck
+		if err := writeCompletionItem(list.At(i), it); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// ResolveCompletion resolves a single completion item (the one the client is
+// about to insert), filling in its additionalTextEdits — the auto-import line
+// for a symbol from another module. The item's opaque data token, round-tripped
+// from the earlier Complete response, tells the language server which candidate
+// to resolve. On failure the item is returned unchanged so the client can still
+// apply the primary insert.
+func (s *editorService) ResolveCompletion(_ context.Context, call proto.EditorService_resolveCompletion) error {
+	args := call.Args()
+	bufID := args.BufId()
+
+	protoItem, err := args.Item()
+	if err != nil {
+		return err
+	}
+	item, err := readCompletionItem(protoItem)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+	s.mu.Unlock()
+
+	resolved, rerr := s.lspMgr.ResolveCompletion(path, item)
+	if rerr != nil {
+		resolved = item
+	}
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	out, err := res.NewItem()
+	if err != nil {
+		return err
+	}
+	return writeCompletionItem(out, resolved)
+}
+
+// writeCompletionItem serializes an lsp.CompletionItem into its proto form,
+// including the opaque resolve token (data) and any additionalTextEdits, which
+// are populated only after ResolveCompletion and empty in Complete results.
+func writeCompletionItem(dst proto.CompletionItem, src lsp.CompletionItem) error {
+	if err := dst.SetLabel(src.Label); err != nil {
+		return err
+	}
+	dst.SetKind(uint8(src.Kind))
+	if err := dst.SetDetail(src.Detail); err != nil {
+		return err
+	}
+	if err := dst.SetInsertText(src.InsertText); err != nil {
+		return err
+	}
+	if err := dst.SetSortText(src.SortText); err != nil {
+		return err
+	}
+	if err := dst.SetFilterText(src.FilterText); err != nil {
+		return err
+	}
+	if src.TextEdit != nil {
+		te, err := dst.NewTextEdit()
+		if err != nil {
+			return err
+		}
+		te.SetFromLine(uint32(src.TextEdit.Range.Start.Line))
+		te.SetFromCol(uint32(src.TextEdit.Range.Start.Character))
+		te.SetToLine(uint32(src.TextEdit.Range.End.Line))
+		te.SetToCol(uint32(src.TextEdit.Range.End.Character))
+		if err := te.SetNewText(src.TextEdit.NewText); err != nil {
+			return err
+		}
+	}
+	if len(src.Data) > 0 {
+		if err := dst.SetData(src.Data); err != nil {
+			return err
+		}
+	}
+	if len(src.AdditionalTextEdits) > 0 {
+		el, err := dst.NewAdditionalTextEdits(int32(len(src.AdditionalTextEdits)))
+		if err != nil {
+			return err
+		}
+		for j, e := range src.AdditionalTextEdits {
+			ev := el.At(j)
+			ev.SetFromLine(uint32(e.Range.Start.Line))
+			ev.SetFromCol(uint32(e.Range.Start.Character))
+			ev.SetToLine(uint32(e.Range.End.Line))
+			ev.SetToCol(uint32(e.Range.End.Character))
+			if err := ev.SetNewText(e.NewText); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// readCompletionItem reconstructs the subset of an lsp.CompletionItem needed to
+// resolve it: the display fields plus the opaque data token the language server
+// keys resolution off. The data bytes are copied out of the capnp message so
+// they stay valid once it's released.
+func readCompletionItem(src proto.CompletionItem) (lsp.CompletionItem, error) {
+	label, err := src.Label()
+	if err != nil {
+		return lsp.CompletionItem{}, err
+	}
+	detail, err := src.Detail()
+	if err != nil {
+		return lsp.CompletionItem{}, err
+	}
+	insert, err := src.InsertText()
+	if err != nil {
+		return lsp.CompletionItem{}, err
+	}
+	data, err := src.Data()
+	if err != nil {
+		return lsp.CompletionItem{}, err
+	}
+	item := lsp.CompletionItem{
+		Label:      label,
+		Kind:       lsp.CompletionItemKind(src.Kind()),
+		Detail:     detail,
+		InsertText: insert,
+	}
+	if len(data) > 0 {
+		item.Data = append(json.RawMessage(nil), data...)
+	}
+	return item, nil
 }
 
 func (s *editorService) Definition(_ context.Context, call proto.EditorService_definition) error {

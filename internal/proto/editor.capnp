@@ -284,6 +284,10 @@ struct CompletionItem {
   # falls back to label when empty.
   sortText   @6 :Text;
   filterText @7 :Text;
+  # textEdit, when present (HasTextEdit), is the authoritative primary edit for
+  # accepting this item (its range may cover more than the typed prefix, e.g.
+  # the whole identifier when completing mid-word). Preferred over insertText.
+  textEdit @8 :PluginEdit;
 }
 
 struct ActiveContext {

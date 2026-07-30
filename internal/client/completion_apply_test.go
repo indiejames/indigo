@@ -129,3 +129,59 @@ func TestApplyCompletionNoParensForVariable(t *testing.T) {
 		t.Errorf("cursor col = %d, want 3", got.cursor.Col)
 	}
 }
+
+// TestApplyCompletionUsesTextEditRange verifies the server textEdit is used as
+// the authoritative primary edit: completing mid-word (cursor after "greet" in
+// "greetLoudly") must replace the whole identifier, not just the prefix before
+// the cursor — which would leave the "Loudly" suffix behind.
+func TestApplyCompletionUsesTextEditRange(t *testing.T) {
+	m := newCompletionApplyTestModel("greetLoudly\n")
+	at := document.Pos{Line: 0, Col: 5} // mid-word, after "greet"
+	m.cursor = at
+	item := ClientCompletion{
+		Label: "greetLoudly", InsertText: "greetLoudly", Kind: 6, // Variable (no parens)
+		TextEdit: &ClientLspEdit{FromLine: 0, FromCol: 0, ToLine: 0, ToCol: 11, NewText: "greetLoudly"},
+	}
+	res, _ := m.applyCompletionItem(item, at, "greet")
+	got := res.(Model)
+	if got.buf.Line(0) != "greetLoudly" {
+		t.Errorf("line 0 = %q, want greetLoudly (textEdit range replaces the whole word)", got.buf.Line(0))
+	}
+	if got.cursor.Col != 11 {
+		t.Errorf("cursor col = %d, want 11 (end of replacement)", got.cursor.Col)
+	}
+}
+
+// TestCompletionResolvedIgnoredOnBufferOrCursorChange verifies the deferred
+// resolve result is dropped when the buffer switched or the cursor moved since
+// acceptance, rather than applying a stale edit to the wrong place.
+func TestCompletionResolvedIgnoredOnBufferOrCursorChange(t *testing.T) {
+	base := func() Model {
+		m := newCompletionApplyTestModel("greetL\n")
+		m.bufID = 1
+		m.cursor = document.Pos{Line: 0, Col: 6}
+		return m
+	}
+	item := ClientCompletion{Label: "greetLoudly", InsertText: "greetLoudly"}
+	accepted := document.Pos{Line: 0, Col: 6}
+
+	// Different buffer → ignored.
+	res, _ := base().Update(completionResolvedMsg{item: item, at: accepted, prefix: "greetL", bufID: 2})
+	if got := res.(Model); got.buf.Line(0) != "greetL" {
+		t.Errorf("applied despite bufID mismatch: line 0 = %q", got.buf.Line(0))
+	}
+
+	// Cursor moved since acceptance → ignored.
+	m := base()
+	m.cursor = document.Pos{Line: 0, Col: 3}
+	res2, _ := m.Update(completionResolvedMsg{item: item, at: accepted, prefix: "greetL", bufID: 1})
+	if got := res2.(Model); got.buf.Line(0) != "greetL" {
+		t.Errorf("applied despite cursor move: line 0 = %q", got.buf.Line(0))
+	}
+
+	// Matching buffer + cursor → applied.
+	res3, _ := base().Update(completionResolvedMsg{item: item, at: accepted, prefix: "greetL", bufID: 1})
+	if got := res3.(Model); got.buf.Line(0) != "greetLoudly" {
+		t.Errorf("not applied for matching buffer/cursor: line 0 = %q", got.buf.Line(0))
+	}
+}

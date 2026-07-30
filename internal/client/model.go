@@ -81,6 +81,7 @@ type completionResolvedMsg struct {
 	item   ClientCompletion
 	at     document.Pos
 	prefix string
+	bufID  uint32
 }
 
 // renameSymbolDoneMsg carries the result of an LSP-driven rename.
@@ -812,6 +813,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case completionResolvedMsg:
+		// Drop a resolution that came back for a different buffer, or after the
+		// cursor moved (the user kept typing or navigated): applying at the stale
+		// position could target the wrong buffer or corrupt the text.
+		if msg.bufID != m.bufID || m.cursor != msg.at {
+			return m, nil
+		}
 		return m.applyCompletionItem(msg.item, msg.at, msg.prefix)
 
 	case fixItemsMsg:

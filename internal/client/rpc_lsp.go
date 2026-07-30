@@ -43,6 +43,10 @@ type ClientCompletion struct {
 	// SortText/FilterText drive client-side ranking and filtering; FilterText
 	// falls back to Label when empty.
 	SortText, FilterText string
+	// TextEdit, when non-nil, is the authoritative primary edit for accepting
+	// this item (its range may cover more than the typed prefix). Preferred over
+	// InsertText/Label.
+	TextEdit *ClientLspEdit
 	// Data is the opaque resolve token; pass it back to ResolveCompletion to
 	// obtain AdditionalEdits. Empty when the server has no resolve data.
 	Data []byte
@@ -194,6 +198,16 @@ func completionFromProto(it proto.CompletionItem) ClientCompletion {
 	}
 	if data, err := it.Data(); err == nil && len(data) > 0 {
 		c.Data = append([]byte(nil), data...)
+	}
+	if it.HasTextEdit() {
+		if te, err := it.TextEdit(); err == nil {
+			nt, _ := te.NewText()
+			c.TextEdit = &ClientLspEdit{
+				FromLine: int(te.FromLine()), FromCol: int(te.FromCol()),
+				ToLine: int(te.ToLine()), ToCol: int(te.ToCol()),
+				NewText: nt,
+			}
+		}
 	}
 	if edits, err := it.AdditionalTextEdits(); err == nil && edits.Len() > 0 {
 		c.AdditionalEdits = make([]ClientLspEdit, edits.Len())

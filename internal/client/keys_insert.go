@@ -366,59 +366,70 @@ func (m Model) applyCompletion() (tea.Model, tea.Cmd) {
 // the inserted text, moved down by any whole lines the import edits inserted
 // above it.
 func (m Model) applyCompletionItem(item ClientCompletion, at document.Pos, prefix string) (tea.Model, tea.Cmd) {
-	insertText := item.InsertText
-	if insertText == "" {
-		insertText = item.Label
+	baseText := item.InsertText
+	if baseText == "" {
+		baseText = item.Label
+	}
+
+	// Primary edit range: prefer the server-provided textEdit, which is
+	// authoritative and may cover more than the typed prefix — notably the whole
+	// identifier when completing mid-word (the prefix heuristic would only
+	// replace the part before the cursor, leaving the suffix behind). Otherwise
+	// replace the typed prefix immediately before the cursor.
+	pFromLine, pFromCol := at.Line, at.Col-len([]rune(prefix))
+	pToLine, pToCol := at.Line, at.Col
+	if item.TextEdit != nil {
+		pFromLine, pFromCol = item.TextEdit.FromLine, item.TextEdit.FromCol
+		pToLine, pToCol = item.TextEdit.ToLine, item.TextEdit.ToCol
+		baseText = item.TextEdit.NewText
+	}
+	if pFromCol < 0 {
+		pFromCol = 0
 	}
 
 	// For functions/methods/constructors, also insert the call parentheses and
 	// leave the cursor between them, then trigger signature help so the
-	// parameters are visible. Skipped when the insert text already has a '(' or
-	// one already follows the cursor, to avoid doubling.
+	// parameters are visible. Skipped when the text already has a '(' or one
+	// already follows the edit, to avoid doubling.
 	addParens := completionAddsParens(item.Kind) &&
-		!strings.ContainsRune(insertText, '(') &&
-		!strings.Contains(insertText, "\n") &&
-		!m.bufCharAfterIs(at, '(')
+		!strings.ContainsRune(baseText, '(') &&
+		!strings.Contains(baseText, "\n") &&
+		!m.bufCharAfterIs(document.Pos{Line: pToLine, Col: pToCol}, '(')
 	if addParens {
-		insertText += "()"
+		baseText += "()"
 	}
 
-	from := at.Col - len([]rune(prefix))
-	if from < 0 {
-		from = 0
-	}
-
-	// Primary edit (replace the typed prefix with the completion text) plus the
-	// additionalTextEdits — the auto-import line(s), which sit above the cursor.
+	// Primary edit plus the additionalTextEdits — the auto-import line(s), which
+	// sit above the cursor.
 	edits := make([]ClientLspEdit, 0, 1+len(item.AdditionalEdits))
 	edits = append(edits, ClientLspEdit{
-		FromLine: at.Line, FromCol: from,
-		ToLine: at.Line, ToCol: at.Col,
-		NewText: insertText,
+		FromLine: pFromLine, FromCol: pFromCol,
+		ToLine: pToLine, ToCol: pToCol,
+		NewText: baseText,
 	})
 	edits = append(edits, item.AdditionalEdits...)
 
 	m2, cmd := m.applyCompletionEdits(edits)
 
-	// Place the cursor at the end of the inserted completion text, shifted down
-	// by whole lines any additional edit inserted at or above the primary edit.
+	// Place the cursor at the end of the inserted text, shifted down by whole
+	// lines any additional edit inserted at or above the primary edit's start.
 	// Auto-import edits are whole-line insertions above the cursor, so only the
 	// line offset changes; the column is the completion's end on its own line.
 	lineDelta := 0
 	for _, e := range item.AdditionalEdits {
-		if e.FromLine < at.Line || (e.FromLine == at.Line && e.FromCol <= from) {
+		if e.FromLine < pFromLine || (e.FromLine == pFromLine && e.FromCol <= pFromCol) {
 			lineDelta += strings.Count(e.NewText, "\n") - (e.ToLine - e.FromLine)
 		}
 	}
-	if nl := strings.Count(insertText, "\n"); nl > 0 {
-		last := insertText[strings.LastIndex(insertText, "\n")+1:]
-		m2.cursor = document.Pos{Line: at.Line + lineDelta + nl, Col: len([]rune(last))}
+	if nl := strings.Count(baseText, "\n"); nl > 0 {
+		last := baseText[strings.LastIndex(baseText, "\n")+1:]
+		m2.cursor = document.Pos{Line: pFromLine + lineDelta + nl, Col: len([]rune(last))}
 	} else {
-		col := from + len([]rune(insertText))
+		col := pFromCol + len([]rune(baseText))
 		if addParens {
 			col-- // sit between the inserted ( and )
 		}
-		m2.cursor = document.Pos{Line: at.Line + lineDelta, Col: col}
+		m2.cursor = document.Pos{Line: pFromLine + lineDelta, Col: col}
 	}
 	m2.scrollToCursor()
 	if addParens {

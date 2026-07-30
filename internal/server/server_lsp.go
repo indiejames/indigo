@@ -244,6 +244,19 @@ func writeCompletionItem(dst proto.CompletionItem, src lsp.CompletionItem) error
 	if err := dst.SetFilterText(src.FilterText); err != nil {
 		return err
 	}
+	if src.TextEdit != nil {
+		te, err := dst.NewTextEdit()
+		if err != nil {
+			return err
+		}
+		te.SetFromLine(uint32(src.TextEdit.Range.Start.Line))
+		te.SetFromCol(uint32(src.TextEdit.Range.Start.Character))
+		te.SetToLine(uint32(src.TextEdit.Range.End.Line))
+		te.SetToCol(uint32(src.TextEdit.Range.End.Character))
+		if err := te.SetNewText(src.TextEdit.NewText); err != nil {
+			return err
+		}
+	}
 	if len(src.Data) > 0 {
 		if err := dst.SetData(src.Data); err != nil {
 			return err

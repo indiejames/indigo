@@ -120,7 +120,7 @@ func (m Model) resolveCompletionCmd(item ClientCompletion, at document.Pos, pref
 		if err != nil {
 			resolved = item
 		}
-		return completionResolvedMsg{item: resolved, at: at, prefix: prefix}
+		return completionResolvedMsg{item: resolved, at: at, prefix: prefix, bufID: bufID}
 	}
 }
 

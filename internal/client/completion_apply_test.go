@@ -185,3 +185,50 @@ func TestCompletionResolvedIgnoredOnBufferOrCursorChange(t *testing.T) {
 		t.Errorf("not applied for matching buffer/cursor: line 0 = %q", got.buf.Line(0))
 	}
 }
+
+// TestSignatureIsCallable checks the resolved-detail heuristic used to add call
+// parens when the LSP kind alone doesn't identify a callable (imported
+// functions arrive as kind Variable).
+func TestSignatureIsCallable(t *testing.T) {
+	cases := []struct {
+		detail string
+		want   bool
+	}{
+		{"(alias) function greetLoudly(name: string): string\nimport greetLoudly", true},
+		{"function foo(): void", true},
+		{"(method) Foo.bar(x: number): void", true},
+		{"const cb: (x: number) => void", true},
+		{"const Ctor: new (x: number) => Foo", false},          // construct signature — new-able, not callable
+		{"const Ctor: abstract new (x: number) => Foo", false}, // abstract construct signature
+		{"const x: number", false},
+		{"const s: string", false},
+		{"(property) Foo.count: number", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := signatureIsCallable(tc.detail); got != tc.want {
+			t.Errorf("signatureIsCallable(%q) = %v, want %v", tc.detail, got, tc.want)
+		}
+	}
+}
+
+// TestApplyCompletionAddsParensForImportedFunction verifies an already-imported
+// function (LSP kind Variable, but a callable resolved detail) still gets call
+// parentheses with the cursor placed between them.
+func TestApplyCompletionAddsParensForImportedFunction(t *testing.T) {
+	m := newCompletionApplyTestModel("greetL\n")
+	at := document.Pos{Line: 0, Col: 6}
+	m.cursor = at
+	item := ClientCompletion{
+		Label: "greetLoudly", InsertText: "greetLoudly", Kind: 6, // Variable (import alias)
+		Detail: "(alias) function greetLoudly(name: string): string\nimport greetLoudly",
+	}
+	res, _ := m.applyCompletionItem(item, at, "greetL")
+	got := res.(Model)
+	if got.buf.Line(0) != "greetLoudly()" {
+		t.Errorf("line 0 = %q, want greetLoudly() (imported function should get parens)", got.buf.Line(0))
+	}
+	if got.cursor.Col != 12 {
+		t.Errorf("cursor col = %d, want 12 (between parens)", got.cursor.Col)
+	}
+}

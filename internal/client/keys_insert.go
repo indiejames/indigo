@@ -315,7 +315,15 @@ func signatureIsCallable(detail string) bool {
 	case strings.Contains(detail, "(method)"):
 		return true
 	case strings.Contains(detail, ") => "):
-		return true // arrow function type, e.g. `(x: number) => void`
+		// Arrow function type, e.g. `(x: number) => void` — callable. But a
+		// construct signature (`new (...) => T`, `abstract new (...) => T`) is
+		// new-able, not directly callable, so don't append call parens for it.
+		typ := detail
+		if i := strings.Index(typ, ": "); i >= 0 {
+			typ = typ[i+2:]
+		}
+		typ = strings.TrimSpace(typ)
+		return !strings.HasPrefix(typ, "new (") && !strings.HasPrefix(typ, "abstract new (")
 	}
 	return false
 }

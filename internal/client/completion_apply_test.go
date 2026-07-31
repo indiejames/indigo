@@ -198,6 +198,8 @@ func TestSignatureIsCallable(t *testing.T) {
 		{"function foo(): void", true},
 		{"(method) Foo.bar(x: number): void", true},
 		{"const cb: (x: number) => void", true},
+		{"const Ctor: new (x: number) => Foo", false},          // construct signature — new-able, not callable
+		{"const Ctor: abstract new (x: number) => Foo", false}, // abstract construct signature
 		{"const x: number", false},
 		{"const s: string", false},
 		{"(property) Foo.count: number", false},

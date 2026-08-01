@@ -201,6 +201,9 @@ func TestSignatureIsCallable(t *testing.T) {
 		{"const Ctor: new (x: number) => Foo", false},          // construct signature — new-able, not callable
 		{"const Ctor: abstract new (x: number) => Foo", false}, // abstract construct signature
 		{"const x: number", false},
+		// Fresh (not-yet-imported) auto-import candidate: signature is on the
+		// second line, after an "Auto import from '...'" preamble.
+		{"Auto import from './helper'\nfunction bar(x: number, y: number): number", true},
 		{"const s: string", false},
 		{"(property) Foo.count: number", false},
 		{"", false},
@@ -225,10 +228,62 @@ func TestApplyCompletionAddsParensForImportedFunction(t *testing.T) {
 	}
 	res, _ := m.applyCompletionItem(item, at, "greetL")
 	got := res.(Model)
-	if got.buf.Line(0) != "greetLoudly()" {
-		t.Errorf("line 0 = %q, want greetLoudly() (imported function should get parens)", got.buf.Line(0))
+	if got.buf.Line(0) != "greetLoudly(name)" {
+		t.Errorf("line 0 = %q, want greetLoudly(name) (imported function gets named placeholder)", got.buf.Line(0))
 	}
 	if got.cursor.Col != 12 {
-		t.Errorf("cursor col = %d, want 12 (between parens)", got.cursor.Col)
+		t.Errorf("cursor col = %d, want 12 (start of the first argument placeholder)", got.cursor.Col)
+	}
+}
+
+// TestApplyCompletionFillsMultipleArgPlaceholders verifies multi-parameter
+// functions insert all parameter names and land the cursor on the first.
+func TestApplyCompletionFillsMultipleArgPlaceholders(t *testing.T) {
+	m := newCompletionApplyTestModel("gr\n")
+	at := document.Pos{Line: 0, Col: 2}
+	m.cursor = at
+	item := ClientCompletion{
+		Label: "greet", InsertText: "greet", Kind: 3,
+		Detail: "function greet(name: string, times: number): void",
+	}
+	res, _ := m.applyCompletionItem(item, at, "gr")
+	got := res.(Model)
+	if got.buf.Line(0) != "greet(name, times)" {
+		t.Errorf("line 0 = %q, want greet(name, times)", got.buf.Line(0))
+	}
+	if got.cursor.Col != 6 { // start of "name" (g0 r1 e2 e3 t4 (5 n6)
+		t.Errorf("cursor col = %d, want 6 (start of first arg)", got.cursor.Col)
+	}
+}
+
+// TestApplyCompletionFreshAutoImportFillsArgs reproduces the exact bug report:
+// accepting a fresh (not-yet-imported) auto-import candidate for a two-argument
+// function must still fill in both argument placeholders. This is the real
+// resolved-item shape captured from typescript-language-server for a function
+// export that isn't imported yet — detail leads with an "Auto import from"
+// preamble, and additionalTextEdits appends the name into an existing import
+// statement rather than inserting a whole new import line.
+func TestApplyCompletionFreshAutoImportFillsArgs(t *testing.T) {
+	m := newCompletionApplyTestModel("import { greetLoudly } from \"./helper\";\n\nconst r = bar\n")
+	at := document.Pos{Line: 2, Col: 13} // end of "bar"
+	m.cursor = at
+	item := ClientCompletion{
+		Label: "bar", InsertText: "bar", Kind: 3,
+		Detail: "Auto import from './helper'\nfunction bar(x: number, y: number): number",
+		AdditionalEdits: []ClientLspEdit{{
+			FromLine: 0, FromCol: 9, ToLine: 0, ToCol: 9, NewText: "bar, ",
+		}},
+	}
+	res, _ := m.applyCompletionItem(item, at, "bar")
+	got := res.(Model)
+
+	if got.buf.Line(0) != "import { bar, greetLoudly } from \"./helper\";" {
+		t.Errorf("line 0 = %q, want the import list to gain bar", got.buf.Line(0))
+	}
+	if got.buf.Line(2) != "const r = bar(x, y)" {
+		t.Errorf("line 2 = %q, want const r = bar(x, y) (args filled in)", got.buf.Line(2))
+	}
+	if !got.snippetOn {
+		t.Error("expected snippet mode to be active with argument placeholders")
 	}
 }

@@ -68,6 +68,9 @@ func (m *Model) handleMousePress(x, y int) {
 	if !ok {
 		return
 	}
+	if m.snippetOn {
+		*m = m.exitSnippet()
+	}
 	now := time.Now()
 	isDoubleClick := now.Sub(m.lastClickAt) <= doubleClickWindow && m.lastClickPos == pos
 	m.lastClickAt = now

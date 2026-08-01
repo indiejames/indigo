@@ -508,6 +508,14 @@ type Model struct {
 	completionPrefix string
 	completionSeq    int // debounce token; only the latest auto-trigger fetches
 
+	// Snippet (argument-placeholder) mode: after accepting a callable
+	// completion, the inserted parameter names become tab stops the user can
+	// jump between (Tab/Shift+Tab) and type over. Single line only.
+	snippetOn    bool
+	snippetLine  int
+	snippetStops []snippetStop
+	snippetIdx   int
+
 	// Fix popup state (Shift+F)
 	fixItems []ClientFixItem   // non-empty = popup visible
 	fixDecor *ClientDecoration // decoration being fixed (nil for action-only items)

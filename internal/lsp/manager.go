@@ -250,6 +250,16 @@ func (m *Manager) CodeActions(path string, startLine, startCol, endLine, endCol 
 	return nil, nil
 }
 
+// InlayHints returns inlay hints for path within the given range (normally the
+// client's visible viewport).
+func (m *Manager) InlayHints(path string, startLine, startCol, endLine, endCol int) ([]InlayHint, error) {
+	if c := m.clientForPath(path); c != nil {
+		m.ensureOpened(c, path)
+		return c.InlayHints(path, startLine, startCol, endLine, endCol)
+	}
+	return nil, nil
+}
+
 // Rename renames the symbol at (line, col) in path via its language server,
 // returning the resulting WorkspaceEdit (nil if unsupported or unavailable).
 func (m *Manager) Rename(path string, line, col int, newName string) (*WorkspaceEdit, error) {

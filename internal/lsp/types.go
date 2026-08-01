@@ -95,6 +95,7 @@ type ServerCapabilities struct {
 	CompletionProvider         any             `json:"completionProvider,omitempty"`
 	DocumentFormattingProvider any             `json:"documentFormattingProvider,omitempty"`
 	RenameProvider             any             `json:"renameProvider,omitempty"`
+	InlayHintProvider          any             `json:"inlayHintProvider,omitempty"`
 }
 
 type SignatureHelpOptions struct {
@@ -440,6 +441,56 @@ type CompletionItem struct {
 type CompletionList struct {
 	IsIncomplete bool             `json:"isIncomplete"`
 	Items        []CompletionItem `json:"items"`
+}
+
+// ---- textDocument/inlayHint ----
+
+type InlayHintParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
+}
+
+type InlayHintKind int
+
+const (
+	InlayHintKindType      InlayHintKind = 1
+	InlayHintKindParameter InlayHintKind = 2
+)
+
+// InlayHint is one hint returned by textDocument/inlayHint, e.g. the ": string"
+// after an inferred variable or the "name:" before a positional argument.
+type InlayHint struct {
+	Position Position `json:"position"`
+	// Label is json.RawMessage because the LSP spec allows two shapes: a plain
+	// string, or []InlayHintLabelPart ({value, tooltip?, location?, command?}) —
+	// use Text() to normalize either into a plain string.
+	Label        json.RawMessage `json:"label"`
+	Kind         InlayHintKind   `json:"kind,omitempty"`
+	PaddingLeft  bool            `json:"paddingLeft,omitempty"`
+	PaddingRight bool            `json:"paddingRight,omitempty"`
+}
+
+// Text normalizes Label to a plain display string, joining InlayHintLabelPart
+// values when the server returns the structured array form.
+func (h *InlayHint) Text() string {
+	if h == nil || len(h.Label) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(h.Label, &s); err == nil {
+		return s
+	}
+	var parts []struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(h.Label, &parts); err == nil {
+		vals := make([]string, len(parts))
+		for i, p := range parts {
+			vals[i] = p.Value
+		}
+		return strings.Join(vals, "")
+	}
+	return ""
 }
 
 // ---- textDocument/definition ----

@@ -482,6 +482,48 @@ func (r *RPC) Format(ctx context.Context, bufID uint32) (content string, changed
 	return content, res.Changed(), res.NoFormatter(), nil
 }
 
+// ClientInlayHint is an inlay hint (inferred type or parameter name) to render
+// as virtual text at a position — never part of the actual buffer content.
+type ClientInlayHint struct {
+	Line, Col                 int
+	Label                     string
+	Kind                      uint8 // 1 = Type, 2 = Parameter
+	PaddingLeft, PaddingRight bool
+}
+
+// InlayHints fetches inlay hints for bufID within [startLine,endLine) —
+// normally the client's visible viewport, not the whole file.
+func (r *RPC) InlayHints(ctx context.Context, bufID uint32, startLine, startCol, endLine, endCol int) ([]ClientInlayHint, error) {
+	fut, rel := r.svc.InlayHints(ctx, func(p proto.EditorService_inlayHints_Params) error {
+		p.SetBufId(bufID)
+		p.SetStartLine(uint32(startLine))
+		p.SetStartCol(uint32(startCol))
+		p.SetEndLine(uint32(endLine))
+		p.SetEndCol(uint32(endCol))
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, err
+	}
+	list, err := res.Hints()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ClientInlayHint, list.Len())
+	for i := range out {
+		h := list.At(i)
+		label, _ := h.Label()
+		out[i] = ClientInlayHint{
+			Line: int(h.Line()), Col: int(h.Col()),
+			Label: label, Kind: h.Kind(),
+			PaddingLeft: h.PaddingLeft(), PaddingRight: h.PaddingRight(),
+		}
+	}
+	return out, nil
+}
+
 // ClientLspEdit is a single text replacement from an LSP code action.
 type ClientLspEdit struct {
 	FromLine, FromCol int

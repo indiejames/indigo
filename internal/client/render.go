@@ -47,6 +47,11 @@ var (
 	searchCurrentStyle = lipgloss.NewStyle().Background(lipgloss.Color("#AAAA00")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
 )
 
+// inlayHintStyle renders LSP inlay hints (inferred types, parameter names) —
+// dim and unobtrusive, since they're virtual text the server infers, not code
+// the user wrote.
+var inlayHintStyle = lipgloss.NewStyle().Faint(true)
+
 // lineOverlay describes a styled text injection at a visual column in the content area.
 // col is an index into the tab-expanded rune slice for the line; w is how many of those
 // rune positions the text visually occupies (i.e. positions to skip in the underlying content).

@@ -561,6 +561,66 @@ func (m Model) buildRowOverlays(layout []layoutEntry, cw int) [][]lineOverlay {
 	return rows
 }
 
+// buildInlayHintOverlays converts the current viewport's inlay hints into
+// per-row overlays. Unlike every other overlay producer in this file, these
+// carry w: 0 — a plugin/search/indent-guide overlay's w tells renderLineRunes
+// how many real rune positions to skip (the overlay replaces existing
+// content), but an inlay hint is virtual text the server infers; it must
+// never consume or hide a real character. w: 0 makes renderLineRunes draw the
+// hint and then continue rendering the real content at that same column
+// unaffected — a pure insertion. Getting this wrong would silently eat real
+// characters equal to the hint's width, hiding actual code.
+func (m Model) buildInlayHintOverlays(layout []layoutEntry, cw int) [][]lineOverlay {
+	if m.cfg == nil || !m.cfg.InlayHints || len(m.inlayHints) == 0 {
+		return nil
+	}
+	vis := len(layout)
+	rows := make([][]lineOverlay, vis)
+	for _, h := range m.inlayHints {
+		if h.Label == "" {
+			continue
+		}
+		if h.Line < 0 || h.Line >= m.buf.LineCount() {
+			continue // stale hint from before an edit shortened the buffer
+		}
+		lineRunes := []rune(m.buf.Line(h.Line))
+		if h.Col < 0 || h.Col > len(lineRunes) {
+			continue // stale hint from before an edit shortened this line
+		}
+		_, colMap := expandTabsRemap(lineRunes)
+		visCol := h.Col
+		if h.Col < len(colMap) {
+			visCol = colMap[h.Col]
+		}
+		row := screenRowOf(layout, h.Line, visCol, cw)
+		if row < 0 || row >= vis {
+			continue
+		}
+		text := h.Label
+		if h.PaddingLeft {
+			text = " " + text
+		}
+		if h.PaddingRight {
+			text += " "
+		}
+		chunkStart := layout[row].chunkStart
+		rows[row] = append(rows[row], lineOverlay{
+			col:  visCol - chunkStart,
+			text: inlayHintStyle.Render(text),
+			w:    0,
+		})
+	}
+	for ri, ovls := range rows {
+		for j := 1; j < len(ovls); j++ {
+			for k := j; k > 0 && ovls[k].col < ovls[k-1].col; k-- {
+				ovls[k], ovls[k-1] = ovls[k-1], ovls[k]
+			}
+		}
+		rows[ri] = ovls
+	}
+	return rows
+}
+
 // buildSearchOverlays builds per-row overlays for all search matches. Overlay
 // column values are chunk-relative. Returns nil when there are no matches.
 func (m Model) buildSearchOverlays(layout []layoutEntry, cw int) [][]lineOverlay {

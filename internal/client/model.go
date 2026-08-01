@@ -74,6 +74,12 @@ type fixItemsMsg struct {
 // completionsMsg carries fresh completion items.
 type completionsMsg struct{ items []ClientCompletion }
 
+// inlayHintsMsg carries fresh inlay hints for the requested viewport.
+type inlayHintsMsg struct {
+	bufID uint32
+	items []ClientInlayHint
+}
+
 // completionResolvedMsg carries a completion item resolved on accept, along with
 // the cursor position and typed prefix captured when the user accepted it, so
 // the deferred apply lands at the right place regardless of the current cursor.
@@ -516,6 +522,9 @@ type Model struct {
 	snippetStops []snippetStop
 	snippetIdx   int
 
+	inlayHints []ClientInlayHint // current viewport's hints, refreshed periodically
+	inlayTick  int               // counter; fetch every 10 ticks (~1.2s), same cadence as diagnostics
+
 	// Fix popup state (Shift+F)
 	fixItems []ClientFixItem   // non-empty = popup visible
 	fixDecor *ClientDecoration // decoration being fixed (nil for action-only items)
@@ -653,7 +662,7 @@ func tick() tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(tick(), m.reparseHighlight(), m.fetchDecorations(), m.ReportActiveContextCmd())
+	return tea.Batch(tick(), m.reparseHighlight(), m.fetchDecorations(), m.fetchInlayHints(), m.ReportActiveContextCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -667,6 +676,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		m.diagTick++
 		m.decorTick++
+		m.inlayTick++
 		if m.flashTick > 0 {
 			m.flashTick--
 		}
@@ -676,6 +686,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.decorTick%3 == 0 {
 			cmds = append(cmds, m.fetchDecorations())
+		}
+		if m.inlayTick%10 == 0 {
+			cmds = append(cmds, m.fetchInlayHints())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -983,6 +996,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		return m, nil
+
+	case inlayHintsMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
+		m.inlayHints = msg.items
 		return m, nil
 
 	case pluginKeyResultMsg:

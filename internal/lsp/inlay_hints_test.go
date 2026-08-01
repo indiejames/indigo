@@ -30,6 +30,7 @@ func TestInlayHintsSendsRangeAndDecodesBothLabelShapes(t *testing.T) {
 	_ = fakeServer
 
 	c := &Client{docVersions: make(map[string]int), rootURI: pathToURI("/workspace")}
+	c.caps.InlayHintProvider = true
 	c.conn = newJSONRPCConn(clientEnd, clientEnd, nil, nil)
 
 	type result struct {
@@ -95,6 +96,7 @@ func TestInlayHintsNullResponse(t *testing.T) {
 	_ = fakeServer
 
 	c := &Client{docVersions: make(map[string]int), rootURI: pathToURI("/workspace")}
+	c.caps.InlayHintProvider = true
 	c.conn = newJSONRPCConn(clientEnd, clientEnd, nil, nil)
 
 	done := make(chan error, 1)
@@ -114,5 +116,25 @@ func TestInlayHintsNullResponse(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for InlayHints to return")
+	}
+}
+
+// TestInlayHintsSkipsRequestWhenUnsupported verifies InlayHints returns early,
+// without attempting a request, when the server never advertised
+// inlayHintProvider. This matters more here than for most methods in this
+// file: InlayHints is polled periodically (not a one-shot, user-triggered
+// request like Hover/Complete), so hitting a server that never supports it
+// would otherwise waste a request roughly every 1.2s per open buffer,
+// indefinitely. c.conn is deliberately left nil — if the capability guard
+// were missing or broken, attempting the request would panic immediately
+// rather than silently succeeding against a real connection.
+func TestInlayHintsSkipsRequestWhenUnsupported(t *testing.T) {
+	c := &Client{docVersions: make(map[string]int)} // caps.InlayHintProvider is nil; conn is nil
+	hints, err := c.InlayHints("/workspace/main.go", 0, 0, 10, 0)
+	if err != nil {
+		t.Fatalf("InlayHints returned an error: %v", err)
+	}
+	if hints != nil {
+		t.Errorf("hints = %v, want nil when the server has no inlayHintProvider", hints)
 	}
 }

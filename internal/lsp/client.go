@@ -503,6 +503,13 @@ func (c *Client) resolveCodeActions(actions []CodeAction) {
 // visible viewport, not the whole file — servers can be slow on large files,
 // and hints outside the viewport aren't rendered anyway.
 func (c *Client) InlayHints(path string, startLine, startCol, endLine, endCol int) ([]InlayHint, error) {
+	c.mu.Lock()
+	supported := c.caps.InlayHintProvider != nil
+	c.mu.Unlock()
+	if !supported {
+		return nil, nil
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

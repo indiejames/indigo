@@ -329,6 +329,7 @@ func (s *editorService) InlayHints(_ context.Context, call proto.EditorService_i
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 	path := entry.buf.Path()
+	buf := entry.buf
 	s.mu.Unlock()
 
 	hints, err := s.lspMgr.InlayHints(path,
@@ -348,7 +349,16 @@ func (s *editorService) InlayHints(_ context.Context, call proto.EditorService_i
 	for i, h := range hints {
 		hi := list.At(i)
 		hi.SetLine(uint32(h.Position.Line))
-		hi.SetCol(uint32(h.Position.Character))
+		// h.Position.Character is a UTF-16 code-unit offset per the LSP spec's
+		// default (indigo never negotiates an alternate positionEncoding), but
+		// the client treats every column as a rune index — convert here, where
+		// the buffer's actual line content is available, so nothing downstream
+		// has to know about the distinction.
+		col := h.Position.Character
+		if h.Position.Line >= 0 && h.Position.Line < buf.LineCount() {
+			col = utf16ColToRune([]rune(buf.Line(h.Position.Line)), col)
+		}
+		hi.SetCol(uint32(col))
 		if err := hi.SetLabel(h.Text()); err != nil {
 			return err
 		}
@@ -357,6 +367,29 @@ func (s *editorService) InlayHints(_ context.Context, call proto.EditorService_i
 		hi.SetPaddingRight(h.PaddingRight)
 	}
 	return nil
+}
+
+// utf16ColToRune converts col, a UTF-16 code-unit offset as used by LSP
+// Position.character (indigo does not negotiate an alternate
+// positionEncoding, so per spec every server defaults to UTF-16), into a rune
+// index within line. Only runes outside the Basic Multilingual Plane
+// (U+10000 and up — most emoji, some historic/rare scripts) differ: they
+// encode as two UTF-16 code units but remain a single rune, so treating col
+// directly as a rune index drifts by one for each such rune before the
+// target position on the line.
+func utf16ColToRune(line []rune, col int) int {
+	units := 0
+	for i, r := range line {
+		if units >= col {
+			return i
+		}
+		if r > 0xFFFF {
+			units += 2
+		} else {
+			units++
+		}
+	}
+	return len(line)
 }
 
 func (s *editorService) Definition(_ context.Context, call proto.EditorService_definition) error {

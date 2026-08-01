@@ -530,6 +530,25 @@ func (m Model) applyCompletionItem(item ClientCompletion, at document.Pos, prefi
 		pFromLine, pFromCol = item.TextEdit.FromLine, item.TextEdit.FromCol
 		pToLine, pToCol = item.TextEdit.ToLine, item.TextEdit.ToCol
 		baseText = item.TextEdit.NewText
+		// A server's textEdit is computed once, at fetch time, against however
+		// much of the prefix was typed then — it does not track further typing,
+		// because indigo's incremental narrowing (see refreshCompletionFilter)
+		// deliberately re-filters the cached list locally instead of
+		// re-fetching on every keystroke. Confirmed against real gopls: the
+		// same candidate's textEdit.range end sits exactly at the trigger
+		// column right after the fetch, but at the full typed-prefix column
+		// when fetched fresh later — so if the cursor has since moved past the
+		// edit's end (more was typed after this item was fetched), extend the
+		// edit to also consume those characters. Otherwise they'd survive
+		// untouched right after the inserted text (e.g. accepting a
+		// zero-width edit fetched right after '.' but accepted after typing
+		// "sn" produced "m.snippetOnsn" instead of "m.snippetOn"). This must
+		// NOT fire when the edit legitimately extends past the cursor into
+		// pre-existing buffer text (the mid-word-completion case), which is
+		// exactly the pToCol <= at.Col direction below.
+		if pToLine == at.Line && at.Col > pToCol {
+			pToCol = at.Col
+		}
 	}
 	if pFromCol < 0 {
 		pFromCol = 0

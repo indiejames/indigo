@@ -287,3 +287,35 @@ func TestApplyCompletionFreshAutoImportFillsArgs(t *testing.T) {
 		t.Error("expected snippet mode to be active with argument placeholders")
 	}
 }
+
+// TestApplyCompletionExtendsStaleTextEditPastNarrowedPrefix is a regression
+// test for a real reported bug: in a Go file, typing "m." triggered a
+// completion fetch (gopls returns snippetOn's textEdit as the zero-width
+// range {3,3} right after the dot — confirmed against a real gopls). The user
+// then typed "sn" — indigo's incremental narrowing re-filters the cached list
+// locally without re-fetching, so the item's textEdit stayed frozen at {3,3}.
+// Accepting "snippetOn" applied that stale zero-width edit, inserting the
+// completion BEFORE the already-typed "sn" instead of replacing it, producing
+// "m.snippetOnsn" instead of "m.snippetOn". The fix extends a textEdit whose
+// end trails behind the current cursor (more was typed after the fetch) to
+// also consume those characters.
+func TestApplyCompletionExtendsStaleTextEditPastNarrowedPrefix(t *testing.T) {
+	m := newCompletionApplyTestModel("m.sn\n")
+	at := document.Pos{Line: 0, Col: 4} // cursor after "m.sn"
+	m.cursor = at
+	item := ClientCompletion{
+		Label: "snippetOn", InsertText: "snippetOn", Kind: 5, // Field
+		// The stale, zero-width textEdit gopls returned at the ORIGINAL
+		// trigger point (right after "m."), before "sn" was typed.
+		TextEdit: &ClientLspEdit{FromLine: 0, FromCol: 2, ToLine: 0, ToCol: 2, NewText: "snippetOn"},
+	}
+	res, _ := m.applyCompletionItem(item, at, "sn")
+	got := res.(Model)
+
+	if got.buf.Line(0) != "m.snippetOn" {
+		t.Errorf("line 0 = %q, want m.snippetOn (the typed \"sn\" must be consumed, not left over)", got.buf.Line(0))
+	}
+	if got.cursor.Col != 11 {
+		t.Errorf("cursor col = %d, want 11 (end of snippetOn)", got.cursor.Col)
+	}
+}

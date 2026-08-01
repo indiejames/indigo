@@ -37,7 +37,120 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Any other key dismisses the popup, then is handled normally.
 		m = m.clearedCompletion()
 	}
+
+	if m.snippetOn {
+		switch msg.String() {
+		case "tab":
+			return m.snippetJump(1), nil
+		case "shift+tab":
+			return m.snippetJump(-1), nil
+		case "backspace":
+			return m.snippetEdit(msg)
+		default:
+			if len(msg.Runes) > 0 {
+				return m.snippetEdit(msg)
+			}
+			// Esc, cursor movement, Enter, etc. leave snippet mode and are then
+			// handled normally — so a single Esc also leaves insert mode rather
+			// than needing a second press.
+			m = m.exitSnippet()
+		}
+	}
 	return m.handleInsertKey(msg)
+}
+
+// enterSnippet activates snippet mode over stops (absolute columns on line) and
+// selects the first stop.
+func (m Model) enterSnippet(line int, stops []snippetStop) Model {
+	m.snippetOn = true
+	m.snippetLine = line
+	m.snippetStops = stops
+	return m.selectSnippetStop(0)
+}
+
+// exitSnippet clears snippet mode and any placeholder selection.
+func (m Model) exitSnippet() Model {
+	m.snippetOn = false
+	m.snippetStops = nil
+	m.snippetIdx = 0
+	m.sel = nil
+	return m
+}
+
+// selectSnippetStop makes stop idx active: a non-empty placeholder is selected
+// (highlighted) so typing replaces it; an empty stop just places the cursor.
+func (m Model) selectSnippetStop(idx int) Model {
+	m.snippetIdx = idx
+	s := m.snippetStops[idx]
+	if s.end > s.start {
+		m.sel = &Selection{
+			Anchor: document.Pos{Line: m.snippetLine, Col: s.start},
+			Head:   document.Pos{Line: m.snippetLine, Col: s.end - 1}, // selection end is inclusive
+		}
+		m.cursor = document.Pos{Line: m.snippetLine, Col: s.start}
+	} else {
+		m.sel = nil
+		m.cursor = document.Pos{Line: m.snippetLine, Col: s.start}
+	}
+	return m
+}
+
+// snippetJump moves to the next/previous tab stop, leaving snippet mode when
+// advancing past the last stop.
+func (m Model) snippetJump(dir int) tea.Model {
+	next := m.snippetIdx + dir
+	if next < 0 {
+		next = 0
+	}
+	if next >= len(m.snippetStops) {
+		return m.exitSnippet()
+	}
+	return m.selectSnippetStop(next)
+}
+
+// snippetEdit handles a printable key or backspace while in snippet mode: it
+// replaces the selected placeholder (if any) with the keypress, then keeps the
+// remaining stops positioned by the net change in the line's length. Leaving the
+// snippet line abandons snippet mode.
+func (m Model) snippetEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	idx := m.snippetIdx
+	line := m.snippetLine
+	before := m.buf.LineLen(line)
+	editCol := m.cursor.Col
+
+	var cmds []tea.Cmd
+	if m.sel != nil {
+		start, _ := m.sel.ordered()
+		editCol = start.Col
+		m2, delCmd := m.deleteSelection()
+		m = m2
+		if delCmd != nil {
+			cmds = append(cmds, delCmd)
+		}
+	}
+	model, editCmd := m.handleInsertKey(msg)
+	m = model.(Model)
+	if editCmd != nil {
+		cmds = append(cmds, editCmd)
+	}
+
+	if m.cursor.Line != line { // edit inserted a newline / moved off-line
+		return m.exitSnippet(), tea.Sequence(cmds...)
+	}
+
+	// Shift the stops after the active one by the net column change at editCol,
+	// and grow/shrink the active stop's end to match.
+	delta := m.buf.LineLen(line) - before
+	if idx < len(m.snippetStops) {
+		m.snippetStops[idx].end += delta
+	}
+	for j := idx + 1; j < len(m.snippetStops); j++ {
+		if m.snippetStops[j].start >= editCol {
+			m.snippetStops[j].start += delta
+			m.snippetStops[j].end += delta
+		}
+	}
+	return m, tea.Sequence(cmds...)
 }
 
 // handleInsertKey handles a single insert-mode key edit. Completion-popup
@@ -266,7 +379,7 @@ func (m Model) handleInsertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// all but the latest pending trigger, so a burst of keystrokes causes
 			// a single fetch. Once the popup is open, further typing narrows the
 			// cached list (handleInsert) rather than re-fetching.
-			if r == '.' || (isWordChar(r) && !m2.completionOn) {
+			if !m2.snippetOn && (r == '.' || (isWordChar(r) && !m2.completionOn)) {
 				m2.completionSeq++
 				seq := m2.completionSeq
 				delayed := tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
@@ -301,29 +414,32 @@ func completionAddsParens(kind uint8) bool {
 
 // signatureIsCallable reports whether a resolved completion detail describes a
 // callable symbol, so call parentheses are inserted even when the LSP kind
-// doesn't say so. An imported function comes back as kind Variable with detail
-// like "(alias) function greetLoudly(name: string): string", and a
-// function-typed value as "const cb: (x: number) => void". Only the first line
-// is inspected — tsserver appends "\nimport X" and similar after it.
+// doesn't say so. An already-imported function comes back as kind Variable
+// with detail like "(alias) function greetLoudly(name: string): string", and a
+// function-typed value as "const cb: (x: number) => void". A not-yet-imported
+// auto-import candidate instead leads with a preamble line — detail is
+// "Auto import from './helper'\nfunction bar(x: number, y: number): number" —
+// so every line is checked, not just the first.
 func signatureIsCallable(detail string) bool {
-	if i := strings.IndexByte(detail, '\n'); i >= 0 {
-		detail = detail[:i]
-	}
-	switch {
-	case strings.Contains(detail, "function "):
-		return true
-	case strings.Contains(detail, "(method)"):
-		return true
-	case strings.Contains(detail, ") => "):
-		// Arrow function type, e.g. `(x: number) => void` — callable. But a
-		// construct signature (`new (...) => T`, `abstract new (...) => T`) is
-		// new-able, not directly callable, so don't append call parens for it.
-		typ := detail
-		if i := strings.Index(typ, ": "); i >= 0 {
-			typ = typ[i+2:]
+	for _, line := range strings.Split(detail, "\n") {
+		switch {
+		case strings.Contains(line, "function "):
+			return true
+		case strings.Contains(line, "(method)"):
+			return true
+		case strings.Contains(line, ") => "):
+			// Arrow function type, e.g. `(x: number) => void` — callable. But a
+			// construct signature (`new (...) => T`, `abstract new (...) => T`) is
+			// new-able, not directly callable, so don't append call parens for it.
+			typ := line
+			if i := strings.Index(typ, ": "); i >= 0 {
+				typ = typ[i+2:]
+			}
+			typ = strings.TrimSpace(typ)
+			if !strings.HasPrefix(typ, "new (") && !strings.HasPrefix(typ, "abstract new (") {
+				return true
+			}
 		}
-		typ = strings.TrimSpace(typ)
-		return !strings.HasPrefix(typ, "new (") && !strings.HasPrefix(typ, "abstract new (")
 	}
 	return false
 }
@@ -424,8 +540,33 @@ func (m Model) applyCompletionItem(item ClientCompletion, at document.Pos, prefi
 		!strings.ContainsRune(baseText, '(') &&
 		!strings.Contains(baseText, "\n") &&
 		!m.bufCharAfterIs(document.Pos{Line: pToLine, Col: pToCol}, '(')
+	// paramStart is the rune offset of the first argument placeholder within
+	// baseText, or -1 when there are no named parameters (bare "()").
+	paramStart := -1
+	var stopOffsets []snippetStop // tab stops as rune offsets within baseText
 	if addParens {
-		baseText += "()"
+		if names := parseSignatureParams(item.Detail); len(names) > 0 {
+			var b strings.Builder
+			b.WriteString(baseText)
+			b.WriteByte('(')
+			off := len([]rune(baseText)) + 1 // just past the '('
+			for i, n := range names {
+				if i > 0 {
+					b.WriteString(", ")
+					off += 2
+				}
+				nl := len([]rune(n))
+				stopOffsets = append(stopOffsets, snippetStop{off, off + nl})
+				b.WriteString(n)
+				off += nl
+			}
+			b.WriteByte(')')
+			stopOffsets = append(stopOffsets, snippetStop{off + 1, off + 1}) // final stop after ')'
+			baseText = b.String()
+			paramStart = stopOffsets[0].start
+		} else {
+			baseText += "()"
+		}
 	}
 
 	// Primary edit plus the additionalTextEdits — the auto-import line(s), which
@@ -455,12 +596,25 @@ func (m Model) applyCompletionItem(item ClientCompletion, at document.Pos, prefi
 		m2.cursor = document.Pos{Line: pFromLine + lineDelta + nl, Col: len([]rune(last))}
 	} else {
 		col := pFromCol + len([]rune(baseText))
-		if addParens {
-			col-- // sit between the inserted ( and )
+		switch {
+		case paramStart >= 0:
+			col = pFromCol + paramStart // start of the first argument placeholder
+		case addParens:
+			col-- // sit between the empty ( and )
 		}
 		m2.cursor = document.Pos{Line: pFromLine + lineDelta, Col: col}
 	}
 	m2.scrollToCursor()
+	// Enter snippet mode over the argument placeholders (converting the
+	// baseText-relative offsets to absolute columns on the inserted line).
+	if len(stopOffsets) > 0 {
+		line := pFromLine + lineDelta
+		abs := make([]snippetStop, len(stopOffsets))
+		for i, s := range stopOffsets {
+			abs[i] = snippetStop{pFromCol + s.start, pFromCol + s.end}
+		}
+		m2 = m2.enterSnippet(line, abs)
+	}
 	if addParens {
 		return m2, tea.Batch(cmd, m2.fetchSignatureHelp())
 	}

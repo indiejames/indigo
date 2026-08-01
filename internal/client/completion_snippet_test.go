@@ -144,3 +144,34 @@ func TestSnippetEditDoesNotAutoTriggerCompletion(t *testing.T) {
 		t.Error("Tab past the last stop should exit snippet mode")
 	}
 }
+
+// TestMouseClickDuringSnippetExitsSnippetMode is a regression test: a mouse
+// click moves the cursor without going through handleInsert's key dispatch, so
+// unlike every keyboard-driven cursor move it didn't trigger exitSnippet() —
+// leaving stale snippet stops active for what was now an unrelated cursor
+// position. A subsequent Tab would snap the cursor back to the old snippet
+// line/columns instead of respecting the click.
+func TestMouseClickDuringSnippetExitsSnippetMode(t *testing.T) {
+	m := newCompletionApplyTestModel("greet(name, times)\nother line\n")
+	m = m.enterSnippet(0, []snippetStop{{6, 10}, {12, 17}, {18, 18}})
+	if !m.snippetOn || m.sel == nil {
+		t.Fatal("setup: expected snippet mode active with a placeholder selected")
+	}
+
+	m.handleMousePress(0, 1) // click onto the second line, away from the snippet
+
+	if m.snippetOn {
+		t.Error("snippet mode should be exited by a mouse click elsewhere")
+	}
+	want := document.Pos{Line: 1, Col: 0}
+	// The click sets its own fresh single-point selection (normal click
+	// behavior) — the bug is a stale *placeholder* selection surviving, not
+	// selection-in-general, so assert the selection is anchored at the click,
+	// not left over from the snippet.
+	if m.sel == nil || m.sel.Anchor != want || m.sel.Head != want {
+		t.Errorf("sel = %+v, want a fresh point selection at %v (not the stale placeholder)", m.sel, want)
+	}
+	if m.cursor != want {
+		t.Errorf("cursor = %v, want %v (the clicked position, not snapped back to the snippet)", m.cursor, want)
+	}
+}

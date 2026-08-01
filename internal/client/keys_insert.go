@@ -141,6 +141,9 @@ func (m Model) snippetEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Shift the stops after the active one by the net column change at editCol,
 	// and grow/shrink the active stop's end to match.
 	delta := m.buf.LineLen(line) - before
+	stops := make([]snippetStop, len(m.snippetStops))
+	copy(stops, m.snippetStops)
+	m.snippetStops = stops
 	if idx < len(m.snippetStops) {
 		m.snippetStops[idx].end += delta
 	}

@@ -107,6 +107,9 @@ interface EditorService {
   # from another module). The item's data blob must be passed back unchanged
   # so the language server can identify which candidate to resolve.
   resolveCompletion @45 (bufId :UInt32, item :CompletionItem) -> (item :CompletionItem);
+  # Inlay hints (inferred types, parameter names) for [startLine,endLine) —
+  # normally the client's visible viewport, not the whole file.
+  inlayHints @46 (bufId :UInt32, startLine :UInt32, startCol :UInt32, endLine :UInt32, endCol :UInt32) -> (hints :List(InlayHint));
 }
 
 # MenuItemInfo is one node in the Command-menu tree contributed by a plugin.
@@ -288,6 +291,15 @@ struct CompletionItem {
   # accepting this item (its range may cover more than the typed prefix, e.g.
   # the whole identifier when completing mid-word). Preferred over insertText.
   textEdit @8 :PluginEdit;
+}
+
+struct InlayHint {
+  line         @0 :UInt32;
+  col          @1 :UInt32;
+  label        @2 :Text;  # already normalized to a plain string server-side
+  kind         @3 :UInt8; # 1 = Type, 2 = Parameter
+  paddingLeft  @4 :Bool;
+  paddingRight @5 :Bool;
 }
 
 struct ActiveContext {

@@ -101,6 +101,31 @@ func (c *Client) Initialize() error {
 			"tsserver": map[string]any{
 				"useSyntaxServer": "never",
 			},
+			// Inlay hints: parameter-name hints only (e.g. `foo(count: 5)`),
+			// the highest-value/lowest-noise category. Both gopls and
+			// typescript-language-server default every inlay-hint category to
+			// off, so without this indigo would never receive a single hint
+			// regardless of Config.InlayHints. The broader categories
+			// (variable/return types, composite literal fields, etc.) are
+			// deliberately left at each server's own default (off) — enabling
+			// them produces a type annotation on nearly every `:=` in
+			// idiomatic Go, measured at 58 hints in one 300-line file, far too
+			// noisy as a default.
+			//
+			// Read by typescript-language-server. "literals" limits hints to
+			// literal arguments (numbers, booleans, strings, etc.) where the
+			// parameter name adds real information — e.g. `f(true, 5)` becomes
+			// `f(enabled: true, count: 5)` — and skips variable-argument
+			// calls like `f(userID)`, where the variable's own name already
+			// conveys the same thing "all" would additionally annotate.
+			"preferences": map[string]any{
+				"includeInlayParameterNameHints": "literals",
+			},
+			// Read by gopls; matches the same parameter-name-only scope as
+			// the preference above.
+			"hints": map[string]any{
+				"parameterNames": true,
+			},
 		},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -471,6 +496,31 @@ func (c *Client) resolveCodeActions(actions []CodeAction) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+// InlayHints returns inlay hints (inferred types, parameter names) for the
+// given range. startLine/startCol and endLine/endCol are normally the client's
+// visible viewport, not the whole file — servers can be slow on large files,
+// and hints outside the viewport aren't rendered anyway.
+func (c *Client) InlayHints(path string, startLine, startCol, endLine, endCol int) ([]InlayHint, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	raw, err := c.conn.Call(ctx, "textDocument/inlayHint", InlayHintParams{
+		TextDocument: TextDocumentIdentifier{URI: pathToURI(path)},
+		Range: Range{
+			Start: Position{Line: startLine, Character: startCol},
+			End:   Position{Line: endLine, Character: endCol},
+		},
+	})
+	if err != nil || string(raw) == "null" {
+		return nil, err
+	}
+	var hints []InlayHint
+	if err := json.Unmarshal(raw, &hints); err != nil {
+		return nil, err
+	}
+	return hints, nil
 }
 
 // Rename requests textDocument/rename for the symbol at (line, col) and

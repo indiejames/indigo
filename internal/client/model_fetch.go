@@ -63,6 +63,29 @@ func (m Model) updateViewportCmd() tea.Cmd {
 	}
 }
 
+// fetchInlayHints polls the language server for inlay hints (inferred types,
+// parameter names) in the current viewport. Skipped when the feature is
+// disabled in config or there's no RPC connection. topLine/height give an
+// approximate line range — soft-wrap means a screen row isn't exactly one
+// buffer line, but a small over-fetch at the viewport edges is harmless.
+func (m Model) fetchInlayHints() tea.Cmd {
+	if m.rpc == nil || m.cfg == nil || !m.cfg.InlayHints {
+		return nil
+	}
+	bufID := m.bufID
+	startLine := m.topLine
+	endLine := m.topLine + m.visibleLines()
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		items, err := m.rpc.InlayHints(ctx, bufID, startLine, 0, endLine, 0)
+		if err != nil {
+			return nil
+		}
+		return inlayHintsMsg{bufID: bufID, items: items}
+	}
+}
+
 func (m Model) fetchHover() tea.Cmd {
 	bufID := m.bufID
 	line, col := m.cursor.Line, m.cursor.Col

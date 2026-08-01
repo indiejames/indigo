@@ -73,6 +73,13 @@ func (m Model) View() string {
 			}
 		}
 	}
+	if inlayOverlays := m.buildInlayHintOverlays(layout, cw); inlayOverlays != nil {
+		for i := range vis {
+			if len(inlayOverlays[i]) > 0 {
+				rowOverlays[i] = mergeOverlays(rowOverlays[i], inlayOverlays[i])
+			}
+		}
+	}
 	if extraOverlays := m.buildExtraCursorOverlays(layout, cw); extraOverlays != nil {
 		for i := range vis {
 			if len(extraOverlays[i]) > 0 {

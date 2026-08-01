@@ -314,6 +314,51 @@ func readCompletionItem(src proto.CompletionItem) (lsp.CompletionItem, error) {
 	return item, nil
 }
 
+// InlayHints returns inlay hints (inferred types, parameter names) for
+// [startLine,endLine) — normally the client's visible viewport, not the whole
+// file, since servers can be slow on large files and hints outside the
+// viewport aren't rendered anyway.
+func (s *editorService) InlayHints(_ context.Context, call proto.EditorService_inlayHints) error {
+	args := call.Args()
+	bufID := args.BufId()
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+	s.mu.Unlock()
+
+	hints, err := s.lspMgr.InlayHints(path,
+		int(args.StartLine()), int(args.StartCol()), int(args.EndLine()), int(args.EndCol()))
+	res, rerr := call.AllocResults()
+	if rerr != nil {
+		return rerr
+	}
+	if err != nil || len(hints) == 0 {
+		return nil
+	}
+
+	list, err := res.NewHints(int32(len(hints)))
+	if err != nil {
+		return err
+	}
+	for i, h := range hints {
+		hi := list.At(i)
+		hi.SetLine(uint32(h.Position.Line))
+		hi.SetCol(uint32(h.Position.Character))
+		if err := hi.SetLabel(h.Text()); err != nil {
+			return err
+		}
+		hi.SetKind(uint8(h.Kind))
+		hi.SetPaddingLeft(h.PaddingLeft)
+		hi.SetPaddingRight(h.PaddingRight)
+	}
+	return nil
+}
+
 func (s *editorService) Definition(_ context.Context, call proto.EditorService_definition) error {
 	args := call.Args()
 	bufID := args.BufId()

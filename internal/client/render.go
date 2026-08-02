@@ -655,10 +655,10 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 	}
 	if len(spans) > 0 {
 		for _, s := range spans {
-			newStart := 0
-			if s.StartCol < len(colMap) {
-				newStart = colMap[s.StartCol]
+			if s.StartCol >= len(colMap) {
+				continue // stale span whose start no longer exists on this line
 			}
+			newStart := colMap[s.StartCol]
 			newEnd := math.MaxInt
 			if s.EndCol != math.MaxInt {
 				if s.EndCol < len(colMap) {

@@ -718,14 +718,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// GetUpdates never echoes this client's own ops back.
 		before := m.cursorSnap()
 		var inverses []document.Op
-		atLine := -1
+		atLine, delta := -1, 0
 		for _, op := range msg.ops {
 			if op.Type == document.OpInsert || op.Type == document.OpDelete {
 				inverses = append(inverses, inverseOp(m, op)) // must precede Apply
 			}
-			if al, _ := opLineDelta(op); atLine < 0 || al < atLine {
+			al, d := opLineDelta(op)
+			if atLine < 0 || al < atLine {
 				atLine = al
 			}
+			delta += d
 			m.buf.Apply(op)
 		}
 		if len(inverses) > 0 {
@@ -747,8 +749,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.clampCursor()
-		m, invalidateCmd := m.invalidateLSPOverlaysFrom(max(atLine, 0))
-		return m, tea.Batch(m.reparseHighlight(), invalidateCmd)
+		m = m.shiftLSPOverlayLines(max(atLine, 0), delta)
+		m, refreshCmd := m.scheduleLSPOverlayRefresh()
+		return m, tea.Batch(m.reparseHighlight(), refreshCmd)
 
 	case saveAsPromptMsg:
 		s := ""

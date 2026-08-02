@@ -1,6 +1,7 @@
 package client
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/indiejames/indigo/internal/config"
@@ -95,116 +96,171 @@ func TestInverseOpDelete(t *testing.T) {
 	}
 }
 
-// TestApplyOpClearsStaleLSPOverlaysOnLineCountChange is a regression test for
-// a reported bug: pressing Enter in insert mode caused colors below the
-// cursor to visibly shift for about a second, then snap back. Root cause:
-// m.semanticSpans/m.inlayHints are keyed by absolute line number but are only
-// refreshed periodically (~1.2s), not on every edit. A line-count-changing
-// edit shifts every subsequent line's number without re-indexing these
-// caches, so they briefly rendered pre-edit data at now-wrong line numbers.
-// applyOp must clear both immediately when the edit changes the line count.
-func TestApplyOpClearsStaleLSPOverlaysOnLineCountChange(t *testing.T) {
+// TestApplyOpPreservesLSPOverlaysAcrossEdits verifies applyOp does NOT clear
+// m.semanticSpans/m.inlayHints, for either a line-count-changing edit
+// (Enter) or a same-line edit. An earlier version of this fix cleared them
+// immediately for positional correctness, but since tree-sitter doesn't
+// capture plain identifiers at all in most grammars, that meant those
+// identifiers flashed to the terminal's default (often white) color on every
+// keystroke — visibly worse than the brief mispositioning it prevented.
+// Mirroring VS Code's own approach, stale data is now left on screen until a
+// debounced re-fetch (see scheduleLSPOverlayRefresh) replaces it; the render
+// path's bounds check (see TestRenderLineChunkSkipsStaleSpanPastLineEnd) is
+// what keeps a stale span from ever painting somewhere it shouldn't.
+func TestApplyOpPreservesLSPOverlaysAcrossEdits(t *testing.T) {
 	m := newTestModel("line one\nline two\n")
 	m.rpc = &RPC{}
 	m.semanticSpans = highlight.LineSpans{1: {{StartCol: 0, EndCol: 4, ANSI: "x"}}}
 	m.inlayHints = []ClientInlayHint{{Line: 1, Col: 0, Label: "x"}}
 
+	// A line-count-changing edit (Enter) inserted at line 0 — data at line 1
+	// shifts to line 2, it isn't cleared or left at the now-wrong old key.
 	op := document.Op{Type: document.OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "\n"}
 	m2, _ := applyOp(m, op)
-
-	if len(m2.semanticSpans) != 0 {
-		t.Errorf("semanticSpans = %v, want empty after a line-count-changing edit", m2.semanticSpans)
+	if len(m2.semanticSpans[2]) != 1 || len(m2.inlayHints) != 1 || m2.inlayHints[0].Line != 2 {
+		t.Errorf("line-count-changing edit lost or mis-shifted cached data: semanticSpans=%v inlayHints=%v",
+			m2.semanticSpans, m2.inlayHints)
 	}
-	if len(m2.inlayHints) != 0 {
-		t.Errorf("inlayHints = %v, want empty after a line-count-changing edit", m2.inlayHints)
-	}
-}
 
-// TestApplyOpClearsStaleLSPOverlaysOnSameLineEdit verifies a same-line,
-// non-line-count-changing edit also clears that line's cache. A cached
-// semantic span's columns are just as stale after a character is inserted
-// before it as a whole line's number is after a newline — reported as
-// visible "colors shift over" on a single line, not just after pressing
-// Enter.
-func TestApplyOpClearsStaleLSPOverlaysOnSameLineEdit(t *testing.T) {
-	m := newTestModel("line one\n")
-	m.rpc = &RPC{}
-	m.semanticSpans = highlight.LineSpans{0: {{StartCol: 5, EndCol: 8, ANSI: "x"}}}
-	m.inlayHints = []ClientInlayHint{{Line: 0, Col: 8, Label: "x"}}
-
-	op := document.Op{Type: document.OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "X"}
-	m2, _ := applyOp(m, op)
-
-	if len(m2.semanticSpans[0]) != 0 {
-		t.Errorf("semanticSpans[0] = %v, want cleared after an edit on line 0", m2.semanticSpans[0])
-	}
-	if len(m2.inlayHints) != 0 {
-		t.Errorf("inlayHints = %v, want cleared after an edit on line 0", m2.inlayHints)
+	// A same-line, non-line-count-changing edit.
+	m3 := newTestModel("line one\n")
+	m3.rpc = &RPC{}
+	m3.semanticSpans = highlight.LineSpans{0: {{StartCol: 5, EndCol: 8, ANSI: "x"}}}
+	op2 := document.Op{Type: document.OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "X"}
+	m4, _ := applyOp(m3, op2)
+	if len(m4.semanticSpans[0]) != 1 {
+		t.Errorf("same-line edit cleared cached data: semanticSpans=%v", m4.semanticSpans)
 	}
 }
 
-// TestApplyOpKeepsLSPOverlaysBeforeEditLine is the counterpart to the two
-// regression tests above: an edit can never invalidate a position strictly
-// before it, so cached data for earlier lines must survive. This is the
-// actual fix for the "whole file briefly goes uncolored on every keystroke"
-// regression an earlier version of this fix introduced by clearing the
-// entire cache unconditionally instead of just the affected lines.
-func TestApplyOpKeepsLSPOverlaysBeforeEditLine(t *testing.T) {
-	m := newTestModel("line one\nline two\nline three\n")
-	m.rpc = &RPC{}
-	m.semanticSpans = highlight.LineSpans{
-		0: {{StartCol: 0, EndCol: 4, ANSI: "x"}},
-		2: {{StartCol: 0, EndCol: 4, ANSI: "y"}},
-	}
-	m.inlayHints = []ClientInlayHint{{Line: 0, Col: 4, Label: "x"}}
+// TestRenderLineChunkSkipsStaleSpanPastLineEnd is the actual safety net for
+// no longer clearing on edit: a span whose StartCol no longer fits the
+// (now-shorter) line — e.g. a semantic-token span computed before the user
+// deleted most of the line — must be skipped, not rendered starting from
+// column 0 through the end of the line. The naive fallback (defaulting to
+// column 0) would paint the ENTIRE remaining line with the stale color; this
+// was previously unreachable because tree-sitter spans are always freshly
+// recomputed on every edit, but became reachable once semantic-token spans
+// were allowed to outlive the edit that shifted them.
+func TestRenderLineChunkSkipsStaleSpanPastLineEnd(t *testing.T) {
+	m := newTestModel("ab\n")
+	const staleColor = "\x1b[38;2;9;9;9m"
+	// A stale span from before the line was shortened to "ab" — its start
+	// column (10) no longer exists on the current 2-rune line.
+	m.hlSpans = highlight.LineSpans{0: {{StartCol: 10, EndCol: 15, ANSI: staleColor}}}
 
-	// Edit on line 2 — line 0's cached data is unrelated and must survive.
-	op := document.Op{Type: document.OpInsert, InsertLine: 2, InsertCol: 0, InsertText: "X"}
-	m2, _ := applyOp(m, op)
+	cw := 80
+	layout := m.buildScreenLayout(1, cw)
+	rendered := m.renderLineChunk(layout[0], cw, nil, -1, -1, false)
 
-	if len(m2.semanticSpans[0]) != 1 {
-		t.Errorf("semanticSpans[0] = %v, want unchanged (edit was on line 2)", m2.semanticSpans[0])
-	}
-	if len(m2.semanticSpans[2]) != 0 {
-		t.Errorf("semanticSpans[2] = %v, want cleared (the edited line)", m2.semanticSpans[2])
-	}
-	if len(m2.inlayHints) != 1 {
-		t.Errorf("inlayHints = %v, want unchanged (edit was on line 2)", m2.inlayHints)
+	if strings.Contains(rendered, staleColor) {
+		t.Errorf("stale out-of-range span should be skipped entirely, rendered = %q", rendered)
 	}
 }
 
-// TestInvalidateLSPOverlaysDebounceCoalescesRapidEdits verifies the
+// TestScheduleLSPOverlayRefreshDebounceCoalescesRapidEdits verifies the
 // lspOverlaySeq token: a burst of edits (the common case while typing)
-// invalidates repeatedly, but only the LATEST scheduled refresh should
-// actually fire — earlier ones must be recognized as stale by the
+// schedules a refresh repeatedly, but only the LATEST scheduled refresh
+// should actually fire — earlier ones must be recognized as stale by the
 // lspOverlayRefreshMsg handler and ignored, so rapid typing coalesces into
 // one LSP round trip instead of one per keystroke.
-func TestInvalidateLSPOverlaysDebounceCoalescesRapidEdits(t *testing.T) {
+func TestScheduleLSPOverlayRefreshDebounceCoalescesRapidEdits(t *testing.T) {
 	m := newTestModel("line one\n")
 	m.rpc = &RPC{}
 	m.cfg = &config.Config{SemanticTokens: true, InlayHints: true}
 
-	m, _ = m.invalidateLSPOverlaysFrom(0)
+	m, _ = m.scheduleLSPOverlayRefresh()
 	firstSeq := m.lspOverlaySeq
-	m, _ = m.invalidateLSPOverlaysFrom(0)
+	m, _ = m.scheduleLSPOverlayRefresh()
 	secondSeq := m.lspOverlaySeq
 
 	if firstSeq == secondSeq {
-		t.Fatal("setup: expected two successive invalidations to produce different seq tokens")
+		t.Fatal("setup: expected two successive schedules to produce different seq tokens")
 	}
 
 	// The stale (first) refresh message must be ignored.
-	res, cmd := m.Update(lspOverlayRefreshMsg{seq: firstSeq})
-	m2 := res.(Model)
+	_, cmd := m.Update(lspOverlayRefreshMsg{seq: firstSeq})
 	if cmd != nil {
 		t.Error("a stale lspOverlayRefreshMsg should not trigger a re-fetch")
 	}
-	_ = m2
 
 	// The current (second/latest) refresh message must be accepted (non-nil
 	// Cmd — the actual fetch is async and RPC-backed, not asserted here).
 	_, cmd2 := m.Update(lspOverlayRefreshMsg{seq: secondSeq})
 	if cmd2 == nil {
 		t.Error("the current lspOverlayRefreshMsg should trigger a re-fetch")
+	}
+}
+
+// TestShiftLSPOverlayLinesOnInsert is a regression test for a reported bug:
+// after leaving stale cache entries untouched on edit (rather than clearing
+// them), every line AFTER a line-count-changing edit still went white until
+// the debounced refresh landed. Root cause: leaving the data at its OLD line
+// numbers isn't enough — the renderer looks up the NEW line numbers, finds
+// nothing there, and that's visually indistinguishable from having cleared
+// it. Cached data at or after the edit point must be re-keyed by the line
+// delta, not merely preserved in place.
+func TestShiftLSPOverlayLinesOnInsert(t *testing.T) {
+	m := newTestModel("line one\nline two\nline three\n")
+	m.semanticSpans = highlight.LineSpans{
+		0: {{StartCol: 0, EndCol: 4, ANSI: "a"}},
+		1: {{StartCol: 0, EndCol: 4, ANSI: "b"}},
+		2: {{StartCol: 0, EndCol: 4, ANSI: "c"}},
+	}
+	m.inlayHints = []ClientInlayHint{{Line: 1, Col: 4, Label: "x"}, {Line: 2, Col: 4, Label: "y"}}
+
+	// Insert a newline at the start of line 1 — everything from line 1
+	// onward shifts down by one.
+	m2 := m.shiftLSPOverlayLines(1, 1)
+
+	if len(m2.semanticSpans[0]) != 1 {
+		t.Errorf("line 0 (before the edit) = %v, want unchanged", m2.semanticSpans[0])
+	}
+	if len(m2.semanticSpans[1]) != 0 {
+		t.Errorf("line 1 (the old key) = %v, want empty — its data should have moved to line 2", m2.semanticSpans[1])
+	}
+	if len(m2.semanticSpans[2]) != 1 || m2.semanticSpans[2][0].ANSI != "b" {
+		t.Errorf("line 2 = %v, want old line 1's span (\"b\") shifted here", m2.semanticSpans[2])
+	}
+	if len(m2.semanticSpans[3]) != 1 || m2.semanticSpans[3][0].ANSI != "c" {
+		t.Errorf("line 3 = %v, want old line 2's span (\"c\") shifted here", m2.semanticSpans[3])
+	}
+
+	wantHints := map[int]bool{2: false, 3: false}
+	for _, h := range m2.inlayHints {
+		if _, ok := wantHints[h.Line]; !ok {
+			t.Errorf("unexpected inlay hint at shifted line %d", h.Line)
+			continue
+		}
+		wantHints[h.Line] = true
+	}
+	for line, found := range wantHints {
+		if !found {
+			t.Errorf("expected an inlay hint shifted to line %d", line)
+		}
+	}
+}
+
+// TestShiftLSPOverlayLinesOnDelete verifies a multi-line delete drops cached
+// data for the deleted lines and shifts data after them up, rather than
+// leaving orphaned entries at now-nonexistent or colliding line numbers.
+func TestShiftLSPOverlayLinesOnDelete(t *testing.T) {
+	m := newTestModel("a\nb\nc\nd\ne\n")
+	m.semanticSpans = highlight.LineSpans{
+		1: {{StartCol: 0, EndCol: 1, ANSI: "b"}}, // within the deleted range [1,4)
+		3: {{StartCol: 0, EndCol: 1, ANSI: "d"}}, // within the deleted range
+		4: {{StartCol: 0, EndCol: 1, ANSI: "e"}}, // after the deleted range
+	}
+
+	// Delete lines [1,4) — a 3-line deletion, delta = -3, atLine = 1. Old line
+	// 4 ("e", after the deleted range) shifts to new line 1 (4 + -3 = 1).
+	m2 := m.shiftLSPOverlayLines(1, -3)
+
+	if len(m2.semanticSpans[3]) != 0 {
+		t.Errorf("old line 3's key (within the deleted range) should be empty, got %v", m2.semanticSpans[3])
+	}
+	got := m2.semanticSpans[1]
+	if len(got) != 1 || got[0].ANSI != "e" {
+		t.Errorf("semanticSpans[1] = %v, want old line 4's span (\"e\") shifted to the new line 1", got)
 	}
 }

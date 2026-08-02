@@ -91,7 +91,7 @@ func defaults() *Config {
 		BracketColors:        true,
 		IndentGuides:         true,
 		InlayHints:           true,
-		SemanticTokens:       true,
+		SemanticTokens:       false,
 	}
 }
 

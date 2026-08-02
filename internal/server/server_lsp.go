@@ -369,6 +369,75 @@ func (s *editorService) InlayHints(_ context.Context, call proto.EditorService_i
 	return nil
 }
 
+// SemanticTokensRange returns LSP-derived syntax-coloring tokens for
+// [startLine,endLine) — normally the client's visible viewport, not the whole
+// file, since servers can be slow on large files and tokens outside the
+// viewport aren't rendered anyway.
+func (s *editorService) SemanticTokensRange(_ context.Context, call proto.EditorService_semanticTokensRange) error {
+	args := call.Args()
+	bufID := args.BufId()
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+	buf := entry.buf
+	s.mu.Unlock()
+
+	tokens, err := s.lspMgr.SemanticTokensRange(path,
+		int(args.StartLine()), int(args.StartCol()), int(args.EndLine()), int(args.EndCol()))
+	res, rerr := call.AllocResults()
+	if rerr != nil {
+		return rerr
+	}
+	if err != nil || len(tokens) == 0 {
+		return nil
+	}
+
+	list, err := res.NewTokens(int32(len(tokens)))
+	if err != nil {
+		return err
+	}
+	for i, tok := range tokens {
+		ti := list.At(i)
+		ti.SetLine(uint32(tok.Line))
+		// tok.StartChar/Length are UTF-16 code-unit offsets per the LSP
+		// spec's default (indigo never negotiates an alternate
+		// positionEncoding), but the client treats every column/length as
+		// rune counts — convert both the start and end offsets here, where
+		// the buffer's actual line content is available, so a non-BMP rune
+		// anywhere from the line start through the end of the token (not
+		// just before it) is accounted for.
+		startCol, length := tok.StartChar, tok.Length
+		if tok.Line >= 0 && tok.Line < buf.LineCount() {
+			lineRunes := []rune(buf.Line(tok.Line))
+			runeStart := utf16ColToRune(lineRunes, tok.StartChar)
+			runeEnd := utf16ColToRune(lineRunes, tok.StartChar+tok.Length)
+			startCol, length = runeStart, runeEnd-runeStart
+		}
+		ti.SetCol(uint32(startCol))
+		ti.SetLength(uint32(length))
+		if err := ti.SetTokenType(tok.TokenType); err != nil {
+			return err
+		}
+		if len(tok.Modifiers) > 0 {
+			ml, err := ti.NewModifiers(int32(len(tok.Modifiers)))
+			if err != nil {
+				return err
+			}
+			for j, m := range tok.Modifiers {
+				if err := ml.Set(j, m); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // utf16ColToRune converts col, a UTF-16 code-unit offset as used by LSP
 // Position.character (indigo does not negotiate an alternate
 // positionEncoding, so per spec every server defaults to UTF-16), into a rune

@@ -94,6 +94,20 @@ func (c *Client) Initialize() error {
 					},
 				},
 				PublishDiagnostics: &PublishDiagnosticsClientCapabilities{RelatedInformation: true},
+				SemanticTokens: &SemanticTokensClientCapabilities{
+					Requests: SemanticTokensRequestClientCapabilities{Range: true},
+					TokenTypes: []string{
+						"namespace", "type", "class", "enum", "interface", "struct",
+						"typeParameter", "parameter", "variable", "property", "enumMember",
+						"event", "function", "method", "macro", "keyword", "modifier",
+						"comment", "string", "number", "regexp", "operator", "decorator",
+					},
+					TokenModifiers: []string{
+						"declaration", "definition", "readonly", "static", "deprecated",
+						"abstract", "async", "modification", "documentation", "defaultLibrary",
+					},
+					Formats: []string{"relative"},
+				},
 			},
 		},
 		InitializationOptions: map[string]any{
@@ -126,6 +140,13 @@ func (c *Client) Initialize() error {
 			"hints": map[string]any{
 				"parameterNames": true,
 			},
+			// gopls only advertises semanticTokensProvider (and so only
+			// responds to textDocument/semanticTokens/range) when this is
+			// explicitly enabled — confirmed against a real gopls: declaring
+			// the client capability alone was not enough. Read by gopls;
+			// typescript-language-server advertises semantic tokens by
+			// default and needs no equivalent setting.
+			"semanticTokens": true,
 		},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -528,6 +549,87 @@ func (c *Client) InlayHints(path string, startLine, startCol, endLine, endCol in
 		return nil, err
 	}
 	return hints, nil
+}
+
+// SemanticTokensRange returns decoded semantic tokens for the given range —
+// normally the client's visible viewport, not the whole file, both because
+// servers can be slow on large files and because indigo only ever needs to
+// color what's on screen. Returns (nil, nil) when the server doesn't support
+// semantic tokens at all; this is checked upfront (unlike most methods on
+// Client) because, like InlayHints, this will be polled periodically rather
+// than called once per user action — skipping unsupported servers avoids
+// wasting a request indefinitely.
+func (c *Client) SemanticTokensRange(path string, startLine, startCol, endLine, endCol int) ([]SemanticToken, error) {
+	c.mu.Lock()
+	provider := c.caps.SemanticTokensProvider
+	c.mu.Unlock()
+	if provider == nil {
+		return nil, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	raw, err := c.conn.Call(ctx, "textDocument/semanticTokens/range", SemanticTokensParams{
+		TextDocument: TextDocumentIdentifier{URI: pathToURI(path)},
+		Range: Range{
+			Start: Position{Line: startLine, Character: startCol},
+			End:   Position{Line: endLine, Character: endCol},
+		},
+	})
+	if err != nil || string(raw) == "null" {
+		return nil, err
+	}
+	var result SemanticTokensResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return decodeSemanticTokens(result.Data, provider.Legend), nil
+}
+
+// decodeSemanticTokens expands the delta-encoded Data array — 5 uint32s per
+// token: [deltaLine, deltaStartChar, length, tokenType, tokenModifiers], per
+// the LSP spec's SemanticTokens encoding — into absolute-position tokens,
+// resolving the type/modifier indices via legend (which is per-server: never
+// assume a fixed index means the same thing across servers). Per spec,
+// deltaStartChar is relative to the previous token's start ONLY when
+// deltaLine is 0 (same line); otherwise it's the new line's absolute start
+// column. Malformed trailing data (not a multiple of 5) is ignored rather
+// than panicking.
+func decodeSemanticTokens(data []uint32, legend SemanticTokensLegend) []SemanticToken {
+	var tokens []SemanticToken
+	line, startChar := 0, 0
+	for i := 0; i+5 <= len(data); i += 5 {
+		deltaLine := int(data[i])
+		deltaStartChar := int(data[i+1])
+		length := int(data[i+2])
+		typeIdx := int(data[i+3])
+		modBits := data[i+4]
+
+		if deltaLine == 0 {
+			startChar += deltaStartChar
+		} else {
+			line += deltaLine
+			startChar = deltaStartChar
+		}
+
+		var tokenType string
+		if typeIdx >= 0 && typeIdx < len(legend.TokenTypes) {
+			tokenType = legend.TokenTypes[typeIdx]
+		}
+		var mods []string
+		for b, name := range legend.TokenModifiers {
+			if modBits&(1<<uint(b)) != 0 {
+				mods = append(mods, name)
+			}
+		}
+
+		tokens = append(tokens, SemanticToken{
+			Line: line, StartChar: startChar, Length: length,
+			TokenType: tokenType, Modifiers: mods,
+		})
+	}
+	return tokens
 }
 
 // Rename requests textDocument/rename for the symbol at (line, col) and

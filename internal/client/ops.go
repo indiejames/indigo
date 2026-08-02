@@ -111,12 +111,12 @@ func minAffectedLine(ops []document.Op) int {
 // App can adjust existing jump entries and add a new one.
 func applyOp(m Model, op document.Op) (Model, tea.Cmd) {
 	inv := inverseOp(m, op)
+	atLine, delta := opLineDelta(op)
 	var recordCmd tea.Cmd
 	if m.currentGroup != nil {
 		m.currentGroup = append(m.currentGroup, inv)
 	} else {
 		m.undoStack = append(m.undoStack, undoEntry{ops: []document.Op{inv}, before: m.cursorSnap()})
-		atLine, delta := opLineDelta(op)
 		fp, line, col := m.filePath, m.cursor.Line, m.cursor.Col
 		depth := len(m.undoStack)
 		recordCmd = func() tea.Msg {
@@ -124,7 +124,92 @@ func applyOp(m Model, op document.Op) (Model, tea.Cmd) {
 		}
 	}
 	m.redoStack = nil // any new edit invalidates the redo history
-	return m, tea.Batch(m.sendOp(op), m.reparseHighlight(), recordCmd)
+	m = m.shiftLSPOverlayLines(atLine, delta)
+	m, refreshCmd := m.scheduleLSPOverlayRefresh()
+	return m, tea.Batch(m.sendOp(op), m.reparseHighlight(), recordCmd, refreshCmd)
+}
+
+// shiftLSPOverlayLines re-keys cached semantic-token/inlay-hint data by delta
+// for lines at or after atLine, matching how a line-count-changing edit
+// (Enter, a multi-line paste/delete) shifts every subsequent buffer line.
+// Leaving the cache untouched (as scheduleLSPOverlayRefresh does for a
+// same-line edit) is not safe here: after such an edit, the renderer looks up
+// data by the NEW line numbers, but the cached data is still sitting at the
+// OLD ones — a lookup at the new number simply finds nothing, which looks
+// identical to having cleared it, producing the same white-flash symptom on
+// every line after the edit point. Re-keying instead of clearing keeps that
+// data visible (if slightly approximate — see below) through the debounce
+// window instead of losing it.
+//
+// Lines before atLine are unaffected by the edit and untouched. For a
+// negative delta (deleted lines), a line whose shifted destination would
+// still fall before atLine had its content deleted entirely and is dropped;
+// this also correctly drops data for lines strictly within the deleted
+// range without needing to special-case them (verified against the exact
+// line arithmetic for a multi-line delete). For a positive delta (inserted
+// lines, e.g. Enter splitting a line in two), the line at atLine itself is
+// an approximation — its old content may have been split across the
+// original and new line — but the render-time bounds check discards
+// whatever columns no longer fit, and the debounced refresh corrects it
+// shortly after regardless.
+func (m Model) shiftLSPOverlayLines(atLine, delta int) Model {
+	if delta == 0 {
+		return m
+	}
+	if len(m.semanticSpans) > 0 {
+		shifted := make(highlight.LineSpans, len(m.semanticSpans))
+		for line, spans := range m.semanticSpans {
+			if line < atLine {
+				shifted[line] = spans
+				continue
+			}
+			newLine := line + delta
+			if newLine < atLine {
+				continue // this line's content was deleted
+			}
+			shifted[newLine] = append(shifted[newLine], spans...)
+		}
+		m.semanticSpans = shifted
+	}
+	if len(m.inlayHints) > 0 {
+		shifted := make([]ClientInlayHint, 0, len(m.inlayHints))
+		for _, h := range m.inlayHints {
+			if h.Line >= atLine {
+				newLine := h.Line + delta
+				if newLine < atLine {
+					continue // this line's content was deleted
+				}
+				h.Line = newLine
+			}
+			shifted = append(shifted, h)
+		}
+		m.inlayHints = shifted
+	}
+	return m
+}
+
+// scheduleLSPOverlayRefresh debounces a re-fetch of semantic tokens/inlay
+// hints after an edit, without touching the current (possibly now slightly
+// stale) cached data — it stays on screen until the fresh fetch replaces it.
+// This mirrors VS Code's own approach: it doesn't blank decorations while
+// waiting for an update, it swaps them in when ready. An earlier version of
+// this cleared stale entries immediately for positional correctness, but
+// since tree-sitter doesn't capture plain identifiers at all in most
+// grammars, that meant those identifiers flashed to the terminal's default
+// (often white) color on every keystroke — worse than the brief
+// mispositioning it prevented. The render-side bounds check in
+// renderLineChunk (skipping a span whose start no longer fits the line) keeps
+// a stale span from ever painting past where it belongs, so leaving it on
+// screen a little longer is safe. Debounced (not immediate) so a burst of
+// keystrokes coalesces into one LSP round trip, mirroring the completion
+// auto-trigger's debounce.
+func (m Model) scheduleLSPOverlayRefresh() (Model, tea.Cmd) {
+	m.lspOverlaySeq++
+	seq := m.lspOverlaySeq
+	cmd := tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
+		return lspOverlayRefreshMsg{seq: seq}
+	})
+	return m, cmd
 }
 
 // ApplyExternalOps applies ops (e.g. a delete+insert replace pair from a
@@ -164,6 +249,9 @@ func applyBatch(m Model, ops []document.Op) (Model, tea.Cmd) {
 	recordCmd := func() tea.Msg {
 		return EditRecordMsg{FilePath: fp, Line: line, Col: col, AtLine: atLine, LineDelta: delta, UndoDepth: depth}
 	}
+	m = m.shiftLSPOverlayLines(atLine, delta)
+	m, refreshCmd := m.scheduleLSPOverlayRefresh()
+	extraCmds := []tea.Cmd{refreshCmd}
 	// sendOp already applied every op to the local buffer above, in order,
 	// synchronously — that part was always correct. What's sequenced here
 	// is each op's *network* send to the server: ops in a batch are often
@@ -177,7 +265,8 @@ func applyBatch(m Model, ops []document.Op) (Model, tea.Cmd) {
 	// op sends need this guarantee, so reparseHighlight/recordCmd — which
 	// don't depend on send order — still run concurrently with each other
 	// once the sends finish.
-	return m, tea.Sequence(append(sendCmds, tea.Batch(m.reparseHighlight(), recordCmd))...)
+	tail := append([]tea.Cmd{m.reparseHighlight(), recordCmd}, extraCmds...)
+	return m, tea.Sequence(append(sendCmds, tea.Batch(tail...))...)
 }
 
 // inverseOp returns the op that reverses op.

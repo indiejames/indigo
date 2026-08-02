@@ -37,3 +37,31 @@ func TestUTF16ColToRune(t *testing.T) {
 		})
 	}
 }
+
+// TestUTF16ColToRuneTokenLengthAcrossNonBMPRune verifies the composition used
+// by SemanticTokensRange to convert a token's length: calling utf16ColToRune
+// at both the token's start and its end (start+length in UTF-16 units), then
+// taking the difference. This must be correct not just when a non-BMP rune
+// precedes the token (covered by the table above), but when the token itself
+// IS or contains one — naively reusing the UTF-16 length as a rune count
+// would overcount by one per such rune, causing the renderer to consume one
+// extra real character past the token as part of its coloring.
+func TestUTF16ColToRuneTokenLengthAcrossNonBMPRune(t *testing.T) {
+	// "foo(😀)" — runes: f(0) o(1) o(2) ((3) 😀(4) )(5). UTF-16 units:
+	// f(0) o(1) o(2) ((3) 😀(4,5) )(6). A token spanning exactly the emoji is
+	// UTF-16 [4,6) — length 2 units — but must convert to rune [4,5) — length
+	// 1 rune, since 😀 is a single rune.
+	line := []rune("foo(😀)")
+	startUTF16, endUTF16 := 4, 6
+
+	runeStart := utf16ColToRune(line, startUTF16)
+	runeEnd := utf16ColToRune(line, endUTF16)
+	length := runeEnd - runeStart
+
+	if runeStart != 4 {
+		t.Errorf("runeStart = %d, want 4", runeStart)
+	}
+	if length != 1 {
+		t.Errorf("length = %d, want 1 (the emoji is one rune, not two)", length)
+	}
+}

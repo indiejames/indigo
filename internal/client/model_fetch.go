@@ -86,6 +86,27 @@ func (m Model) fetchInlayHints() tea.Cmd {
 	}
 }
 
+// fetchSemanticTokens polls the language server for semantic tokens
+// (LSP-derived syntax coloring) in the current viewport. Skipped when the
+// feature is disabled in config or there's no RPC connection.
+func (m Model) fetchSemanticTokens() tea.Cmd {
+	if m.rpc == nil || m.cfg == nil || !m.cfg.SemanticTokens {
+		return nil
+	}
+	bufID := m.bufID
+	startLine := m.topLine
+	endLine := m.topLine + m.visibleLines()
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		items, err := m.rpc.SemanticTokensRange(ctx, bufID, startLine, 0, endLine, 0)
+		if err != nil {
+			return nil
+		}
+		return semanticTokensMsg{bufID: bufID, items: items}
+	}
+}
+
 func (m Model) fetchHover() tea.Cmd {
 	bufID := m.bufID
 	line, col := m.cursor.Line, m.cursor.Col

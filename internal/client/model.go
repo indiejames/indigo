@@ -74,10 +74,22 @@ type fixItemsMsg struct {
 // completionsMsg carries fresh completion items.
 type completionsMsg struct{ items []ClientCompletion }
 
+// lspOverlayRefreshMsg fires after the post-edit debounce delay to re-fetch
+// semantic tokens/inlay hints. seq is the lspOverlaySeq captured when it was
+// scheduled; a stale seq (a newer edit has since invalidated the caches
+// again) is ignored so a burst of edits causes one fetch, not one per edit.
+type lspOverlayRefreshMsg struct{ seq int }
+
 // inlayHintsMsg carries fresh inlay hints for the requested viewport.
 type inlayHintsMsg struct {
 	bufID uint32
 	items []ClientInlayHint
+}
+
+// semanticTokensMsg carries fresh semantic tokens for the requested viewport.
+type semanticTokensMsg struct {
+	bufID uint32
+	items []ClientSemanticToken
 }
 
 // completionResolvedMsg carries a completion item resolved on accept, along with
@@ -525,6 +537,10 @@ type Model struct {
 	inlayHints []ClientInlayHint // current viewport's hints, refreshed periodically
 	inlayTick  int               // counter; fetch every 10 ticks (~1.2s), same cadence as diagnostics
 
+	semanticSpans highlight.LineSpans // current viewport's semantic-token spans, refreshed periodically
+	semanticTick  int                 // counter; fetch every 10 ticks (~1.2s), same cadence as diagnostics
+	lspOverlaySeq int                 // debounce token; only the latest post-edit refresh fetches
+
 	// Fix popup state (Shift+F)
 	fixItems []ClientFixItem   // non-empty = popup visible
 	fixDecor *ClientDecoration // decoration being fixed (nil for action-only items)
@@ -662,7 +678,7 @@ func tick() tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(tick(), m.reparseHighlight(), m.fetchDecorations(), m.fetchInlayHints(), m.ReportActiveContextCmd())
+	return tea.Batch(tick(), m.reparseHighlight(), m.fetchDecorations(), m.fetchInlayHints(), m.fetchSemanticTokens(), m.ReportActiveContextCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -677,6 +693,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diagTick++
 		m.decorTick++
 		m.inlayTick++
+		m.semanticTick++
 		if m.flashTick > 0 {
 			m.flashTick--
 		}
@@ -690,6 +707,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.inlayTick%10 == 0 {
 			cmds = append(cmds, m.fetchInlayHints())
 		}
+		if m.semanticTick%10 == 0 {
+			cmds = append(cmds, m.fetchSemanticTokens())
+		}
 		return m, tea.Batch(cmds...)
 
 	case updatesMsg:
@@ -698,9 +718,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// GetUpdates never echoes this client's own ops back.
 		before := m.cursorSnap()
 		var inverses []document.Op
+		atLine := -1
 		for _, op := range msg.ops {
 			if op.Type == document.OpInsert || op.Type == document.OpDelete {
 				inverses = append(inverses, inverseOp(m, op)) // must precede Apply
+			}
+			if al, _ := opLineDelta(op); atLine < 0 || al < atLine {
+				atLine = al
 			}
 			m.buf.Apply(op)
 		}
@@ -723,7 +747,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.clampCursor()
-		return m, m.reparseHighlight()
+		m, invalidateCmd := m.invalidateLSPOverlaysFrom(max(atLine, 0))
+		return m, tea.Batch(m.reparseHighlight(), invalidateCmd)
 
 	case saveAsPromptMsg:
 		s := ""
@@ -998,11 +1023,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case lspOverlayRefreshMsg:
+		if msg.seq != m.lspOverlaySeq {
+			return m, nil // superseded by a later edit
+		}
+		return m, tea.Batch(m.fetchSemanticTokens(), m.fetchInlayHints())
+
 	case inlayHintsMsg:
 		if msg.bufID != m.bufID {
 			return m, nil // stale result from a previous buffer switch; discard
 		}
 		m.inlayHints = msg.items
+		return m, nil
+
+	case semanticTokensMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
+		m.semanticSpans = buildSemanticSpans(msg.items)
 		return m, nil
 
 	case pluginKeyResultMsg:

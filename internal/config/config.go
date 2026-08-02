@@ -74,6 +74,7 @@ type Config struct {
 	BracketColors        bool              `toml:"bracket_colors"`
 	IndentGuides         bool              `toml:"indent_guides"`
 	InlayHints           bool              `toml:"inlay_hints"`
+	SemanticTokens       bool              `toml:"semantic_tokens"`
 	// FileTypes maps file extensions or filenames to a syntax language key.
 	// Keys are extensions (with or without leading dot) or bare filenames.
 	// Values are a registered language key such as "sh", "go", ".md", etc.
@@ -90,6 +91,7 @@ func defaults() *Config {
 		BracketColors:        true,
 		IndentGuides:         true,
 		InlayHints:           true,
+		SemanticTokens:       true,
 	}
 }
 

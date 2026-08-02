@@ -372,6 +372,11 @@ func byteToRuneCol(line string, byteCol int) int {
 // --- capture → ANSI mapping ---
 
 // hexToANSI converts a "#RRGGBB" hex color to a true-color SGR open sequence.
+// HexToANSI converts a "#RRGGBB" color to its SGR truecolor escape sequence.
+// Exported so other packages (e.g. semantic-token coloring) can reuse
+// indigo's existing hex palette instead of maintaining a second one.
+func HexToANSI(hex string) string { return hexToANSI(hex) }
+
 func hexToANSI(hex string) string {
 	hex = strings.TrimPrefix(hex, "#")
 	r, _ := strconv.ParseInt(hex[0:2], 16, 64)

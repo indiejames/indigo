@@ -1,5 +1,7 @@
 # indigo
 
+<img src="indigo_logo.png" width="150" style="display: block; margin: 0 auto;">
+
 A terminal text editor written in go with modal editing and built-in language server support. Inspired by [Vim](https://www.vim.org/), [Kakoune](https://kakoune.org/), and [Helix](https://helix-editor.com/).
 
 ## Who it's for
@@ -299,3 +301,7 @@ format_on_save  = false  # run formatter automatically on :w
 ```
 
 Full configuration reference, including how to add custom language servers and formatters: [Configuration](docs/configuration.md).
+
+## About the Logo
+
+The name `indigo` was inspired by the [indigo bunting](https://www.allaboutbirds.org/guide/Indigo_Bunting/overview), a bird I have had the pleasure of seeing (from a distance) here in Northern Virginia. The logo is my own poor attempt at rendering it.  

@@ -110,6 +110,9 @@ interface EditorService {
   # Inlay hints (inferred types, parameter names) for [startLine,endLine) —
   # normally the client's visible viewport, not the whole file.
   inlayHints @46 (bufId :UInt32, startLine :UInt32, startCol :UInt32, endLine :UInt32, endCol :UInt32) -> (hints :List(InlayHint));
+  # Semantic tokens (LSP-derived syntax coloring) for [startLine,endLine) —
+  # normally the client's visible viewport, not the whole file.
+  semanticTokensRange @47 (bufId :UInt32, startLine :UInt32, startCol :UInt32, endLine :UInt32, endCol :UInt32) -> (tokens :List(SemanticToken));
 }
 
 # MenuItemInfo is one node in the Command-menu tree contributed by a plugin.
@@ -291,6 +294,14 @@ struct CompletionItem {
   # accepting this item (its range may cover more than the typed prefix, e.g.
   # the whole identifier when completing mid-word). Preferred over insertText.
   textEdit @8 :PluginEdit;
+}
+
+struct SemanticToken {
+  line      @0 :UInt32;
+  col       @1 :UInt32;  # already converted from UTF-16 to a rune index server-side
+  length    @2 :UInt32;  # in runes, same conversion applied
+  tokenType @3 :Text;    # already resolved from the server's legend
+  modifiers @4 :List(Text);
 }
 
 struct InlayHint {

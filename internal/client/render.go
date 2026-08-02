@@ -642,9 +642,18 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 		}
 	}
 
-	// Remap highlight spans to chunk-relative visual cols.
+	// Remap highlight spans to chunk-relative visual cols. Semantic-token
+	// spans, if any, are prepended ahead of tree-sitter's own spans for this
+	// line so they win for the identifier-ish positions they cover — safe to
+	// simply prepend (no priority-number reconciliation needed) because a
+	// position can never simultaneously be, say, a tree-sitter comment/string
+	// AND a semantic-token variable/function.
 	var remappedSpans []highlight.Span
-	if spans := m.hlSpans[lineNum]; len(spans) > 0 {
+	spans := m.hlSpans[lineNum]
+	if sem := m.semanticSpans[lineNum]; len(sem) > 0 {
+		spans = append(append([]highlight.Span(nil), sem...), spans...)
+	}
+	if len(spans) > 0 {
 		for _, s := range spans {
 			newStart := 0
 			if s.StartCol < len(colMap) {

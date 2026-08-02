@@ -524,6 +524,55 @@ func (r *RPC) InlayHints(ctx context.Context, bufID uint32, startLine, startCol,
 	return out, nil
 }
 
+// ClientSemanticToken is one LSP-derived syntax-coloring token. Col/Length are
+// already rune-based (converted server-side from the LSP spec's UTF-16
+// code-unit offsets), and TokenType/Modifiers are already resolved from the
+// server's legend — the client never needs to know about either.
+type ClientSemanticToken struct {
+	Line, Col, Length int
+	TokenType         string
+	Modifiers         []string
+}
+
+// SemanticTokensRange fetches LSP-derived syntax-coloring tokens for bufID
+// within [startLine,endLine) — normally the client's visible viewport, not
+// the whole file.
+func (r *RPC) SemanticTokensRange(ctx context.Context, bufID uint32, startLine, startCol, endLine, endCol int) ([]ClientSemanticToken, error) {
+	fut, rel := r.svc.SemanticTokensRange(ctx, func(p proto.EditorService_semanticTokensRange_Params) error {
+		p.SetBufId(bufID)
+		p.SetStartLine(uint32(startLine))
+		p.SetStartCol(uint32(startCol))
+		p.SetEndLine(uint32(endLine))
+		p.SetEndCol(uint32(endCol))
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, err
+	}
+	list, err := res.Tokens()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ClientSemanticToken, list.Len())
+	for i := range out {
+		tok := list.At(i)
+		tokenType, _ := tok.TokenType()
+		out[i] = ClientSemanticToken{
+			Line: int(tok.Line()), Col: int(tok.Col()), Length: int(tok.Length()),
+			TokenType: tokenType,
+		}
+		if mods, err := tok.Modifiers(); err == nil && mods.Len() > 0 {
+			out[i].Modifiers = make([]string, mods.Len())
+			for j := range out[i].Modifiers {
+				out[i].Modifiers[j], _ = mods.At(j)
+			}
+		}
+	}
+	return out, nil
+}
+
 // ClientLspEdit is a single text replacement from an LSP code action.
 type ClientLspEdit struct {
 	FromLine, FromCol int

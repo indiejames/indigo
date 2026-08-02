@@ -89,13 +89,35 @@ const (
 type ServerCapabilities struct {
 	// TextDocumentSync is json.RawMessage because the LSP spec allows either
 	// a TextDocumentSyncKind integer or a TextDocumentSyncOptions object.
-	TextDocumentSync           json.RawMessage `json:"textDocumentSync,omitempty"`
-	HoverProvider              any             `json:"hoverProvider,omitempty"`
-	SignatureHelpProvider      any             `json:"signatureHelpProvider,omitempty"`
-	CompletionProvider         any             `json:"completionProvider,omitempty"`
-	DocumentFormattingProvider any             `json:"documentFormattingProvider,omitempty"`
-	RenameProvider             any             `json:"renameProvider,omitempty"`
-	InlayHintProvider          any             `json:"inlayHintProvider,omitempty"`
+	TextDocumentSync           json.RawMessage        `json:"textDocumentSync,omitempty"`
+	HoverProvider              any                    `json:"hoverProvider,omitempty"`
+	SignatureHelpProvider      any                    `json:"signatureHelpProvider,omitempty"`
+	CompletionProvider         any                    `json:"completionProvider,omitempty"`
+	DocumentFormattingProvider any                    `json:"documentFormattingProvider,omitempty"`
+	RenameProvider             any                    `json:"renameProvider,omitempty"`
+	InlayHintProvider          any                    `json:"inlayHintProvider,omitempty"`
+	SemanticTokensProvider     *SemanticTokensOptions `json:"semanticTokensProvider,omitempty"`
+}
+
+// SemanticTokensLegend maps the token type/modifier indices used in a
+// SemanticTokens.Data array to their string names. Negotiated once per
+// server at initialize — different servers define different legends (e.g.
+// gopls and typescript-language-server use different orderings and even
+// different type vocabularies), so an index must never be interpreted
+// without the legend that produced it.
+type SemanticTokensLegend struct {
+	TokenTypes     []string `json:"tokenTypes"`
+	TokenModifiers []string `json:"tokenModifiers"`
+}
+
+// SemanticTokensOptions is the shape of ServerCapabilities.SemanticTokensProvider.
+// Range/Full are json.RawMessage because the spec allows either a bool or an
+// options object for each; indigo only needs to know the legend and whether
+// range requests are supported at all (presence, not the object's contents).
+type SemanticTokensOptions struct {
+	Legend SemanticTokensLegend `json:"legend"`
+	Range  json.RawMessage      `json:"range,omitempty"`
+	Full   json.RawMessage      `json:"full,omitempty"`
 }
 
 type SignatureHelpOptions struct {
@@ -156,10 +178,31 @@ type CompletionClientCapabilities struct {
 	CompletionItem *CompletionItemClientCapabilities `json:"completionItem,omitempty"`
 }
 
+// SemanticTokensRequestClientCapabilities declares which semantic-tokens
+// request shapes the client will use. indigo only ever requests ranges (the
+// visible viewport), matching how inlay hints are fetched.
+type SemanticTokensRequestClientCapabilities struct {
+	Range bool `json:"range,omitempty"`
+}
+
+// SemanticTokensClientCapabilities advertises textDocument/semanticTokens
+// support. TokenTypes/TokenModifiers list the standard vocabulary defined by
+// the LSP spec — purely informational (servers report their own legend
+// separately in SemanticTokensOptions, which indigo always consults instead
+// of assuming any fixed index meaning); Formats must include "relative", the
+// only encoding format the spec defines.
+type SemanticTokensClientCapabilities struct {
+	Requests       SemanticTokensRequestClientCapabilities `json:"requests"`
+	TokenTypes     []string                                `json:"tokenTypes"`
+	TokenModifiers []string                                `json:"tokenModifiers"`
+	Formats        []string                                `json:"formats"`
+}
+
 type TextDocumentClientCapabilities struct {
 	CodeAction         *CodeActionClientCapabilities         `json:"codeAction,omitempty"`
 	Completion         *CompletionClientCapabilities         `json:"completion,omitempty"`
 	PublishDiagnostics *PublishDiagnosticsClientCapabilities `json:"publishDiagnostics,omitempty"`
+	SemanticTokens     *SemanticTokensClientCapabilities     `json:"semanticTokens,omitempty"`
 }
 
 type ClientCapabilities struct {
@@ -441,6 +484,33 @@ type CompletionItem struct {
 type CompletionList struct {
 	IsIncomplete bool             `json:"isIncomplete"`
 	Items        []CompletionItem `json:"items"`
+}
+
+// ---- textDocument/semanticTokens ----
+
+type SemanticTokensParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
+}
+
+// SemanticTokensResult is the raw, delta-encoded response from
+// textDocument/semanticTokens/range. Data is a flat array of 5-uint32 groups
+// per token: [deltaLine, deltaStartChar, length, tokenType, tokenModifiers] —
+// see Client.SemanticTokensRange for the decode.
+type SemanticTokensResult struct {
+	ResultID string   `json:"resultId,omitempty"`
+	Data     []uint32 `json:"data"`
+}
+
+// SemanticToken is one decoded token: absolute (not delta-encoded) position,
+// with its type/modifiers already resolved to names via the server's legend.
+// StartChar/Length are UTF-16 code-unit offsets, per LSP Position semantics.
+type SemanticToken struct {
+	Line      int
+	StartChar int
+	Length    int
+	TokenType string
+	Modifiers []string
 }
 
 // ---- textDocument/inlayHint ----

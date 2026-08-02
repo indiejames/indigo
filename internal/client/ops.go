@@ -111,12 +111,12 @@ func minAffectedLine(ops []document.Op) int {
 // App can adjust existing jump entries and add a new one.
 func applyOp(m Model, op document.Op) (Model, tea.Cmd) {
 	inv := inverseOp(m, op)
+	atLine, delta := opLineDelta(op)
 	var recordCmd tea.Cmd
 	if m.currentGroup != nil {
 		m.currentGroup = append(m.currentGroup, inv)
 	} else {
 		m.undoStack = append(m.undoStack, undoEntry{ops: []document.Op{inv}, before: m.cursorSnap()})
-		atLine, delta := opLineDelta(op)
 		fp, line, col := m.filePath, m.cursor.Line, m.cursor.Col
 		depth := len(m.undoStack)
 		recordCmd = func() tea.Msg {
@@ -124,7 +124,50 @@ func applyOp(m Model, op document.Op) (Model, tea.Cmd) {
 		}
 	}
 	m.redoStack = nil // any new edit invalidates the redo history
-	return m, tea.Batch(m.sendOp(op), m.reparseHighlight(), recordCmd)
+	m, invalidateCmd := m.invalidateLSPOverlaysFrom(atLine)
+	return m, tea.Batch(m.sendOp(op), m.reparseHighlight(), recordCmd, invalidateCmd)
+}
+
+// invalidateLSPOverlaysFrom drops cached semantic-token/inlay-hint data for
+// lines at or after atLine and schedules a debounced re-fetch. Both are keyed
+// by absolute line+column but are refreshed only periodically (~1.2s), not on
+// every edit — any edit invalidates cached data at or after its own line
+// (a same-line character insert shifts every column after it on that line;
+// a line-count-changing edit additionally shifts every line after it), so
+// without this they'd keep rendering pre-edit data at now-wrong positions
+// until the next poll. An edit can never invalidate a position strictly
+// before it, so lines earlier than atLine are left untouched — clearing the
+// entire cache on every keystroke (an earlier version of this fix) meant the
+// whole visible viewport lost its coloring on every edit instead of just the
+// line being typed on, which was far more visually disruptive than the
+// mispositioning bug it fixed. The re-fetch is debounced (not immediate) so
+// a burst of keystrokes coalesces into one LSP round trip, mirroring the
+// completion auto-trigger's debounce.
+func (m Model) invalidateLSPOverlaysFrom(atLine int) (Model, tea.Cmd) {
+	if len(m.semanticSpans) > 0 {
+		kept := make(highlight.LineSpans, len(m.semanticSpans))
+		for line, spans := range m.semanticSpans {
+			if line < atLine {
+				kept[line] = spans
+			}
+		}
+		m.semanticSpans = kept
+	}
+	if len(m.inlayHints) > 0 {
+		kept := make([]ClientInlayHint, 0, len(m.inlayHints))
+		for _, h := range m.inlayHints {
+			if h.Line < atLine {
+				kept = append(kept, h)
+			}
+		}
+		m.inlayHints = kept
+	}
+	m.lspOverlaySeq++
+	seq := m.lspOverlaySeq
+	cmd := tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
+		return lspOverlayRefreshMsg{seq: seq}
+	})
+	return m, cmd
 }
 
 // ApplyExternalOps applies ops (e.g. a delete+insert replace pair from a
@@ -164,6 +207,8 @@ func applyBatch(m Model, ops []document.Op) (Model, tea.Cmd) {
 	recordCmd := func() tea.Msg {
 		return EditRecordMsg{FilePath: fp, Line: line, Col: col, AtLine: atLine, LineDelta: delta, UndoDepth: depth}
 	}
+	m, invalidateCmd := m.invalidateLSPOverlaysFrom(atLine)
+	extraCmds := []tea.Cmd{invalidateCmd}
 	// sendOp already applied every op to the local buffer above, in order,
 	// synchronously — that part was always correct. What's sequenced here
 	// is each op's *network* send to the server: ops in a batch are often
@@ -177,7 +222,8 @@ func applyBatch(m Model, ops []document.Op) (Model, tea.Cmd) {
 	// op sends need this guarantee, so reparseHighlight/recordCmd — which
 	// don't depend on send order — still run concurrently with each other
 	// once the sends finish.
-	return m, tea.Sequence(append(sendCmds, tea.Batch(m.reparseHighlight(), recordCmd))...)
+	tail := append([]tea.Cmd{m.reparseHighlight(), recordCmd}, extraCmds...)
+	return m, tea.Sequence(append(sendCmds, tea.Batch(tail...))...)
 }
 
 // inverseOp returns the op that reverses op.

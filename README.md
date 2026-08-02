@@ -1,6 +1,6 @@
 # indigo
 
-<img src="indigo_logo.png" width="150" style="display: block; margin: 0 auto;">
+<img src="indigo_logo.png" alt="Indigo logo" width="150" style="display: block; margin: 0 auto;">
 
 A terminal text editor written in go with modal editing and built-in language server support. Inspired by [Vim](https://www.vim.org/), [Kakoune](https://kakoune.org/), and [Helix](https://helix-editor.com/).
 

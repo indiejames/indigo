@@ -70,14 +70,53 @@ func (m *Model) moveCursor(dLine, dCol int) {
 	if line >= m.buf.LineCount() {
 		line = max(0, m.buf.LineCount()-1)
 	}
-	lineLen := m.buf.LineLen(line)
-	maxCol := lineLen
-	if m.mode == ModeNormal && maxCol > 0 {
-		maxCol--
+	maxCol := m.buf.LineLen(line)
+	if m.mode == ModeNormal {
+		maxCol = m.normalLineEnd(line)
 	}
 	col := max(0, min(m.cursor.Col+dCol, maxCol))
 	m.cursor.Line = line
 	m.cursor.Col = col
+	m.scrollToCursor()
+}
+
+// normalLineEnd returns the rightmost column the Normal-mode cursor may rest
+// on for line. When a following line exists, that is one past the last
+// character — i.e. on the line break itself, which can then be navigated
+// onto and deleted like any other character (Helix-style). The final line of
+// the buffer has no line break to rest on, so it stays clamped to the last
+// character.
+func (m *Model) normalLineEnd(line int) int {
+	lineLen := m.buf.LineLen(line)
+	if line < m.buf.LineCount()-1 {
+		return lineLen
+	}
+	return max(0, lineLen-1)
+}
+
+// moveCursorChar moves the Normal-mode cursor by one character, treating the
+// line break between two lines as a single crossable character: moving right
+// from the last character steps onto the line break, then a further right
+// step crosses onto the next line; moving left is the mirror image.
+func (m *Model) moveCursorChar(delta int) {
+	line, col := m.cursor.Line, m.cursor.Col
+	switch {
+	case delta > 0:
+		if end := m.normalLineEnd(line); col < end {
+			col++
+		} else if line < m.buf.LineCount()-1 {
+			line++
+			col = 0
+		}
+	case delta < 0:
+		if col > 0 {
+			col--
+		} else if line > 0 {
+			line--
+			col = m.normalLineEnd(line)
+		}
+	}
+	m.cursor.Line, m.cursor.Col = line, col
 	m.scrollToCursor()
 }
 

@@ -55,8 +55,8 @@ func (m *Model) clickToPos(x, y int) (document.Pos, bool) {
 	}
 
 	maxCol := m.buf.LineLen(lineNum)
-	if m.mode == ModeNormal && maxCol > 0 {
-		maxCol--
+	if m.mode == ModeNormal {
+		maxCol = m.normalLineEnd(lineNum)
 	}
 	col = min(col, maxCol)
 
@@ -131,8 +131,8 @@ func (m *Model) scrollWheel(delta int) {
 		return // cursor still visible — leave it alone
 	}
 	maxCol := m.buf.LineLen(m.cursor.Line)
-	if m.mode == ModeNormal && maxCol > 0 {
-		maxCol--
+	if m.mode == ModeNormal {
+		maxCol = m.normalLineEnd(m.cursor.Line)
 	}
 	m.cursor.Col = min(m.cursor.Col, max(0, maxCol))
 }

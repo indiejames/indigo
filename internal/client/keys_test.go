@@ -193,11 +193,27 @@ func TestHandleNormalSelectLine(t *testing.T) {
 }
 
 func TestHandleNormalDeleteEmptyLine(t *testing.T) {
-	// 'd' on empty line → no-op (no RPC needed)
+	// 'd' on an empty line: the cursor rests on the line's own line break, so
+	// deleting it joins with the next line, leaving a single empty line.
 	m := newTestModel("\n")
 	m.cursor = document.Pos{Line: 0, Col: 0}
 	m2, _ := m.handleNormal(fakeKey("d"))
-	_ = m2
+	got := m2.(Model)
+	if got.buf.LineCount() != 1 {
+		t.Errorf("LineCount() = %d, want 1", got.buf.LineCount())
+	}
+}
+
+func TestHandleNormalDeleteEmptyLineAtEOF(t *testing.T) {
+	// 'd' on the final, truly-last line with nothing after it is still a
+	// no-op: there is no line break there to delete.
+	m := newTestModel("")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m2, _ := m.handleNormal(fakeKey("d"))
+	got := m2.(Model)
+	if got.buf.LineCount() != 1 || got.buf.Line(0) != "" {
+		t.Errorf("buffer changed on no-op delete: LineCount=%d Line(0)=%q", got.buf.LineCount(), got.buf.Line(0))
+	}
 }
 
 func TestHandleNormalPrefixCommandM(t *testing.T) {

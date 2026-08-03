@@ -174,10 +174,21 @@ func (m *Model) extendLineBackward() {
 func (m Model) deleteSelection() (Model, tea.Cmd) {
 	if m.sel == nil {
 		lineLen := m.buf.LineLen(m.cursor.Line)
-		if lineLen == 0 {
-			return m, nil
+		if m.cursor.Col >= lineLen {
+			// Cursor rests on the line break itself: delete it like any other
+			// character, joining this line with the next.
+			if m.cursor.Line >= m.buf.LineCount()-1 {
+				return m, nil
+			}
+			op := document.Op{
+				ClientID: m.clientID(),
+				Type:     document.OpDelete,
+				FromLine: m.cursor.Line, FromCol: lineLen,
+				ToLine: m.cursor.Line + 1, ToCol: 0,
+			}
+			return applyOp(m, op)
 		}
-		col := min(m.cursor.Col, lineLen-1)
+		col := m.cursor.Col
 		m.sel = &Selection{
 			Anchor: document.Pos{Line: m.cursor.Line, Col: col},
 			Head:   document.Pos{Line: m.cursor.Line, Col: col},

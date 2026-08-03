@@ -262,12 +262,26 @@ func TestFlipSelection(t *testing.T) {
 // --- deleteSelection (safe cases only) ---
 
 func TestDeleteSelectionNilSelEmptyLine(t *testing.T) {
-	// On an empty line with nil selection, deleteSelection is a no-op.
+	// An empty line's cursor rests on its own line break; deleting it joins
+	// with the next line.
 	m := newTestModel("\n")
 	m.cursor = document.Pos{Line: 0, Col: 0}
 	m2, cmd := m.deleteSelection()
+	if cmd == nil {
+		t.Error("deleteSelection on empty line with a next line should join, not no-op")
+	}
+	if m2.buf.LineCount() != 1 {
+		t.Errorf("LineCount() = %d, want 1", m2.buf.LineCount())
+	}
+}
+
+func TestDeleteSelectionNilSelEmptyLineAtEOF(t *testing.T) {
+	// The truly-final empty line has no line break to delete: no-op.
+	m := newTestModel("")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m2, cmd := m.deleteSelection()
 	if cmd != nil {
-		t.Error("deleteSelection on empty line should return nil cmd")
+		t.Error("deleteSelection at true EOF should return nil cmd")
 	}
 	_ = m2
 }

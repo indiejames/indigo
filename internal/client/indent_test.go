@@ -146,7 +146,7 @@ func TestEnterDetectedIndentOverridesConfig(t *testing.T) {
 	// The buffer's own style should win so edits stay consistent with it.
 	m := newAutoPairTestModel("def foo():\n    pass\n")
 	m.cfg = &config.Config{IndentStyle: "tabs"}
-	m.detectedIndent = detectIndentSettings(m.buf.Content())
+	m.detectedIndent = config.DetectIndentSettings(m.buf.Content())
 	m.cursor = document.Pos{Line: 1, Col: len([]rune("    pass"))}
 	m2, _ := m.handleInsert(fakeKey("enter"))
 	got := m2.(Model)

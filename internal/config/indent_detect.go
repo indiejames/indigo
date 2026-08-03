@@ -1,16 +1,14 @@
-package client
-
-import "github.com/indiejames/indigo/internal/config"
+package config
 
 // detectIndentScanLimit caps how much of a buffer's content is inspected
 // for indent detection, so opening a huge file doesn't pay for a full scan.
 const detectIndentScanLimit = 64 * 1024
 
-// detectIndentSettings scans a buffer's existing content for the indent
-// style it already uses, so editing someone else's file stays consistent
-// with it even when it differs from your own configured default. Returns
-// nil when the content is empty or has no clear leading-whitespace signal.
-func detectIndentSettings(content string) *config.IndentSettings {
+// DetectIndentSettings scans content for the indent style it already uses,
+// so editing or formatting an existing file stays consistent with it even
+// when it differs from the configured default. Returns nil when the
+// content is empty or has no clear leading-whitespace signal.
+func DetectIndentSettings(content string) *IndentSettings {
 	if len(content) > detectIndentScanLimit {
 		content = content[:detectIndentScanLimit]
 	}
@@ -52,9 +50,9 @@ func detectIndentSettings(content string) *config.IndentSettings {
 	case tabLines == 0 && spaceLines == 0:
 		return nil
 	case tabLines > spaceLines:
-		return &config.IndentSettings{Style: "tabs", Width: 4}
+		return &IndentSettings{Style: "tabs", Width: 4}
 	case minSpaceWidth > 0:
-		return &config.IndentSettings{Style: "spaces", Width: minSpaceWidth}
+		return &IndentSettings{Style: "spaces", Width: minSpaceWidth}
 	default:
 		return nil
 	}

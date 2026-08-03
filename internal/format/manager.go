@@ -21,13 +21,17 @@ var ErrNoFormatter = errors.New("no formatter available")
 
 // LSPFormatter is the subset of lsp.Manager used for formatting.
 type LSPFormatter interface {
-	Format(path, content string) (string, bool, error)
+	Format(path, content string, opts lsp.FormattingOptions) (string, bool, error)
 }
 
 // Manager picks the right formatter for a given file and runs it.
-// Priority: user-configured > LSP > auto-detected built-in defaults.
+// Priority: user-configured > auto-detected built-in defaults > LSP.
+// Dedicated formatters (prettier, gofmt, ...) are preferred over generic LSP
+// formatting because they honor project-local config files (.prettierrc,
+// EditorConfig, ...) that a language server's own formatter may ignore.
 type Manager struct {
 	lsp      LSPFormatter
+	cfg      *config.Config
 	userFmts []config.FormatterConfig
 	autoFmts []config.FormatterConfig // subset of DefaultFormatters found in PATH or node_modules
 	workDir  string
@@ -38,6 +42,7 @@ type Manager struct {
 func NewManager(lspMgr *lsp.Manager, cfg *config.Config, workDir string) *Manager {
 	m := &Manager{
 		lsp:      lspMgr,
+		cfg:      cfg,
 		userFmts: cfg.Formatters,
 		workDir:  workDir,
 	}
@@ -70,17 +75,36 @@ func (m *Manager) Format(path, content string) (string, bool, error) {
 		}
 	}
 
-	if formatted, changed, err := m.lsp.Format(path, content); err == nil && changed {
-		return formatted, true, nil
-	}
-
 	for _, f := range m.autoFmts {
 		if matchesExt(f.Extensions, ext) {
 			return runExternal(f, path, content)
 		}
 	}
 
+	if formatted, changed, err := m.lsp.Format(path, content, m.lspFormattingOptions(ext, content)); err == nil && changed {
+		return formatted, true, nil
+	}
+
 	return "", false, ErrNoFormatter
+}
+
+// lspFormattingOptions resolves the tab size / spaces-vs-tabs to send with an
+// LSP formatting request: the indent style already used in content takes
+// precedence (matches an existing file's convention), falling back to the
+// configured per-language default.
+func (m *Manager) lspFormattingOptions(ext, content string) lsp.FormattingOptions {
+	settings := config.IndentSettings{Style: "tabs", Width: 4}
+	if m.cfg != nil {
+		settings = m.cfg.EffectiveIndent(ext)
+	}
+	if detected := config.DetectIndentSettings(content); detected != nil {
+		settings = *detected
+	}
+	width := settings.Width
+	if width <= 0 {
+		width = 4
+	}
+	return lsp.FormattingOptions{TabSize: width, InsertSpaces: settings.Style == "spaces"}
 }
 
 func runExternal(fc config.FormatterConfig, filePath, content string) (string, bool, error) {

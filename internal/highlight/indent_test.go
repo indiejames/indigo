@@ -74,6 +74,31 @@ func TestDedentTargetNoMatchWhenNotBeforeCloser(t *testing.T) {
 	}
 }
 
+func TestDedentTargetNegativeColDoesNotPanic(t *testing.T) {
+	h := New("test.go")
+	content := "func foo() {\n\tdoStuff()\n}\n"
+	if _, ok := h.DedentTarget([]byte(content), 1, -1); ok {
+		t.Error("DedentTarget: got ok=true for negative col, want false")
+	}
+}
+
+func TestDedentTargetHandlesMultiByteRunesBeforeCloser(t *testing.T) {
+	// The line with the closer has a multi-byte rune (文, 3 UTF-8 bytes)
+	// before it. cursor.Col is rune-based (8: right before '}'), but
+	// tree-sitter reports byte-based columns — the closer's real byte
+	// column is 10, not 8. Without converting rune col to byte col first,
+	// the position comparison inside DedentTarget would never match.
+	h := New("test.go")
+	content := "func foo() {\n\tif x {\n\t\t文bar()}\n\t}\n}\n"
+	got, ok := h.DedentTarget([]byte(content), 2, 8)
+	if !ok {
+		t.Fatal("DedentTarget: got ok=false, want true (multi-byte rune before the closer)")
+	}
+	if got != "\t" {
+		t.Errorf("DedentTarget = %q, want %q", got, "\t")
+	}
+}
+
 func TestDedentTargetJSStubIsInertNotCrashing(t *testing.T) {
 	// javascript's vendored indents.scm is "; inherits: ecma,jsx" with no
 	// local captures, and this binding doesn't resolve "inherits". This

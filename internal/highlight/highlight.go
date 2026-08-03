@@ -177,6 +177,16 @@ var (
 	// import/export specifier lists, destructuring patterns, and object
 	// literals. Used to decide whether typing '{' should expand into an
 	// indented block or just insert "{}".
+	//
+	// Currently JS/TS/TSX-specific: these are the exact node type names from
+	// those three grammars (verified against their parser.c symbol tables).
+	// Other brace languages (Go composite literals, Python dict/set
+	// literals, Rust struct expressions, ...) have analogous "written
+	// inline" constructs but aren't covered here yet — ShouldExpandBraceBlock
+	// falls back to always expanding for them, matching the pre-existing
+	// behavior for every language before this feature existed. Extending
+	// this map to another language needs the same node-type verification,
+	// not just a name guess.
 	tsInlineBraceTypes = map[string]bool{
 		"named_imports":  true,
 		"export_clause":  true,
@@ -280,6 +290,15 @@ func (h *Highlighter) ShouldExpandBraceBlock(content []byte, line, col int) bool
 		return true
 	}
 
+	lines := strings.Split(string(content), "\n")
+	if line < 0 || line >= len(lines) {
+		return true
+	}
+	// col is rune-based (matching the client's cursor column); tree-sitter
+	// Points use byte columns, so convert against the pre-insertion line —
+	// the inserted "{}" starts exactly at this boundary either way.
+	byteCol := runeColToByteCol(lines[line], col)
+
 	p := sitter.NewParser()
 	p.SetLanguage(h.lang)
 	tree, err := p.ParseString(context.Background(), nil, insertRunesAt(content, line, col, "{}"))
@@ -288,7 +307,7 @@ func (h *Highlighter) ShouldExpandBraceBlock(content []byte, line, col int) bool
 	}
 	defer tree.Close()
 
-	pt := sitter.Point{Row: uint(line), Column: uint(col)}
+	pt := sitter.Point{Row: uint(line), Column: uint(byteCol)}
 	node := tree.RootNode().DescendantForPointRange(pt, pt)
 	if node.IsNull() {
 		return true
@@ -345,6 +364,9 @@ func (h *Highlighter) DedentTarget(content []byte, line, col int) (string, bool)
 		return "", false
 	}
 	runes := []rune(lines[line])
+	if col < 0 || col > len(runes) {
+		return "", false
+	}
 	c := col
 	for c < len(runes) && (runes[c] == ' ' || runes[c] == '\t') {
 		c++
@@ -352,7 +374,8 @@ func (h *Highlighter) DedentTarget(content []byte, line, col int) (string, bool)
 	if c >= len(runes) {
 		return "", false // nothing but whitespace left on this line
 	}
-	targetRow, targetCol := uint(line), uint(c)
+	// c is rune-based; tree-sitter Points use byte columns.
+	targetRow, targetCol := uint(line), uint(runeColToByteCol(lines[line], c))
 
 	p := sitter.NewParser()
 	p.SetLanguage(h.lang)
@@ -515,6 +538,20 @@ func byteToRuneCol(line string, byteCol int) int {
 		return len([]rune(line))
 	}
 	return len([]rune(line[:byteCol]))
+}
+
+// runeColToByteCol converts a rune-based column into a byte offset within
+// line — the inverse of byteToRuneCol. Needed because tree-sitter Points use
+// byte columns, while the client's cursor columns are rune-based.
+func runeColToByteCol(line string, runeCol int) int {
+	if runeCol <= 0 {
+		return 0
+	}
+	runes := []rune(line)
+	if runeCol >= len(runes) {
+		return len(line)
+	}
+	return len(string(runes[:runeCol]))
 }
 
 // --- capture → ANSI mapping ---

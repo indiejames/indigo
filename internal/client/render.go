@@ -535,9 +535,13 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 		if gutterW > 0 {
 			sb.WriteString(gutterStyle.Render(strings.Repeat(" ", gutterW)))
 		}
-		if lineNum == m.cursor.Line && chunk == 0 {
+		selA, selB := m.selectionCols(lineNum, 0)
+		switch {
+		case lineNum == m.cursor.Line && chunk == 0:
 			sb.WriteString(cursorStyle.Render(" "))
-		} else {
+		case selA >= 0 && selA <= selB:
+			sb.WriteString(selectionStyle.Render(" "))
+		default:
 			sb.WriteString("~")
 		}
 		return padToWidth(sb.String())

@@ -1,6 +1,7 @@
 package format
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/indiejames/indigo/internal/config"
@@ -199,6 +200,25 @@ func TestFormatReturnsErrNoFormatterWhenNothingAvailable(t *testing.T) {
 	_, _, err := m.Format("/tmp/foo.xyz", "content\n")
 	if err != ErrNoFormatter {
 		t.Errorf("Format error = %v, want ErrNoFormatter", err)
+	}
+}
+
+// TestFormatPropagatesLSPError is a regression test: a genuine LSP
+// formatting failure (timeout, malformed response, ...) must surface as
+// itself, not get silently reported as ErrNoFormatter — the caller uses
+// ErrNoFormatter to show "No formatter available", which would be
+// misleading when a formatter is available but just failed.
+func TestFormatPropagatesLSPError(t *testing.T) {
+	wantErr := errors.New("lsp request timed out")
+	fl := &fakeLSP{err: wantErr}
+	m := &Manager{lsp: fl, cfg: &config.Config{}}
+
+	_, changed, err := m.Format("/tmp/foo.xyz", "content\n")
+	if err != wantErr {
+		t.Errorf("Format error = %v, want %v", err, wantErr)
+	}
+	if changed {
+		t.Error("changed should be false when the LSP formatter errored")
 	}
 }
 

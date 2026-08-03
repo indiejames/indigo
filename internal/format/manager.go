@@ -81,7 +81,11 @@ func (m *Manager) Format(path, content string) (string, bool, error) {
 		}
 	}
 
-	if formatted, changed, err := m.lsp.Format(path, content, m.lspFormattingOptions(ext, content)); err == nil && changed {
+	formatted, changed, err := m.lsp.Format(path, content, m.lspFormattingOptions(ext, content))
+	if err != nil {
+		return "", false, err
+	}
+	if changed {
 		return formatted, true, nil
 	}
 

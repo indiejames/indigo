@@ -516,10 +516,10 @@ type Model struct {
 	helpVisible bool // true = help popup visible
 	helpScroll  int  // scroll offset within the help popup
 
-	hoverContent     *string        // non-nil = hover popup visible
-	hoverScroll      int            // scroll offset within the hover popup
-	hoverTotalLines  int            // total rendered body lines; used to clamp scroll
-	sigHelp          *ClientSigHelp // non-nil = signature help popup visible
+	hoverContent     *string            // non-nil = hover popup visible
+	hoverScroll      int                // scroll offset within the hover popup
+	hoverTotalLines  int                // total rendered body lines; used to clamp scroll
+	sigHelp          *ClientSigHelp     // non-nil = signature help popup visible
 	completions      []ClientCompletion // filtered/sorted view shown in the popup
 	completionsRaw   []ClientCompletion // full unfiltered list from the last fetch
 	completionOn     bool
@@ -929,6 +929,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// happens to trigger a reparse.
 			m.semanticSpans = nil
 			m.inlayHints = nil
+			m.detectedIndent = config.DetectIndentSettings(msg.content)
 			m, refreshCmd = m.scheduleLSPOverlayRefresh()
 			refreshCmd = tea.Batch(m.reparseHighlight(), refreshCmd)
 		} else if !msg.thenSave {

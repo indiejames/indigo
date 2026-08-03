@@ -1,9 +1,11 @@
 package format
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/indiejames/indigo/internal/config"
+	"github.com/indiejames/indigo/internal/lsp"
 )
 
 // ---- expandPath ----
@@ -121,5 +123,131 @@ func TestRunExternalNonZeroExit(t *testing.T) {
 	_, _, err := runExternal(makeFC("false"), "/tmp/test.go", "content")
 	if err == nil {
 		t.Error("expected error from formatter with non-zero exit, got nil")
+	}
+}
+
+// ---- Manager.Format ----
+
+// fakeLSP is a stub LSPFormatter that records the options it was called
+// with and returns a canned result.
+type fakeLSP struct {
+	called    bool
+	gotOpts   lsp.FormattingOptions
+	formatted string
+	changed   bool
+	err       error
+}
+
+func (f *fakeLSP) Format(path, content string, opts lsp.FormattingOptions) (string, bool, error) {
+	f.called = true
+	f.gotOpts = opts
+	if f.err != nil {
+		return content, false, f.err
+	}
+	return f.formatted, f.changed, nil
+}
+
+// TestFormatPrefersAutoFormatterOverLSP is a regression test: a dedicated
+// auto-detected formatter (e.g. prettier) must win over generic LSP
+// formatting when both are available for the same extension, since it
+// honors project-local config files the LSP formatter may ignore.
+func TestFormatPrefersAutoFormatterOverLSP(t *testing.T) {
+	fl := &fakeLSP{formatted: "LSP OUTPUT\n", changed: true}
+	auto := makeFC("tr", "a-z", "A-Z")
+	auto.Extensions = []string{"ts"}
+	m := &Manager{
+		lsp:      fl,
+		cfg:      &config.Config{},
+		autoFmts: []config.FormatterConfig{auto},
+	}
+
+	got, changed, err := m.Format("/tmp/foo.ts", "hello\n")
+	if err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+	if !changed || got != "HELLO\n" {
+		t.Errorf("Format = (%q, %v), want (%q, true) from the auto formatter", got, changed, "HELLO\n")
+	}
+	if fl.called {
+		t.Error("LSP formatter should not be called when an auto formatter matches")
+	}
+}
+
+// TestFormatFallsBackToLSPWhenNoAutoFormatter verifies the LSP formatter is
+// still used for extensions with no configured or auto-detected formatter.
+func TestFormatFallsBackToLSPWhenNoAutoFormatter(t *testing.T) {
+	fl := &fakeLSP{formatted: "formatted\n", changed: true}
+	m := &Manager{lsp: fl, cfg: &config.Config{}}
+
+	got, changed, err := m.Format("/tmp/foo.rs", "content\n")
+	if err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+	if !changed || got != "formatted\n" {
+		t.Errorf("Format = (%q, %v), want (%q, true)", got, changed, "formatted\n")
+	}
+	if !fl.called {
+		t.Error("LSP formatter should be called when no auto formatter matches")
+	}
+}
+
+// TestFormatReturnsErrNoFormatterWhenNothingAvailable verifies the sentinel
+// error when neither an external nor an LSP formatter can handle the file.
+func TestFormatReturnsErrNoFormatterWhenNothingAvailable(t *testing.T) {
+	fl := &fakeLSP{changed: false}
+	m := &Manager{lsp: fl, cfg: &config.Config{}}
+
+	_, _, err := m.Format("/tmp/foo.xyz", "content\n")
+	if err != ErrNoFormatter {
+		t.Errorf("Format error = %v, want ErrNoFormatter", err)
+	}
+}
+
+// TestFormatPropagatesLSPError is a regression test: a genuine LSP
+// formatting failure (timeout, malformed response, ...) must surface as
+// itself, not get silently reported as ErrNoFormatter — the caller uses
+// ErrNoFormatter to show "No formatter available", which would be
+// misleading when a formatter is available but just failed.
+func TestFormatPropagatesLSPError(t *testing.T) {
+	wantErr := errors.New("lsp request timed out")
+	fl := &fakeLSP{err: wantErr}
+	m := &Manager{lsp: fl, cfg: &config.Config{}}
+
+	_, changed, err := m.Format("/tmp/foo.xyz", "content\n")
+	if err != wantErr {
+		t.Errorf("Format error = %v, want %v", err, wantErr)
+	}
+	if changed {
+		t.Error("changed should be false when the LSP formatter errored")
+	}
+}
+
+// ---- lspFormattingOptions ----
+
+func TestLSPFormattingOptionsUsesDetectedIndent(t *testing.T) {
+	m := &Manager{cfg: &config.Config{}}
+	opts := m.lspFormattingOptions("go", "func foo() {\n\tbar()\n}\n")
+	if opts.InsertSpaces {
+		t.Errorf("InsertSpaces = true, want false for a tab-indented file")
+	}
+}
+
+func TestLSPFormattingOptionsFallsBackToConfiguredExtDefault(t *testing.T) {
+	// No content signal (single line, nothing indented) → falls back to the
+	// per-extension default, which is 2-space for ts.
+	m := &Manager{cfg: &config.Config{}}
+	opts := m.lspFormattingOptions("ts", "const x = 1;\n")
+	if !opts.InsertSpaces || opts.TabSize != 2 {
+		t.Errorf("opts = %+v, want {TabSize:2 InsertSpaces:true}", opts)
+	}
+}
+
+func TestLSPFormattingOptionsDetectedContentOverridesConfigDefault(t *testing.T) {
+	// File already uses 4-space indentation even though ts defaults to 2:
+	// the file's own convention should win.
+	m := &Manager{cfg: &config.Config{}}
+	opts := m.lspFormattingOptions("ts", "function foo() {\n    bar();\n}\n")
+	if !opts.InsertSpaces || opts.TabSize != 4 {
+		t.Errorf("opts = %+v, want {TabSize:4 InsertSpaces:true}", opts)
 	}
 }

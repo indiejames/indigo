@@ -719,7 +719,7 @@ func (c *Client) GetDiagnostics(path string) []Diagnostic {
 
 // Format requests textDocument/formatting and applies the returned edits.
 // Returns (content, false, nil) when the server reports no formatting support.
-func (c *Client) Format(path, content string) (string, bool, error) {
+func (c *Client) Format(path, content string, opts FormattingOptions) (string, bool, error) {
 	c.mu.Lock()
 	hasFormatting := c.caps.DocumentFormattingProvider != nil
 	c.mu.Unlock()
@@ -732,7 +732,7 @@ func (c *Client) Format(path, content string) (string, bool, error) {
 
 	params := DocumentFormattingParams{
 		TextDocument: TextDocumentIdentifier{URI: pathToURI(path)},
-		Options:      FormattingOptions{TabSize: 4, InsertSpaces: true},
+		Options:      opts,
 	}
 	raw, err := c.conn.Call(ctx, "textDocument/formatting", params)
 	if err != nil {

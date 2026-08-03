@@ -295,9 +295,9 @@ func (m *Manager) RenameAfterChange(path, content string, line, col int, newName
 
 // Format requests formatting for path from its language server.
 // Returns (content, false, nil) when no server is configured or formatting is unsupported.
-func (m *Manager) Format(path, content string) (string, bool, error) {
+func (m *Manager) Format(path, content string, opts FormattingOptions) (string, bool, error) {
 	if c := m.clientForPath(path); c != nil {
-		return c.Format(path, content)
+		return c.Format(path, content, opts)
 	}
 	return content, false, nil
 }

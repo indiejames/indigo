@@ -516,10 +516,10 @@ type Model struct {
 	helpVisible bool // true = help popup visible
 	helpScroll  int  // scroll offset within the help popup
 
-	hoverContent     *string        // non-nil = hover popup visible
-	hoverScroll      int            // scroll offset within the hover popup
-	hoverTotalLines  int            // total rendered body lines; used to clamp scroll
-	sigHelp          *ClientSigHelp // non-nil = signature help popup visible
+	hoverContent     *string            // non-nil = hover popup visible
+	hoverScroll      int                // scroll offset within the hover popup
+	hoverTotalLines  int                // total rendered body lines; used to clamp scroll
+	sigHelp          *ClientSigHelp     // non-nil = signature help popup visible
 	completions      []ClientCompletion // filtered/sorted view shown in the popup
 	completionsRaw   []ClientCompletion // full unfiltered list from the last fetch
 	completionOn     bool
@@ -592,7 +592,7 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 		filePath:            filePath,
 		workDir:             workDir,
 		hlr:                 highlight.New(filePath),
-		detectedIndent:      detectIndentSettings(content),
+		detectedIndent:      config.DetectIndentSettings(content),
 		metrics:             &metricsData{},
 		recoveryPrompt:      fromRecovery,
 		pluginBindings:      rpc.PluginBindings(),
@@ -908,6 +908,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.fetchCompletions()
 
 	case formatResultMsg:
+		var refreshCmd tea.Cmd
 		if msg.changed {
 			m.buf = document.New(m.filePath, msg.content)
 			m.undoStack = nil
@@ -921,6 +922,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !msg.thenSave {
 				m.status = "Formatted"
 			}
+			// The formatter can move code arbitrarily, so the pre-format
+			// tree-sitter spans and semantic-token/inlay-hint caches no
+			// longer line up with anything — reparse now rather than
+			// leaving stale highlighting on screen until an unrelated edit
+			// happens to trigger a reparse.
+			m.semanticSpans = nil
+			m.inlayHints = nil
+			m.detectedIndent = config.DetectIndentSettings(msg.content)
+			m, refreshCmd = m.scheduleLSPOverlayRefresh()
+			refreshCmd = tea.Batch(m.reparseHighlight(), refreshCmd)
 		} else if !msg.thenSave {
 			if msg.noFormatter {
 				m.status = "No formatter available"
@@ -929,9 +940,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if msg.thenSave {
-			return m, m.doSaveNow()
+			return m, tea.Batch(refreshCmd, m.doSaveNow())
 		}
-		return m, nil
+		return m, refreshCmd
 
 	case definitionMsg:
 		if !msg.found {

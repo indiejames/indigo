@@ -72,3 +72,54 @@ func TestLoadMissingDir(t *testing.T) {
 		t.Error("default LineNumbers should be true when config dir missing")
 	}
 }
+
+func TestEffectiveIndentHardcodedFallback(t *testing.T) {
+	cfg := &Config{}
+	got := cfg.EffectiveIndent("elm") // no built-in default for this extension
+	want := IndentSettings{Style: "tabs", Width: 4}
+	if got != want {
+		t.Errorf("EffectiveIndent(elm) = %+v, want %+v", got, want)
+	}
+}
+
+func TestEffectiveIndentBuiltinPerLanguageDefault(t *testing.T) {
+	cfg := &Config{}
+	got := cfg.EffectiveIndent("py")
+	want := IndentSettings{Style: "spaces", Width: 4}
+	if got != want {
+		t.Errorf("EffectiveIndent(py) = %+v, want %+v", got, want)
+	}
+}
+
+func TestEffectiveIndentUserGlobalOverridesBuiltinPerLanguage(t *testing.T) {
+	cfg := &Config{IndentStyle: "spaces", IndentWidth: 8}
+	got := cfg.EffectiveIndent("go") // built-in default is tabs/4
+	want := IndentSettings{Style: "spaces", Width: 8}
+	if got != want {
+		t.Errorf("EffectiveIndent(go) = %+v, want %+v", got, want)
+	}
+}
+
+func TestEffectiveIndentUserPerLanguageOverridesEverything(t *testing.T) {
+	cfg := &Config{
+		IndentStyle:     "spaces",
+		IndentWidth:     8,
+		IndentOverrides: map[string]IndentSettings{"go": {Style: "tabs", Width: 2}},
+	}
+	got := cfg.EffectiveIndent("go")
+	want := IndentSettings{Style: "tabs", Width: 2}
+	if got != want {
+		t.Errorf("EffectiveIndent(go) = %+v, want %+v", got, want)
+	}
+}
+
+func TestEffectiveIndentPartialUserOverrideInheritsOtherField(t *testing.T) {
+	cfg := &Config{
+		IndentOverrides: map[string]IndentSettings{"py": {Width: 2}}, // style unset
+	}
+	got := cfg.EffectiveIndent("py")
+	want := IndentSettings{Style: "spaces", Width: 2} // style inherited from built-in default
+	if got != want {
+		t.Errorf("EffectiveIndent(py) = %+v, want %+v", got, want)
+	}
+}

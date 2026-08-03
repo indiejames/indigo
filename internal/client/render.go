@@ -334,7 +334,7 @@ func (m Model) selectionCols(lineNum, lineLen int) (selA, selB int) {
 	if !m.sel.IsLine && lineNum == end.Line {
 		selB = min(end.Col, max(0, lineLen-1))
 	}
-	if lineLen == 0 || selA > selB {
+	if selA > selB {
 		return -1, -1
 	}
 	return selA, selB
@@ -485,6 +485,8 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 
 	if hasCursor && curCol >= n {
 		sb.WriteString(cursorStyle.Render(" "))
+	} else if n == 0 && hasSel && selA <= selB {
+		sb.WriteString(selectionStyle.Render(" "))
 	}
 	// Write overlays that fall at or past end of content.
 	for ; oi < len(overlays); oi++ {

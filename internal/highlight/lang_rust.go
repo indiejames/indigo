@@ -12,4 +12,5 @@ func init() {
 		return sitter.NewLanguage(rust.GetLanguage()), rust.GetQuery("highlights")
 	}
 	registerLang(fn, ".rs")
+	registerIndentQuery(func() []byte { return rust.GetQuery("indents") }, ".rs")
 }

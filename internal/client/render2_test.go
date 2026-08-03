@@ -40,6 +40,17 @@ func TestRenderLineRunesEmpty(t *testing.T) {
 	}
 }
 
+func TestRenderLineRunesEmptyLineSelected(t *testing.T) {
+	var sb strings.Builder
+	// Empty line covered by a selection (selA=0, selB=0, no cursor here):
+	// should still render a styled padding cell, not nothing, so the line
+	// visibly shows as selected.
+	renderLineRunes(&sb, []rune{}, 0, 0, -1, nil, nil, nil)
+	if sb.String() == "" {
+		t.Error("empty selected line should render a styled space, got empty output")
+	}
+}
+
 // --- overlayRight ---
 
 func TestOverlayRight(t *testing.T) {
@@ -190,7 +201,6 @@ func TestRenderStatusBarDirtyFlag(t *testing.T) {
 	}
 }
 
-
 func TestRenderStatusBarZeroWidth(t *testing.T) {
 	m := newTestModel("")
 	m.width = 0
@@ -278,7 +288,6 @@ func TestHandleKeyClearsStatus(t *testing.T) {
 		t.Errorf("handleKey should clear status, got %q", got.status)
 	}
 }
-
 
 // ansiStrip removes ANSI escape sequences for plain-text assertions.
 func ansiStrip(s string) string {

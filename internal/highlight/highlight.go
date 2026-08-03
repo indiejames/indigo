@@ -29,9 +29,10 @@ type LineSpans map[int][]Span
 
 // Highlighter holds the compiled language and query for a file type.
 type Highlighter struct {
-	lang  *sitter.Language
-	query *sitter.Query
-	extra *Highlighter // optional secondary parser (e.g. markdown_inline)
+	lang        *sitter.Language
+	query       *sitter.Query
+	extra       *Highlighter // optional secondary parser (e.g. markdown_inline)
+	indentQuery *sitter.Query
 }
 
 // New returns a Highlighter for filePath, or nil if the language is unsupported.
@@ -48,6 +49,11 @@ func New(filePath string) *Highlighter {
 	if elang, eqsrc := extraLanguageForPath(filePath); elang != nil && len(eqsrc) > 0 {
 		if eq, err := sitter.NewQuery(elang, eqsrc); err == nil {
 			h.extra = &Highlighter{lang: elang, query: eq}
+		}
+	}
+	if iqsrc := indentQueryForPath(filePath); len(iqsrc) > 0 {
+		if iq, err := sitter.NewQuery(lang, iqsrc); err == nil {
+			h.indentQuery = iq
 		}
 	}
 	return h
@@ -166,6 +172,18 @@ var (
 		"argument_list": true, "arguments": true,
 		"call_arguments": true, "positional_arguments": true,
 	}
+	// tsInlineBraceTypes are node types whose braces wrap a construct that's
+	// conventionally written on one line rather than expanded into a block:
+	// import/export specifier lists, destructuring patterns, and object
+	// literals. Used to decide whether typing '{' should expand into an
+	// indented block or just insert "{}".
+	tsInlineBraceTypes = map[string]bool{
+		"named_imports":  true,
+		"export_clause":  true,
+		"object_pattern": true,
+		"object":         true,
+		"jsx_expression": true,
+	}
 )
 
 // TextObjectAt finds the "inside" text object of the given kind at (line, col).
@@ -248,6 +266,136 @@ func (h *Highlighter) TextObjectAround(content []byte, line, col int, kind strin
 		return tsCommentAt(leaf)
 	}
 	return TextObject{}, false
+}
+
+// ShouldExpandBraceBlock reports whether typing '{' at (line, col) should
+// expand into an indented block ("{\n\t\n}") rather than a plain "{}" pair.
+// It reparses content with "{}" inserted at the cursor and inspects the
+// resulting node: constructs conventionally written inline (import/export
+// lists, destructuring patterns, object literals, JSX expression
+// containers) don't expand; everything else (function bodies, control-flow
+// blocks, struct/class bodies, ...) does.
+func (h *Highlighter) ShouldExpandBraceBlock(content []byte, line, col int) bool {
+	if h == nil {
+		return true
+	}
+
+	p := sitter.NewParser()
+	p.SetLanguage(h.lang)
+	tree, err := p.ParseString(context.Background(), nil, insertRunesAt(content, line, col, "{}"))
+	if err != nil || tree == nil {
+		return true
+	}
+	defer tree.Close()
+
+	pt := sitter.Point{Row: uint(line), Column: uint(col)}
+	node := tree.RootNode().DescendantForPointRange(pt, pt)
+	if node.IsNull() {
+		return true
+	}
+	if tsInlineBraceTypes[node.Type()] {
+		return false
+	}
+	if parent := node.Parent(); !parent.IsNull() && tsInlineBraceTypes[parent.Type()] {
+		return false
+	}
+	return true
+}
+
+// insertRunesAt returns content with s inserted at the given rune-based
+// (line, col) position, leaving content unchanged if the position is out of
+// range.
+func insertRunesAt(content []byte, line, col int, s string) []byte {
+	lines := strings.Split(string(content), "\n")
+	if line < 0 || line >= len(lines) {
+		return content
+	}
+	runes := []rune(lines[line])
+	if col < 0 || col > len(runes) {
+		return content
+	}
+	lines[line] = string(runes[:col]) + s + string(runes[col:])
+	return []byte(strings.Join(lines, "\n"))
+}
+
+// DedentTarget reports the indentation that a new line (created by pressing
+// Enter at line, col) should use, for the specific case where the next
+// token after the cursor — skipping same-line whitespace — closes the
+// block/call/group enclosing the cursor (e.g. pressing Enter right before
+// an already-typed "}" that has other content before it, so it isn't just
+// an empty pair). When that's the case, the new line should align with the
+// line the block opened on rather than inheriting the cursor line's
+// (deeper) indentation. Returns ("", false) when there's no such token, or
+// when this language has no indent query.
+//
+// This deliberately only reads the @indent.end / @indent.branch captures —
+// the token-to-closer relationship these queries encode directly via tree
+// structure (a captured closing token's parent is the node it closes) — and
+// ignores the query language's predicates (#set!, #eq?, ...) and the
+// @indent.begin/@indent.align/@indent.immediate machinery that give Helix's
+// full algorithm its scope-opening and continuation-alignment behavior.
+// That's out of scope here; see the indent design discussion for why.
+func (h *Highlighter) DedentTarget(content []byte, line, col int) (string, bool) {
+	if h == nil || h.indentQuery == nil {
+		return "", false
+	}
+
+	lines := strings.Split(string(content), "\n")
+	if line < 0 || line >= len(lines) {
+		return "", false
+	}
+	runes := []rune(lines[line])
+	c := col
+	for c < len(runes) && (runes[c] == ' ' || runes[c] == '\t') {
+		c++
+	}
+	if c >= len(runes) {
+		return "", false // nothing but whitespace left on this line
+	}
+	targetRow, targetCol := uint(line), uint(c)
+
+	p := sitter.NewParser()
+	p.SetLanguage(h.lang)
+	tree, err := p.ParseString(context.Background(), nil, content)
+	if err != nil || tree == nil {
+		return "", false
+	}
+	defer tree.Close()
+
+	qc := sitter.NewQueryCursor()
+	matches := qc.Matches(h.indentQuery, tree.RootNode(), content)
+	for {
+		m := matches.Next()
+		if m == nil {
+			break
+		}
+		for _, cap := range m.Captures {
+			name := h.indentQuery.CaptureNameForID(cap.Index)
+			if name != "indent.end" && name != "indent.branch" {
+				continue
+			}
+			sp := cap.Node.StartPoint()
+			if sp.Row != targetRow || sp.Column != targetCol {
+				continue
+			}
+			target := cap.Node.Parent()
+			if target.IsNull() {
+				continue
+			}
+			targetLine := lineAt(lines, int(target.StartPoint().Row))
+			return targetLine[:leadingWS(targetLine)], true
+		}
+	}
+	return "", false
+}
+
+// leadingWS returns the number of leading space/tab bytes in s.
+func leadingWS(s string) int {
+	i := 0
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	return i
 }
 
 func tsNodeSpan(n sitter.Node) TextObject {

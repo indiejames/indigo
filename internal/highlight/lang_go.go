@@ -12,4 +12,5 @@ func init() {
 		return sitter.NewLanguage(golang_lang.GetLanguage()), golang_lang.GetQuery("highlights")
 	}
 	registerLang(fn, ".go")
+	registerIndentQuery(func() []byte { return golang_lang.GetQuery("indents") }, ".go")
 }

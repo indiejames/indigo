@@ -271,15 +271,7 @@ func (m Model) handleInsertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.extraCursors) > 0 {
 			return applyInsertToAllCursors(m, "\n")
 		}
-		op := document.Op{
-			ClientID:   m.rpc.ClientID(),
-			Type:       document.OpInsert,
-			InsertLine: m.cursor.Line,
-			InsertCol:  m.cursor.Col,
-			InsertText: "\n",
-		}
-		m.cursor = document.Pos{Line: m.cursor.Line + 1, Col: 0}
-		return applyOp(m, op)
+		return m.handleEnter()
 
 	case "tab":
 		if len(m.extraCursors) > 0 {
@@ -340,7 +332,7 @@ func (m Model) handleInsertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// indented line, since braces almost always open a block.
 			if len(msg.Runes) == 1 {
 				if closer, ok := autoPairs[r]; ok && m.shouldAutoPair(r) {
-					if r == '{' {
+					if r == '{' && m.shouldExpandBraceBlock() {
 						return m.insertBraceBlock()
 					}
 					op := document.Op{

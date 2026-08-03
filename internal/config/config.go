@@ -59,6 +59,49 @@ var defaultLanguageServers = []LanguageServer{
 	{Extensions: []string{"zig"}, Command: "zls"},
 }
 
+// IndentSettings controls the whitespace used for one indent level.
+// Style is "tabs" or "spaces"; Width is the number of spaces per level
+// (also used as the display width when Style is "tabs"). Either field may
+// be left zero-valued to inherit from a less specific source — see
+// Config.EffectiveIndent.
+type IndentSettings struct {
+	Style string `toml:"style"`
+	Width int    `toml:"width"`
+}
+
+// defaultIndentSettings are indigo's built-in per-language conventions,
+// used when the user hasn't set indent_style/indent_width (globally or for
+// that language). Keyed the same way as DefaultFormatters/
+// defaultLanguageServers: a bare extension, no leading dot.
+var defaultIndentSettings = map[string]IndentSettings{
+	"go":    {Style: "tabs", Width: 4},
+	"rs":    {Style: "spaces", Width: 4},
+	"py":    {Style: "spaces", Width: 4},
+	"rb":    {Style: "spaces", Width: 2},
+	"js":    {Style: "spaces", Width: 2},
+	"jsx":   {Style: "spaces", Width: 2},
+	"ts":    {Style: "spaces", Width: 2},
+	"tsx":   {Style: "spaces", Width: 2},
+	"json":  {Style: "spaces", Width: 2},
+	"jsonc": {Style: "spaces", Width: 2},
+	"yaml":  {Style: "spaces", Width: 2},
+	"yml":   {Style: "spaces", Width: 2},
+	"html":  {Style: "spaces", Width: 2},
+	"css":   {Style: "spaces", Width: 2},
+	"c":     {Style: "spaces", Width: 4},
+	"cpp":   {Style: "spaces", Width: 4},
+	"h":     {Style: "spaces", Width: 4},
+	"hpp":   {Style: "spaces", Width: 4},
+	"java":  {Style: "spaces", Width: 4},
+	"lua":   {Style: "spaces", Width: 2},
+	"zig":   {Style: "spaces", Width: 4},
+	"nix":   {Style: "spaces", Width: 2},
+	"toml":  {Style: "spaces", Width: 2},
+	"sh":    {Style: "spaces", Width: 2},
+	"bash":  {Style: "spaces", Width: 2},
+	"swift": {Style: "spaces", Width: 4},
+}
+
 // Config holds user preferences loaded from ~/.config/indigo/config.toml.
 // Absent keys keep their default values.
 type Config struct {
@@ -80,6 +123,18 @@ type Config struct {
 	// Values are a registered language key such as "sh", "go", ".md", etc.
 	// Example: {".env" = "sh", ".mdx" = "md"}
 	FileTypes map[string]string `toml:"file_types"`
+	// IndentStyle and IndentWidth set the global default indent used for
+	// languages with no built-in or user-configured per-language setting.
+	// IndentStyle is "tabs" or "spaces"; empty/zero mean "use indigo's
+	// built-in default (tabs, width 4)".
+	IndentStyle string `toml:"indent_style"`
+	IndentWidth int    `toml:"indent_width"`
+	// IndentOverrides sets per-language indent settings, keyed by bare
+	// extension (e.g. "py", "go"). Takes precedence over both
+	// IndentStyle/IndentWidth and indigo's built-in per-language defaults.
+	// A partial entry (only style or only width) inherits the other field
+	// from the next source down the precedence chain.
+	IndentOverrides map[string]IndentSettings `toml:"indent"`
 }
 
 func defaults() *Config {
@@ -149,6 +204,35 @@ func (c *Config) EffectiveFormatters() []FormatterConfig {
 	return result
 }
 
+// EffectiveIndent returns the indent settings to use for a file with the
+// given extension (bare, no leading dot — e.g. "py", "go"). Precedence,
+// most specific first: a user IndentOverrides entry for ext, the user's
+// global IndentStyle/IndentWidth, indigo's built-in per-language default,
+// then a hardcoded tabs/width-4 fallback. A partial override (only Style or
+// only Width set) inherits the other field from the next source down this
+// chain rather than resetting it.
+func (c *Config) EffectiveIndent(ext string) IndentSettings {
+	result := IndentSettings{Style: "tabs", Width: 4}
+	if def, ok := defaultIndentSettings[ext]; ok {
+		result = def
+	}
+	if c.IndentStyle != "" {
+		result.Style = c.IndentStyle
+	}
+	if c.IndentWidth != 0 {
+		result.Width = c.IndentWidth
+	}
+	if user, ok := c.IndentOverrides[ext]; ok {
+		if user.Style != "" {
+			result.Style = user.Style
+		}
+		if user.Width != 0 {
+			result.Width = user.Width
+		}
+	}
+	return result
+}
+
 // ConfigDir returns the XDG config home: $XDG_CONFIG_HOME if set, else ~/.config.
 func ConfigDir() (string, error) {
 	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
@@ -198,6 +282,24 @@ const defaultConfigTemplate = `# Indigo editor configuration
 
 # Draw indent guide lines at each tab-stop in the leading whitespace of lines.
 # indent_guides = true
+
+# Default indent style/width for languages with no built-in or per-language
+# setting below. style is "tabs" or "spaces". Indigo also auto-detects the
+# style already used in a file you open and prefers that over any of this.
+# indent_style = "tabs"
+# indent_width = 4
+
+# ---------------------------------------------------------------------------
+# Per-language indent overrides
+#
+# Indigo has built-in per-language conventions (e.g. tabs for Go, 4-space
+# for Python, 2-space for JS/TS/JSON/YAML/CSS/HTML). Add an [indent.<ext>]
+# block to override the style and/or width for a given extension.
+#
+# [indent.py]
+# style = "spaces"
+# width = 4
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Language servers

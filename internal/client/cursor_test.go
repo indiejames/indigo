@@ -204,10 +204,24 @@ func TestSelectionColsEmptyLine(t *testing.T) {
 		Anchor: document.Pos{Line: 1, Col: 0},
 		Head:   document.Pos{Line: 1, Col: 0},
 	}
-	// Empty line: lineLen=0 → returns -1,-1
+	// Empty line inside the selection: still reports a (0,0) padding cell so
+	// the line renders as selected instead of looking untouched.
+	a, b := m.selectionCols(1, 0)
+	if a != 0 || b != 0 {
+		t.Errorf("empty line: got (%d, %d), want (0, 0)", a, b)
+	}
+}
+
+func TestSelectionColsEmptyLineOutsideSelection(t *testing.T) {
+	m := newTestModel("hello\n\nworld\n")
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: 0, Col: 0},
+		Head:   document.Pos{Line: 0, Col: 4},
+	}
+	// Empty line not covered by the selection: still reports no selection.
 	a, b := m.selectionCols(1, 0)
 	if a != -1 || b != -1 {
-		t.Errorf("empty line: got (%d, %d), want (-1, -1)", a, b)
+		t.Errorf("empty line outside selection: got (%d, %d), want (-1, -1)", a, b)
 	}
 }
 

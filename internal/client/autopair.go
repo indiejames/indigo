@@ -62,6 +62,18 @@ func (m Model) shouldAutoPair(r rune) bool {
 	return !isWordChar(m.charBeforeCursor()) && !isWordChar(m.charAfterCursor())
 }
 
+// shouldExpandBraceBlock decides whether typing '{' should expand into an
+// indented block versus just inserting "{}" inline. It defers to the
+// language's syntax tree (via the highlighter) so constructs conventionally
+// written on one line, like a TypeScript import's named-import list, don't
+// get split across three lines the way a function body should.
+func (m Model) shouldExpandBraceBlock() bool {
+	if m.hlr == nil {
+		return true
+	}
+	return m.hlr.ShouldExpandBraceBlock([]byte(m.buf.Content()), m.cursor.Line, m.cursor.Col)
+}
+
 // insertBraceBlock expands typing '{' into a three-line block:
 //
 //	{
@@ -71,16 +83,16 @@ func (m Model) shouldAutoPair(r rune) bool {
 // indented to match the current line, since a '{' almost always opens a
 // block whose body belongs on its own line.
 func (m Model) insertBraceBlock() (Model, tea.Cmd) {
-	runes := []rune(m.buf.Line(m.cursor.Line))
-	indent := string(runes[:leadingWhitespace(runes)])
+	indent := m.currentLineIndent()
+	unit := m.indentUnit()
 
 	op := document.Op{
 		ClientID:   m.clientID(),
 		Type:       document.OpInsert,
 		InsertLine: m.cursor.Line,
 		InsertCol:  m.cursor.Col,
-		InsertText: "{\n" + indent + "\t\n" + indent + "}",
+		InsertText: "{\n" + indent + unit + "\n" + indent + "}",
 	}
-	m.cursor = document.Pos{Line: m.cursor.Line + 1, Col: len(indent) + 1}
+	m.cursor = document.Pos{Line: m.cursor.Line + 1, Col: len(indent) + len(unit)}
 	return applyOp(m, op)
 }

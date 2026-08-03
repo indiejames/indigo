@@ -489,6 +489,7 @@ type Model struct {
 	searchErr           string // non-empty when regex fails to compile
 	hlr                 *highlight.Highlighter
 	hlSpans             highlight.LineSpans
+	detectedIndent      *config.IndentSettings // sniffed from buffer content on open; nil if inconclusive
 	metrics             *metricsData
 	recoveryPrompt      bool // waiting for user to accept or discard recovery content
 
@@ -591,6 +592,7 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 		filePath:            filePath,
 		workDir:             workDir,
 		hlr:                 highlight.New(filePath),
+		detectedIndent:      detectIndentSettings(content),
 		metrics:             &metricsData{},
 		recoveryPrompt:      fromRecovery,
 		pluginBindings:      rpc.PluginBindings(),

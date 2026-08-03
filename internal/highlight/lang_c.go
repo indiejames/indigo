@@ -12,4 +12,5 @@ func init() {
 		return sitter.NewLanguage(c_lang.GetLanguage()), c_lang.GetQuery("highlights")
 	}
 	registerLang(fn, ".c", ".h")
+	registerIndentQuery(func() []byte { return c_lang.GetQuery("indents") }, ".c", ".h")
 }

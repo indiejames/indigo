@@ -40,6 +40,54 @@ func TestRenderLineRunesEmpty(t *testing.T) {
 	}
 }
 
+func TestRenderLineChunkTrailingEmptyLineReverseSelection(t *testing.T) {
+	// "a\nb\n" has a trailing phantom empty line (index 2) that isn't part
+	// of displayLineCount. Select from line 0 through that phantom line,
+	// then simulate a flipped/reverse selection where the cursor sits back
+	// on line 0 — the phantom line is still selected but no longer holds
+	// the cursor, so it must fall through to the selection-padding branch
+	// instead of the plain "~" shortcut.
+	m := newTestModel("a\nb\n")
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: 2, Col: 0},
+		Head:   document.Pos{Line: 0, Col: 0},
+ 	}
+	m.cursor = document.Pos{Line: 0, Col: 0}
+
+	cw := 80
+	layout := m.buildScreenLayout(3, cw)
+	rendered := m.renderLineChunk(layout[2], cw, nil, -1, -1, false)
+
+	if strings.Contains(rendered, "~") {
+		t.Errorf("trailing empty line included in selection should not render as a bare tilde, got %q", rendered)
+	}
+}
+
+func TestRenderLineChunkTrailingEmptyLineUnselectedStillTilde(t *testing.T) {
+	// Same buffer, no selection: the phantom line should still render as a
+	// plain tilde (preserves existing behavior for the common case).
+	m := newTestModel("a\nb\n")
+
+	cw := 80
+	layout := m.buildScreenLayout(3, cw)
+	rendered := m.renderLineChunk(layout[2], cw, nil, -1, -1, false)
+
+	if !strings.Contains(rendered, "~") {
+		t.Errorf("unselected trailing empty line should render as a tilde, got %q", rendered)
+	}
+}
+
+func TestRenderLineRunesEmptyLineSelected(t *testing.T) {
+	var sb strings.Builder
+	// Empty line covered by a selection (selA=0, selB=0, no cursor here):
+	// should still render a styled padding cell, not nothing, so the line
+	// visibly shows as selected.
+	renderLineRunes(&sb, []rune{}, 0, 0, -1, nil, nil, nil)
+	if sb.String() == "" {
+		t.Error("empty selected line should render a styled space, got empty output")
+	}
+}
+
 // --- overlayRight ---
 
 func TestOverlayRight(t *testing.T) {
@@ -190,7 +238,6 @@ func TestRenderStatusBarDirtyFlag(t *testing.T) {
 	}
 }
 
-
 func TestRenderStatusBarZeroWidth(t *testing.T) {
 	m := newTestModel("")
 	m.width = 0
@@ -278,7 +325,6 @@ func TestHandleKeyClearsStatus(t *testing.T) {
 		t.Errorf("handleKey should clear status, got %q", got.status)
 	}
 }
-
 
 // ansiStrip removes ANSI escape sequences for plain-text assertions.
 func ansiStrip(s string) string {

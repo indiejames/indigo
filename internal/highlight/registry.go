@@ -12,9 +12,26 @@ var langRegistry = map[string]func() (*sitter.Language, []byte){}
 // Used by markdown to also run markdown_inline on the same content.
 var extraLangRegistry = map[string]func() (*sitter.Language, []byte){}
 
+// indentQueryRegistry holds each language's tree-sitter indent query
+// (captures like @indent.end/@indent.branch), used to compute semantic
+// indentation on Enter. Compiled against the same Language as the primary
+// highlight query, so it stores only the query source, not a Language.
+// Not every language has one registered — many vendored indent queries are
+// "; inherits: <other-grammar>" stubs this binding can't resolve, so
+// registering them would silently do nothing.
+var indentQueryRegistry = map[string]func() []byte{}
+
 func registerLang(fn func() (*sitter.Language, []byte), keys ...string) {
 	for _, k := range keys {
 		langRegistry[k] = fn
+	}
+}
+
+// registerIndentQuery attaches an indent query to the given extensions.
+// It must be called after the primary parser is already registered.
+func registerIndentQuery(fn func() []byte, keys ...string) {
+	for _, k := range keys {
+		indentQueryRegistry[k] = fn
 	}
 }
 
@@ -34,6 +51,9 @@ func RegisterAlias(from, to string) bool {
 	langRegistry[from] = fn
 	if extraFn, ok2 := extraLangRegistry[to]; ok2 {
 		extraLangRegistry[from] = extraFn
+	}
+	if indentFn, ok2 := indentQueryRegistry[to]; ok2 {
+		indentQueryRegistry[from] = indentFn
 	}
 	if comment, ok2 := lineCommentByKey[to]; ok2 {
 		lineCommentByKey[from] = comment
@@ -66,6 +86,13 @@ func NewForKey(key string) *Highlighter {
 		if elang != nil && len(eqsrc) > 0 {
 			if eq, err := sitter.NewQuery(elang, eqsrc); err == nil {
 				h.extra = &Highlighter{lang: elang, query: eq}
+			}
+		}
+	}
+	if ifn, ok2 := indentQueryRegistry[key]; ok2 {
+		if iqsrc := ifn(); len(iqsrc) > 0 {
+			if iq, err := sitter.NewQuery(lang, iqsrc); err == nil {
+				h.indentQuery = iq
 			}
 		}
 	}
@@ -145,6 +172,18 @@ func extraLanguageForPath(filePath string) (*sitter.Language, []byte) {
 	fn, ok := extraLangRegistry[k]
 	if !ok {
 		return nil, nil
+	}
+	return fn()
+}
+
+func indentQueryForPath(filePath string) []byte {
+	k := lookupKey(filePath)
+	if k == "" {
+		return nil
+	}
+	fn, ok := indentQueryRegistry[k]
+	if !ok {
+		return nil
 	}
 	return fn()
 }

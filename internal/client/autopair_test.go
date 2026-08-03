@@ -1,6 +1,22 @@
 package client
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/highlight"
+)
+
+func newAutoPairTSTestModel(t *testing.T, content string) Model {
+	t.Helper()
+	m := newAutoPairTestModel(content)
+	m.buf = document.New("test.ts", content)
+	m.hlr = highlight.New("test.ts")
+	if m.hlr == nil {
+		t.Skip("no TypeScript highlighter registered; run with -tags lang_all (or lang_typescript)")
+	}
+	return m
+}
 
 func newAutoPairTestModel(content string) Model {
 	m := newTestModel(content)
@@ -143,5 +159,40 @@ func TestAutoPairBraceExpandsToBlockPreservingIndent(t *testing.T) {
 	}
 	if got.cursor.Line != 1 || got.cursor.Col != 2 {
 		t.Errorf("cursor = (%d,%d), want (1,2)", got.cursor.Line, got.cursor.Col)
+	}
+}
+
+func TestAutoPairBraceExpandsToBlockForFunctionBody(t *testing.T) {
+	m := newAutoPairTSTestModel(t, "function foo() ")
+	m.cursor.Col = len([]rune("function foo() "))
+	m2, _ := m.handleInsert(fakeKey("{"))
+	got := m2.(Model)
+
+	if got.buf.LineCount() != 3 {
+		t.Fatalf("LineCount() = %d, want 3 (function body should expand)", got.buf.LineCount())
+	}
+	if got.buf.Line(0) != "function foo() {" {
+		t.Errorf("line 0 = %q, want %q", got.buf.Line(0), "function foo() {")
+	}
+	if got.buf.Line(2) != "}" {
+		t.Errorf("line 2 = %q, want %q", got.buf.Line(2), "}")
+	}
+}
+
+func TestAutoPairBraceDoesNotExpandForImportList(t *testing.T) {
+	m := newAutoPairTSTestModel(t, "import  from 'foo'")
+	m.cursor.Col = len([]rune("import ")) // right after "import "
+	m2, _ := m.handleInsert(fakeKey("{"))
+	got := m2.(Model)
+
+	if got.buf.LineCount() != 1 {
+		t.Fatalf("LineCount() = %d, want 1 (import list shouldn't expand)", got.buf.LineCount())
+	}
+	want := "import {} from 'foo'"
+	if got.buf.Line(0) != want {
+		t.Errorf("line 0 = %q, want %q", got.buf.Line(0), want)
+	}
+	if got.cursor.Col != len([]rune("import {")) {
+		t.Errorf("cursor.Col = %d, want %d (between the pair)", got.cursor.Col, len([]rune("import {")))
 	}
 }

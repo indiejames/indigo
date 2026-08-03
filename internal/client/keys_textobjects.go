@@ -623,3 +623,40 @@ func executeUnindent(m Model) (tea.Model, tea.Cmd) {
 	m.sel = nil
 	return m, cmd
 }
+
+// executeJoinLines joins the current line with the line below it (vim's J):
+// the line break and the next line's leading whitespace are replaced with a
+// single space. The space is omitted when the current line is empty or
+// already ends in whitespace, the next line is blank, or it starts with ')'.
+func executeJoinLines(m Model) (tea.Model, tea.Cmd) {
+	if m.cursor.Line >= m.buf.LineCount()-1 {
+		return m, nil
+	}
+	cur := []rune(m.buf.Line(m.cursor.Line))
+	next := []rune(m.buf.Line(m.cursor.Line + 1))
+	indent := leadingWhitespace(next)
+	rest := next[indent:]
+
+	ops := []document.Op{{
+		ClientID: m.clientID(),
+		Type:     document.OpDelete,
+		FromLine: m.cursor.Line, FromCol: len(cur),
+		ToLine: m.cursor.Line + 1, ToCol: indent,
+	}}
+
+	space := len(cur) > 0 && cur[len(cur)-1] != ' ' && cur[len(cur)-1] != '\t' &&
+		len(rest) > 0 && rest[0] != ')'
+	if space {
+		ops = append(ops, document.Op{
+			ClientID:   m.clientID(),
+			Type:       document.OpInsert,
+			InsertLine: m.cursor.Line,
+			InsertCol:  len(cur),
+			InsertText: " ",
+		})
+	}
+
+	m.sel = nil
+	m.cursor = document.Pos{Line: m.cursor.Line, Col: len(cur)}
+	return applyBatch(m, ops)
+}

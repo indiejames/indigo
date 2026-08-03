@@ -35,10 +35,20 @@ func TestMoveCursorClampsAboveBuffer(t *testing.T) {
 }
 
 func TestMoveCursorNormalModeClampsCol(t *testing.T) {
-	// Normal mode: maxCol = lineLen-1
+	// Normal mode: maxCol = lineLen when a following line exists, since the
+	// cursor may rest on the line break itself.
 	m := newTestModel("hello\n")
 	m.moveCursor(0, 10)
-	// "hello" has len 5, maxCol = 4 in normal mode
+	if m.cursor.Col != 5 {
+		t.Errorf("cursor.Col = %d, want 5", m.cursor.Col)
+	}
+}
+
+func TestMoveCursorNormalModeClampsColOnLastLine(t *testing.T) {
+	// The last line of the buffer has no line break to rest on, so it still
+	// clamps to the last character.
+	m := newTestModel("hello")
+	m.moveCursor(0, 10)
 	if m.cursor.Col != 4 {
 		t.Errorf("cursor.Col = %d, want 4", m.cursor.Col)
 	}
@@ -347,5 +357,69 @@ func TestScreenRowOf(t *testing.T) {
 	// bufLine not in layout → -1
 	if r := screenRowOf(layout, 99, 0, cw); r != -1 {
 		t.Errorf("missing bufLine: row=%d, want -1", r)
+	}
+}
+
+// --- moveCursorChar ---
+
+func TestMoveCursorCharRightRestsOnLineBreak(t *testing.T) {
+	m := newTestModel("foo\nbar\n")
+	m.cursor = document.Pos{Line: 0, Col: 2} // on the second 'o'
+	m.moveCursorChar(1)
+	if m.cursor != (document.Pos{Line: 0, Col: 3}) {
+		t.Errorf("cursor = %+v, want {Line:0 Col:3} (on the line break)", m.cursor)
+	}
+}
+
+func TestMoveCursorCharRightCrossesLineBreak(t *testing.T) {
+	m := newTestModel("foo\nbar\n")
+	m.cursor = document.Pos{Line: 0, Col: 3} // resting on the line break
+	m.moveCursorChar(1)
+	if m.cursor != (document.Pos{Line: 1, Col: 0}) {
+		t.Errorf("cursor = %+v, want {Line:1 Col:0}", m.cursor)
+	}
+}
+
+func TestMoveCursorCharLeftEntersLineBreak(t *testing.T) {
+	m := newTestModel("foo\nbar\n")
+	m.cursor = document.Pos{Line: 1, Col: 0}
+	m.moveCursorChar(-1)
+	if m.cursor != (document.Pos{Line: 0, Col: 3}) {
+		t.Errorf("cursor = %+v, want {Line:0 Col:3} (back on the line break)", m.cursor)
+	}
+}
+
+func TestMoveCursorCharRightStopsAtTrueEOF(t *testing.T) {
+	m := newTestModel("foo") // no trailing newline: nothing past the last char
+	m.cursor = document.Pos{Line: 0, Col: 2}
+	m.moveCursorChar(1)
+	if m.cursor != (document.Pos{Line: 0, Col: 2}) {
+		t.Errorf("cursor = %+v, want unchanged {Line:0 Col:2}", m.cursor)
+	}
+}
+
+func TestMoveCursorCharLeftStopsAtBufferStart(t *testing.T) {
+	m := newTestModel("foo\nbar\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m.moveCursorChar(-1)
+	if m.cursor != (document.Pos{Line: 0, Col: 0}) {
+		t.Errorf("cursor = %+v, want unchanged {Line:0 Col:0}", m.cursor)
+	}
+}
+
+// TestDeleteOnLineBreakJoinsLines is a regression test for navigating the
+// cursor onto a line break with moveCursorChar and deleting it with 'd',
+// treating the line break like any other character.
+func TestDeleteOnLineBreakJoinsLines(t *testing.T) {
+	m := newTestModel("foo\nbar\n")
+	m.cursor = document.Pos{Line: 0, Col: 2} // on the second 'o'
+	m.moveCursorChar(1)                      // now resting on the line break
+	got, _ := m.handleNormal(fakeKey("d"))
+	m2 := got.(Model)
+	if line := m2.buf.Line(0); line != "foobar" {
+		t.Errorf("Line(0) = %q, want %q", line, "foobar")
+	}
+	if m2.cursor != (document.Pos{Line: 0, Col: 3}) {
+		t.Errorf("cursor = %+v, want {Line:0 Col:3}", m2.cursor)
 	}
 }

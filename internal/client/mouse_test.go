@@ -46,13 +46,14 @@ func TestClickToPosClampsToBeyondLastLine(t *testing.T) {
 
 func TestClickToPosClampsColToLineLen(t *testing.T) {
 	m := newTestModel("hi\n")
-	// "hi" has len 2; normal mode maxCol = 1
+	// "hi" has len 2; a following line exists, so normal mode maxCol = 2
+	// (the cursor may rest on the line break itself).
 	pos, ok := m.clickToPos(99, 0)
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
-	if pos.Col > 1 {
-		t.Errorf("pos.Col = %d should be <= 1 in normal mode", pos.Col)
+	if pos.Col > 2 {
+		t.Errorf("pos.Col = %d should be <= 2 in normal mode", pos.Col)
 	}
 }
 

@@ -202,3 +202,72 @@ func TestMatchingPairPosUnmatchedBracket(t *testing.T) {
 		t.Error("matchingPairPos: found a match for an unclosed bracket, want not found")
 	}
 }
+
+func TestExecuteJoinLinesInsertsSpaceAndStripsIndent(t *testing.T) {
+	m := newTestModel("foo\n    bar\n")
+	m.cursor = document.Pos{Line: 0, Col: 1}
+
+	got, _ := executeJoinLines(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "foo bar" {
+		t.Errorf("Line(0) = %q, want %q", line, "foo bar")
+	}
+	if m2.buf.LineCount() != 2 {
+		t.Errorf("LineCount() = %d, want 2", m2.buf.LineCount())
+	}
+	if m2.cursor != (document.Pos{Line: 0, Col: 3}) {
+		t.Errorf("cursor = %+v, want {Line:0 Col:3}", m2.cursor)
+	}
+}
+
+func TestExecuteJoinLinesNoExtraSpaceWhenLineEndsInWhitespace(t *testing.T) {
+	m := newTestModel("foo \n  bar\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+
+	got, _ := executeJoinLines(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "foo bar" {
+		t.Errorf("Line(0) = %q, want %q", line, "foo bar")
+	}
+}
+
+func TestExecuteJoinLinesNoSpaceBeforeCloseParen(t *testing.T) {
+	m := newTestModel("foo(bar\n)\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+
+	got, _ := executeJoinLines(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "foo(bar)" {
+		t.Errorf("Line(0) = %q, want %q", line, "foo(bar)")
+	}
+}
+
+func TestExecuteJoinLinesEmptyCurrentLine(t *testing.T) {
+	m := newTestModel("\n  bar\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+
+	got, _ := executeJoinLines(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "bar" {
+		t.Errorf("Line(0) = %q, want %q", line, "bar")
+	}
+}
+
+func TestExecuteJoinLinesOnLastLineIsNoop(t *testing.T) {
+	m := newTestModel("foo")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+
+	got, cmd := executeJoinLines(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "foo" {
+		t.Errorf("Line(0) = %q, want %q", line, "foo")
+	}
+	if cmd != nil {
+		t.Error("cmd = non-nil, want nil for a no-op join")
+	}
+}

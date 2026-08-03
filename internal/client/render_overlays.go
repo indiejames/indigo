@@ -801,6 +801,7 @@ var helpEntries = []helpEntry{
 	{key: "O", desc: "New line above"},
 	{key: "d", desc: "Delete selection"},
 	{key: "c", desc: "Change selection (delete + insert)"},
+	{key: "J", desc: "Join line with the line below"},
 	{key: "y", desc: "Yank (copy) selection"},
 	{key: "u", desc: "Undo"},
 	{key: "U", desc: "Redo"},

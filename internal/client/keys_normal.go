@@ -157,6 +157,9 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "K":
 		return m, m.fetchHover()
 
+	case "J":
+		return executeJoinLines(m)
+
 	case "D":
 		if len(m.diagsAtPos(m.cursor.Line, m.cursor.Col)) > 0 {
 			m.diagPopup = !m.diagPopup
@@ -309,12 +312,12 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "h", "left":
 		m.applyToAllCursors(func(m *Model) {
 			m.sel = nil
-			m.moveCursor(0, -1)
+			m.moveCursorChar(-1)
 		})
 	case "l", "right":
 		m.applyToAllCursors(func(m *Model) {
 			m.sel = nil
-			m.moveCursor(0, 1)
+			m.moveCursorChar(1)
 		})
 	case "j", "down":
 		m.applyToAllCursors(func(m *Model) {

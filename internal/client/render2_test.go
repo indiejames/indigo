@@ -49,9 +49,9 @@ func TestRenderLineChunkTrailingEmptyLineReverseSelection(t *testing.T) {
 	// instead of the plain "~" shortcut.
 	m := newTestModel("a\nb\n")
 	m.sel = &Selection{
-		Anchor: document.Pos{Line: 0, Col: 0},
-		Head:   document.Pos{Line: 2, Col: 0},
-	}
+		Anchor: document.Pos{Line: 2, Col: 0},
+		Head:   document.Pos{Line: 0, Col: 0},
+ 	}
 	m.cursor = document.Pos{Line: 0, Col: 0}
 
 	cw := 80

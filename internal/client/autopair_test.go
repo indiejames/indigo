@@ -7,10 +7,14 @@ import (
 	"github.com/indiejames/indigo/internal/highlight"
 )
 
-func newAutoPairTSTestModel(content string) Model {
+func newAutoPairTSTestModel(t *testing.T, content string) Model {
+	t.Helper()
 	m := newAutoPairTestModel(content)
 	m.buf = document.New("test.ts", content)
 	m.hlr = highlight.New("test.ts")
+	if m.hlr == nil {
+		t.Skip("no TypeScript highlighter registered; run with -tags lang_all (or lang_typescript)")
+	}
 	return m
 }
 
@@ -159,7 +163,7 @@ func TestAutoPairBraceExpandsToBlockPreservingIndent(t *testing.T) {
 }
 
 func TestAutoPairBraceExpandsToBlockForFunctionBody(t *testing.T) {
-	m := newAutoPairTSTestModel("function foo() ")
+	m := newAutoPairTSTestModel(t, "function foo() ")
 	m.cursor.Col = len([]rune("function foo() "))
 	m2, _ := m.handleInsert(fakeKey("{"))
 	got := m2.(Model)
@@ -176,7 +180,7 @@ func TestAutoPairBraceExpandsToBlockForFunctionBody(t *testing.T) {
 }
 
 func TestAutoPairBraceDoesNotExpandForImportList(t *testing.T) {
-	m := newAutoPairTSTestModel("import  from 'foo'")
+	m := newAutoPairTSTestModel(t, "import  from 'foo'")
 	m.cursor.Col = len([]rune("import ")) // right after "import "
 	m2, _ := m.handleInsert(fakeKey("{"))
 	got := m2.(Model)

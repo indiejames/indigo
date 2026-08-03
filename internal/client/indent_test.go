@@ -8,10 +8,14 @@ import (
 	"github.com/indiejames/indigo/internal/highlight"
 )
 
-func newAutoPairGoTestModel(content string) Model {
+func newAutoPairGoTestModel(t *testing.T, content string) Model {
+	t.Helper()
 	m := newAutoPairTestModel(content)
 	m.buf = document.New("test.go", content)
 	m.hlr = highlight.New("test.go")
+	if m.hlr == nil {
+		t.Skip("no Go highlighter registered; run with -tags lang_all (or lang_go)")
+	}
 	return m
 }
 
@@ -118,7 +122,7 @@ func TestEnterMatchesEnclosingBlockIndentBeforeCloser(t *testing.T) {
 	// dedented to match "if x {", not "bar()"'s deeper indent — Phase 1's
 	// heuristic alone can't do this, since the last char before the cursor
 	// is ')', which doesn't signal an indent change either way.
-	m := newAutoPairGoTestModel("func foo() {\n\tif x {\n\t\tbar()}\n}\n")
+	m := newAutoPairGoTestModel(t, "func foo() {\n\tif x {\n\t\tbar()}\n}\n")
 	m.cursor = document.Pos{Line: 2, Col: len([]rune("\t\tbar()"))} // right before '}'
 	m2, _ := m.handleInsert(fakeKey("enter"))
 	got := m2.(Model)

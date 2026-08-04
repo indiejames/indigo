@@ -142,6 +142,8 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 | `a`          | Enter insert mode, cursor after current char |
 | `A`          | Enter insert mode at end of line             |
 | `o` / `O`    | Open new line below / above                  |
+| `Mj` / `Mk`  | Move current/selected line(s) down / up      |
+| `Shift+Down` / `Shift+Up` | Move current/selected line(s) down / up (repeatable) |
 | `u` / `U`    | Undo / redo                                  |
 | `K`          | Show hover documentation (LSP)               |
 | `/`          | Enter search mode                            |

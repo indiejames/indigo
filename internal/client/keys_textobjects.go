@@ -1,6 +1,8 @@
 package client
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/indiejames/indigo/internal/document"
@@ -663,4 +665,74 @@ func executeJoinLines(m Model) (tea.Model, tea.Cmd) {
 	m.sel = nil
 	m.cursor = document.Pos{Line: m.cursor.Line, Col: len(cur)}
 	return applyBatch(m, ops)
+}
+
+// executeMoveLineUp moves the current line (or every selected line) up by
+// one line, swapping places with the line above it.
+func executeMoveLineUp(m Model) (tea.Model, tea.Cmd) {
+	return moveLines(m, -1)
+}
+
+// executeMoveLineDown moves the current line (or every selected line) down by
+// one line, swapping places with the line below it.
+func executeMoveLineDown(m Model) (tea.Model, tea.Cmd) {
+	return moveLines(m, 1)
+}
+
+// moveLines swaps the selected line range (or the cursor line, via
+// selectionLineRange) with its neighboring line in the direction of dir (-1
+// up, +1 down). The cursor and selection shift by dir so repeated presses
+// keep moving the same block further.
+//
+// The whole-line delete mirrors deleteSelection's IsLine branch: it consumes
+// the newline after its last line when a following line exists, and
+// otherwise stops at that line's content, since the last line in a buffer
+// with no trailing "\n" has none to consume.
+func moveLines(m Model, dir int) (tea.Model, tea.Cmd) {
+	startLine, endLine := m.selectionLineRange()
+	lc := m.buf.LineCount()
+	if dir < 0 && startLine == 0 {
+		return m, nil
+	}
+	if dir > 0 && endLine >= lc-1 {
+		return m, nil
+	}
+
+	block := make([]string, 0, endLine-startLine+1)
+	for ln := startLine; ln <= endLine; ln++ {
+		block = append(block, m.buf.Line(ln))
+	}
+
+	var from, to int
+	var lines []string
+	if dir < 0 {
+		from, to = startLine-1, endLine
+		lines = append(append([]string{}, block...), m.buf.Line(from))
+	} else {
+		from, to = startLine, endLine+1
+		lines = append([]string{m.buf.Line(to)}, block...)
+	}
+
+	delOp := document.Op{ClientID: m.clientID(), Type: document.OpDelete, FromLine: from, FromCol: 0}
+	newText := strings.Join(lines, "\n")
+	if to+1 < lc {
+		delOp.ToLine, delOp.ToCol = to+1, 0
+		newText += "\n"
+	} else {
+		delOp.ToLine, delOp.ToCol = to, m.buf.LineLen(to)
+	}
+	insOp := document.Op{
+		ClientID:   m.clientID(),
+		Type:       document.OpInsert,
+		InsertLine: from,
+		InsertCol:  0,
+		InsertText: newText,
+	}
+
+	m.cursor.Line += dir
+	if m.sel != nil {
+		m.sel.Anchor.Line += dir
+		m.sel.Head.Line += dir
+	}
+	return applyBatch(m, []document.Op{delOp, insOp})
 }

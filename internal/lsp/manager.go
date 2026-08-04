@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ServerConfig describes how to launch a language server for a set of file extensions.
@@ -14,13 +15,23 @@ type ServerConfig struct {
 	Args       []string
 }
 
+// startRetryCooldown is how long clientForPath waits before retrying a
+// language server whose most recent start attempt failed (not found, or
+// failed/timed out during initialize). Without this, a broken server gets
+// re-spawned on every DidOpen/DidChange call — one per keystroke — each
+// paying the full cost of a process spawn plus (on an initialize timeout)
+// up to Client.Initialize's 30s deadline, all running concurrently as
+// unbounded background goroutines.
+const startRetryCooldown = time.Minute
+
 // Manager holds one Client per language, lazily started.
 type Manager struct {
-	mu          sync.Mutex
-	clients     map[string]*Client // languageID → Client
-	servers     []ServerConfig
-	rootDir     string
-	fileContent map[string]string // path → content stored by DidOpen for ensureOpened
+	mu           sync.Mutex
+	clients      map[string]*Client   // languageID → Client
+	failedStarts map[string]time.Time // languageID → time of last failed start attempt
+	servers      []ServerConfig
+	rootDir      string
+	fileContent  map[string]string // path → content stored by DidOpen for ensureOpened
 }
 
 // NewManager creates a Manager for the given workspace root.
@@ -28,10 +39,11 @@ type Manager struct {
 // should come first so they shadow the built-in defaults.
 func NewManager(rootDir string, servers []ServerConfig) *Manager {
 	return &Manager{
-		clients:     make(map[string]*Client),
-		servers:     servers,
-		rootDir:     rootDir,
-		fileContent: make(map[string]string),
+		clients:      make(map[string]*Client),
+		failedStarts: make(map[string]time.Time),
+		servers:      servers,
+		rootDir:      rootDir,
+		fileContent:  make(map[string]string),
 	}
 }
 
@@ -67,6 +79,10 @@ func (m *Manager) clientForPath(path string) *Client {
 		m.mu.Unlock()
 		return c
 	}
+	if last, failed := m.failedStarts[langID]; failed && time.Since(last) < startRetryCooldown {
+		m.mu.Unlock()
+		return nil
+	}
 	m.mu.Unlock()
 
 	// Slow path: start and initialize the server without holding the mutex so
@@ -82,10 +98,12 @@ func (m *Manager) clientForPath(path string) *Client {
 	}
 	if err != nil {
 		// Language server not installed — silently skip.
+		m.recordFailedStart(langID)
 		return nil
 	}
 	if err := c.Initialize(); err != nil {
 		c.Shutdown()
+		m.recordFailedStart(langID)
 		return nil
 	}
 
@@ -98,8 +116,15 @@ func (m *Manager) clientForPath(path string) *Client {
 		return existing
 	}
 	m.clients[langID] = c
+	delete(m.failedStarts, langID)
 	m.mu.Unlock()
 	return c
+}
+
+func (m *Manager) recordFailedStart(langID string) {
+	m.mu.Lock()
+	m.failedStarts[langID] = time.Now()
+	m.mu.Unlock()
 }
 
 // DidOpen notifies the appropriate language server that path was opened.

@@ -615,6 +615,7 @@ var defaultCaptureTable = map[string]captureEntry{
 	"function.method.call":  {hexToANSI("#DCDCAA"), 54},
 	"type":                  {hexToANSI("#4EC9B0"), 50},
 	"type.builtin":          {hexToANSI("#4EC9B0"), 50},
+	"constructor":           {hexToANSI("#4EC9B0"), 50},
 	"namespace":             {hexToANSI("#4EC9B0"), 48},
 	"module":                {hexToANSI("#4EC9B0"), 48},
 	"tag":                   {hexToANSI("#569CD6"), 46},
@@ -622,9 +623,11 @@ var defaultCaptureTable = map[string]captureEntry{
 	"variable.builtin":      {hexToANSI("#569CD6"), 42},
 	"variable":              {hexToANSI("#9CDCFE"), 40},
 	"label":                 {hexToANSI("#9CDCFE"), 38},
+	"punctuation":           {hexToANSI("#D4D4D4"), 20},
 	"punctuation.bracket":   {hexToANSI("#D4D4D4"), 20},
 	"punctuation.delimiter": {hexToANSI("#D4D4D4"), 20},
 	"punctuation.special":   {hexToANSI("#C586C0"), 20},
+	"error":                 {hexToANSI("#F44747"), 95},
 
 	// markup.* — used by markdown and other markup grammars (modern nvim-treesitter naming).
 	// captureANSI only prefix-matches on the first dot, so markup.heading.1 falls back to
@@ -715,207 +718,3 @@ func captureANSI(name string) (string, int, bool) {
 	}
 	return "", 0, false
 }
-
-// --- custom queries for languages where nvim-treesitter queries use inheritance ---
-
-const typescriptHighlightQuery = `
-(comment) @comment
-
-[
-  (string)
-  (template_string)
-] @string
-
-(number) @number
-
-[
-  "break" "case" "catch" "class" "const" "continue" "debugger" "default"
-  "delete" "do" "else" "export" "extends" "finally" "for" "from" "function"
-  "get" "if" "import" "in" "instanceof" "let" "new" "of" "return" "set"
-  "static" "switch" "target" "throw" "try" "typeof" "var" "void" "while"
-  "with" "yield" "async" "await" "implements" "interface" "private"
-  "protected" "public" "readonly" "enum" "abstract" "declare" "namespace"
-  "type" "override" "satisfies" "as" "module"
-] @keyword
-
-[
-  (true)
-  (false)
-  (null)
-  (undefined)
-] @constant.builtin
-
-(type_identifier) @type
-
-(function_declaration name: (identifier) @function)
-(method_definition name: (property_identifier) @function)
-(function_signature name: (identifier) @function)
-(method_signature name: (property_identifier) @function)
-
-(call_expression function: (identifier) @function.call)
-(call_expression function: (member_expression property: (property_identifier) @function.call))
-(new_expression constructor: (identifier) @type)
-`
-
-const javascriptHighlightQuery = `
-(comment) @comment
-
-[
-  (string)
-  (template_string)
-] @string
-
-(number) @number
-
-[
-  "break" "case" "catch" "class" "const" "continue" "debugger" "default"
-  "delete" "do" "else" "export" "extends" "finally" "for" "from" "function"
-  "get" "if" "import" "in" "instanceof" "let" "new" "of" "return" "set"
-  "static" "switch" "target" "throw" "try" "typeof" "var" "void" "while"
-  "with" "yield" "async" "await"
-] @keyword
-
-[
-  (true)
-  (false)
-  (null)
-  (undefined)
-] @constant.builtin
-
-(function_declaration name: (identifier) @function)
-(method_definition name: (property_identifier) @function)
-
-(call_expression function: (identifier) @function.call)
-(call_expression function: (member_expression property: (property_identifier) @function.call))
-`
-
-const cppHighlightQuery = `
-(comment) @comment
-
-[
-  (string_literal)
-  (raw_string_literal)
-  (char_literal)
-] @string
-
-(number_literal) @number
-
-[
-  "break" "case" "catch" "class" "const" "constexpr" "consteval" "constinit"
-  "continue" "co_await" "co_return" "co_yield" "default" "delete" "do" "else"
-  "enum" "explicit" "export" "extern" "final" "for" "friend" "if" "inline"
-  "mutable" "namespace" "new" "noexcept" "operator" "override" "private"
-  "protected" "public" "register" "requires" "return" "sizeof" "static"
-  "static_assert" "struct" "switch" "template" "throw" "try"
-  "typedef" "typename" "union" "using" "virtual" "volatile" "while"
-] @keyword
-
-(true) @constant.builtin
-(false) @constant.builtin
-
-"nullptr" @constant.builtin
-
-(type_identifier) @type
-
-(function_declarator declarator: (identifier) @function)
-
-(call_expression function: (identifier) @function.call)
-(call_expression function: (field_expression field: (field_identifier) @function.call))
-`
-
-const htmlHighlightQuery = `
-(comment) @comment
-
-(quoted_attribute_value) @string
-
-(attribute_name) @attribute
-
-[
-  (start_tag (tag_name) @tag)
-  (end_tag (tag_name) @tag)
-  (self_closing_tag (tag_name) @tag)
-]
-`
-
-const phpHighlightQuery = `
-(comment) @comment
-
-[
-  (string)
-  (heredoc)
-  (nowdoc)
-] @string
-
-(integer) @number
-(float) @number
-
-[
-  "array" "break" "case" "catch" "class" "clone" "const"
-  "continue" "declare" "default" "do" "echo" "else" "elseif"
-  "enddeclare" "endfor" "endforeach" "endif" "endswitch" "endwhile"
-  "enum" "extends" "finally" "fn" "for" "foreach" "function"
-  "global" "goto" "if" "implements" "include" "include_once" "instanceof"
-  "insteadof" "interface" "list" "match" "namespace" "new" "print"
-  "private" "protected" "public" "readonly" "require" "require_once"
-  "return" "static" "switch" "throw" "trait" "try" "unset" "use"
-  "while" "yield" "abstract" "final"
-] @keyword
-
-(boolean) @constant.builtin
-(null) @constant.builtin
-
-(named_type (name) @type)
-
-(function_definition name: (name) @function)
-(method_declaration name: (name) @function)
-
-(function_call_expression function: (name) @function.call)
-(member_call_expression name: (name) @function.call)
-`
-
-const svelteHighlightQuery = `
-(comment) @comment
-
-(quoted_attribute_value) @string
-
-(attribute_name) @attribute
-
-[
-  (start_tag (tag_name) @tag)
-  (end_tag (tag_name) @tag)
-  (self_closing_tag (tag_name) @tag)
-]
-`
-
-const gdscriptHighlightQuery = `
-(comment) @comment
-
-[
-  (string)
-  (string_name)
-] @string
-
-(float) @number
-(integer) @number
-
-[
-  (true)
-  (false)
-] @constant.builtin
-
-(null) @constant
-
-[
-  "and" "as" "await" "break" "class" "const" "continue" "elif" "else"
-  "enum" "extends" "for" "func" "if" "in" "is" "match" "not" "or"
-  "pass" "return" "signal" "var" "while"
-] @keyword
-
-(function_definition (name) @function)
-(constructor_definition "_init" @function)
-
-(call (identifier) @function.call)
-(attribute_call (identifier) @function.method.call)
-
-(type (identifier) @type)
-`

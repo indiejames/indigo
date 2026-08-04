@@ -9,7 +9,7 @@ import (
 
 func init() {
 	fn := func() (*sitter.Language, []byte) {
-		return sitter.NewLanguage(tsx.GetLanguage()), []byte(typescriptHighlightQuery)
+		return sitter.NewLanguage(tsx.GetLanguage()), []byte(tsxHighlightQuery)
 	}
 	registerLang(fn, ".tsx")
 }

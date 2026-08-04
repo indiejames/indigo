@@ -621,6 +621,12 @@ func (s *editorService) DocumentSymbols(_ context.Context, call proto.EditorServ
 }
 
 func (s *editorService) Format(_ context.Context, call proto.EditorService_format) error {
+	// Format blocks on a synchronous LSP round trip (up to 10s — see
+	// lsp.Client.Format) when no dedicated formatter is configured. Without
+	// this, capnp serializes all calls on a connection behind it, so a slow
+	// LSP formatter freezes typing (ApplyOp) for the whole client window.
+	call.Go()
+
 	bufID := call.Args().BufId()
 
 	s.mu.Lock()

@@ -78,6 +78,22 @@ func (c *jsonrpcConn) Call(ctx context.Context, method string, params any) (json
 	}
 }
 
+// failPending wakes every in-flight Call with a "connection closed" error
+// instead of leaving it to block until its own context deadline. Called once
+// readLoop exits (EOF, i.e. the language server process died or its pipe
+// closed) so callers fail fast rather than waiting out a timeout that can
+// never be satisfied.
+func (c *jsonrpcConn) failPending() {
+	c.pending.Range(func(key, value any) bool {
+		ch := value.(chan *jsonrpcMsg)
+		select {
+		case ch <- &jsonrpcMsg{Error: &jsonrpcError{Code: -32000, Message: "connection closed"}}:
+		default:
+		}
+		return true
+	})
+}
+
 // Notify sends a notification (no response expected).
 func (c *jsonrpcConn) Notify(method string, params any) error {
 	raw, err := json.Marshal(params)
@@ -99,6 +115,7 @@ func (c *jsonrpcConn) write(msg jsonrpcMsg) error {
 }
 
 func (c *jsonrpcConn) readLoop(r io.Reader) {
+	defer c.failPending()
 	br := bufio.NewReader(r)
 	for {
 		// Read headers until blank line.

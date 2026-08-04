@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -193,10 +195,19 @@ func (a App) handleNewFileInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(a.workDir, path)
 		}
-		if _, err := os.Stat(filepath.Dir(path)); err != nil {
-			// Parent directory doesn't exist — ask before creating it,
-			// rather than opening a buffer that will fail to save later.
-			a.newFileMkdirConfirm = &path
+		if info, err := os.Stat(filepath.Dir(path)); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				// Parent directory doesn't exist — ask before creating it,
+				// rather than opening a buffer that will fail to save later.
+				a.newFileMkdirConfirm = &path
+				return a, nil
+			}
+			// Other error (permission denied, I/O error, etc.)
+			a.status = fmt.Sprintf("E: cannot access parent directory: %v", err)
+			return a, nil
+		} else if !info.IsDir() {
+			// Parent exists but is not a directory.
+			a.status = fmt.Sprintf("E: parent path is not a directory: %s", filepath.Dir(path))
 			return a, nil
 		}
 		return a, a.doOpenFile(path)

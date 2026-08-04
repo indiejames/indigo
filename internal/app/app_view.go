@@ -213,6 +213,11 @@ func renderNewFileMkdirConfirm(dir string, w int) string {
 		innerW = w * 2 / 3
 	}
 	innerW = max(innerW, 34)
+	// Ensure the dialog (including borders) fits within the terminal width.
+	// RoundedBorder adds 2 chars on each side.
+	if w > 0 && innerW+4 > w {
+		innerW = w - 4
+	}
 
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

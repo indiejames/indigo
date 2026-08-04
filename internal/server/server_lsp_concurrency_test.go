@@ -188,3 +188,109 @@ func TestFormatDiscardsStaleResultOnConcurrentEdit(t *testing.T) {
 		t.Fatalf("buffer content = %q, want %q — the concurrent insert must survive Format's stale (pre-edit) result", got, want)
 	}
 }
+
+// TestFormatDiscardsStaleResultAfterBufferSwap is a regression test: version
+// alone is not enough to detect a stale Format result, because
+// document.New() always starts a fresh buffer at version 0. If entry.buf is
+// replaced by a brand-new *document.Buffer while an earlier Format call is
+// still running (e.g. a second, faster concurrent Format call finishing
+// first), the new buffer's version can coincidentally equal the first
+// call's baseVersion despite being a completely different object — a
+// version-only check would then let the first call's stale result clobber
+// the second call's already-committed one. Format must also require the
+// buffer pointer itself to be unchanged. See the entry.buf == baseBuf check
+// in Format (server_lsp.go).
+func TestFormatDiscardsStaleResultAfterBufferSwap(t *testing.T) {
+	dir := t.TempDir()
+	startedA := filepath.Join(dir, "started-a")
+	releaseA := filepath.Join(dir, "release-a")
+	// Formatter A: signals it has started, then blocks until told to
+	// proceed, then uppercases — simulating a slow format on the buffer's
+	// original (version 0) content.
+	scriptA := filepath.Join(dir, "formatter-a.sh")
+	if err := os.WriteFile(scriptA, []byte(
+		"#!/bin/sh\ntouch "+startedA+"\nwhile [ ! -f "+releaseA+" ]; do sleep 0.02; done\ntr a-z A-Z\n",
+	), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Formatters: []config.FormatterConfig{
+			{Extensions: []string{"swap"}, Command: scriptA},
+		},
+	}
+	fmtMgr := format.NewManager(nil, cfg, dir)
+
+	s := &editorService{
+		buffers: map[uint32]*bufferEntry{
+			1: {buf: document.New("/tmp/x.swap", "hello\n")},
+		},
+		fmtMgr:    fmtMgr,
+		lspMgr:    &lsp.Manager{},
+		pluginMgr: &plugin.Manager{},
+	}
+	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
+
+	// Start the slow Format call A; it will block until releaseA appears.
+	formatADone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		fut, rel := client.Format(ctx, func(p proto.EditorService_format_Params) error {
+			p.SetBufId(1)
+			return nil
+		})
+		defer rel()
+		_, err := fut.Struct()
+		formatADone <- err
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(startedA); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("formatter A never started (marker file never appeared)")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Format A is now genuinely blocked, holding baseVersion=0 from the
+	// original buffer object. Swap the formatter to one that runs
+	// instantly and produces different output, then run Format again
+	// (call B) to completion — this installs a brand-new *document.Buffer
+	// (also version 0) before A ever resumes.
+	cfg.Formatters[0].Command = "sh"
+	cfg.Formatters[0].Args = []string{"-c", "rev"}
+	fut, rel := client.Format(context.Background(), func(p proto.EditorService_format_Params) error {
+		p.SetBufId(1)
+		return nil
+	})
+	_, err := fut.Struct()
+	rel()
+	if err != nil {
+		t.Fatalf("Format call B errored: %v", err)
+	}
+	const wantAfterB = "olleh\n" // rev reverses each line's characters, keeping the trailing newline
+	if got := s.buffers[1].buf.Content(); got != wantAfterB {
+		t.Fatalf("buffer content after Format B = %q, want %q", got, wantAfterB)
+	}
+	bufAfterB := s.buffers[1].buf
+
+	// Now let formatter A finish and commit (or, pre-fix, incorrectly
+	// overwrite B's result).
+	if err := os.WriteFile(releaseA, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-formatADone; err != nil {
+		t.Fatalf("Format call A errored: %v", err)
+	}
+
+	if got := s.buffers[1].buf; got != bufAfterB {
+		t.Fatalf("entry.buf changed after Format A's stale write — Format A clobbered Format B's buffer despite matching version")
+	}
+	if got := s.buffers[1].buf.Content(); got != wantAfterB {
+		t.Fatalf("buffer content = %q, want %q — Format A's stale result (from the pre-swap buffer) must not overwrite Format B's already-committed buffer", got, wantAfterB)
+	}
+}

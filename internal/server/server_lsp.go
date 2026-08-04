@@ -637,7 +637,8 @@ func (s *editorService) Format(_ context.Context, call proto.EditorService_forma
 	}
 	path := entry.buf.Path()
 	content := entry.buf.Content()
-	baseVersion := entry.buf.Version()
+	baseBuf := entry.buf
+	baseVersion := baseBuf.Version()
 	s.mu.Unlock()
 
 	formatted, changed, fmtErr := s.fmtMgr.Format(path, content)
@@ -650,7 +651,12 @@ func (s *editorService) Format(_ context.Context, call proto.EditorService_forma
 	if changed {
 		s.mu.Lock()
 		entry, ok = s.buffers[bufID]
-		if ok && entry.buf.Version() == baseVersion {
+		// Both checks matter: version alone isn't enough because
+		// document.New() always starts a fresh buffer at version 0, so a
+		// buffer swapped in by something else (e.g. a second concurrent
+		// Format call finishing first) could coincidentally match
+		// baseVersion despite being a different buffer entirely.
+		if ok && entry.buf == baseBuf && entry.buf.Version() == baseVersion {
 			newBuf := document.New(path, formatted)
 			newBuf.MarkDirty()
 			entry.buf = newBuf

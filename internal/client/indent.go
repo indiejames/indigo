@@ -105,16 +105,47 @@ func (m Model) splitInsideBracketPair() (Model, tea.Cmd) {
 	return applyOp(m, op)
 }
 
-// dedentTarget consults the buffer's tree-sitter indent query (when one is
-// available for its language) for the case where the next token after the
-// cursor closes the block/call/group enclosing it — see
-// highlight.Highlighter.DedentTarget for exactly what this does and doesn't
-// cover.
-func (m Model) dedentTarget() (string, bool) {
+// dedentTargetAt consults the buffer's tree-sitter indent query (when one
+// is available for its language) for the case where the next token at
+// (line, col) — skipping same-line whitespace — closes the block/call/group
+// enclosing it — see highlight.Highlighter.DedentTarget for exactly what
+// this does and doesn't cover.
+func (m Model) dedentTargetAt(line, col int) (string, bool) {
 	if m.hlr == nil {
 		return "", false
 	}
-	return m.hlr.DedentTarget([]byte(m.buf.Content()), m.cursor.Line, m.cursor.Col)
+	return m.hlr.DedentTarget([]byte(m.buf.Content()), line, col)
+}
+
+// contextIndent returns the indentation appropriate for content inserted
+// into prevLine (the whole line immediately before it) at prevCol, on
+// buffer line prevLineNum (pass -1 when prevLine isn't a real buffer line,
+// e.g. it was synthesized as empty for the top of the file): matching the
+// enclosing block's indent when trailing content on that same line, after
+// prevCol, closes it (see dedentTarget) — the narrow case of splicing a new
+// line in right before an already-typed closer — one level deeper than
+// prevLine after an opening bracket or trailing ':', otherwise prevLine's
+// own indent. This is the same rule handleEnter uses for a freshly typed
+// line, generalized to a position that isn't necessarily the cursor's.
+//
+// Deliberately does not look at what follows on a *different* line (e.g.
+// the line a moved-down block will land in front of): dedentTarget only
+// answers "does trailing same-line content close an enclosing block", and
+// stretching it across a line boundary would dedent content down to the
+// enclosing scope's own level even when a sibling statement right above
+// already establishes the correct (deeper) body indent.
+func (m Model) contextIndent(prevLine string, prevLineNum, prevCol int) string {
+	if prevLineNum >= 0 {
+		if target, ok := m.dedentTargetAt(prevLineNum, prevCol); ok {
+			return target
+		}
+	}
+	runs := []rune(prevLine)
+	indent := string(runs[:leadingWhitespace(runs)])
+	if indentOpeners[lastNonSpaceBefore(runs, prevCol)] {
+		indent += m.indentUnit()
+	}
+	return indent
 }
 
 // handleEnter inserts a newline with semantic indentation: the same level
@@ -127,16 +158,7 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 		return m.splitInsideBracketPair()
 	}
 
-	var indent string
-	if target, ok := m.dedentTarget(); ok {
-		indent = target
-	} else {
-		indent = m.currentLineIndent()
-		runes := []rune(m.buf.Line(m.cursor.Line))
-		if indentOpeners[lastNonSpaceBefore(runes, m.cursor.Col)] {
-			indent += m.indentUnit()
-		}
-	}
+	indent := m.contextIndent(m.buf.Line(m.cursor.Line), m.cursor.Line, m.cursor.Col)
 
 	op := document.Op{
 		ClientID:   m.clientID(),
@@ -147,4 +169,47 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 	}
 	m.cursor = document.Pos{Line: m.cursor.Line + 1, Col: len(indent)}
 	return applyOp(m, op)
+}
+
+// blockBaseIndent returns the leading whitespace of the first non-blank
+// line in lines, used as the reference point a moved or pasted block's
+// indentation is shifted relative to. Blank lines are skipped so an empty
+// leading line in the block doesn't masquerade as zero indentation; ok is
+// false when every line is blank, since there's then nothing to anchor a
+// shift to.
+func blockBaseIndent(lines []string) (indent string, ok bool) {
+	for _, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		runs := []rune(l)
+		return string(runs[:leadingWhitespace(runs)]), true
+	}
+	return "", false
+}
+
+// reindentLines shifts every non-blank line in lines by delta characters of
+// unit's whitespace character — added at the start when delta > 0, removed
+// when delta < 0 — preserving each line's indentation relative to the
+// others in the block. Blank lines are left untouched.
+func reindentLines(lines []string, unit string, delta int) []string {
+	if delta == 0 || unit == "" || len(lines) == 0 {
+		return lines
+	}
+	ch := unit[:1]
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			out[i] = line
+			continue
+		}
+		if delta > 0 {
+			out[i] = strings.Repeat(ch, delta) + line
+			continue
+		}
+		runs := []rune(line)
+		n := leadingWhitespace(runs)
+		out[i] = string(runs[min(n, -delta):])
+	}
+	return out
 }

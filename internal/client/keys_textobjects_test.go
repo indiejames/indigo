@@ -443,3 +443,123 @@ func TestExecuteMoveLineDownMovesWholeSelection(t *testing.T) {
 		t.Errorf("sel = %+v, want Anchor.Line=1 Head.Line=2", m2.sel)
 	}
 }
+
+// TestExecuteMoveLineDownIndentsAfterOpenBrace is a regression test: a line
+// moved down to land right after an opener ("{", "(", "[", or a trailing
+// ':') should pick up one more level of indent, the same rule handleEnter
+// uses for a freshly typed line there.
+func TestExecuteMoveLineDownIndentsAfterOpenBrace(t *testing.T) {
+	m := newTestModel("foo\nif x {\nbar\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+
+	got, _ := executeMoveLineDown(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "if x {" {
+		t.Errorf("Line(0) = %q, want %q", line, "if x {")
+	}
+	if line := m2.buf.Line(1); line != "\tfoo" {
+		t.Errorf("Line(1) = %q, want %q (indented one level after the open brace)", line, "\tfoo")
+	}
+	if line := m2.buf.Line(2); line != "bar" {
+		t.Errorf("Line(2) = %q, want %q", line, "bar")
+	}
+}
+
+// TestExecuteMoveLineUpDedentsWhenLeavingBraceBlock is a regression test:
+// moving the reverse direction (out from under an opener) should dedent
+// back, settling on each press rather than only once the user stops.
+func TestExecuteMoveLineUpDedentsWhenLeavingBraceBlock(t *testing.T) {
+	m := newTestModel("if x {\n\tfoo\nbar\n")
+	m.cursor = document.Pos{Line: 1, Col: 1}
+
+	got, _ := executeMoveLineUp(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "foo" {
+		t.Errorf("Line(0) = %q, want %q (dedented after leaving the brace block)", line, "foo")
+	}
+	if line := m2.buf.Line(1); line != "if x {" {
+		t.Errorf("Line(1) = %q, want %q", line, "if x {")
+	}
+}
+
+// TestExecuteMoveLineDownPreservesRelativeIndentWithinBlock is a
+// regression test: reindenting a multi-line selection shifts every line by
+// the same amount rather than flattening it, so internal nesting survives
+// the move.
+func TestExecuteMoveLineDownPreservesRelativeIndentWithinBlock(t *testing.T) {
+	m := newTestModel("foo\n\tbar\nif x {\nqux\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: 0, Col: 0},
+		Head:   document.Pos{Line: 1, Col: 0},
+		IsLine: true,
+	}
+
+	got, _ := executeMoveLineDown(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "if x {" {
+		t.Errorf("Line(0) = %q, want %q", line, "if x {")
+	}
+	if line := m2.buf.Line(1); line != "\tfoo" {
+		t.Errorf("Line(1) = %q, want %q", line, "\tfoo")
+	}
+	if line := m2.buf.Line(2); line != "\t\tbar" {
+		t.Errorf("Line(2) = %q, want %q (nesting relative to foo preserved)", line, "\t\tbar")
+	}
+}
+
+// TestExecuteMoveLineDownDedentsOneLevelPastNestedBlock is a regression
+// test: moving a statement down past a nested block's closer, so it lands
+// as the last statement in the *enclosing* function body (sibling to the
+// nested block, not inside it), must dedent it to match that body level —
+// not all the way to the function's own declaration indent, which an
+// earlier, overly broad use of DedentTarget produced (it looked at
+// whether the line the block would land *before* opened with a closer,
+// which fires even when a sibling statement right above already
+// establishes the correct body indent).
+func TestExecuteMoveLineDownDedentsOneLevelPastNestedBlock(t *testing.T) {
+	m := newAutoPairGoTestModel(t, "func foo() {\n\tif x {\n\t\tbar()\n\t}\n}\n")
+	m.cursor = document.Pos{Line: 2, Col: 2}
+
+	got, _ := executeMoveLineDown(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(2); line != "\t}" {
+		t.Errorf("Line(2) = %q, want %q", line, "\t}")
+	}
+	if line := m2.buf.Line(3); line != "\tbar()" {
+		t.Errorf("Line(3) = %q, want %q (one level, matching the function body — not \\t\\t, and not fully dedented to \"\")", line, "\tbar()")
+	}
+}
+
+// TestExecuteMoveLineUpIndentsImmediatelyWithSiblingInBlock is a
+// regression test for the exact bug reported against this feature: moving
+// a multi-line selection up into a brace block that already contains an
+// indented sibling statement must indent it on the very first press (to
+// match that sibling), not stay flat until the selection is dragged all
+// the way up past the sibling too.
+func TestExecuteMoveLineUpIndentsImmediatelyWithSiblingInBlock(t *testing.T) {
+	m := newTestModel("if x {\n\ty := 1\n}\nnew1\nnew2\n")
+	m.cursor = document.Pos{Line: 3, Col: 0}
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: 3, Col: 0},
+		Head:   document.Pos{Line: 4, Col: 0},
+		IsLine: true,
+	}
+
+	got, _ := executeMoveLineUp(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(2); line != "\tnew1" {
+		t.Errorf("Line(2) = %q, want %q (indented on the first press, matching the sibling y := 1)", line, "\tnew1")
+	}
+	if line := m2.buf.Line(3); line != "\tnew2" {
+		t.Errorf("Line(3) = %q, want %q", line, "\tnew2")
+	}
+	if line := m2.buf.Line(4); line != "}" {
+		t.Errorf("Line(4) = %q, want %q", line, "}")
+	}
+}

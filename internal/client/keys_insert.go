@@ -303,6 +303,9 @@ func (m Model) handleInsertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		if len(msg.Runes) > 0 {
 			text := string(msg.Runes)
+			if len(m.extraCursors) == 0 && strings.Contains(text, "\n") {
+				return m.insertPastedText(text)
+			}
 			if len(m.extraCursors) > 0 {
 				m2, cmd := applyInsertToAllCursors(m, text)
 				r := msg.Runes[0]
@@ -386,6 +389,36 @@ func (m Model) handleInsertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// insertPastedText inserts multi-line text (from a terminal paste or an
+// IME multi-rune commit) at the cursor, reindenting every line after the
+// first to match the destination context — the same rule handleEnter uses
+// for a freshly typed line there — while preserving the pasted lines'
+// indentation relative to each other. The first line is left untouched
+// since it continues whatever's already before the cursor.
+func (m Model) insertPastedText(text string) (tea.Model, tea.Cmd) {
+	lines := strings.Split(text, "\n")
+	rest := lines[1:]
+	if baseline, ok := blockBaseIndent(rest); ok {
+		target := m.contextIndent(m.buf.Line(m.cursor.Line), m.cursor.Line, m.cursor.Col)
+		delta := len([]rune(target)) - len([]rune(baseline))
+		rest = reindentLines(rest, m.indentUnit(), delta)
+	}
+
+	op := document.Op{
+		ClientID:   m.rpc.ClientID(),
+		Type:       document.OpInsert,
+		InsertLine: m.cursor.Line,
+		InsertCol:  m.cursor.Col,
+		InsertText: strings.Join(append([]string{lines[0]}, rest...), "\n"),
+	}
+	lastLine := lines[0]
+	if len(rest) > 0 {
+		lastLine = rest[len(rest)-1]
+	}
+	m.cursor = document.Pos{Line: m.cursor.Line + len(lines) - 1, Col: len([]rune(lastLine))}
+	return applyOp(m, op)
 }
 
 // completionContinues reports whether msg should narrow an open completion

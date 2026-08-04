@@ -1,6 +1,8 @@
 package client
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/indiejames/indigo/internal/document"
@@ -390,6 +392,8 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		text, err := readClipboard()
 		if err != nil {
 			m.status = "clipboard: " + err.Error()
+		} else if strings.Contains(text, "\n") {
+			return m.insertPastedText(text)
 		} else if text != "" {
 			op := document.Op{
 				ClientID:   m.rpc.ClientID(),

@@ -223,6 +223,16 @@ func convertCaseAllCursors(m Model, join func([]string) string) (Model, tea.Cmd)
 			continue
 		}
 
+		editLine := e.cursor.Line
+		selStart := sel.Anchor.Col
+		selEnd := sel.Head.Col
+		if selStart > selEnd {
+			selStart, selEnd = selEnd, selStart
+		}
+		oldLen := selEnd - selStart + 1
+		newLen := len([]rune(converted))
+		delta := newLen - oldLen
+
 		m.cursor = e.cursor
 		m.sel = sel
 		var delCmd tea.Cmd
@@ -239,11 +249,23 @@ func convertCaseAllCursors(m Model, join func([]string) string) (Model, tea.Cmd)
 		})
 		cmds = append(cmds, insCmd)
 
+		// Translate any already-saved cursors on the same line that are to the
+		// right of this edit to account for the length change.
+		if delta != 0 {
+			for i := range results {
+				if results[i].cursor.Line == editLine && results[i].cursor.Col > selStart {
+					results[i].cursor.Col += delta
+				}
+			}
+		}
+
 		results = append(results, result{m.cursor, e.isPrimary})
 	}
 
-	if openedGroup && len(m.currentGroup) > 0 {
-		m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: snapBefore})
+	if openedGroup {
+		if len(m.currentGroup) > 0 {
+			m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: snapBefore})
+		}
 		m.currentGroup = nil
 	}
 

@@ -137,3 +137,63 @@ func TestFindIdentifierAt(t *testing.T) {
 		t.Error("findIdentifierAt on whitespace should return ok=false")
 	}
 }
+
+// TestExecuteCaseConvertMultipleCursorsSameLine is a regression test: when
+// multiple cursors are on the same line and processed back-to-front, a
+// conversion that changes the length of the text to the left of an
+// already-processed cursor must adjust that cursor's saved position so it
+// points to the correct column after all edits complete.
+func TestExecuteCaseConvertMultipleCursorsSameLine(t *testing.T) {
+	// Line with two identifiers where converting the right one to snake_case
+	// makes it longer, then converting the left one affects positions.
+	// Using identifiers that change length when converted:
+	// "myVar" (5 chars) -> "my_var" (6 chars, +1)
+	// "aB" (2 chars) -> "a_b" (3 chars, +1)
+	m := newTestModel("aB myVar\n")
+	m.rpc = &RPC{}
+	// Place cursors: one at col 0 (on "aB"), one at col 3 (on "myVar")
+	m.cursor = document.Pos{Line: 0, Col: 3}
+	m.extraCursors = []ExtraCursor{{pos: document.Pos{Line: 0, Col: 0}}}
+
+	m2, _ := executeCaseConvertSnake(m)
+	got := m2.(Model)
+
+	want := "a_b my_var"
+	if got.buf.Line(0) != want {
+		t.Errorf("line = %q, want %q", got.buf.Line(0), want)
+	}
+
+	// Check that both cursors are positioned correctly after their conversions.
+	// The conversion processes back-to-front: myVar first (becomes my_var at col 4),
+	// then aB (becomes a_b at col 0). When aB is converted, it grows by 1 char,
+	// so the saved cursor from myVar conversion should be adjusted.
+	// After "myVar" -> "my_var" conversion (delete cols 3-7, insert at col 3),
+	// cursor remains at col 3 (start of converted text).
+	// After "aB" -> "a_b" (delta +1), that saved cursor should shift to col 4.
+	cursors := []document.Pos{got.cursor}
+	for _, ec := range got.extraCursors {
+		cursors = append(cursors, ec.pos)
+	}
+
+	// We expect two cursors, both on line 0.
+	if len(cursors) != 2 {
+		t.Fatalf("got %d cursors, want 2", len(cursors))
+	}
+
+	// Sort by column to check them in order
+	if cursors[0].Col > cursors[1].Col {
+		cursors[0], cursors[1] = cursors[1], cursors[0]
+	}
+
+	// First cursor: after "a_b" conversion, should be at start of "a_b" (col 0)
+	if cursors[0].Line != 0 || cursors[0].Col != 0 {
+		t.Errorf("left cursor = %v, want {Line: 0, Col: 0}", cursors[0])
+	}
+
+	// Second cursor: after "my_var" conversion at original position,
+	// would be at col 3 (start of "my_var" at original position 3, now position 4).
+	// After left edit adds 1 char, should be at col 4.
+	if cursors[1].Line != 0 || cursors[1].Col != 4 {
+		t.Errorf("right cursor = %v, want {Line: 0, Col: 4}", cursors[1])
+	}
+}

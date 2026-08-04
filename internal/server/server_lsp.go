@@ -529,7 +529,7 @@ func (s *editorService) References(_ context.Context, call proto.EditorService_r
 	for i, loc := range locs {
 		fl := list.At(i)
 		locPath := lsp.URIToPath(loc.URI)
-		fl.SetPath(locPath)  //nolint:errcheck
+		fl.SetPath(locPath) //nolint:errcheck
 		fl.SetLine(uint32(loc.Range.Start.Line))
 		fl.SetCol(uint32(loc.Range.Start.Character))
 		// Preview: if it's the same file, read from buffer; otherwise leave empty.
@@ -572,10 +572,10 @@ func (s *editorService) WorkspaceSymbols(_ context.Context, call proto.EditorSer
 	}
 	for i, sym := range syms {
 		sr := list.At(i)
-		sr.SetName(sym.Name)                             //nolint:errcheck
+		sr.SetName(sym.Name) //nolint:errcheck
 		sr.SetKind(uint8(sym.Kind))
-		sr.SetContainerName(sym.ContainerName)           //nolint:errcheck
-		sr.SetPath(lsp.URIToPath(sym.Location.URI))      //nolint:errcheck
+		sr.SetContainerName(sym.ContainerName)      //nolint:errcheck
+		sr.SetPath(lsp.URIToPath(sym.Location.URI)) //nolint:errcheck
 		sr.SetLine(uint32(sym.Location.Range.Start.Line))
 		sr.SetCol(uint32(sym.Location.Range.Start.Character))
 	}
@@ -610,10 +610,10 @@ func (s *editorService) DocumentSymbols(_ context.Context, call proto.EditorServ
 	}
 	for i, sym := range syms {
 		sr := list.At(i)
-		sr.SetName(sym.Name)                             //nolint:errcheck
+		sr.SetName(sym.Name) //nolint:errcheck
 		sr.SetKind(uint8(sym.Kind))
-		sr.SetContainerName(sym.ContainerName)           //nolint:errcheck
-		sr.SetPath(lsp.URIToPath(sym.Location.URI))      //nolint:errcheck
+		sr.SetContainerName(sym.ContainerName)      //nolint:errcheck
+		sr.SetPath(lsp.URIToPath(sym.Location.URI)) //nolint:errcheck
 		sr.SetLine(uint32(sym.Location.Range.Start.Line))
 		sr.SetCol(uint32(sym.Location.Range.Start.Character))
 	}
@@ -637,6 +637,7 @@ func (s *editorService) Format(_ context.Context, call proto.EditorService_forma
 	}
 	path := entry.buf.Path()
 	content := entry.buf.Content()
+	baseVersion := entry.buf.Version()
 	s.mu.Unlock()
 
 	formatted, changed, fmtErr := s.fmtMgr.Format(path, content)
@@ -647,13 +648,24 @@ func (s *editorService) Format(_ context.Context, call proto.EditorService_forma
 	}
 
 	if changed {
-		newBuf := document.New(path, formatted)
-		newBuf.MarkDirty()
 		s.mu.Lock()
-		entry.buf = newBuf
-		s.buffers[bufID] = entry
-		s.mu.Unlock()
-		go s.lspMgr.DidChange(path, formatted)
+		entry, ok = s.buffers[bufID]
+		if ok && entry.buf.Version() == baseVersion {
+			newBuf := document.New(path, formatted)
+			newBuf.MarkDirty()
+			entry.buf = newBuf
+			s.buffers[bufID] = entry
+			s.mu.Unlock()
+			go s.lspMgr.DidChange(path, formatted)
+		} else {
+			// The buffer changed while formatting ran outside the lock
+			// (e.g. a keystroke's ApplyOp landed during format-on-save) —
+			// "formatted" no longer reflects the buffer's current content.
+			// Discard it rather than clobbering the newer edit; the next
+			// Format call will format the buffer's actual current state.
+			s.mu.Unlock()
+			changed = false
+		}
 	}
 
 	res, err := call.AllocResults()

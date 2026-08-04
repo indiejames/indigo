@@ -652,12 +652,12 @@ var defaultCaptureTable = map[string]captureEntry{
 	"markup.quote":         {hexToANSI("#6A9955"), 74},
 
 	// text.* — old nvim-treesitter naming still used by some grammars.
-	"text":          {hexToANSI("#D4D4D4"), 27},
-	"text.title":    {hexToANSI("#569CD6"), 87},
-	"text.strong":   {hexToANSIBold("#E5C07B"), 83},
-	"text.emphasis": {hexToANSIItalic("#D7BA7D"), 83},
-	"text.literal":  {hexToANSI("#d5890e"), 82},
-	"text.uri":      {hexToANSI("#615bd3"), 78},
+	"text":           {hexToANSI("#D4D4D4"), 27},
+	"text.title":     {hexToANSI("#569CD6"), 87},
+	"text.strong":    {hexToANSIBold("#E5C07B"), 83},
+	"text.emphasis":  {hexToANSIItalic("#D7BA7D"), 83},
+	"text.literal":   {hexToANSI("#d5890e"), 82},
+	"text.uri":       {hexToANSI("#615bd3"), 78},
 	"text.reference": {hexToANSI("#9CDCFE"), 76},
 }
 
@@ -709,12 +709,19 @@ func captureANSI(name string) (string, int, bool) {
 	if e, ok := captureTable[name]; ok {
 		return e.ansi, e.priority, true
 	}
-	// Prefix match: "keyword.special" → "keyword" at one lower priority.
-	if idx := strings.Index(name, "."); idx >= 0 {
-		prefix := name[:idx]
+	// Progressively trim the last dot-separated segment, keeping the most
+	// specific match still present in the table, one priority step down per
+	// level trimmed — e.g. "function.method.private" falls back to
+	// "function.method" (not straight to "function") if the former exists.
+	prefix := name
+	for level := 1; ; level++ {
+		idx := strings.LastIndex(prefix, ".")
+		if idx < 0 {
+			return "", 0, false
+		}
+		prefix = prefix[:idx]
 		if e, ok := captureTable[prefix]; ok {
-			return e.ansi, e.priority - 1, true
+			return e.ansi, e.priority - level, true
 		}
 	}
-	return "", 0, false
 }

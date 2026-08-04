@@ -27,8 +27,9 @@ const startRetryCooldown = time.Minute
 // Manager holds one Client per language, lazily started.
 type Manager struct {
 	mu           sync.Mutex
-	clients      map[string]*Client   // languageID → Client
-	failedStarts map[string]time.Time // languageID → time of last failed start attempt
+	clients      map[string]*Client       // languageID → Client
+	failedStarts map[string]time.Time     // languageID → time of last failed start attempt
+	starting     map[string]chan struct{} // languageID → closed when the in-flight start finishes
 	servers      []ServerConfig
 	rootDir      string
 	fileContent  map[string]string // path → content stored by DidOpen for ensureOpened
@@ -41,6 +42,7 @@ func NewManager(rootDir string, servers []ServerConfig) *Manager {
 	return &Manager{
 		clients:      make(map[string]*Client),
 		failedStarts: make(map[string]time.Time),
+		starting:     make(map[string]chan struct{}),
 		servers:      servers,
 		rootDir:      rootDir,
 		fileContent:  make(map[string]string),
@@ -73,20 +75,42 @@ func (m *Manager) clientForPath(path string) *Client {
 
 	langID := languageIDForExt(ext)
 
-	// Fast path: client already running.
-	m.mu.Lock()
-	if c, ok := m.clients[langID]; ok {
+	for {
+		m.mu.Lock()
+		if c, ok := m.clients[langID]; ok {
+			m.mu.Unlock()
+			return c
+		}
+		if last, failed := m.failedStarts[langID]; failed && time.Since(last) < startRetryCooldown {
+			m.mu.Unlock()
+			return nil
+		}
+		if ch, inProgress := m.starting[langID]; inProgress {
+			// Another goroutine is already starting this language server —
+			// wait for it to finish, then re-check clients/failedStarts
+			// above instead of racing it to spawn a second process.
+			m.mu.Unlock()
+			<-ch
+			continue
+		}
+		ch := make(chan struct{})
+		m.starting[langID] = ch
 		m.mu.Unlock()
+
+		c := m.startClient(langID, cfg)
+
+		m.mu.Lock()
+		delete(m.starting, langID)
+		m.mu.Unlock()
+		close(ch)
 		return c
 	}
-	if last, failed := m.failedStarts[langID]; failed && time.Since(last) < startRetryCooldown {
-		m.mu.Unlock()
-		return nil
-	}
-	m.mu.Unlock()
+}
 
-	// Slow path: start and initialize the server without holding the mutex so
-	// diagnostics polls and other operations can proceed concurrently.
+// startClient spawns and initializes the language server for cfg, without
+// holding m.mu, so diagnostics polls and other operations on other languages
+// can proceed concurrently. Callers must hold the langID slot in m.starting.
+func (m *Manager) startClient(langID string, cfg *ServerConfig) *Client {
 	cmd := cfg.Command
 	c, err := NewClient(cmd, cfg.Args, m.rootDir)
 	if err != nil {
@@ -107,14 +131,7 @@ func (m *Manager) clientForPath(path string) *Client {
 		return nil
 	}
 
-	// Store the client, guarding against two goroutines both reaching this point.
 	m.mu.Lock()
-	if existing, ok := m.clients[langID]; ok {
-		// Another goroutine finished first; discard ours.
-		m.mu.Unlock()
-		c.Shutdown()
-		return existing
-	}
 	m.clients[langID] = c
 	delete(m.failedStarts, langID)
 	m.mu.Unlock()

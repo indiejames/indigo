@@ -33,7 +33,6 @@ func TestCallFailsFastWhenConnectionCloses(t *testing.T) {
 	conn := newJSONRPCConn(clientEnd, clientEnd, nil, nil)
 
 	callDone := make(chan error, 1)
-	start := time.Now()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -47,7 +46,10 @@ func TestCallFailsFastWhenConnectionCloses(t *testing.T) {
 		t.Fatal("fake server never received the request")
 	}
 
-	// The request is now genuinely pending. Kill the "process".
+	// The request is now genuinely pending. Kill the "process" and start
+	// timing from here — only the failure path after this point is what
+	// the test is actually asserting on.
+	start := time.Now()
 	serverEnd.Close() //nolint:errcheck
 
 	var err error

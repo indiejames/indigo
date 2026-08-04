@@ -6,6 +6,62 @@ import (
 	"github.com/indiejames/indigo/internal/document"
 )
 
+// TestExecuteGoToLineStartMovesAllCursors is a regression test: gh must move
+// every cursor to its own line start, not just the primary cursor.
+func TestExecuteGoToLineStartMovesAllCursors(t *testing.T) {
+	m := newTestModel("  abc\n  def\n")
+	m.cursor = document.Pos{Line: 0, Col: 4}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 2}, Head: document.Pos{Line: 0, Col: 4}}
+	m.extraCursors = []ExtraCursor{{
+		pos: document.Pos{Line: 1, Col: 4},
+		sel: &Selection{Anchor: document.Pos{Line: 1, Col: 2}, Head: document.Pos{Line: 1, Col: 4}},
+	}}
+
+	m2, _ := executeGoToLineStart(m)
+	got := m2.(Model)
+
+	if got.cursor.Col != 0 {
+		t.Errorf("primary cursor.Col = %d, want 0", got.cursor.Col)
+	}
+	if got.sel != nil {
+		t.Errorf("primary sel = %v, want nil", got.sel)
+	}
+	if got.extraCursors[0].pos.Col != 0 {
+		t.Errorf("extra cursor.Col = %d, want 0", got.extraCursors[0].pos.Col)
+	}
+	if got.extraCursors[0].sel != nil {
+		t.Errorf("extra cursor.sel = %v, want nil", got.extraCursors[0].sel)
+	}
+}
+
+// TestExecuteGoToLineEndMovesAllCursors is a regression test: gl must move
+// every cursor to its own line end, not just the primary cursor.
+func TestExecuteGoToLineEndMovesAllCursors(t *testing.T) {
+	m := newTestModel("ab\nabcde\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 1}}
+	m.extraCursors = []ExtraCursor{{
+		pos: document.Pos{Line: 1, Col: 0},
+		sel: &Selection{Anchor: document.Pos{Line: 1, Col: 0}, Head: document.Pos{Line: 1, Col: 1}},
+	}}
+
+	m2, _ := executeGoToLineEnd(m)
+	got := m2.(Model)
+
+	if got.cursor.Col != 2 {
+		t.Errorf("primary cursor.Col = %d, want 2", got.cursor.Col)
+	}
+	if got.sel != nil {
+		t.Errorf("primary sel = %v, want nil", got.sel)
+	}
+	if got.extraCursors[0].pos.Col != 5 {
+		t.Errorf("extra cursor.Col = %d, want 5", got.extraCursors[0].pos.Col)
+	}
+	if got.extraCursors[0].sel != nil {
+		t.Errorf("extra cursor.sel = %v, want nil", got.extraCursors[0].sel)
+	}
+}
+
 // TestExecuteSelectInsideCharExcludesTrailingDelimiter is a regression test:
 // mi. must select only the quoted content, not the closing delimiter.
 func TestExecuteSelectInsideCharExcludesTrailingDelimiter(t *testing.T) {

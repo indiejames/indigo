@@ -14,8 +14,13 @@ func (m *Model) selectedText() string {
 	if m.sel == nil {
 		return ""
 	}
-	start, end := m.sel.ordered()
-	if m.sel.IsLine {
+	return m.textForSelection(m.sel)
+}
+
+// textForSelection returns the text covered by sel, which need not be m.sel.
+func (m *Model) textForSelection(sel *Selection) string {
+	start, end := sel.ordered()
+	if sel.IsLine {
 		var sb strings.Builder
 		for l := start.Line; l <= end.Line; l++ {
 			sb.WriteString(m.buf.Line(l))

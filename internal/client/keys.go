@@ -68,6 +68,19 @@ var prefixCmds = []command{
 	},
 	commandMenuRoot,
 	{
+		key:       '~',
+		label:     "Case",
+		menuTitle: "Case",
+		children: []command{
+			{key: 's', label: "snake_case", execute: executeCaseConvertSnake},
+			{key: 'S', label: "SCREAMING_SNAKE_CASE", execute: executeCaseConvertScreamingSnake},
+			{key: 'c', label: "camelCase", execute: executeCaseConvertCamel},
+			{key: 'p', label: "PascalCase", execute: executeCaseConvertPascal},
+			{key: 'k', label: "kebab-case", execute: executeCaseConvertKebab},
+			{key: 'd', label: "dot.case", execute: executeCaseConvertDot},
+		},
+	},
+	{
 		key:       'm',
 		label:     "Match",
 		menuTitle: "Match",
@@ -255,7 +268,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.recoveryPrompt {
 		return m.handleRecoveryPrompt(msg)
 	}
-// Escape dismisses the diagnostic popup and suppresses re-show until cursor leaves the range.
+	// Escape dismisses the diagnostic popup and suppresses re-show until cursor leaves the range.
 	// Always falls through so the mode transition (insert→normal) also happens.
 	if m.diagPopup && msg.String() == "esc" {
 		m.diagPopup = false

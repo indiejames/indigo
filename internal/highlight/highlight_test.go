@@ -43,3 +43,43 @@ func TestHighlightEmptyContent(t *testing.T) {
 		t.Error("nil Highlighter.Highlight(empty) should return nil")
 	}
 }
+
+func TestIsInStringNilSafe(t *testing.T) {
+	var h *Highlighter
+	if h.IsInString([]byte("anything"), 0, 0) {
+		t.Error("nil Highlighter.IsInString() = true, want false")
+	}
+}
+
+func TestIsInString(t *testing.T) {
+	h := New("test.go")
+	if h == nil {
+		t.Skip("no Go highlighter registered; run with -tags lang_all (or lang_go)")
+	}
+
+	content := []byte(`package main
+
+var s = "hello world"
+var n = 1
+`)
+	tests := []struct {
+		name       string
+		line, col  int
+		wantString bool
+	}{
+		{"inside string body", 2, 12, true},
+		{"just inside opening quote", 2, 9, true},
+		{"just before closing quote", 2, 20, true},
+		{"right before opening quote (boundary, outside)", 2, 8, false},
+		{"right after closing quote (boundary, outside)", 2, 21, false},
+		{"well before string", 2, 5, false},
+		{"unrelated line", 3, 4, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := h.IsInString(content, tt.line, tt.col); got != tt.wantString {
+				t.Errorf("IsInString(line=%d, col=%d) = %v, want %v", tt.line, tt.col, got, tt.wantString)
+			}
+		})
+	}
+}

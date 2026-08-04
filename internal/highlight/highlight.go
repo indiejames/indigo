@@ -278,16 +278,82 @@ func (h *Highlighter) TextObjectAround(content []byte, line, col int, kind strin
 	return TextObject{}, false
 }
 
+// IsInString reports whether (line, col) falls inside a string/template
+// literal, per the language's syntax tree — i.e. any node captured
+// "string" (or a "string.*" subtype, such as a template literal) by the
+// language's highlight query spans that position.
+func (h *Highlighter) IsInString(content []byte, line, col int) bool {
+	if h == nil {
+		return false
+	}
+
+	lines := strings.Split(string(content), "\n")
+	if line < 0 || line >= len(lines) {
+		return false
+	}
+	byteCol := runeColToByteCol(lines[line], col)
+
+	p := sitter.NewParser()
+	p.SetLanguage(h.lang)
+	tree, err := p.ParseString(context.Background(), nil, content)
+	if err != nil || tree == nil {
+		return false
+	}
+	defer tree.Close()
+
+	pt := sitter.Point{Row: uint(line), Column: uint(byteCol)}
+	qc := sitter.NewQueryCursor()
+	matches := qc.Matches(h.query, tree.RootNode(), content)
+	for {
+		m := matches.Next()
+		if m == nil {
+			break
+		}
+		for _, cap := range m.Captures {
+			name := h.query.CaptureNameForID(cap.Index)
+			if name != "string" && !strings.HasPrefix(name, "string.") {
+				continue
+			}
+			if pointWithin(pt, cap.Node.StartPoint(), cap.Node.EndPoint()) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// pointWithin reports whether pt (a cursor position — the insertion point
+// immediately before the rune at pt.Column) falls strictly between start and
+// end, exclusive of both endpoints: a cursor sitting immediately before the
+// opening delimiter or immediately after the closing one counts as outside.
+func pointWithin(pt, start, end sitter.Point) bool {
+	if pt.Row < start.Row || pt.Row > end.Row {
+		return false
+	}
+	if pt.Row == start.Row && pt.Column <= start.Column {
+		return false
+	}
+	if pt.Row == end.Row && pt.Column >= end.Column {
+		return false
+	}
+	return true
+}
+
 // ShouldExpandBraceBlock reports whether typing '{' at (line, col) should
 // expand into an indented block ("{\n\t\n}") rather than a plain "{}" pair.
 // It reparses content with "{}" inserted at the cursor and inspects the
 // resulting node: constructs conventionally written inline (import/export
 // lists, destructuring patterns, object literals, JSX expression
 // containers) don't expand; everything else (function bodies, control-flow
-// blocks, struct/class bodies, ...) does.
+// blocks, struct/class bodies, ...) does. It also never expands inside a
+// string/template literal — a '{' typed there is string content, not the
+// start of a block, so it shouldn't split the line.
 func (h *Highlighter) ShouldExpandBraceBlock(content []byte, line, col int) bool {
 	if h == nil {
 		return true
+	}
+	if h.IsInString(content, line, col) {
+		return false
 	}
 
 	lines := strings.Split(string(content), "\n")

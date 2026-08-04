@@ -179,6 +179,24 @@ func TestAutoPairBraceExpandsToBlockForFunctionBody(t *testing.T) {
 	}
 }
 
+func TestAutoPairBraceDoesNotExpandInsideString(t *testing.T) {
+	m := newAutoPairTSTestModel(t, `const s = "hello "`)
+	m.cursor.Col = len([]rune(`const s = "hello `)) // inside the string, right after "hello "
+	m2, _ := m.handleInsert(fakeKey("{"))
+	got := m2.(Model)
+
+	if got.buf.LineCount() != 1 {
+		t.Fatalf("LineCount() = %d, want 1 (typing '{' inside a string shouldn't split it across lines)", got.buf.LineCount())
+	}
+	want := `const s = "hello {}"`
+	if got.buf.Line(0) != want {
+		t.Errorf("line 0 = %q, want %q", got.buf.Line(0), want)
+	}
+	if got.cursor.Col != len([]rune(`const s = "hello {`)) {
+		t.Errorf("cursor.Col = %d, want %d (between the pair)", got.cursor.Col, len([]rune(`const s = "hello {`)))
+	}
+}
+
 func TestAutoPairBraceDoesNotExpandForImportList(t *testing.T) {
 	m := newAutoPairTSTestModel(t, "import  from 'foo'")
 	m.cursor.Col = len([]rune("import ")) // right after "import "

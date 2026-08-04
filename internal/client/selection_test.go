@@ -6,6 +6,25 @@ import (
 	"github.com/indiejames/indigo/internal/document"
 )
 
+// --- selectedText ---
+
+// TestSelectedTextLineWiseMultiLine is a regression test: yanking a
+// multi-line linewise selection (built via repeated `x`) must return every
+// selected line, not just the first.
+func TestSelectedTextLineWiseMultiLine(t *testing.T) {
+	m := newTestModel("one\ntwo\nthree\n")
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: 0, Col: 0},
+		Head:   document.Pos{Line: 1, Col: 2},
+		IsLine: true,
+	}
+	got := m.selectedText()
+	want := "one\ntwo\n"
+	if got != want {
+		t.Errorf("selectedText() = %q, want %q", got, want)
+	}
+}
+
 // --- Selection.ordered ---
 
 func TestSelectionOrderedAnchorFirst(t *testing.T) {

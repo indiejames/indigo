@@ -27,14 +27,18 @@ func executeGoToDefinition(m Model) (tea.Model, tea.Cmd) {
 }
 
 func executeGoToLineStart(m Model) (tea.Model, tea.Cmd) {
-	m.sel = nil
-	m.cursor.Col = 0
+	m.applyToAllCursors(func(m *Model) {
+		m.sel = nil
+		m.cursor.Col = 0
+	})
 	return m, nil
 }
 
 func executeGoToLineEnd(m Model) (tea.Model, tea.Cmd) {
-	m.sel = nil
-	m.cursor.Col = m.buf.LineLen(m.cursor.Line)
+	m.applyToAllCursors(func(m *Model) {
+		m.sel = nil
+		m.cursor.Col = m.buf.LineLen(m.cursor.Line)
+	})
 	return m, nil
 }
 
@@ -535,7 +539,7 @@ outer:
 				ClientID: m.rpc.ClientID(),
 				Type:     document.OpDelete,
 				FromLine: ln, FromCol: indent,
-				ToLine:   ln, ToCol: indent + deleteLen,
+				ToLine: ln, ToCol: indent + deleteLen,
 			})
 		}
 	} else {
@@ -613,7 +617,7 @@ func executeUnindent(m Model) (tea.Model, tea.Cmd) {
 			ClientID: m.clientID(),
 			Type:     document.OpDelete,
 			FromLine: ln, FromCol: 0,
-			ToLine:   ln, ToCol: remove,
+			ToLine: ln, ToCol: remove,
 		})
 	}
 	if len(ops) == 0 {

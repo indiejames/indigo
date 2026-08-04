@@ -16,7 +16,12 @@ func (m *Model) selectedText() string {
 	}
 	start, end := m.sel.ordered()
 	if m.sel.IsLine {
-		return m.buf.Line(start.Line) + "\n"
+		var sb strings.Builder
+		for l := start.Line; l <= end.Line; l++ {
+			sb.WriteString(m.buf.Line(l))
+			sb.WriteByte('\n')
+		}
+		return sb.String()
 	}
 	if start.Line == end.Line {
 		runes := []rune(m.buf.Line(start.Line))

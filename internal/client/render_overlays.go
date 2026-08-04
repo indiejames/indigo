@@ -793,6 +793,14 @@ var helpEntries = []helpEntry{
 	{key: "gs", desc: "First non-whitespace"},
 	{key: "gb", desc: "Open buffer picker"},
 	{key: ""},
+	{key: "Case conversion (~…)"},
+	{key: "~s", desc: "snake_case"},
+	{key: "~S", desc: "SCREAMING_SNAKE_CASE"},
+	{key: "~c", desc: "camelCase"},
+	{key: "~p", desc: "PascalCase"},
+	{key: "~k", desc: "kebab-case"},
+	{key: "~d", desc: "dot.case"},
+	{key: ""},
 	{key: "Editing"},
 	{key: "i", desc: "Insert before cursor"},
 	{key: "a", desc: "Insert after cursor"},
@@ -965,7 +973,7 @@ func renderHelpPopup(width, scroll, maxH int, pluginBindings []ClientPluginBindi
 		indicator := fmt.Sprintf(" j/k scroll   %d/%d ", shown, total)
 		indicatorRunes := []rune(indicator)
 		remainDashes := max(0, innerW-len(indicatorRunes))
-		bottom = popupBorderStyle.Render(bdrBL+indicator+strings.Repeat(bdrH, remainDashes)+bdrBR)
+		bottom = popupBorderStyle.Render(bdrBL + indicator + strings.Repeat(bdrH, remainDashes) + bdrBR)
 	} else {
 		bottom = popupBorderStyle.Render(bdrBL + strings.Repeat(bdrH, innerW) + bdrBR)
 	}

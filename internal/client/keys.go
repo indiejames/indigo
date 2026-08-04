@@ -81,6 +81,15 @@ var prefixCmds = []command{
 		},
 	},
 	{
+		key:       'M',
+		label:     "Move",
+		menuTitle: "Move",
+		children: []command{
+			{key: 'j', label: "Move line(s) down", execute: executeMoveLineDown},
+			{key: 'k', label: "Move line(s) up", execute: executeMoveLineUp},
+		},
+	},
+	{
 		key:       'm',
 		label:     "Match",
 		menuTitle: "Match",

@@ -18,6 +18,10 @@ func fakeKey(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEsc}
 	case "enter":
 		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "shift+up":
+		return tea.KeyMsg{Type: tea.KeyShiftUp}
+	case "shift+down":
+		return tea.KeyMsg{Type: tea.KeyShiftDown}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	}

@@ -327,3 +327,119 @@ func TestExecuteJoinLinesOnLastLineIsNoop(t *testing.T) {
 		t.Error("cmd = non-nil, want nil for a no-op join")
 	}
 }
+
+func TestExecuteMoveLineDownSwapsWithNextLine(t *testing.T) {
+	m := newTestModel("foo\nbar\nbaz\n")
+	m.cursor = document.Pos{Line: 0, Col: 2}
+
+	got, _ := executeMoveLineDown(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "bar" {
+		t.Errorf("Line(0) = %q, want %q", line, "bar")
+	}
+	if line := m2.buf.Line(1); line != "foo" {
+		t.Errorf("Line(1) = %q, want %q", line, "foo")
+	}
+	if line := m2.buf.Line(2); line != "baz" {
+		t.Errorf("Line(2) = %q, want %q", line, "baz")
+	}
+	if m2.cursor != (document.Pos{Line: 1, Col: 2}) {
+		t.Errorf("cursor = %+v, want {Line:1 Col:2}", m2.cursor)
+	}
+}
+
+func TestExecuteMoveLineUpSwapsWithPrevLine(t *testing.T) {
+	m := newTestModel("foo\nbar\nbaz\n")
+	m.cursor = document.Pos{Line: 1, Col: 1}
+
+	got, _ := executeMoveLineUp(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "bar" {
+		t.Errorf("Line(0) = %q, want %q", line, "bar")
+	}
+	if line := m2.buf.Line(1); line != "foo" {
+		t.Errorf("Line(1) = %q, want %q", line, "foo")
+	}
+	if m2.cursor != (document.Pos{Line: 0, Col: 1}) {
+		t.Errorf("cursor = %+v, want {Line:0 Col:1}", m2.cursor)
+	}
+}
+
+func TestExecuteMoveLineUpAtTopIsNoop(t *testing.T) {
+	m := newTestModel("foo\nbar\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+
+	got, cmd := executeMoveLineUp(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "foo" {
+		t.Errorf("Line(0) = %q, want %q", line, "foo")
+	}
+	if cmd != nil {
+		t.Error("cmd = non-nil, want nil for a no-op move")
+	}
+}
+
+func TestExecuteMoveLineDownAtBottomIsNoop(t *testing.T) {
+	m := newTestModel("foo\nbar")
+	m.cursor = document.Pos{Line: 1, Col: 0}
+
+	got, cmd := executeMoveLineDown(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(1); line != "bar" {
+		t.Errorf("Line(1) = %q, want %q", line, "bar")
+	}
+	if cmd != nil {
+		t.Error("cmd = non-nil, want nil for a no-op move")
+	}
+}
+
+func TestExecuteMoveLineDownNoTrailingNewlineAtEOF(t *testing.T) {
+	m := newTestModel("foo\nbar")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+
+	got, _ := executeMoveLineDown(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "bar" {
+		t.Errorf("Line(0) = %q, want %q", line, "bar")
+	}
+	if line := m2.buf.Line(1); line != "foo" {
+		t.Errorf("Line(1) = %q, want %q", line, "foo")
+	}
+	if m2.buf.LineCount() != 2 {
+		t.Errorf("LineCount() = %d, want 2", m2.buf.LineCount())
+	}
+}
+
+func TestExecuteMoveLineDownMovesWholeSelection(t *testing.T) {
+	m := newTestModel("foo\nbar\nbaz\nqux\n")
+	m.cursor = document.Pos{Line: 1, Col: 0}
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: 0, Col: 0},
+		Head:   document.Pos{Line: 1, Col: 0},
+		IsLine: true,
+	}
+
+	got, _ := executeMoveLineDown(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "baz" {
+		t.Errorf("Line(0) = %q, want %q", line, "baz")
+	}
+	if line := m2.buf.Line(1); line != "foo" {
+		t.Errorf("Line(1) = %q, want %q", line, "foo")
+	}
+	if line := m2.buf.Line(2); line != "bar" {
+		t.Errorf("Line(2) = %q, want %q", line, "bar")
+	}
+	if line := m2.buf.Line(3); line != "qux" {
+		t.Errorf("Line(3) = %q, want %q", line, "qux")
+	}
+	if m2.sel == nil || m2.sel.Anchor.Line != 1 || m2.sel.Head.Line != 2 {
+		t.Errorf("sel = %+v, want Anchor.Line=1 Head.Line=2", m2.sel)
+	}
+}

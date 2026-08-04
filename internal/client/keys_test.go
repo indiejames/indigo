@@ -350,7 +350,6 @@ func TestHandleInsertEnd(t *testing.T) {
 	}
 }
 
-
 // --- executeSelectInsideWord ---
 
 func TestExecuteSelectInsideWordMid(t *testing.T) {
@@ -502,5 +501,62 @@ func TestUnindentNoIndent(t *testing.T) {
 	got := m2.(Model)
 	if got.buf.Line(0) != "hello" {
 		t.Errorf("unindent with no indent: line changed unexpectedly to %q", got.buf.Line(0))
+	}
+}
+
+func TestHandleNormalPrefixCommandCapitalM(t *testing.T) {
+	m := newTestModel("")
+	m2, _ := m.handleNormal(fakeKey("M"))
+	got := m2.(Model)
+	if len(got.prefixSeq) != 1 || got.prefixSeq[0] != 'M' {
+		t.Errorf("after M: prefixSeq = %v, want [M]", got.prefixSeq)
+	}
+}
+
+func TestHandleNormalPrefixMjMovesLineDown(t *testing.T) {
+	m := newTestModel("foo\nbar\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m.prefixSeq = []rune{'M'}
+	m2, _ := m.handleNormal(fakeKey("j"))
+	got := m2.(Model)
+	if got.buf.Line(0) != "bar" || got.buf.Line(1) != "foo" {
+		t.Errorf("Mj: Line(0)=%q Line(1)=%q, want bar/foo", got.buf.Line(0), got.buf.Line(1))
+	}
+	if got.prefixSeq != nil {
+		t.Error("Mj: prefixSeq should be cleared after execute")
+	}
+}
+
+func TestHandleNormalPrefixMkMovesLineUp(t *testing.T) {
+	m := newTestModel("foo\nbar\n")
+	m.cursor = document.Pos{Line: 1, Col: 0}
+	m.prefixSeq = []rune{'M'}
+	m2, _ := m.handleNormal(fakeKey("k"))
+	got := m2.(Model)
+	if got.buf.Line(0) != "bar" || got.buf.Line(1) != "foo" {
+		t.Errorf("Mk: Line(0)=%q Line(1)=%q, want bar/foo", got.buf.Line(0), got.buf.Line(1))
+	}
+	if got.prefixSeq != nil {
+		t.Error("Mk: prefixSeq should be cleared after execute")
+	}
+}
+
+func TestHandleNormalShiftDownMovesLineDown(t *testing.T) {
+	m := newTestModel("foo\nbar\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m2, _ := m.handleNormal(fakeKey("shift+down"))
+	got := m2.(Model)
+	if got.buf.Line(0) != "bar" || got.buf.Line(1) != "foo" {
+		t.Errorf("shift+down: Line(0)=%q Line(1)=%q, want bar/foo", got.buf.Line(0), got.buf.Line(1))
+	}
+}
+
+func TestHandleNormalShiftUpMovesLineUp(t *testing.T) {
+	m := newTestModel("foo\nbar\n")
+	m.cursor = document.Pos{Line: 1, Col: 0}
+	m2, _ := m.handleNormal(fakeKey("shift+up"))
+	got := m2.(Model)
+	if got.buf.Line(0) != "bar" || got.buf.Line(1) != "foo" {
+		t.Errorf("shift+up: Line(0)=%q Line(1)=%q, want bar/foo", got.buf.Line(0), got.buf.Line(1))
 	}
 }

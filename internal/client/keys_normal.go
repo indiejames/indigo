@@ -449,6 +449,15 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "<":
 		return executeUnindent(m)
 
+	// Move current line (or selected lines) up/down, swapping with the
+	// neighbor. Bound to Shift+Arrow rather than Alt+Arrow: zellij's default
+	// pane-focus keymap claims Alt+Arrow even in "locked" interface mode.
+	case "shift+up":
+		return executeMoveLineUp(m)
+
+	case "shift+down":
+		return executeMoveLineDown(m)
+
 	// Jump list navigation.
 	case "-":
 		return m, func() tea.Msg { return JumpBackMsg{} }

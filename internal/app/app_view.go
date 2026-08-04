@@ -56,6 +56,13 @@ func (a App) View() string {
 	if a.pluginInput != nil {
 		return overlayCenter(base, a.pluginInput.render(), a.width, a.height)
 	}
+	if a.newFileInput != nil {
+		return overlayCenter(base, a.newFileInput.render(), a.width, a.height)
+	}
+	if a.newFileMkdirConfirm != nil {
+		popup := renderNewFileMkdirConfirm(filepath.Dir(*a.newFileMkdirConfirm), a.width)
+		return overlayCenter(base, popup, a.width, a.height)
+	}
 	if a.symbolPicker != nil {
 		return overlayCenter(base, a.symbolPicker.render(), a.width, a.height)
 	}
@@ -196,6 +203,57 @@ func (p *appPluginInput) render() string {
 	}
 
 	return pluginInputBorderStyle.Render(strings.Join(rows, "\n"))
+}
+
+// renderNewFileMkdirConfirm renders the "create missing directory?"
+// confirmation shown when a New File path's parent directory doesn't exist.
+func renderNewFileMkdirConfirm(dir string, w int) string {
+	innerW := 46
+	if w > 0 && w*2/3 < innerW {
+		innerW = w * 2 / 3
+	}
+	innerW = max(innerW, 34)
+	// Ensure the dialog (including borders) fits within the terminal width.
+	// RoundedBorder adds 2 chars on each side.
+	if w > 0 && innerW+4 > w {
+		innerW = w - 4
+	}
+
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#FFAA44")).
+		Background(lipgloss.Color("#1E2A38"))
+	titleStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#0D1B2A")).
+		Foreground(lipgloss.Color("#FFAA44")).
+		Bold(true).
+		Padding(0, 1)
+	divStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#1E2A38")).
+		Foreground(lipgloss.Color("#FFAA44"))
+	textStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#1E2A38")).
+		Foreground(lipgloss.Color("#AABBCC")).
+		Padding(0, 1)
+	hintStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#1E2A38")).
+		Foreground(lipgloss.Color("#88DDAA")).
+		Padding(0, 1)
+
+	msg := dir + " does not exist."
+	if maxW := innerW - 2; len([]rune(msg)) > maxW && maxW > 1 {
+		r := []rune(msg)
+		msg = "…" + string(r[len(r)-(maxW-1):])
+	}
+
+	rows := []string{
+		titleStyle.Width(innerW).Render("Create Directory?"),
+		divStyle.Render(strings.Repeat("─", innerW)),
+		textStyle.Width(innerW).Render(msg),
+		textStyle.Width(innerW).Render("Create it and the new file?"),
+		hintStyle.Width(innerW).Render("Enter/y: Create   Esc/n: Cancel"),
+	}
+	return borderStyle.Render(strings.Join(rows, "\n"))
 }
 
 func renderFileChangedPrompt(w, sel int) string {

@@ -199,6 +199,8 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return QuitAllMsg{SaveAll: true} }
 	case "e", "edit":
 		return m, func() tea.Msg { return OpenPickerMsg{} }
+	case "new":
+		return m, func() tea.Msg { return OpenNewFileMsg{} }
 	case "metrics":
 		if m.metrics != nil {
 			m.metrics.show = !m.metrics.show

@@ -2,6 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -169,6 +173,74 @@ func (a App) handlePluginInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(msg.Runes) > 0 && a.pluginInput != nil {
 			a.pluginInput.text += string(msg.Runes)
 		}
+	}
+	return a, nil
+}
+
+// handleNewFileInputKey routes key events to the "New File" filename prompt.
+// Confirming opens the typed path via the normal open-file flow, which
+// already creates an empty in-memory buffer for paths that don't exist yet
+// (the file is written to disk on first save).
+func (a App) handleNewFileInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		a.newFileInput = nil
+		return a, nil
+	case "enter":
+		path := strings.TrimSpace(a.newFileInput.text)
+		a.newFileInput = nil
+		if path == "" {
+			return a, nil
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(a.workDir, path)
+		}
+		if info, err := os.Stat(filepath.Dir(path)); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				// Parent directory doesn't exist — ask before creating it,
+				// rather than opening a buffer that will fail to save later.
+				a.newFileMkdirConfirm = &path
+				return a, nil
+			}
+			// Other error (permission denied, I/O error, etc.)
+			a.status = fmt.Sprintf("E: cannot access parent directory: %v", err)
+			return a, nil
+		} else if !info.IsDir() {
+			// Parent exists but is not a directory.
+			a.status = fmt.Sprintf("E: parent path is not a directory: %s", filepath.Dir(path))
+			return a, nil
+		}
+		return a, a.doOpenFile(path)
+	case "backspace":
+		if a.newFileInput != nil {
+			runes := []rune(a.newFileInput.text)
+			if len(runes) > 0 {
+				a.newFileInput.text = string(runes[:len(runes)-1])
+			}
+		}
+	default:
+		if len(msg.Runes) > 0 && a.newFileInput != nil {
+			a.newFileInput.text += string(msg.Runes)
+		}
+	}
+	return a, nil
+}
+
+// handleNewFileMkdirConfirmKey routes key events to the "create missing
+// directory?" confirmation shown when a New File path's parent directory
+// doesn't exist yet.
+func (a App) handleNewFileMkdirConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	path := *a.newFileMkdirConfirm
+	switch msg.String() {
+	case "y", "Y", "enter":
+		a.newFileMkdirConfirm = nil
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			a.status = fmt.Sprintf("E: could not create directory: %v", err)
+			return a, nil
+		}
+		return a, a.doOpenFile(path)
+	case "n", "N", "esc", "ctrl+c":
+		a.newFileMkdirConfirm = nil
 	}
 	return a, nil
 }

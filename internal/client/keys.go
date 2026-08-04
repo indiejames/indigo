@@ -136,6 +136,9 @@ var commandMenuRoot = command{
 		{key: 'f', label: "File picker", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return OpenPickerMsg{} }
 		}},
+		{key: 'n', label: "New file", execute: func(m Model) (tea.Model, tea.Cmd) {
+			return m, func() tea.Msg { return OpenNewFileMsg{} }
+		}},
 		{key: 'a', label: "Code Actions (fixes & refactors)", execute: func(m Model) (tea.Model, tea.Cmd) {
 			// Uses the current selection as the request range when one is
 			// active, so range refactors (Extract Function/Variable) are

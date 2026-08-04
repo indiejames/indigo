@@ -102,6 +102,13 @@ type App struct {
 	// Plugin-driven UI overlays.
 	pluginPopup *appPluginPopup // non-nil when a plugin popup is visible
 	pluginInput *appPluginInput // non-nil when a plugin input prompt is visible
+
+	newFileInput *appPluginInput // non-nil when the "New File" prompt is visible
+
+	// newFileMkdirConfirm holds the absolute path pending "create missing
+	// directory?" confirmation, shown when a New File path's parent
+	// directory doesn't exist yet. Non-nil = confirmation is visible.
+	newFileMkdirConfirm *string
 }
 
 // appPluginPopup holds state for a plugin-driven interactive list overlay.
@@ -274,6 +281,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.pluginInput.width = msg.Width
 			a.pluginInput.height = msg.Height
 		}
+		if a.newFileInput != nil {
+			a.newFileInput.width = msg.Width
+			a.newFileInput.height = msg.Height
+		}
 		if a.symbolPicker != nil {
 			a.symbolPicker.width = msg.Width
 			a.symbolPicker.height = msg.Height
@@ -299,6 +310,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ---- picker open ----
 	case client.OpenPickerMsg:
 		a.picker = newFilePicker(a.workDir, a.activeFileDir(), a.width, a.height, a.cfg.FuzzySearch)
+		return a, nil
+
+	// ---- new file prompt open ----
+	case client.OpenNewFileMsg:
+		a.newFileInput = &appPluginInput{
+			title:       "New File",
+			placeholder: "relative/path/to/file.ext",
+			width:       a.width,
+			height:      a.height,
+		}
 		return a, nil
 
 	// ---- picker result ----
@@ -691,6 +712,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if a.pluginInput != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handlePluginInputKey(km)
+		}
+	}
+	if a.newFileInput != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleNewFileInputKey(km)
+		}
+	}
+	if a.newFileMkdirConfirm != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleNewFileMkdirConfirmKey(km)
 		}
 	}
 	if a.pluginPopup != nil {

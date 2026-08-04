@@ -173,6 +173,9 @@ type OpenFileAtMsg struct {
 // OpenPickerMsg signals the App to open the file picker.
 type OpenPickerMsg struct{}
 
+// OpenNewFileMsg signals the App to open the "New File" filename prompt.
+type OpenNewFileMsg struct{}
+
 // OpenSearchReplaceMsg signals the App to open the global search & replace dialog.
 type OpenSearchReplaceMsg struct{}
 

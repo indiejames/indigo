@@ -82,17 +82,19 @@ The render loop and keypress path **never block** on plugin I/O. Snappiness is e
 | Overlay / virtual text                    | Async, cached last result   | none    |
 | Status bar items                          | Async, cached last result   | none    |
 | **Key binding handler**                   | Await response              | 300 ms  |
-| **Insert-mode hook** (e.g. bracket close) | Await response              | 300 ms  |
+| **Insert-mode hook** (e.g. bracket close) | Fire-and-forget for the char itself; response applied if it arrives | 300 ms |
 | **Menu action handler** (Command menu)    | Await response              | 300 ms  |
 | **Action provider** (Shift+F actions)     | Await response              | 500 ms  |
 | **Fix provider** (fixable decorations)    | Await response              | 500 ms  |
 | **Command handler** (`:name`)             | Registered, not yet dispatched — see note | — |
 
-For the interactive cases (key bindings, insert hooks, and menu actions all share one handler shape), the server dispatches to the plugin in a goroutine and awaits the response with a deadline. If the deadline expires, the keypress falls through as if no plugin handled it.
+For the interactive cases (key bindings and menu actions), the server dispatches to the plugin in a goroutine and awaits the response with a deadline. If the deadline expires, the keypress falls through as if no plugin handled it.
+
+**Insert-mode hooks are different on purpose.** Every keystroke goes through `insertSelfInsert`, so gating the character's own insertion on a plugin round trip would risk stalling — or on a timeout, silently dropping — ordinary typing. Instead the client inserts the typed char locally and immediately, exactly as if no hook were registered, and *also* fires the registered `OnInsert` handler (if any) as a background request with the same 300ms deadline as other handlers. If a response comes back in time, it's applied the same way a key binding's response is (decoration refresh, optional cursor move, optional capture mode) — it just never blocks or overrides the insert itself. Use `OnInsert` for per-char triggers (e.g. re-checking something after `.` or `(` is typed); use `OnChange` (fires on every edit, no char filtering) if you need to react to *all* typing.
 
 > **Note:** `registerCommand`/`OnCommand` handlers are stored server-side but nothing currently calls them — the client's `:name` command line does not yet route to plugin-registered commands. This is a known gap, not a design choice; treat `OnCommand` as reserved for now.
 
-Decoration updates (gutter annotations, overlays, status bar items) are delivered asynchronously. The editor renders its last cached decoration state every frame; stale decorations are preferable to a frozen editor.
+Decoration updates (gutter annotations, overlays, status bar items) are polled by the client (every 3rd tick of its 120ms timer, ~360ms average) and rendered from that cache every frame — stale decorations are preferable to a frozen editor. A plugin that needs a decoration change to show up sooner than the next poll — e.g. after finishing async work like an LLM completion — can call the SDK's `RefreshDecorations(bufID)`, which pushes an immediate refetch to any client currently viewing that buffer instead of waiting on the poll cadence.
 
 Overlay decorations are rendered in a single pass through each visible line's runes — labels are injected directly at their target column during the normal character-rendering loop, with no ANSI post-processing. Rendering cost is O(visible_lines × line_width) regardless of how many overlay decorations the plugin returns, so a plugin returning 500 overlays costs no more than one returning 5.
 
@@ -195,6 +197,9 @@ interface EditorApi {
     wordAt          @13 (bufId: UInt32, pos: Position) -> (start: Position, end: Position, found: Bool);
     bufferInfo      @14 (bufId: UInt32) -> (path: Text, languageId: Text, lineCount: UInt32, isDirty: Bool);
     visibleRange    @15 (clientId: UInt64) -> (startLine: UInt32, endLine: UInt32);
+
+    # Push an immediate decoration refetch to clients viewing bufId
+    refreshDecorations @21 (bufId: UInt32) -> ();
 }
 
 # Handler interfaces — implemented by the plugin, called by the server

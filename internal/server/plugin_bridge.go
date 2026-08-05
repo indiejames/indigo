@@ -20,7 +20,7 @@ func serverLog(format string, args ...any) {
 	if err != nil {
 		return
 	}
-	defer f.Close() //nolint:errcheck
+	defer f.Close()                                  //nolint:errcheck
 	fmt.Fprintf(f, "[server] "+format+"\n", args...) //nolint:errcheck
 }
 
@@ -215,6 +215,43 @@ func (s *editorService) PluginKeyRegistered(trigger string) {
 		_, err := fut.Struct()
 		rel()
 		serverLog("PluginKeyRegistered: KeyRegistered to client %d: err=%v", i, err)
+	}
+}
+
+// PluginInsertHookRegistered implements plugin.ServerBridge.
+// Notifies all connected clients that a plugin registered an OnInsert hook.
+func (s *editorService) PluginInsertHookRegistered(char string) {
+	s.mu.Lock()
+	callbacks := s.allCallbacks()
+	s.mu.Unlock()
+
+	ctx := context.Background()
+	for _, cb := range callbacks {
+		fut, rel := cb.InsertHookRegistered(ctx, func(p proto.ClientCallback_insertHookRegistered_Params) error {
+			return p.SetChar(char)
+		})
+		fut.Struct() //nolint:errcheck
+		rel()
+	}
+}
+
+// PluginDecorationsChanged implements plugin.ServerBridge.
+// Notifies all connected clients that bufID's decorations may have changed,
+// so any client currently viewing it can refetch immediately rather than
+// waiting for its next poll tick.
+func (s *editorService) PluginDecorationsChanged(bufID uint32) {
+	s.mu.Lock()
+	callbacks := s.allCallbacks()
+	s.mu.Unlock()
+
+	ctx := context.Background()
+	for _, cb := range callbacks {
+		fut, rel := cb.DecorationsChanged(ctx, func(p proto.ClientCallback_decorationsChanged_Params) error {
+			p.SetBufId(bufID)
+			return nil
+		})
+		fut.Struct() //nolint:errcheck
+		rel()
 	}
 }
 

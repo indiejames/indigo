@@ -1090,6 +1090,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case PluginDecorationsChangedMsg:
+		if msg.BufID != m.bufID {
+			return m, nil // not the buffer this window is viewing
+		}
+		return m, m.fetchDecorations()
+
 	case tea.KeyMsg:
 		if m.metrics != nil {
 			m.metrics.lastKeyAt = time.Now()

@@ -14,6 +14,14 @@ interface ClientCallback {
   hidePluginPopup @6 ()                                          -> ();
   showInputPrompt @7 (title :Text, placeholder :Text)            -> ();
   hideInputPrompt @8 ()                                          -> ();
+  # Mirrors keyRegistered but for OnInsert hooks: handles the race where a
+  # plugin registers an insert hook after this client's initial
+  # getPluginInsertChars snapshot was taken.
+  insertHookRegistered @9 (char :Text)                           -> ();
+  # Sent when a plugin calls the SDK's RefreshDecorations(bufId) — tells the
+  # client to refetch decorations for bufId now rather than on the next poll
+  # tick. A client not currently viewing bufId ignores it.
+  decorationsChanged   @10 (bufId :UInt32)                       -> ();
 }
 
 interface EditorService {
@@ -113,6 +121,10 @@ interface EditorService {
   # Semantic tokens (LSP-derived syntax coloring) for [startLine,endLine) —
   # normally the client's visible viewport, not the whole file.
   semanticTokensRange @47 (bufId :UInt32, startLine :UInt32, startCol :UInt32, endLine :UInt32, endCol :UInt32) -> (tokens :List(SemanticToken));
+  # Chars with a registered OnInsert hook (any plugin), fetched once at
+  # connect time — mirrors getPluginKeys. See insertHookRegistered for the
+  # live-update counterpart covering hooks registered after connect.
+  getPluginInsertChars @48 () -> (chars :List(Text));
 }
 
 # MenuItemInfo is one node in the Command-menu tree contributed by a plugin.

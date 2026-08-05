@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"sort"
 	"strings"
 	"time"
@@ -350,6 +351,32 @@ func executeInsertEnd(m Model) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// insertHookCmd fires the plugin OnInsert hook registered for r, if any, as a
+// fire-and-forget side effect keyed off the cursor position immediately
+// after r was inserted. It never gates or delays the character's own
+// insertion — that's already happened locally by the time this cmd runs —
+// so a slow or hung plugin can't stall typing or swallow a keystroke, unlike
+// a normal-mode key binding. The response, if any arrives before the 300ms
+// deadline, only drives the same side effects any plugin key RPC does
+// (decoration refresh, cursor move, capture mode) via pluginKeyResultMsg.
+func (m Model) insertHookCmd(r rune) tea.Cmd {
+	if m.rpc == nil || !m.rpc.HasInsertHook(string(r)) {
+		return nil
+	}
+	bufID := m.bufID
+	curLine := uint32(m.cursor.Line)
+	curCol := uint32(m.cursor.Col)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancel()
+		result, err := m.rpc.HandlePluginKey(ctx, string(r), "insert", bufID, curLine, curCol)
+		if err != nil {
+			return nil
+		}
+		return pluginKeyResultMsg{result: result}
+	}
+}
+
 // insertSelfInsert handles any key not bound in insertCmds: it inserts the
 // typed rune(s) into the buffer, applying auto-pairing, signature-help, and
 // completion triggers along the way.
@@ -403,9 +430,9 @@ func (m Model) insertSelfInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor.Col++
 			m2, cmd := applyOp(m, op)
 			if r == '(' {
-				return m2, tea.Batch(cmd, m2.fetchSignatureHelp())
+				return m2, tea.Batch(cmd, m2.fetchSignatureHelp(), m2.insertHookCmd(r))
 			}
-			return m2, cmd
+			return m2, tea.Batch(cmd, m2.insertHookCmd(r))
 		}
 	}
 
@@ -438,9 +465,9 @@ func (m Model) insertSelfInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		delayed := tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
 			return triggerCompletionMsg{seq: seq}
 		})
-		return m2, tea.Batch(cmd, delayed)
+		return m2, tea.Batch(cmd, delayed, m2.insertHookCmd(r))
 	}
-	return m2, cmd
+	return m2, tea.Batch(cmd, m2.insertHookCmd(r))
 }
 
 // insertPastedText inserts multi-line text (from a terminal paste or an

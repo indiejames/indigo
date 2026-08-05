@@ -19,6 +19,11 @@ type PluginMoveCursorMsg struct {
 	Col   uint32
 }
 
+// PluginDecorationsChangedMsg is sent by the server when a plugin calls
+// RefreshDecorations, so the buffer viewing BufID can refetch immediately
+// instead of waiting for its next poll tick.
+type PluginDecorationsChangedMsg struct{ BufID uint32 }
+
 // ClientPopupItem is one entry in a plugin-driven list popup.
 type ClientPopupItem struct {
 	Label    string
@@ -111,6 +116,27 @@ func (s *callbackServer) KeyRegistered(_ context.Context, call proto.ClientCallb
 	clientLog("KeyRegistered called: trigger=%q, rpc_set=%v", trigger, r != nil)
 	if r != nil {
 		r.addPluginKey(trigger)
+	}
+	_, err = call.AllocResults()
+	return err
+}
+
+func (s *callbackServer) DecorationsChanged(_ context.Context, call proto.ClientCallback_decorationsChanged) error {
+	s.dispatch(PluginDecorationsChangedMsg{BufID: call.Args().BufId()})
+	_, err := call.AllocResults()
+	return err
+}
+
+func (s *callbackServer) InsertHookRegistered(_ context.Context, call proto.ClientCallback_insertHookRegistered) error {
+	char, err := call.Args().Char()
+	if err != nil {
+		return err
+	}
+	s.mu.RLock()
+	r := s.rpc
+	s.mu.RUnlock()
+	if r != nil {
+		r.addInsertHookChar(char)
 	}
 	_, err = call.AllocResults()
 	return err

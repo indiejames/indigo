@@ -56,6 +56,9 @@ func (s *editorApiServer) RegisterInsertHook(_ context.Context, call pluginproto
 	}
 	s.reg.insertHooks[char] = handler.AddRef()
 	s.reg.mu.Unlock()
+	if s.bridge != nil {
+		s.bridge.PluginInsertHookRegistered(char)
+	}
 	_, err = call.AllocResults()
 	return err
 }
@@ -150,6 +153,15 @@ func (s *editorApiServer) RegisterDecorations(_ context.Context, call pluginprot
 	return err
 }
 
+func (s *editorApiServer) RefreshDecorations(_ context.Context, call pluginproto.EditorApi_refreshDecorations) error {
+	bufID := call.Args().BufId()
+	if s.bridge != nil {
+		s.bridge.PluginDecorationsChanged(bufID)
+	}
+	_, err := call.AllocResults()
+	return err
+}
+
 func (s *editorApiServer) RegisterActionProvider(_ context.Context, call pluginproto.EditorApi_registerActionProvider) error {
 	provider := call.Args().Provider()
 	if !provider.IsValid() {
@@ -192,8 +204,8 @@ func (s *editorApiServer) ApplyEdit(_ context.Context, call pluginproto.EditorAp
 		}
 		edits[i] = TextEdit{
 			FromLine: from.Line(), FromCol: from.Col(),
-			ToLine:   to.Line(), ToCol: to.Col(),
-			NewText:  text,
+			ToLine: to.Line(), ToCol: to.Col(),
+			NewText: text,
 		}
 	}
 	if err := s.bridge.PluginApplyEdit(bufID, edits); err != nil {

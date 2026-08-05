@@ -578,9 +578,7 @@ type Model struct {
 // Used for hot-reloading preferences at runtime.
 func (m Model) WithConfig(cfg *config.Config) Model {
 	m.cfg = cfg
-	if warnings := applyKeybindOverrides(cfg); len(warnings) > 0 {
-		m.status = strings.Join(warnings, "; ")
-	}
+	m.status = strings.Join(applyKeybindOverrides(cfg), "; ")
 	return m
 }
 

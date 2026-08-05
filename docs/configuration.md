@@ -158,8 +158,9 @@ An unknown `mode` or `action` is likewise reported as a warning rather than sile
 | `move-line-up` | `shift+up` | `move-line-down` | `shift+down` |
 | `jump-back` | `-` | `jump-forward` | `=`, `+` |
 
-Multi-key sequences (the `g`, `m`, `M`, `~`, and Space menus) aren't individually
-overridable yet — only the keys listed above and in the table below.
+Multi-key sequences (the `g`, `m`, `M`, `~`, `[`, `]`, and Space menus, plus any
+others added later) aren't individually overridable — only the single-key
+actions listed above and in the table below.
 
 ### Insert-mode actions (default key)
 

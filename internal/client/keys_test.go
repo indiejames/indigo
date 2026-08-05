@@ -9,22 +9,22 @@ import (
 // --- findCommand ---
 
 func TestFindCommandSingleKey(t *testing.T) {
-	cmd, ok := findCommand([]rune{'m'})
+	cmd, ok := findCommand([]string{"m"})
 	if !ok {
 		t.Fatal("findCommand('m') should return ok=true")
 	}
-	if cmd.key != 'm' {
-		t.Errorf("cmd.key = %c, want m", cmd.key)
+	if cmd.key != "m" {
+		t.Errorf("cmd.key = %s, want m", cmd.key)
 	}
 }
 
 func TestFindCommandMultiKey(t *testing.T) {
-	cmd, ok := findCommand([]rune{'m', 'i'})
+	cmd, ok := findCommand([]string{"m", "i"})
 	if !ok {
 		t.Fatal("findCommand('m','i') should return ok=true")
 	}
-	if cmd.key != 'i' {
-		t.Errorf("cmd.key = %c, want i", cmd.key)
+	if cmd.key != "i" {
+		t.Errorf("cmd.key = %s, want i", cmd.key)
 	}
 	if len(cmd.children) == 0 {
 		t.Error("mi should have children")
@@ -32,7 +32,7 @@ func TestFindCommandMultiKey(t *testing.T) {
 }
 
 func TestFindCommandLeaf(t *testing.T) {
-	cmd, ok := findCommand([]rune{'m', 'i', 'w'})
+	cmd, ok := findCommand([]string{"m", "i", "w"})
 	if !ok {
 		t.Fatal("findCommand('m','i','w') should return ok=true")
 	}
@@ -42,14 +42,14 @@ func TestFindCommandLeaf(t *testing.T) {
 }
 
 func TestFindCommandUnknown(t *testing.T) {
-	_, ok := findCommand([]rune{'z'})
+	_, ok := findCommand([]string{"ctrl+z"})
 	if ok {
-		t.Error("findCommand('z') should return ok=false")
+		t.Error("findCommand('ctrl+z') should return ok=false")
 	}
 }
 
 func TestFindCommandEmpty(t *testing.T) {
-	cmd, ok := findCommand([]rune{})
+	cmd, ok := findCommand([]string{})
 	if ok || cmd != nil {
 		t.Error("findCommand(empty) should return nil, false")
 	}
@@ -220,14 +220,14 @@ func TestHandleNormalPrefixCommandM(t *testing.T) {
 	m := newTestModel("")
 	m2, _ := m.handleNormal(fakeKey("m"))
 	got := m2.(Model)
-	if len(got.prefixSeq) != 1 || got.prefixSeq[0] != 'm' {
+	if len(got.prefixSeq) != 1 || got.prefixSeq[0] != "m" {
 		t.Errorf("after m: prefixSeq = %v, want [m]", got.prefixSeq)
 	}
 }
 
 func TestHandleNormalPrefixEscCancels(t *testing.T) {
 	m := newTestModel("")
-	m.prefixSeq = []rune{'m'}
+	m.prefixSeq = []string{"m"}
 	m2, _ := m.handleNormal(fakeKey("esc"))
 	got := m2.(Model)
 	if len(got.prefixSeq) != 0 {
@@ -238,7 +238,7 @@ func TestHandleNormalPrefixEscCancels(t *testing.T) {
 func TestHandleNormalPrefixMIWExecutes(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.cursor = document.Pos{Line: 0, Col: 2}
-	m.prefixSeq = []rune{'m', 'i'}
+	m.prefixSeq = []string{"m", "i"}
 	m2, _ := m.handleNormal(fakeKey("w"))
 	got := m2.(Model)
 	if got.sel == nil {
@@ -508,7 +508,7 @@ func TestHandleNormalPrefixCommandCapitalM(t *testing.T) {
 	m := newTestModel("")
 	m2, _ := m.handleNormal(fakeKey("M"))
 	got := m2.(Model)
-	if len(got.prefixSeq) != 1 || got.prefixSeq[0] != 'M' {
+	if len(got.prefixSeq) != 1 || got.prefixSeq[0] != "M" {
 		t.Errorf("after M: prefixSeq = %v, want [M]", got.prefixSeq)
 	}
 }
@@ -516,7 +516,7 @@ func TestHandleNormalPrefixCommandCapitalM(t *testing.T) {
 func TestHandleNormalPrefixMjMovesLineDown(t *testing.T) {
 	m := newTestModel("foo\nbar\n")
 	m.cursor = document.Pos{Line: 0, Col: 0}
-	m.prefixSeq = []rune{'M'}
+	m.prefixSeq = []string{"M"}
 	m2, _ := m.handleNormal(fakeKey("j"))
 	got := m2.(Model)
 	if got.buf.Line(0) != "bar" || got.buf.Line(1) != "foo" {
@@ -530,7 +530,7 @@ func TestHandleNormalPrefixMjMovesLineDown(t *testing.T) {
 func TestHandleNormalPrefixMkMovesLineUp(t *testing.T) {
 	m := newTestModel("foo\nbar\n")
 	m.cursor = document.Pos{Line: 1, Col: 0}
-	m.prefixSeq = []rune{'M'}
+	m.prefixSeq = []string{"M"}
 	m2, _ := m.handleNormal(fakeKey("k"))
 	got := m2.(Model)
 	if got.buf.Line(0) != "bar" || got.buf.Line(1) != "foo" {
@@ -558,5 +558,95 @@ func TestHandleNormalShiftUpMovesLineUp(t *testing.T) {
 	got := m2.(Model)
 	if got.buf.Line(0) != "bar" || got.buf.Line(1) != "foo" {
 		t.Errorf("shift+up: Line(0)=%q Line(1)=%q, want bar/foo", got.buf.Line(0), got.buf.Line(1))
+	}
+}
+
+// --- keyRune regression tests ---
+
+// TestKeyRuneModifiedKey verifies that modified plugin keys like "ctrl+p" are
+// returned unchanged, not truncated to the first rune. This is a regression
+// test for a bug where keyRune would return only "c" for "ctrl+p".
+func TestKeyRuneModifiedKey(t *testing.T) {
+	result := keyRune("ctrl+p", "Open file picker")
+	if result != "ctrl+p" {
+		t.Errorf("keyRune(\"ctrl+p\", ...) = %q, want \"ctrl+p\"", result)
+	}
+}
+
+// TestKeyRuneEmptyKeyUsesLabel verifies that when key is empty, keyRune
+// derives the result from the first rune of the lowercased label.
+func TestKeyRuneEmptyKeyUsesLabel(t *testing.T) {
+	result := keyRune("", "Symbol picker")
+	if result != "s" {
+		t.Errorf("keyRune(\"\", \"Symbol picker\") = %q, want \"s\"", result)
+	}
+}
+
+// TestKeyRuneSingleChar verifies that single-character keys are returned unchanged.
+func TestKeyRuneSingleChar(t *testing.T) {
+	result := keyRune("p", "Paste")
+	if result != "p" {
+		t.Errorf("keyRune(\"p\", \"Paste\") = %q, want \"p\"", result)
+	}
+}
+
+// TestKeyRuneEmptyBoth verifies that when both key and label are empty, an empty string is returned.
+func TestKeyRuneEmptyBoth(t *testing.T) {
+	result := keyRune("", "")
+	if result != "" {
+		t.Errorf("keyRune(\"\", \"\") = %q, want \"\"", result)
+	}
+}
+
+// TestClientMenuItemsToCommandsModifiedKey verifies that plugin menu items with
+// modified keys (e.g., "ctrl+p") are correctly converted to commands with the
+// full key preserved for both display and dispatch.
+func TestClientMenuItemsToCommandsModifiedKey(t *testing.T) {
+	items := []ClientMenuItem{
+		{
+			Key:        "ctrl+p",
+			Label:      "Open file picker",
+			PluginName: "test-plugin",
+			Command:    "open-picker",
+		},
+	}
+
+	cmds := clientMenuItemsToCommands(items)
+	if len(cmds) != 1 {
+		t.Fatalf("clientMenuItemsToCommands returned %d commands, want 1", len(cmds))
+	}
+
+	cmd := cmds[0]
+	if cmd.key != "ctrl+p" {
+		t.Errorf("command.key = %q, want \"ctrl+p\"", cmd.key)
+	}
+	if cmd.label != "Open file picker" {
+		t.Errorf("command.label = %q, want \"Open file picker\"", cmd.label)
+	}
+	if cmd.execute == nil {
+		t.Error("command.execute should be set for leaf menu items")
+	}
+}
+
+// TestClientMenuItemsToCommandsEmptyKey verifies that when a plugin menu item
+// has an empty key, the first rune of the lowercased label is used.
+func TestClientMenuItemsToCommandsEmptyKey(t *testing.T) {
+	items := []ClientMenuItem{
+		{
+			Key:        "",
+			Label:      "Symbol picker",
+			PluginName: "test-plugin",
+			Command:    "symbol-picker",
+		},
+	}
+
+	cmds := clientMenuItemsToCommands(items)
+	if len(cmds) != 1 {
+		t.Fatalf("clientMenuItemsToCommands returned %d commands, want 1", len(cmds))
+	}
+
+	cmd := cmds[0]
+	if cmd.key != "s" {
+		t.Errorf("command.key = %q, want \"s\" (first rune of lowercased label)", cmd.key)
 	}
 }

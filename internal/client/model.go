@@ -484,7 +484,7 @@ type Model struct {
 	cmdCompletionIdx    int            // selected item in command completion popup (−1 = none)
 	diagPopup           bool           // when true, show diagnostic detail popup for cursor line
 	diagPopupSuppressed bool           // Escape pressed; don't re-show until cursor leaves the range
-	prefixSeq           []rune         // keys typed so far for a multi-key Normal-mode command
+	prefixSeq           []string         // keys typed so far for a multi-key Normal-mode command
 	searchQuery         string
 	searchMatches       []searchMatch
 	searchIdx           int

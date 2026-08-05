@@ -8,12 +8,14 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/indiejames/indigo/internal/document"
 )
 
 // command is a node in the prefix-command tree.
 // Leaf nodes have execute set; branch nodes have children.
 type command struct {
-	key       rune
+	key       string
 	label     string
 	menuTitle string
 	children  []command
@@ -22,105 +24,201 @@ type command struct {
 
 // prefixCmds is the root of the prefix-command tree for Normal mode.
 var prefixCmds = []command{
+	{key: "ctrl+p", label: "Open file picker", execute: func(m Model) (tea.Model, tea.Cmd) {
+		return m, func() tea.Msg { return OpenPickerMsg{} }
+	}},
+	{key: "n", label: "Search next", execute: func(m Model) (tea.Model, tea.Cmd) {
+		if len(m.searchMatches) > 0 {
+			m.searchIdx = (m.searchIdx + 1) % len(m.searchMatches)
+			sm := m.searchMatches[m.searchIdx]
+			m.cursor = document.Pos{Line: sm.line, Col: sm.col}
+			m.scrollToCursor()
+		}
+		return m, nil
+	}},
+	{key: "N", label: "Search previous", execute: func(m Model) (tea.Model, tea.Cmd) {
+		if len(m.searchMatches) > 0 {
+			m.searchIdx = (m.searchIdx - 1 + len(m.searchMatches)) % len(m.searchMatches)
+			sm := m.searchMatches[m.searchIdx]
+			m.cursor = document.Pos{Line: sm.line, Col: sm.col}
+			m.scrollToCursor()
+		}
+		return m, nil
+	}},
+	{key: "i", label: "Insert before cursor", execute: func(m Model) (tea.Model, tea.Cmd) {
+		m = m.withClearedSearch()
+		m.sel = nil
+		m.currentGroup = []document.Op{}
+		m.groupBefore = m.cursorSnap()
+		m.insertLineCount = m.buf.LineCount()
+		m.mode = ModeInsert
+		return m, nil
+	}},
+	{key: "ctrl+c", label: "Quit hint", execute: executeCancelHint},
+	{key: ":", label: "Command mode", execute: executeEnterCommandMode},
+	{key: "/", label: "Search", execute: executeEnterSearchMode},
+	{key: "esc", label: "Cancel selection", execute: executeEscNormal},
+	{key: "a", label: "Append after cursor", execute: executeAppendAfterCursor},
+	{key: "A", label: "Append at line end", execute: executeAppendLineEnd},
+	{key: "o", label: "Open line below", execute: executeOpenLineBelow},
+	{key: "O", label: "Open line above", execute: executeOpenLineAbove},
+	{key: "ctrl+s", label: "Save", execute: executeSave},
+	{key: "K", label: "Hover docs", execute: executeHover},
+	{key: "J", label: "Join lines", execute: executeJoinLines},
+	{key: "D", label: "Toggle diagnostics popup", execute: executeToggleDiagPopup},
+	{key: "u", label: "Undo", execute: executeUndo},
+	{key: "U", label: "Redo", execute: executeRedo},
+	{key: "W", label: "Extend to next word start", execute: executeExtendNextWordStart},
+	{key: "E", label: "Extend word forward", execute: executeExtendWordForward},
+	{key: "x", label: "Select line", execute: executeSelectLine},
+	{key: "X", label: "Extend line backward", execute: executeExtendLineBackward},
+	{key: "%", label: "Select all", execute: executeSelectAll},
+	{key: ";", label: "Clear selections", execute: executeClearSelections},
+	{key: "alt+;", label: "Flip selection", execute: executeFlipSelection},
+	{key: "d", label: "Delete selection", execute: executeDeleteSelection},
+	{key: "c", label: "Change selection", execute: executeChangeSelection},
+	{key: "y", label: "Yank", execute: executeYank},
+	{key: "h", label: "Cursor left", execute: executeCursorLeft},
+	{key: "left", label: "Cursor left", execute: executeCursorLeft},
+	{key: "l", label: "Cursor right", execute: executeCursorRight},
+	{key: "right", label: "Cursor right", execute: executeCursorRight},
+	{key: "j", label: "Cursor down", execute: executeCursorDown},
+	{key: "down", label: "Cursor down", execute: executeCursorDown},
+	{key: "k", label: "Cursor up", execute: executeCursorUp},
+	{key: "up", label: "Cursor up", execute: executeCursorUp},
+	{key: "ctrl+f", label: "Page down", execute: executePageDown},
+	{key: "pgdown", label: "Page down", execute: executePageDown},
+	{key: "ctrl+b", label: "Page up", execute: executePageUp},
+	{key: "pgup", label: "Page up", execute: executePageUp},
+	{key: "G", label: "Go to last line", execute: executeGoToLastLine},
+	{key: "0", label: "Go to line start", execute: executeGoToLineStart},
+	{key: "home", label: "Go to line start", execute: executeGoToLineStart},
+	{key: "^", label: "Go to first non-blank", execute: executeFirstNonBlank},
+	{key: "$", label: "Go to line end", execute: executeGoToLineEnd},
+	{key: "end", label: "Go to line end", execute: executeGoToLineEnd},
+	{key: "w", label: "Next word start", execute: executeNextWordStart},
+	{key: "b", label: "Previous word start", execute: executePrevWordStart},
+	{key: "e", label: "Word end", execute: executeWordEnd},
+	{key: "p", label: "Paste", execute: executePaste},
+	{key: "B", label: "Extend word backward", execute: executeExtendWordBackward},
+	{key: "ctrl+d", label: "Select next occurrence", execute: executeSelectNextOccurrence},
+	{key: "C", label: "Add cursor below", execute: executeAddCursorBelow},
+	// ctrl+/ and ctrl+_ are the same byte (0x1F) in most terminals.
+	{key: "ctrl+/", label: "Toggle comment", execute: executeToggleComment},
+	{key: "ctrl+_", label: "Toggle comment", execute: executeToggleComment},
+	{key: "?", label: "Show plugin bindings", execute: executeFetchPluginBindings},
+	{key: "alt+s", label: "Split selection into cursors", execute: executeSplitSelectionIntoCursors},
+	{key: "z", label: "Set mark", execute: executeSetMark},
+	{key: "Z", label: "Select to mark", execute: executeSelectToMark},
+	{key: ">", label: "Indent", execute: executeIndent},
+	{key: "<", label: "Unindent", execute: executeUnindent},
+	// Move current line (or selected lines) up/down, swapping with the
+	// neighbor. Bound to Shift+Arrow rather than Alt+Arrow: zellij's default
+	// pane-focus keymap claims Alt+Arrow even in "locked" interface mode.
+	{key: "shift+up", label: "Move line up", execute: executeMoveLineUp},
+	{key: "shift+down", label: "Move line down", execute: executeMoveLineDown},
+	{key: "-", label: "Jump back", execute: executeJumpBack},
+	{key: "=", label: "Jump forward", execute: executeJumpForward},
+	{key: "+", label: "Jump forward", execute: executeJumpForward},
 	{
-		key:       'g',
+		key:       "g",
 		label:     "Go",
 		menuTitle: "Go",
 		children: []command{
-			{key: 'g', label: "Go to top of file", execute: executeGoToTop},
-			{key: 'e', label: "Go to end of file", execute: executeGoToEnd},
-			{key: 'd', label: "Go to definition", execute: executeGoToDefinition},
-			{key: 'h', label: "Go to line start", execute: executeGoToLineStart},
-			{key: 'l', label: "Go to line end", execute: executeGoToLineEnd},
-			{key: 's', label: "Go to symbol in project", execute: func(m Model) (tea.Model, tea.Cmd) {
+			{key: "g", label: "Go to top of file", execute: executeGoToTop},
+			{key: "e", label: "Go to end of file", execute: executeGoToEnd},
+			{key: "d", label: "Go to definition", execute: executeGoToDefinition},
+			{key: "h", label: "Go to line start", execute: executeGoToLineStart},
+			{key: "l", label: "Go to line end", execute: executeGoToLineEnd},
+			{key: "s", label: "Go to symbol in project", execute: func(m Model) (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg { return OpenSymbolPickerMsg{BufID: m.bufID} }
 			}},
-			{key: 'S', label: "Go to symbol in file", execute: func(m Model) (tea.Model, tea.Cmd) {
+			{key: "S", label: "Go to symbol in file", execute: func(m Model) (tea.Model, tea.Cmd) {
 				return m, m.fetchDocSymbols()
 			}},
-			{key: 'r', label: "Find references", execute: func(m Model) (tea.Model, tea.Cmd) {
+			{key: "r", label: "Find references", execute: func(m Model) (tea.Model, tea.Cmd) {
 				return m, m.fetchReferences()
 			}},
-			{key: 'b', label: "Open buffer picker", execute: func(m Model) (tea.Model, tea.Cmd) {
+			{key: "b", label: "Open buffer picker", execute: func(m Model) (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg { return OpenBufPickerMsg{} }
 			}},
 		},
 	},
 	{
-		key:       ']',
+		key:       "]",
 		label:     "Next",
 		menuTitle: "Next",
 		children: []command{
-			{key: 'b', label: "Next buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
+			{key: "b", label: "Next buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg { return NextBufferMsg{} }
 			}},
 		},
 	},
 	{
-		key:       '[',
+		key:       "[",
 		label:     "Prev",
 		menuTitle: "Prev",
 		children: []command{
-			{key: 'b', label: "Previous buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
+			{key: "b", label: "Previous buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg { return PrevBufferMsg{} }
 			}},
 		},
 	},
 	commandMenuRoot,
 	{
-		key:       '~',
+		key:       "~",
 		label:     "Case",
 		menuTitle: "Case",
 		children: []command{
-			{key: 's', label: "snake_case", execute: executeCaseConvertSnake},
-			{key: 'S', label: "SCREAMING_SNAKE_CASE", execute: executeCaseConvertScreamingSnake},
-			{key: 'c', label: "camelCase", execute: executeCaseConvertCamel},
-			{key: 'p', label: "PascalCase", execute: executeCaseConvertPascal},
-			{key: 'k', label: "kebab-case", execute: executeCaseConvertKebab},
-			{key: 'd', label: "dot.case", execute: executeCaseConvertDot},
+			{key: "s", label: "snake_case", execute: executeCaseConvertSnake},
+			{key: "S", label: "SCREAMING_SNAKE_CASE", execute: executeCaseConvertScreamingSnake},
+			{key: "c", label: "camelCase", execute: executeCaseConvertCamel},
+			{key: "p", label: "PascalCase", execute: executeCaseConvertPascal},
+			{key: "k", label: "kebab-case", execute: executeCaseConvertKebab},
+			{key: "d", label: "dot.case", execute: executeCaseConvertDot},
 		},
 	},
 	{
-		key:       'M',
+		key:       "M",
 		label:     "Move",
 		menuTitle: "Move",
 		children: []command{
-			{key: 'j', label: "Move line(s) down", execute: executeMoveLineDown},
-			{key: 'k', label: "Move line(s) up", execute: executeMoveLineUp},
+			{key: "j", label: "Move line(s) down", execute: executeMoveLineDown},
+			{key: "k", label: "Move line(s) up", execute: executeMoveLineUp},
 		},
 	},
 	{
-		key:       'm',
+		key:       "m",
 		label:     "Match",
 		menuTitle: "Match",
 		children: []command{
-			{key: 'm', label: "Go to matching bracket", execute: executeGotoMatchingBracket},
+			{key: "m", label: "Go to matching bracket", execute: executeGotoMatchingBracket},
 			{
-				key:       'i',
+				key:       "i",
 				label:     "Select inside object",
 				menuTitle: "Match Inside",
 				children: []command{
-					{key: 'w', label: "Word", execute: executeSelectInsideWord},
-					{key: 'm', label: "Closest surrounding pair", execute: executeSelectInsideBrackets},
-					{key: '.', label: "Quote/delimiter pair", execute: executeSelectInsideChar},
-					{key: 'f', label: "Function", execute: executeSelectInsideFunction},
-					{key: 't', label: "Type definition", execute: executeSelectInsideType},
-					{key: 'a', label: "Argument/parameter", execute: executeSelectInsideArgument},
-					{key: 'c', label: "Comment", execute: executeSelectInsideComment},
+					{key: "w", label: "Word", execute: executeSelectInsideWord},
+					{key: "m", label: "Closest surrounding pair", execute: executeSelectInsideBrackets},
+					{key: ".", label: "Quote/delimiter pair", execute: executeSelectInsideChar},
+					{key: "f", label: "Function", execute: executeSelectInsideFunction},
+					{key: "t", label: "Type definition", execute: executeSelectInsideType},
+					{key: "a", label: "Argument/parameter", execute: executeSelectInsideArgument},
+					{key: "c", label: "Comment", execute: executeSelectInsideComment},
 				},
 			},
 			{
-				key:       'a',
+				key:       "a",
 				label:     "Select around object",
 				menuTitle: "Match Around",
 				children: []command{
-					{key: 'w', label: "Word", execute: executeSelectInsideWord},
-					{key: 'm', label: "Closest surrounding pair", execute: executeSelectAroundBrackets},
-					{key: '.', label: "Quote/delimiter pair", execute: executeSelectAroundChar},
-					{key: 'f', label: "Function", execute: executeSelectAroundFunction},
-					{key: 't', label: "Type definition", execute: executeSelectAroundType},
-					{key: 'a', label: "Argument/parameter", execute: executeSelectAroundArgument},
-					{key: 'c', label: "Comment", execute: executeSelectAroundComment},
+					{key: "w", label: "Word", execute: executeSelectInsideWord},
+					{key: "m", label: "Closest surrounding pair", execute: executeSelectAroundBrackets},
+					{key: ".", label: "Quote/delimiter pair", execute: executeSelectAroundChar},
+					{key: "f", label: "Function", execute: executeSelectAroundFunction},
+					{key: "t", label: "Type definition", execute: executeSelectAroundType},
+					{key: "a", label: "Argument/parameter", execute: executeSelectAroundArgument},
+					{key: "c", label: "Comment", execute: executeSelectAroundComment},
 				},
 			},
 		},
@@ -132,29 +230,29 @@ var prefixCmds = []command{
 // (declared via plugin.toml menu_item and invoked through OnMenuAction) are
 // merged in at lookup time by resolveCommand, not listed here.
 var commandMenuRoot = command{
-	key:       ' ',
+	key:       " ",
 	label:     "Command",
 	menuTitle: "Command",
 	children: []command{
-		{key: 's', label: "Search & Replace", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "s", label: "Search & Replace", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return OpenSearchReplaceMsg{} }
 		}},
-		{key: 'p', label: "Symbol picker", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "p", label: "Symbol picker", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return OpenSymbolPickerMsg{BufID: m.bufID} }
 		}},
-		{key: 'f', label: "File picker", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "f", label: "File picker", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return OpenPickerMsg{} }
 		}},
-		{key: 'n', label: "New file", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "n", label: "New file", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return OpenNewFileMsg{} }
 		}},
-		{key: 'a', label: "Code Actions (fixes & refactors)", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "a", label: "Code Actions (fixes & refactors)", execute: func(m Model) (tea.Model, tea.Cmd) {
 			// Uses the current selection as the request range when one is
 			// active, so range refactors (Extract Function/Variable) are
 			// offered alongside point-based quick-fixes.
 			return m, m.fetchFixes()
 		}},
-		{key: 'r', label: "Refactor: Rename Symbol", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "r", label: "Refactor: Rename Symbol", execute: func(m Model) (tea.Model, tea.Cmd) {
 			// Uses the language server if one is running for this buffer;
 			// see doRenameSymbol / EditorService.lspRename.
 			m.mode = ModeCommand
@@ -162,7 +260,7 @@ var commandMenuRoot = command{
 			m.cmdCompletionIdx = -1
 			return m, nil
 		}},
-		{key: 'm', label: "Refactor: Move Function to File", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "m", label: "Refactor: Move Function to File", execute: func(m Model) (tea.Model, tea.Cmd) {
 			// Tree-sitter based (no language server needed); see
 			// doMoveFunctionToFile / EditorService.moveTextToFile.
 			m.mode = ModeCommand
@@ -174,13 +272,13 @@ var commandMenuRoot = command{
 }
 
 // findCommand navigates prefixCmds following seq and returns the final node.
-func findCommand(seq []rune) (*command, bool) {
+func findCommand(seq []string) (*command, bool) {
 	return findIn(prefixCmds, seq)
 }
 
 // findIn walks cmds following seq and returns the final node, recursing into
 // each matched node's children for the next rune in seq.
-func findIn(cmds []command, seq []rune) (*command, bool) {
+func findIn(cmds []command, seq []string) (*command, bool) {
 	var found *command
 	for _, r := range seq {
 		matched := false
@@ -203,8 +301,8 @@ func findIn(cmds []command, seq []rune) (*command, bool) {
 // (space) menu, merges plugin-contributed menu items into its children before
 // resolving the rest of seq against it. This lets plugins add entries (and
 // submenus) without the core prefixCmds tree knowing about them ahead of time.
-func (m Model) resolveCommand(seq []rune) (*command, bool) {
-	if len(seq) == 0 || seq[0] != ' ' {
+func (m Model) resolveCommand(seq []string) (*command, bool) {
+	if len(seq) == 0 || seq[0] != " " {
 		return findCommand(seq)
 	}
 	node := commandMenuRoot
@@ -247,16 +345,16 @@ func clientMenuItemsToCommands(items []ClientMenuItem) []command {
 	return out
 }
 
-// keyRune picks the popup-selector rune for a plugin menu item: the declared
+// keyRune picks the popup-selector key for a plugin menu item: the declared
 // Key if set, otherwise the lowercased first rune of Label.
-func keyRune(key, label string) rune {
-	if r := []rune(key); len(r) > 0 {
-		return r[0]
+func keyRune(key, label string) string {
+	if key != "" {
+		return key
 	}
 	for _, r := range strings.ToLower(label) {
-		return r
+		return string(r)
 	}
-	return 0
+	return ""
 }
 
 // handleMenuActionRPC dispatches a Command-menu selection to the plugin that

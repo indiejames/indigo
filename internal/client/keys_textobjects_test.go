@@ -563,3 +563,66 @@ func TestExecuteMoveLineUpIndentsImmediatelyWithSiblingInBlock(t *testing.T) {
 		t.Errorf("Line(4) = %q, want %q", line, "}")
 	}
 }
+
+// TestExecuteMoveLineDownAdjustsCursorColumn is a regression test: when moving
+// a line down causes reindentation, the cursor column must shift by the same
+// delta so it stays on the same character.
+func TestExecuteMoveLineDownAdjustsCursorColumn(t *testing.T) {
+	m := newTestModel("foo\nif x {\nbar\n")
+	m.cursor = document.Pos{Line: 0, Col: 2} // on the second 'o' of "foo"
+
+	got, _ := executeMoveLineDown(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "if x {" {
+		t.Errorf("Line(0) = %q, want %q", line, "if x {")
+	}
+	if line := m2.buf.Line(1); line != "\tfoo" {
+		t.Errorf("Line(1) = %q, want %q (indented after the brace)", line, "\tfoo")
+	}
+	// Cursor was at column 2 on "foo", now at column 2+1=3 on "\tfoo" (the same 'o').
+	if m2.cursor != (document.Pos{Line: 1, Col: 3}) {
+		t.Errorf("cursor = %+v, want {Line:1 Col:3} (adjusted for the added tab)", m2.cursor)
+	}
+}
+
+// TestExecuteMoveLineUpAdjustsSelectionColumns is a regression test: when
+// moving a selection up causes dedentation, both anchor and head columns must
+// shift by the same delta.
+func TestExecuteMoveLineUpAdjustsSelectionColumns(t *testing.T) {
+	m := newTestModel("if x {\n\tfoo\n\tbar\nqux\n")
+	m.cursor = document.Pos{Line: 2, Col: 4} // on 'r' in "\tbar"
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: 1, Col: 2}, // on 'o' in "\tfoo"
+		Head:   document.Pos{Line: 2, Col: 4}, // on 'r' in "\tbar"
+		IsLine: true,
+	}
+
+	got, _ := executeMoveLineUp(m)
+	m2 := got.(Model)
+
+	if line := m2.buf.Line(0); line != "foo" {
+		t.Errorf("Line(0) = %q, want %q (dedented after leaving the brace block)", line, "foo")
+	}
+	if line := m2.buf.Line(1); line != "bar" {
+		t.Errorf("Line(1) = %q, want %q (dedented after leaving the brace block)", line, "bar")
+	}
+	if line := m2.buf.Line(2); line != "if x {" {
+		t.Errorf("Line(2) = %q, want %q", line, "if x {")
+	}
+	// Selection anchor was at column 2 on "\tfoo", now at column 2-1=1 on "foo".
+	// Selection head was at column 4 on "\tbar", now at column 4-1=3 on "bar".
+	if m2.sel == nil {
+		t.Fatal("sel is nil, want non-nil")
+	}
+	if m2.sel.Anchor != (document.Pos{Line: 0, Col: 1}) {
+		t.Errorf("sel.Anchor = %+v, want {Line:0 Col:1} (adjusted for removed tab)", m2.sel.Anchor)
+	}
+	if m2.sel.Head != (document.Pos{Line: 1, Col: 3}) {
+		t.Errorf("sel.Head = %+v, want {Line:1 Col:3} (adjusted for removed tab)", m2.sel.Head)
+	}
+	// Cursor follows head.
+	if m2.cursor != (document.Pos{Line: 1, Col: 3}) {
+		t.Errorf("cursor = %+v, want {Line:1 Col:3} (follows head)", m2.cursor)
+	}
+}

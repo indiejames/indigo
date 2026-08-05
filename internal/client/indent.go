@@ -188,28 +188,33 @@ func blockBaseIndent(lines []string) (indent string, ok bool) {
 	return "", false
 }
 
-// reindentLines shifts every non-blank line in lines by delta characters of
-// unit's whitespace character — added at the start when delta > 0, removed
-// when delta < 0 — preserving each line's indentation relative to the
-// others in the block. Blank lines are left untouched.
-func reindentLines(lines []string, unit string, delta int) []string {
-	if delta == 0 || unit == "" || len(lines) == 0 {
-		return lines
+// reindentLines replaces the leading whitespace (baseline) of every non-blank
+// line in lines with target, preserving each line's indentation relative to the
+// baseline. Blank lines are left untouched. Returns both the reindented lines
+// and the column delta (in runes) applied to non-blank lines.
+func reindentLines(lines []string, baseline, target string) ([]string, int) {
+	if len(lines) == 0 {
+		return lines, 0
 	}
-	ch := unit[:1]
+	baseRunes := []rune(baseline)
+	targetRunes := []rune(target)
+	delta := len(targetRunes) - len(baseRunes)
 	out := make([]string, len(lines))
 	for i, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			out[i] = line
 			continue
 		}
-		if delta > 0 {
-			out[i] = strings.Repeat(ch, delta) + line
-			continue
-		}
 		runs := []rune(line)
 		n := leadingWhitespace(runs)
-		out[i] = string(runs[min(n, -delta):])
+		// Find how much of the baseline prefix this line actually has.
+		prefixLen := 0
+		for prefixLen < len(baseRunes) && prefixLen < n && runs[prefixLen] == baseRunes[prefixLen] {
+			prefixLen++
+		}
+		// Replace the baseline prefix with target, keeping the rest.
+		suffix := runs[prefixLen:]
+		out[i] = target + string(suffix)
 	}
-	return out
+	return out, delta
 }

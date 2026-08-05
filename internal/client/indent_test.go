@@ -155,3 +155,110 @@ func TestEnterDetectedIndentOverridesConfig(t *testing.T) {
 		t.Errorf("line 2 = %q, want %q (detected 4-space indent, not config tabs)", got.buf.Line(2), "    ")
 	}
 }
+
+// TestReindentLinesTabToSpace is a regression test: reindentLines must convert
+// tab-based baseline indentation to space-based target indentation, preserving
+// relative nesting within the block.
+func TestReindentLinesTabToSpace(t *testing.T) {
+	lines := []string{
+		"\tfoo",
+		"\t\tbar",
+		"\tbaz",
+	}
+	baseline := "\t"
+	target := "    " // 4 spaces
+
+	got, delta := reindentLines(lines, baseline, target)
+
+	if delta != 3 { // 4 spaces - 1 tab = +3 rune positions
+		t.Errorf("delta = %d, want 3 (4 spaces - 1 tab)", delta)
+	}
+	if got[0] != "    foo" {
+		t.Errorf("line 0 = %q, want %q", got[0], "    foo")
+	}
+	if got[1] != "    \tbar" {
+		t.Errorf("line 1 = %q, want %q (baseline replaced, extra tab preserved)", got[1], "    \tbar")
+	}
+	if got[2] != "    baz" {
+		t.Errorf("line 2 = %q, want %q", got[2], "    baz")
+	}
+}
+
+// TestReindentLinesSpaceToTab is a regression test: reindentLines must convert
+// space-based baseline indentation to tab-based target indentation.
+func TestReindentLinesSpaceToTab(t *testing.T) {
+	lines := []string{
+		"    foo",
+		"        bar",
+		"    baz",
+	}
+	baseline := "    " // 4 spaces
+	target := "\t"
+
+	got, delta := reindentLines(lines, baseline, target)
+
+	if delta != -3 { // 1 tab - 4 spaces = -3 rune positions
+		t.Errorf("delta = %d, want -3 (1 tab - 4 spaces)", delta)
+	}
+	if got[0] != "\tfoo" {
+		t.Errorf("line 0 = %q, want %q", got[0], "\tfoo")
+	}
+	if got[1] != "\t    bar" {
+		t.Errorf("line 1 = %q, want %q (baseline replaced, extra spaces preserved)", got[1], "\t    bar")
+	}
+	if got[2] != "\tbaz" {
+		t.Errorf("line 2 = %q, want %q", got[2], "\tbaz")
+	}
+}
+
+// TestReindentLinesPreservesBlankLines is a regression test: blank lines must
+// pass through unchanged regardless of baseline/target.
+func TestReindentLinesPreservesBlankLines(t *testing.T) {
+	lines := []string{
+		"\tfoo",
+		"",
+		"  ",
+		"\t\tbar",
+	}
+	baseline := "\t"
+	target := "    "
+
+	got, _ := reindentLines(lines, baseline, target)
+
+	if got[0] != "    foo" {
+		t.Errorf("line 0 = %q, want %q", got[0], "    foo")
+	}
+	if got[1] != "" {
+		t.Errorf("line 1 = %q, want empty (blank line unchanged)", got[1])
+	}
+	if got[2] != "  " {
+		t.Errorf("line 2 = %q, want %q (whitespace-only line unchanged)", got[2], "  ")
+	}
+	if got[3] != "    \tbar" {
+		t.Errorf("line 3 = %q, want %q", got[3], "    \tbar")
+	}
+}
+
+// TestReindentLinesNoBaselineMatch verifies lines without the baseline prefix
+// still get the target prefix prepended.
+func TestReindentLinesNoBaselineMatch(t *testing.T) {
+	lines := []string{
+		"foo",     // no indent
+		"\tbar",   // tab indent (baseline is spaces)
+		"    baz", // 4 spaces
+	}
+	baseline := "  " // 2 spaces
+	target := "\t"
+
+	got, _ := reindentLines(lines, baseline, target)
+
+	if got[0] != "\tfoo" {
+		t.Errorf("line 0 = %q, want %q (target prepended even though baseline doesn't match)", got[0], "\tfoo")
+	}
+	if got[1] != "\t\tbar" {
+		t.Errorf("line 1 = %q, want %q", got[1], "\t\tbar")
+	}
+	if got[2] != "\t  baz" {
+		t.Errorf("line 2 = %q, want %q (2-space baseline replaced, extra 2 spaces preserved)", got[2], "\t  baz")
+	}
+}

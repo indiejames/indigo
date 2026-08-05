@@ -730,10 +730,10 @@ func moveLines(m Model, dir int) (tea.Model, tea.Cmd) {
 		from, to = startLine, endLine+1
 		prevLine = m.buf.Line(to)
 	}
+	var indentDelta int
 	if baseline, ok := blockBaseIndent(block); ok {
 		target := m.contextIndent(prevLine, -1, len([]rune(prevLine)))
-		delta := len([]rune(target)) - len([]rune(baseline))
-		block = reindentLines(block, m.indentUnit(), delta)
+		block, indentDelta = reindentLines(block, baseline, target)
 	}
 
 	var lines []string
@@ -759,9 +759,32 @@ func moveLines(m Model, dir int) (tea.Model, tea.Cmd) {
 		InsertText: newText,
 	}
 
+	// Adjust cursor and selection positions for both line and column changes.
+	// Line numbers shift by dir; columns on moved non-blank lines shift by indentDelta.
+	// Check against original positions before moving.
+	if m.cursor.Line >= startLine && m.cursor.Line <= endLine {
+		movedLineIdx := m.cursor.Line - startLine
+		if movedLineIdx >= 0 && movedLineIdx < len(block) && strings.TrimSpace(block[movedLineIdx]) != "" {
+			m.cursor.Col = max(0, m.cursor.Col+indentDelta)
+		}
+	}
 	m.cursor.Line += dir
+
 	if m.sel != nil {
+		if m.sel.Anchor.Line >= startLine && m.sel.Anchor.Line <= endLine {
+			movedLineIdx := m.sel.Anchor.Line - startLine
+			if movedLineIdx >= 0 && movedLineIdx < len(block) && strings.TrimSpace(block[movedLineIdx]) != "" {
+				m.sel.Anchor.Col = max(0, m.sel.Anchor.Col+indentDelta)
+			}
+		}
 		m.sel.Anchor.Line += dir
+
+		if m.sel.Head.Line >= startLine && m.sel.Head.Line <= endLine {
+			movedLineIdx := m.sel.Head.Line - startLine
+			if movedLineIdx >= 0 && movedLineIdx < len(block) && strings.TrimSpace(block[movedLineIdx]) != "" {
+				m.sel.Head.Col = max(0, m.sel.Head.Col+indentDelta)
+			}
+		}
 		m.sel.Head.Line += dir
 	}
 	return applyBatch(m, []document.Op{delOp, insOp})

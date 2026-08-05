@@ -402,8 +402,7 @@ func (m Model) insertPastedText(text string) (tea.Model, tea.Cmd) {
 	rest := lines[1:]
 	if baseline, ok := blockBaseIndent(rest); ok {
 		target := m.contextIndent(m.buf.Line(m.cursor.Line), m.cursor.Line, m.cursor.Col)
-		delta := len([]rune(target)) - len([]rune(baseline))
-		rest = reindentLines(rest, m.indentUnit(), delta)
+		rest, _ = reindentLines(rest, baseline, target)
 	}
 
 	op := document.Op{

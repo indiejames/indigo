@@ -102,7 +102,7 @@ they show up the same way (gutter markers, the `D`-popup) with no extra keybindi
 
 | Extensions | Linter |
 |-----------|--------|
-| `.go` | `golangci-lint run --out-format json {file}` |
+| `.go` | `golangci-lint run --output.json.path=stdout {file}` |
 | `.js` `.jsx` `.ts` `.tsx` | `eslint --format json {file}` |
 | `.py` | `ruff check --output-format json {file}` |
 | `.rs` | `cargo clippy --message-format json` (whole crate, not a single file) |
@@ -121,7 +121,7 @@ parse yet can't be added this way.
 [[linter]]
 extensions = ["go"]
 command    = "golangci-lint"
-args       = ["run", "--out-format", "json", "{file}"]
+args       = ["run", "--output.json.path=stdout", "{file}"]
 format     = "golangci-lint-json"
 ```
 

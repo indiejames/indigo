@@ -51,7 +51,7 @@ type LinterConfig struct {
 // Only entries whose command is found in PATH (or node_modules/.bin) are used.
 var DefaultLinters = []LinterConfig{
 	{Extensions: []string{"go"}, Command: "golangci-lint",
-		Args: []string{"run", "--out-format", "json", "{file}"}, Format: "golangci-lint-json"},
+		Args: []string{"run", "--output.json.path=stdout", "{file}"}, Format: "golangci-lint-json"},
 	{Extensions: []string{"js", "jsx", "ts", "tsx"}, Command: "eslint",
 		Args: []string{"--format", "json", "{file}"}, Format: "eslint-json"},
 	{Extensions: []string{"py"}, Command: "ruff",
@@ -405,7 +405,7 @@ const defaultConfigTemplate = `# Indigo editor configuration
 # [[linter]]
 # extensions = ["go"]
 # command    = "golangci-lint"
-# args       = ["run", "--out-format", "json", "{file}"]
+# args       = ["run", "--output.json.path=stdout", "{file}"]
 # format     = "golangci-lint-json"
 # ---------------------------------------------------------------------------
 

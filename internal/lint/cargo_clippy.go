@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 
 	"github.com/indiejames/indigo/internal/lsp"
@@ -23,11 +24,12 @@ type cargoMessage struct {
 		Message string `json:"message"`
 		Level   string `json:"level"`
 		Spans   []struct {
-			LineStart   int  `json:"line_start"`
-			ColumnStart int  `json:"column_start"`
-			LineEnd     int  `json:"line_end"`
-			ColumnEnd   int  `json:"column_end"`
-			IsPrimary   bool `json:"is_primary"`
+			FileName    string `json:"file_name"`
+			LineStart   int    `json:"line_start"`
+			ColumnStart int    `json:"column_start"`
+			LineEnd     int    `json:"line_end"`
+			ColumnEnd   int    `json:"column_end"`
+			IsPrimary   bool   `json:"is_primary"`
 		} `json:"spans"`
 	} `json:"message"`
 }
@@ -40,9 +42,12 @@ type cargoMessage struct {
 // diagnostic often carries secondary spans too (e.g. "note: previous
 // definition here" pointing elsewhere in the file), which would otherwise
 // show as extra, misleadingly-placed markers for what is really one issue.
-// line_start/column_start are 1-based; lsp.Position is 0-based.
-func parseCargoClippy(out []byte, _ string) ([]lsp.Diagnostic, error) {
+// Diagnostics are filtered to only include those whose primary span's
+// file_name matches the provided filePath (normalized for consistent
+// comparison). line_start/column_start are 1-based; lsp.Position is 0-based.
+func parseCargoClippy(out []byte, filePath string) ([]lsp.Diagnostic, error) {
 	var diags []lsp.Diagnostic
+	normalizedFilePath := filepath.Clean(filePath)
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
@@ -59,6 +64,11 @@ func parseCargoClippy(out []byte, _ string) ([]lsp.Diagnostic, error) {
 		}
 		for _, s := range msg.Message.Spans {
 			if !s.IsPrimary {
+				continue
+			}
+			// Filter diagnostics: only include those referencing the target file
+			normalizedSpanFile := filepath.Clean(s.FileName)
+			if normalizedSpanFile != normalizedFilePath {
 				continue
 			}
 			startLine := max(0, s.LineStart-1)

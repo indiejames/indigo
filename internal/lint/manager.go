@@ -151,6 +151,11 @@ func runLinter(lc config.LinterConfig, filePath, workDir string) ([]lsp.Diagnost
 	proc.Stdout = &out
 	runErr := proc.Run()
 
+	// Check for context timeout/cancellation before parsing partial output
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	diags, parseErr := parse(out.Bytes(), filePath)
 	if parseErr != nil {
 		if runErr != nil {

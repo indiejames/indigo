@@ -180,6 +180,11 @@ type Config struct {
 	// Linters override or add an external linter for a given set of file
 	// extensions, merged alongside the file's LSP-reported diagnostics.
 	Linters []LinterConfig `toml:"linter"`
+	// PickerIgnoreDirs names additional directories (matched by base name,
+	// anywhere in the tree) to hide from the file picker, recent files, and
+	// workspace grep — on top of the built-in defaults (.git, node_modules,
+	// vendor, etc.). Example: ["build", "dist"].
+	PickerIgnoreDirs []string `toml:"picker_ignore_dirs"`
 }
 
 func defaults() *Config {

@@ -176,6 +176,7 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 	if startLine > 0 {
 		m = m.AtLine(startLine)
 	}
+	addIgnoredDirs(cfg.PickerIgnoreDirs)
 	recordRecentFile(workDir, absPath)
 	cfgPath, cfgMod := configPathAndMtime()
 	a := &App{
@@ -213,6 +214,7 @@ func (a App) newDirectoryPicker() *filePicker {
 // (used when indigo is started with a directory argument).
 func NewWithPicker(rpc *client.RPC, cfg *config.Config, workDir string) *App {
 	cfgPath, cfgMod := configPathAndMtime()
+	addIgnoredDirs(cfg.PickerIgnoreDirs)
 	return &App{
 		rpc:            rpc,
 		cfg:            cfg,
@@ -243,6 +245,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.configModTime = msg.newMod
 		if msg.cfg != nil {
 			a.cfg = msg.cfg
+			addIgnoredDirs(msg.cfg.PickerIgnoreDirs)
 			for i, m := range a.buffers {
 				a.buffers[i] = m.WithConfig(msg.cfg)
 			}

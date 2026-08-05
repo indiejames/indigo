@@ -17,6 +17,17 @@ var ignoredDirs = map[string]bool{
 	".svn": true, ".hg": true, "__pycache__": true, ".cache": true,
 }
 
+// addIgnoredDirs extends the shared ignoredDirs set with additional
+// directory names (from Config.PickerIgnoreDirs) to hide from the file
+// picker, recent files, and workspace grep, alongside the built-in defaults.
+func addIgnoredDirs(names []string) {
+	for _, name := range names {
+		if name != "" {
+			ignoredDirs[name] = true
+		}
+	}
+}
+
 // pickerEntry is one row in the directory browser.
 type pickerEntry struct {
 	name  string

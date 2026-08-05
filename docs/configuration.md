@@ -18,6 +18,21 @@ Config file location: `~/.config/indigo/config.toml` (created automatically on f
 | `recovery_max_bytes` | int | `104857600` | Maximum file size (bytes) eligible for crash recovery (default 100 MB); `0` disables recovery |
 | `theme` | string | `"default-dark"` | Color theme name — see [Themes](#themes) below |
 
+## File picker
+
+The file picker (and workspace grep, and the recent-files list) always hides `.git`,
+`vendor`, `node_modules`, `.svn`, `.hg`, `__pycache__`, and `.cache`. Add more directory
+names — matched by base name, anywhere in the tree — with `picker_ignore_dirs`:
+
+```toml
+picker_ignore_dirs = ["build", "dist"]
+```
+
+There's no separate extension filter: typing a query like `.go` in the picker's search mode
+already surfaces matching files first — `fuzzy_search` scores a path whose name *ends with*
+the query well above one that merely contains those characters elsewhere, so an extension
+acts as a de facto filter without excluding anything outright.
+
 ## Language servers
 
 indigo starts language servers automatically when you open a file with a supported extension, as long as the server binary is in your PATH. No config is needed for the defaults.
@@ -293,6 +308,7 @@ by being present in that directory.
 line_numbers   = true
 hide_tabs      = false
 fuzzy_search   = true
+picker_ignore_dirs = ["build", "dist"]
 format_on_save = true
 bracket_colors = true
 indent_guides  = true

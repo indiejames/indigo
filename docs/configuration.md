@@ -103,6 +103,9 @@ they show up the same way (gutter markers, the `D`-popup) with no extra keybindi
 | Extensions | Linter |
 |-----------|--------|
 | `.go` | `golangci-lint run --out-format json {file}` |
+| `.js` `.jsx` `.ts` `.tsx` | `eslint --format json {file}` |
+| `.py` | `ruff check --output-format json {file}` |
+| `.rs` | `cargo clippy --message-format json` (whole crate, not a single file) |
 
 Only linters whose command is found in PATH (or `node_modules/.bin`) are used; missing
 tools are silently skipped, same as formatters.
@@ -110,8 +113,9 @@ tools are silently skipped, same as formatters.
 ### Custom linters
 
 Add a `[[linter]]` block to override or extend the defaults. `format` must name one of
-`internal/lint`'s registered output parsers (currently `golangci-lint-json`); a linter
-whose output indigo doesn't know how to parse yet can't be added this way.
+`internal/lint`'s registered output parsers — `golangci-lint-json`, `eslint-json`,
+`ruff-json`, or `cargo-clippy-json`; a linter whose output indigo doesn't know how to
+parse yet can't be added this way.
 
 ```toml
 [[linter]]

@@ -52,6 +52,14 @@ type LinterConfig struct {
 var DefaultLinters = []LinterConfig{
 	{Extensions: []string{"go"}, Command: "golangci-lint",
 		Args: []string{"run", "--out-format", "json", "{file}"}, Format: "golangci-lint-json"},
+	{Extensions: []string{"js", "jsx", "ts", "tsx"}, Command: "eslint",
+		Args: []string{"--format", "json", "{file}"}, Format: "eslint-json"},
+	{Extensions: []string{"py"}, Command: "ruff",
+		Args: []string{"check", "--output-format", "json", "{file}"}, Format: "ruff-json"},
+	// cargo clippy has no single-file argument — it lints the whole crate
+	// containing the saved file, discovered from Manager's workDir.
+	{Extensions: []string{"rs"}, Command: "cargo",
+		Args: []string{"clippy", "--message-format", "json"}, Format: "cargo-clippy-json"},
 }
 
 // DefaultFormatters are tried (in order) when no user formatter config matches

@@ -102,7 +102,7 @@ func (m *Manager) RunAsync(path string) {
 }
 
 func (m *Manager) run(path string, lc config.LinterConfig) {
-	diags, err := runLinter(lc, path)
+	diags, err := runLinter(lc, path, m.workDir)
 
 	m.mu.Lock()
 	if err == nil {
@@ -127,10 +127,13 @@ func (m *Manager) GetDiagnostics(path string) []lsp.Diagnostic {
 }
 
 // runLinter executes lc's command against filePath and parses its output.
-// Most linters exit non-zero when they find issues, so a non-zero exit is
-// only treated as a fatal error when there's no parseable output to fall
-// back on.
-func runLinter(lc config.LinterConfig, filePath string) ([]lsp.Diagnostic, error) {
+// The process runs with workDir as its working directory — cargo clippy in
+// particular discovers Cargo.toml from the CWD rather than from a
+// command-line argument, so without this it fails outright on any project
+// not launched from its own root. Most linters exit non-zero when they find
+// issues, so a non-zero exit is only treated as a fatal error when there's
+// no parseable output to fall back on.
+func runLinter(lc config.LinterConfig, filePath, workDir string) ([]lsp.Diagnostic, error) {
 	parse, ok := parsers[lc.Format]
 	if !ok {
 		return nil, fmt.Errorf("lint: unknown format %q for %s", lc.Format, lc.Command)
@@ -143,6 +146,7 @@ func runLinter(lc config.LinterConfig, filePath string) ([]lsp.Diagnostic, error
 	defer cancel()
 
 	proc := exec.CommandContext(ctx, cmd, args...)
+	proc.Dir = workDir
 	var out bytes.Buffer
 	proc.Stdout = &out
 	runErr := proc.Run()

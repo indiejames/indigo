@@ -3,6 +3,7 @@ package client
 import (
 	"crypto/sha256"
 	"fmt"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -484,7 +485,7 @@ type Model struct {
 	cmdCompletionIdx    int            // selected item in command completion popup (−1 = none)
 	diagPopup           bool           // when true, show diagnostic detail popup for cursor line
 	diagPopupSuppressed bool           // Escape pressed; don't re-show until cursor leaves the range
-	prefixSeq           []string         // keys typed so far for a multi-key Normal-mode command
+	prefixSeq           []string       // keys typed so far for a multi-key Normal-mode command
 	searchQuery         string
 	searchMatches       []searchMatch
 	searchIdx           int
@@ -577,6 +578,7 @@ type Model struct {
 // Used for hot-reloading preferences at runtime.
 func (m Model) WithConfig(cfg *config.Config) Model {
 	m.cfg = cfg
+	m.status = strings.Join(applyKeybindOverrides(cfg), "; ")
 	return m
 }
 
@@ -586,10 +588,16 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 	if fromRecovery {
 		buf.MarkDirty()
 	}
+	warnings := applyKeybindOverrides(cfg)
+	status := ""
+	if len(warnings) > 0 {
+		status = strings.Join(warnings, "; ")
+	}
 	return Model{
 		rpc:                 rpc,
 		buf:                 buf,
 		cfg:                 cfg,
+		status:              status,
 		bufID:               bufID,
 		version:             version,
 		filePath:            filePath,

@@ -23,6 +23,17 @@ type FormatterConfig struct {
 	Args       []string `toml:"args,omitempty"`
 }
 
+// Keybind overrides or adds a single key binding. Mode selects which mode's
+// bindings to affect ("normal" or "insert"); Action must name one of the
+// editor's built-in actions (see docs/configuration.md for the full list —
+// e.g. "save", "cursor-left", "delete-selection"). A Key already bound to a
+// multi-key prefix menu (like "g" or "m") can't be overridden this way.
+type Keybind struct {
+	Mode   string `toml:"mode"`
+	Key    string `toml:"key"`
+	Action string `toml:"action"`
+}
+
 // DefaultFormatters are tried (in order) when no user formatter config matches
 // an extension. Only entries whose command is found in PATH are used.
 // {file} in Args is replaced with the actual file path at runtime.
@@ -135,6 +146,9 @@ type Config struct {
 	// A partial entry (only style or only width) inherits the other field
 	// from the next source down the precedence chain.
 	IndentOverrides map[string]IndentSettings `toml:"indent"`
+	// Keybinds override or add Normal-/Insert-mode key bindings. See the
+	// Keybind type for the shape of each entry.
+	Keybinds []Keybind `toml:"keybind"`
 }
 
 func defaults() *Config {
@@ -347,6 +361,21 @@ const defaultConfigTemplate = `# Indigo editor configuration
 # extensions = ["js", "ts"]
 # command    = "prettier"
 # args       = ["--stdin-filepath", "{file}"]
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Key bindings
+#
+# Add a [[keybind]] block to rebind an existing action to a different key, or
+# to bind an additional key to it. mode is "normal" or "insert"; action must
+# be one of the editor's built-in action names (see docs/configuration.md).
+# A key that's already a multi-key prefix menu (e.g. "g", "m") can't be
+# overridden this way.
+#
+# [[keybind]]
+# mode   = "normal"
+# key    = "ctrl+p"
+# action = "open-file-picker"
 # ---------------------------------------------------------------------------
 `
 

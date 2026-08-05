@@ -15,7 +15,10 @@ import (
 // command is a node in the prefix-command tree.
 // Leaf nodes have execute set; branch nodes have children.
 type command struct {
-	key       string
+	key string
+	// name is the stable, config-facing identifier for this leaf's action
+	// (see config.Keybind.Action). Branch nodes (menus) leave it empty.
+	name      string
 	label     string
 	menuTitle string
 	children  []command
@@ -24,10 +27,10 @@ type command struct {
 
 // prefixCmds is the root of the prefix-command tree for Normal mode.
 var prefixCmds = []command{
-	{key: "ctrl+p", label: "Open file picker", execute: func(m Model) (tea.Model, tea.Cmd) {
+	{key: "ctrl+p", name: "open-file-picker", label: "Open file picker", execute: func(m Model) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return OpenPickerMsg{} }
 	}},
-	{key: "n", label: "Search next", execute: func(m Model) (tea.Model, tea.Cmd) {
+	{key: "n", name: "search-next", label: "Search next", execute: func(m Model) (tea.Model, tea.Cmd) {
 		if len(m.searchMatches) > 0 {
 			m.searchIdx = (m.searchIdx + 1) % len(m.searchMatches)
 			sm := m.searchMatches[m.searchIdx]
@@ -36,7 +39,7 @@ var prefixCmds = []command{
 		}
 		return m, nil
 	}},
-	{key: "N", label: "Search previous", execute: func(m Model) (tea.Model, tea.Cmd) {
+	{key: "N", name: "search-previous", label: "Search previous", execute: func(m Model) (tea.Model, tea.Cmd) {
 		if len(m.searchMatches) > 0 {
 			m.searchIdx = (m.searchIdx - 1 + len(m.searchMatches)) % len(m.searchMatches)
 			sm := m.searchMatches[m.searchIdx]
@@ -45,7 +48,7 @@ var prefixCmds = []command{
 		}
 		return m, nil
 	}},
-	{key: "i", label: "Insert before cursor", execute: func(m Model) (tea.Model, tea.Cmd) {
+	{key: "i", name: "insert-before-cursor", label: "Insert before cursor", execute: func(m Model) (tea.Model, tea.Cmd) {
 		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
@@ -54,72 +57,72 @@ var prefixCmds = []command{
 		m.mode = ModeInsert
 		return m, nil
 	}},
-	{key: "ctrl+c", label: "Quit hint", execute: executeCancelHint},
-	{key: ":", label: "Command mode", execute: executeEnterCommandMode},
-	{key: "/", label: "Search", execute: executeEnterSearchMode},
-	{key: "esc", label: "Cancel selection", execute: executeEscNormal},
-	{key: "a", label: "Append after cursor", execute: executeAppendAfterCursor},
-	{key: "A", label: "Append at line end", execute: executeAppendLineEnd},
-	{key: "o", label: "Open line below", execute: executeOpenLineBelow},
-	{key: "O", label: "Open line above", execute: executeOpenLineAbove},
-	{key: "ctrl+s", label: "Save", execute: executeSave},
-	{key: "K", label: "Hover docs", execute: executeHover},
-	{key: "J", label: "Join lines", execute: executeJoinLines},
-	{key: "D", label: "Toggle diagnostics popup", execute: executeToggleDiagPopup},
-	{key: "u", label: "Undo", execute: executeUndo},
-	{key: "U", label: "Redo", execute: executeRedo},
-	{key: "W", label: "Extend to next word start", execute: executeExtendNextWordStart},
-	{key: "E", label: "Extend word forward", execute: executeExtendWordForward},
-	{key: "x", label: "Select line", execute: executeSelectLine},
-	{key: "X", label: "Extend line backward", execute: executeExtendLineBackward},
-	{key: "%", label: "Select all", execute: executeSelectAll},
-	{key: ";", label: "Clear selections", execute: executeClearSelections},
-	{key: "alt+;", label: "Flip selection", execute: executeFlipSelection},
-	{key: "d", label: "Delete selection", execute: executeDeleteSelection},
-	{key: "c", label: "Change selection", execute: executeChangeSelection},
-	{key: "y", label: "Yank", execute: executeYank},
-	{key: "h", label: "Cursor left", execute: executeCursorLeft},
-	{key: "left", label: "Cursor left", execute: executeCursorLeft},
-	{key: "l", label: "Cursor right", execute: executeCursorRight},
-	{key: "right", label: "Cursor right", execute: executeCursorRight},
-	{key: "j", label: "Cursor down", execute: executeCursorDown},
-	{key: "down", label: "Cursor down", execute: executeCursorDown},
-	{key: "k", label: "Cursor up", execute: executeCursorUp},
-	{key: "up", label: "Cursor up", execute: executeCursorUp},
-	{key: "ctrl+f", label: "Page down", execute: executePageDown},
-	{key: "pgdown", label: "Page down", execute: executePageDown},
-	{key: "ctrl+b", label: "Page up", execute: executePageUp},
-	{key: "pgup", label: "Page up", execute: executePageUp},
-	{key: "G", label: "Go to last line", execute: executeGoToLastLine},
-	{key: "0", label: "Go to line start", execute: executeGoToLineStart},
-	{key: "home", label: "Go to line start", execute: executeGoToLineStart},
-	{key: "^", label: "Go to first non-blank", execute: executeFirstNonBlank},
-	{key: "$", label: "Go to line end", execute: executeGoToLineEnd},
-	{key: "end", label: "Go to line end", execute: executeGoToLineEnd},
-	{key: "w", label: "Next word start", execute: executeNextWordStart},
-	{key: "b", label: "Previous word start", execute: executePrevWordStart},
-	{key: "e", label: "Word end", execute: executeWordEnd},
-	{key: "p", label: "Paste", execute: executePaste},
-	{key: "B", label: "Extend word backward", execute: executeExtendWordBackward},
-	{key: "ctrl+d", label: "Select next occurrence", execute: executeSelectNextOccurrence},
-	{key: "C", label: "Add cursor below", execute: executeAddCursorBelow},
+	{key: "ctrl+c", name: "quit-hint", label: "Quit hint", execute: executeCancelHint},
+	{key: ":", name: "command-mode", label: "Command mode", execute: executeEnterCommandMode},
+	{key: "/", name: "search", label: "Search", execute: executeEnterSearchMode},
+	{key: "esc", name: "cancel-selection", label: "Cancel selection", execute: executeEscNormal},
+	{key: "a", name: "append-after-cursor", label: "Append after cursor", execute: executeAppendAfterCursor},
+	{key: "A", name: "append-line-end", label: "Append at line end", execute: executeAppendLineEnd},
+	{key: "o", name: "open-line-below", label: "Open line below", execute: executeOpenLineBelow},
+	{key: "O", name: "open-line-above", label: "Open line above", execute: executeOpenLineAbove},
+	{key: "ctrl+s", name: "save", label: "Save", execute: executeSave},
+	{key: "K", name: "hover-docs", label: "Hover docs", execute: executeHover},
+	{key: "J", name: "join-lines", label: "Join lines", execute: executeJoinLines},
+	{key: "D", name: "toggle-diagnostics-popup", label: "Toggle diagnostics popup", execute: executeToggleDiagPopup},
+	{key: "u", name: "undo", label: "Undo", execute: executeUndo},
+	{key: "U", name: "redo", label: "Redo", execute: executeRedo},
+	{key: "W", name: "extend-next-word-start", label: "Extend to next word start", execute: executeExtendNextWordStart},
+	{key: "E", name: "extend-word-forward", label: "Extend word forward", execute: executeExtendWordForward},
+	{key: "x", name: "select-line", label: "Select line", execute: executeSelectLine},
+	{key: "X", name: "extend-line-backward", label: "Extend line backward", execute: executeExtendLineBackward},
+	{key: "%", name: "select-all", label: "Select all", execute: executeSelectAll},
+	{key: ";", name: "clear-selections", label: "Clear selections", execute: executeClearSelections},
+	{key: "alt+;", name: "flip-selection", label: "Flip selection", execute: executeFlipSelection},
+	{key: "d", name: "delete-selection", label: "Delete selection", execute: executeDeleteSelection},
+	{key: "c", name: "change-selection", label: "Change selection", execute: executeChangeSelection},
+	{key: "y", name: "yank", label: "Yank", execute: executeYank},
+	{key: "h", name: "cursor-left", label: "Cursor left", execute: executeCursorLeft},
+	{key: "left", name: "cursor-left", label: "Cursor left", execute: executeCursorLeft},
+	{key: "l", name: "cursor-right", label: "Cursor right", execute: executeCursorRight},
+	{key: "right", name: "cursor-right", label: "Cursor right", execute: executeCursorRight},
+	{key: "j", name: "cursor-down", label: "Cursor down", execute: executeCursorDown},
+	{key: "down", name: "cursor-down", label: "Cursor down", execute: executeCursorDown},
+	{key: "k", name: "cursor-up", label: "Cursor up", execute: executeCursorUp},
+	{key: "up", name: "cursor-up", label: "Cursor up", execute: executeCursorUp},
+	{key: "ctrl+f", name: "page-down", label: "Page down", execute: executePageDown},
+	{key: "pgdown", name: "page-down", label: "Page down", execute: executePageDown},
+	{key: "ctrl+b", name: "page-up", label: "Page up", execute: executePageUp},
+	{key: "pgup", name: "page-up", label: "Page up", execute: executePageUp},
+	{key: "G", name: "go-to-last-line", label: "Go to last line", execute: executeGoToLastLine},
+	{key: "0", name: "go-to-line-start", label: "Go to line start", execute: executeGoToLineStart},
+	{key: "home", name: "go-to-line-start", label: "Go to line start", execute: executeGoToLineStart},
+	{key: "^", name: "go-to-first-non-blank", label: "Go to first non-blank", execute: executeFirstNonBlank},
+	{key: "$", name: "go-to-line-end", label: "Go to line end", execute: executeGoToLineEnd},
+	{key: "end", name: "go-to-line-end", label: "Go to line end", execute: executeGoToLineEnd},
+	{key: "w", name: "next-word-start", label: "Next word start", execute: executeNextWordStart},
+	{key: "b", name: "previous-word-start", label: "Previous word start", execute: executePrevWordStart},
+	{key: "e", name: "word-end", label: "Word end", execute: executeWordEnd},
+	{key: "p", name: "paste", label: "Paste", execute: executePaste},
+	{key: "B", name: "extend-word-backward", label: "Extend word backward", execute: executeExtendWordBackward},
+	{key: "ctrl+d", name: "select-next-occurrence", label: "Select next occurrence", execute: executeSelectNextOccurrence},
+	{key: "C", name: "add-cursor-below", label: "Add cursor below", execute: executeAddCursorBelow},
 	// ctrl+/ and ctrl+_ are the same byte (0x1F) in most terminals.
-	{key: "ctrl+/", label: "Toggle comment", execute: executeToggleComment},
-	{key: "ctrl+_", label: "Toggle comment", execute: executeToggleComment},
-	{key: "?", label: "Show plugin bindings", execute: executeFetchPluginBindings},
-	{key: "alt+s", label: "Split selection into cursors", execute: executeSplitSelectionIntoCursors},
-	{key: "z", label: "Set mark", execute: executeSetMark},
-	{key: "Z", label: "Select to mark", execute: executeSelectToMark},
-	{key: ">", label: "Indent", execute: executeIndent},
-	{key: "<", label: "Unindent", execute: executeUnindent},
+	{key: "ctrl+/", name: "toggle-comment", label: "Toggle comment", execute: executeToggleComment},
+	{key: "ctrl+_", name: "toggle-comment", label: "Toggle comment", execute: executeToggleComment},
+	{key: "?", name: "show-plugin-bindings", label: "Show plugin bindings", execute: executeFetchPluginBindings},
+	{key: "alt+s", name: "split-selection-into-cursors", label: "Split selection into cursors", execute: executeSplitSelectionIntoCursors},
+	{key: "z", name: "set-mark", label: "Set mark", execute: executeSetMark},
+	{key: "Z", name: "select-to-mark", label: "Select to mark", execute: executeSelectToMark},
+	{key: ">", name: "indent", label: "Indent", execute: executeIndent},
+	{key: "<", name: "unindent", label: "Unindent", execute: executeUnindent},
 	// Move current line (or selected lines) up/down, swapping with the
 	// neighbor. Bound to Shift+Arrow rather than Alt+Arrow: zellij's default
 	// pane-focus keymap claims Alt+Arrow even in "locked" interface mode.
-	{key: "shift+up", label: "Move line up", execute: executeMoveLineUp},
-	{key: "shift+down", label: "Move line down", execute: executeMoveLineDown},
-	{key: "-", label: "Jump back", execute: executeJumpBack},
-	{key: "=", label: "Jump forward", execute: executeJumpForward},
-	{key: "+", label: "Jump forward", execute: executeJumpForward},
+	{key: "shift+up", name: "move-line-up", label: "Move line up", execute: executeMoveLineUp},
+	{key: "shift+down", name: "move-line-down", label: "Move line down", execute: executeMoveLineDown},
+	{key: "-", name: "jump-back", label: "Jump back", execute: executeJumpBack},
+	{key: "=", name: "jump-forward", label: "Jump forward", execute: executeJumpForward},
+	{key: "+", name: "jump-forward", label: "Jump forward", execute: executeJumpForward},
 	{
 		key:       "g",
 		label:     "Go",

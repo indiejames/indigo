@@ -11,10 +11,38 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
-// ignoredDirs are never shown in the file browser.
-var ignoredDirs = map[string]bool{
-	".git": true, "vendor": true, "node_modules": true,
-	".svn": true, ".hg": true, "__pycache__": true, ".cache": true,
+// builtInIgnoredDirs are never shown in the file browser.
+var builtInIgnoredDirs = []string{
+	".git", "vendor", "node_modules",
+	".svn", ".hg", "__pycache__", ".cache",
+}
+
+// ignoredDirs is the effective set of directories to hide, seeded from
+// builtInIgnoredDirs so it's always non-empty even if addIgnoredDirs is
+// never called, and rebuilt on each configuration load to fold in
+// Config.PickerIgnoreDirs.
+var ignoredDirs = newIgnoredDirsSet(nil)
+
+// newIgnoredDirsSet builds an ignore set from builtInIgnoredDirs plus extra.
+func newIgnoredDirsSet(extra []string) map[string]bool {
+	set := make(map[string]bool, len(builtInIgnoredDirs)+len(extra))
+	for _, name := range builtInIgnoredDirs {
+		set[name] = true
+	}
+	for _, name := range extra {
+		if name != "" {
+			set[name] = true
+		}
+	}
+	return set
+}
+
+// addIgnoredDirs rebuilds the ignoredDirs set from built-in defaults plus
+// additional directory names (from Config.PickerIgnoreDirs) to hide from the
+// file picker, recent files, and workspace grep. Removed entries no longer
+// persist across configuration reloads.
+func addIgnoredDirs(names []string) {
+	ignoredDirs = newIgnoredDirsSet(names)
 }
 
 // pickerEntry is one row in the directory browser.

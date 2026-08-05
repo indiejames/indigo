@@ -27,7 +27,7 @@ func (s *editorService) GetDiagnostics(_ context.Context, call proto.EditorServi
 	path := entry.buf.Path()
 	s.mu.Unlock()
 
-	diags := s.lspMgr.GetDiagnostics(path)
+	diags := append(s.lspMgr.GetDiagnostics(path), s.lintMgr.GetDiagnostics(path)...)
 	ready := s.lspMgr.HasClient(path)
 
 	res, err := call.AllocResults()

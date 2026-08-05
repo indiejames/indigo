@@ -19,6 +19,7 @@ import (
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/format"
+	"github.com/indiejames/indigo/internal/lint"
 	"github.com/indiejames/indigo/internal/lsp"
 	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
@@ -117,6 +118,7 @@ type editorService struct {
 	recDir    string
 	lspMgr    *lsp.Manager
 	fmtMgr    *format.Manager
+	lintMgr   *lint.Manager
 	pluginMgr *plugin.Manager
 	cfg       *config.Config
 
@@ -168,6 +170,7 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 		dirWatches:      make(map[string]int),
 		savingPaths:     make(map[string]time.Time),
 		fmtMgr:          format.NewManager(lspMgr, cfg, workspaceDir),
+		lintMgr:         lint.NewManager(cfg, workspaceDir),
 		cfg:             cfg,
 		shutdown:        shutdown,
 		onClientConnect: onClientConnect,

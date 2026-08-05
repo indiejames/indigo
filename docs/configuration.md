@@ -28,10 +28,11 @@ names — matched by base name, anywhere in the tree — with `picker_ignore_dir
 picker_ignore_dirs = ["build", "dist"]
 ```
 
-There's no separate extension filter: typing a query like `.go` in the picker's search mode
-already surfaces matching files first — `fuzzy_search` scores a path whose name *ends with*
-the query well above one that merely contains those characters elsewhere, so an extension
-acts as a de facto filter without excluding anything outright.
+There's no separate extension filter: when `fuzzy_search = true`, typing a query like `.go`
+in the picker's search mode surfaces matching files first — paths whose name *ends with*
+the query score well above ones that merely contain those characters elsewhere, so an extension
+acts as a de facto filter without excluding anything outright. When `fuzzy_search = false`,
+the picker uses simple substring matching with no ranking.
 
 ## Language servers
 

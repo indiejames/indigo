@@ -118,8 +118,8 @@ func TestOverlayRightPadsShortMain(t *testing.T) {
 
 func TestRenderPopupBoxBasic(t *testing.T) {
 	items := []command{
-		{key: 's', label: "Save"},
-		{key: 'q', label: "Quit"},
+		{key: "s", label: "Save"},
+		{key: "q", label: "Quit"},
 	}
 	lines := renderPopupBox("Menu", items, 40)
 	if len(lines) < 4 { // top + 2 items + bottom
@@ -136,7 +136,7 @@ func TestRenderPopupBoxEmpty(t *testing.T) {
 
 func TestRenderPopupBoxLabelTruncation(t *testing.T) {
 	items := []command{
-		{key: 'x', label: strings.Repeat("A", 100)},
+		{key: "x", label: strings.Repeat("A", 100)},
 	}
 	// Should not panic on very narrow maxW
 	lines := renderPopupBox("T", items, 8)

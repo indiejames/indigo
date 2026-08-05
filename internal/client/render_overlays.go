@@ -155,7 +155,7 @@ func renderPopupBox(title string, items []command, maxW int) []string {
 	// Compute needed inner width.
 	minInner := len([]rune(title))
 	for _, item := range items {
-		w := len([]rune(fmt.Sprintf("  %c  %s  ", item.key, item.label)))
+		w := len([]rune(fmt.Sprintf("  %s  %s  ", item.key, item.label)))
 		if w > minInner {
 			minInner = w
 		}
@@ -179,7 +179,7 @@ func renderPopupBox(title string, items []command, maxW int) []string {
 
 	lines := []string{top}
 	for _, item := range items {
-		keyPart := fmt.Sprintf("  %c", item.key)
+		keyPart := fmt.Sprintf("  %s", item.key)
 		sep := "  "
 		label := item.label
 		// Truncate label if needed.

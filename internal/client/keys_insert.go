@@ -156,239 +156,291 @@ func (m Model) snippetEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Sequence(cmds...)
 }
 
+// insertCmds is the flat (non-nested) set of Insert-mode key bindings; unlike
+// prefixCmds there are no multi-key sequences, so lookup is a single findIn
+// call. Any key not listed here falls through to insertSelfInsert.
+var insertCmds = []command{
+	// ctrl+space sends NUL → "ctrl+@" in most terminals.
+	{key: "ctrl+@", label: "Trigger completion", execute: executeTriggerCompletion},
+	{key: "ctrl+space", label: "Trigger completion", execute: executeTriggerCompletion},
+	{key: "esc", label: "Exit insert mode", execute: executeInsertEsc},
+	// Escape to normal mode (vim convention) — never close from insert mode.
+	{key: "ctrl+c", label: "Exit insert mode", execute: executeInsertCtrlC},
+	{key: "ctrl+s", label: "Save", execute: executeSave},
+	{key: "backspace", label: "Backspace", execute: executeInsertBackspace},
+	{key: "delete", label: "Delete forward", execute: executeInsertDelete},
+	{key: "enter", label: "Newline", execute: executeInsertEnter},
+	{key: "tab", label: "Insert tab", execute: executeInsertTab},
+	{key: "left", label: "Cursor left", execute: executeInsertMoveLeft},
+	{key: "right", label: "Cursor right", execute: executeInsertMoveRight},
+	{key: "up", label: "Cursor up", execute: executeInsertMoveUp},
+	{key: "down", label: "Cursor down", execute: executeInsertMoveDown},
+	{key: "home", label: "Line start", execute: executeInsertHome},
+	{key: "end", label: "Line end", execute: executeInsertEnd},
+}
+
 // handleInsertKey handles a single insert-mode key edit. Completion-popup
 // bookkeeping lives in handleInsert; this function only edits the buffer.
 func (m Model) handleInsertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+@", "ctrl+space": // ctrl+space sends NUL → "ctrl+@" in most terminals
-		m.completionPrefix = m.currentWordPrefix()
-		return m, m.fetchCompletions()
+	if cmd, ok := findIn(insertCmds, []string{msg.String()}); ok && cmd.execute != nil {
+		return cmd.execute(m)
+	}
+	return m.insertSelfInsert(msg)
+}
 
-	case "esc":
-		m.mode = ModeNormal
-		m.sigHelp = nil
-		if m.cursor.Col > 0 {
-			m.cursor.Col--
-		}
-		// Commit the undo group accumulated during this Insert session.
-		var recordCmd tea.Cmd
-		if len(m.currentGroup) > 0 {
-			m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: m.groupBefore})
-			fp := m.filePath
-			atLine := minAffectedLine(m.currentGroup)
-			lineDelta := m.buf.LineCount() - m.insertLineCount
-			startLine := m.groupBefore.cursor.Line
-			startCol := m.groupBefore.cursor.Col
-			depth := len(m.undoStack)
-			recordCmd = func() tea.Msg {
-				return EditRecordMsg{
-					FilePath:  fp,
-					Line:      startLine,
-					Col:       startCol,
-					AtLine:    atLine,
-					LineDelta: lineDelta,
-					UndoDepth: depth,
-				}
+func executeTriggerCompletion(m Model) (tea.Model, tea.Cmd) {
+	m.completionPrefix = m.currentWordPrefix()
+	return m, m.fetchCompletions()
+}
+
+func executeInsertEsc(m Model) (tea.Model, tea.Cmd) {
+	m.mode = ModeNormal
+	m.sigHelp = nil
+	if m.cursor.Col > 0 {
+		m.cursor.Col--
+	}
+	// Commit the undo group accumulated during this Insert session.
+	var recordCmd tea.Cmd
+	if len(m.currentGroup) > 0 {
+		m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: m.groupBefore})
+		fp := m.filePath
+		atLine := minAffectedLine(m.currentGroup)
+		lineDelta := m.buf.LineCount() - m.insertLineCount
+		startLine := m.groupBefore.cursor.Line
+		startCol := m.groupBefore.cursor.Col
+		depth := len(m.undoStack)
+		recordCmd = func() tea.Msg {
+			return EditRecordMsg{
+				FilePath:  fp,
+				Line:      startLine,
+				Col:       startCol,
+				AtLine:    atLine,
+				LineDelta: lineDelta,
+				UndoDepth: depth,
 			}
 		}
-		m.currentGroup = nil
-		return m, recordCmd
+	}
+	m.currentGroup = nil
+	return m, recordCmd
+}
 
-	case "ctrl+c":
-		// Escape to normal mode (vim convention) — never close from insert mode.
-		m.mode = ModeNormal
-		m.sigHelp = nil
-		if m.cursor.Col > 0 {
-			m.cursor.Col--
-		}
-		if len(m.currentGroup) > 0 {
-			m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: m.groupBefore})
-		}
-		m.currentGroup = nil
-		return m, nil
+func executeInsertCtrlC(m Model) (tea.Model, tea.Cmd) {
+	m.mode = ModeNormal
+	m.sigHelp = nil
+	if m.cursor.Col > 0 {
+		m.cursor.Col--
+	}
+	if len(m.currentGroup) > 0 {
+		m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: m.groupBefore})
+	}
+	m.currentGroup = nil
+	return m, nil
+}
 
-	case "ctrl+s":
-		return m, m.doSave()
-
-	case "backspace":
-		if len(m.extraCursors) > 0 {
-			return applyBackspaceToAllCursors(m)
-		}
-		if m.cursor.Col > 0 {
-			toCol := m.cursor.Col
-			if closer, ok := autoPairs[m.charBeforeCursor()]; ok && m.charAfterCursor() == closer {
-				toCol++ // also delete the auto-inserted closer right after the cursor
-			}
-			op := document.Op{
-				ClientID: m.rpc.ClientID(),
-				Type:     document.OpDelete,
-				FromLine: m.cursor.Line,
-				FromCol:  m.cursor.Col - 1,
-				ToLine:   m.cursor.Line,
-				ToCol:    toCol,
-			}
-			m.cursor.Col--
-			return applyOp(m, op)
-		} else if m.cursor.Line > 0 {
-			prevLen := m.buf.LineLen(m.cursor.Line - 1)
-			op := document.Op{
-				ClientID: m.rpc.ClientID(),
-				Type:     document.OpDelete,
-				FromLine: m.cursor.Line - 1,
-				FromCol:  prevLen,
-				ToLine:   m.cursor.Line,
-				ToCol:    0,
-			}
-			m.cursor = document.Pos{Line: m.cursor.Line - 1, Col: prevLen}
-			return applyOp(m, op)
-		}
-
-	case "delete":
-		lineLen := m.buf.LineLen(m.cursor.Line)
-		if m.cursor.Col < lineLen {
-			op := document.Op{
-				ClientID: m.rpc.ClientID(),
-				Type:     document.OpDelete,
-				FromLine: m.cursor.Line,
-				FromCol:  m.cursor.Col,
-				ToLine:   m.cursor.Line,
-				ToCol:    m.cursor.Col + 1,
-			}
-			return applyOp(m, op)
-		} else if m.cursor.Line < m.buf.LineCount()-1 {
-			op := document.Op{
-				ClientID: m.rpc.ClientID(),
-				Type:     document.OpDelete,
-				FromLine: m.cursor.Line,
-				FromCol:  lineLen,
-				ToLine:   m.cursor.Line + 1,
-				ToCol:    0,
-			}
-			return applyOp(m, op)
-		}
-
-	case "enter":
-		if len(m.extraCursors) > 0 {
-			return applyInsertToAllCursors(m, "\n")
-		}
-		return m.handleEnter()
-
-	case "tab":
-		if len(m.extraCursors) > 0 {
-			return applyInsertToAllCursors(m, "\t")
+func executeInsertBackspace(m Model) (tea.Model, tea.Cmd) {
+	if len(m.extraCursors) > 0 {
+		return applyBackspaceToAllCursors(m)
+	}
+	if m.cursor.Col > 0 {
+		toCol := m.cursor.Col
+		if closer, ok := autoPairs[m.charBeforeCursor()]; ok && m.charAfterCursor() == closer {
+			toCol++ // also delete the auto-inserted closer right after the cursor
 		}
 		op := document.Op{
-			ClientID:   m.rpc.ClientID(),
-			Type:       document.OpInsert,
-			InsertLine: m.cursor.Line,
-			InsertCol:  m.cursor.Col,
-			InsertText: "\t",
+			ClientID: m.rpc.ClientID(),
+			Type:     document.OpDelete,
+			FromLine: m.cursor.Line,
+			FromCol:  m.cursor.Col - 1,
+			ToLine:   m.cursor.Line,
+			ToCol:    toCol,
 		}
-		m.cursor.Col++
+		m.cursor.Col--
 		return applyOp(m, op)
+	} else if m.cursor.Line > 0 {
+		prevLen := m.buf.LineLen(m.cursor.Line - 1)
+		op := document.Op{
+			ClientID: m.rpc.ClientID(),
+			Type:     document.OpDelete,
+			FromLine: m.cursor.Line - 1,
+			FromCol:  prevLen,
+			ToLine:   m.cursor.Line,
+			ToCol:    0,
+		}
+		m.cursor = document.Pos{Line: m.cursor.Line - 1, Col: prevLen}
+		return applyOp(m, op)
+	}
+	return m, nil
+}
 
-	case "left":
-		m.moveCursor(0, -1)
-	case "right":
-		m.moveCursor(0, 1)
-	case "up":
-		m.moveCursor(-1, 0)
-	case "down":
-		m.moveCursor(1, 0)
-	case "home":
-		m.cursor.Col = 0
-	case "end":
-		m.cursor.Col = m.buf.LineLen(m.cursor.Line)
+func executeInsertDelete(m Model) (tea.Model, tea.Cmd) {
+	lineLen := m.buf.LineLen(m.cursor.Line)
+	if m.cursor.Col < lineLen {
+		op := document.Op{
+			ClientID: m.rpc.ClientID(),
+			Type:     document.OpDelete,
+			FromLine: m.cursor.Line,
+			FromCol:  m.cursor.Col,
+			ToLine:   m.cursor.Line,
+			ToCol:    m.cursor.Col + 1,
+		}
+		return applyOp(m, op)
+	} else if m.cursor.Line < m.buf.LineCount()-1 {
+		op := document.Op{
+			ClientID: m.rpc.ClientID(),
+			Type:     document.OpDelete,
+			FromLine: m.cursor.Line,
+			FromCol:  lineLen,
+			ToLine:   m.cursor.Line + 1,
+			ToCol:    0,
+		}
+		return applyOp(m, op)
+	}
+	return m, nil
+}
 
-	default:
-		if len(msg.Runes) > 0 {
-			text := string(msg.Runes)
-			if len(m.extraCursors) == 0 && strings.Contains(text, "\n") {
-				return m.insertPastedText(text)
+func executeInsertEnter(m Model) (tea.Model, tea.Cmd) {
+	if len(m.extraCursors) > 0 {
+		return applyInsertToAllCursors(m, "\n")
+	}
+	return m.handleEnter()
+}
+
+func executeInsertTab(m Model) (tea.Model, tea.Cmd) {
+	if len(m.extraCursors) > 0 {
+		return applyInsertToAllCursors(m, "\t")
+	}
+	op := document.Op{
+		ClientID:   m.rpc.ClientID(),
+		Type:       document.OpInsert,
+		InsertLine: m.cursor.Line,
+		InsertCol:  m.cursor.Col,
+		InsertText: "\t",
+	}
+	m.cursor.Col++
+	return applyOp(m, op)
+}
+
+func executeInsertMoveLeft(m Model) (tea.Model, tea.Cmd) {
+	m.moveCursor(0, -1)
+	return m, nil
+}
+
+func executeInsertMoveRight(m Model) (tea.Model, tea.Cmd) {
+	m.moveCursor(0, 1)
+	return m, nil
+}
+
+func executeInsertMoveUp(m Model) (tea.Model, tea.Cmd) {
+	m.moveCursor(-1, 0)
+	return m, nil
+}
+
+func executeInsertMoveDown(m Model) (tea.Model, tea.Cmd) {
+	m.moveCursor(1, 0)
+	return m, nil
+}
+
+func executeInsertHome(m Model) (tea.Model, tea.Cmd) {
+	m.cursor.Col = 0
+	return m, nil
+}
+
+func executeInsertEnd(m Model) (tea.Model, tea.Cmd) {
+	m.cursor.Col = m.buf.LineLen(m.cursor.Line)
+	return m, nil
+}
+
+// insertSelfInsert handles any key not bound in insertCmds: it inserts the
+// typed rune(s) into the buffer, applying auto-pairing, signature-help, and
+// completion triggers along the way.
+func (m Model) insertSelfInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if len(msg.Runes) == 0 {
+		return m, nil
+	}
+	text := string(msg.Runes)
+	if len(m.extraCursors) == 0 && strings.Contains(text, "\n") {
+		return m.insertPastedText(text)
+	}
+	if len(m.extraCursors) > 0 {
+		m2, cmd := applyInsertToAllCursors(m, text)
+		r := msg.Runes[0]
+		if r == '(' || r == ',' {
+			return m2, tea.Batch(cmd, m2.fetchSignatureHelp())
+		}
+		if r == ')' {
+			m2.sigHelp = nil
+		}
+		return m2, cmd
+	}
+
+	r := msg.Runes[0]
+
+	// Typing a closer that's already the next character just moves
+	// past it, instead of inserting a duplicate.
+	if len(msg.Runes) == 1 && autoPairClosers[r] && m.charAfterCursor() == r {
+		m.cursor.Col++
+		if r == ')' {
+			m.sigHelp = nil
+		}
+		return m, nil
+	}
+
+	// Typing an opener auto-inserts its closer, leaving the cursor
+	// between the two. '{' additionally expands onto its own
+	// indented line, since braces almost always open a block.
+	if len(msg.Runes) == 1 {
+		if closer, ok := autoPairs[r]; ok && m.shouldAutoPair(r) {
+			if r == '{' && m.shouldExpandBraceBlock() {
+				return m.insertBraceBlock()
 			}
-			if len(m.extraCursors) > 0 {
-				m2, cmd := applyInsertToAllCursors(m, text)
-				r := msg.Runes[0]
-				if r == '(' || r == ',' {
-					return m2, tea.Batch(cmd, m2.fetchSignatureHelp())
-				}
-				if r == ')' {
-					m2.sigHelp = nil
-				}
-				return m2, cmd
-			}
-
-			r := msg.Runes[0]
-
-			// Typing a closer that's already the next character just moves
-			// past it, instead of inserting a duplicate.
-			if len(msg.Runes) == 1 && autoPairClosers[r] && m.charAfterCursor() == r {
-				m.cursor.Col++
-				if r == ')' {
-					m.sigHelp = nil
-				}
-				return m, nil
-			}
-
-			// Typing an opener auto-inserts its closer, leaving the cursor
-			// between the two. '{' additionally expands onto its own
-			// indented line, since braces almost always open a block.
-			if len(msg.Runes) == 1 {
-				if closer, ok := autoPairs[r]; ok && m.shouldAutoPair(r) {
-					if r == '{' && m.shouldExpandBraceBlock() {
-						return m.insertBraceBlock()
-					}
-					op := document.Op{
-						ClientID:   m.rpc.ClientID(),
-						Type:       document.OpInsert,
-						InsertLine: m.cursor.Line,
-						InsertCol:  m.cursor.Col,
-						InsertText: string(r) + string(closer),
-					}
-					m.cursor.Col++
-					m2, cmd := applyOp(m, op)
-					if r == '(' {
-						return m2, tea.Batch(cmd, m2.fetchSignatureHelp())
-					}
-					return m2, cmd
-				}
-			}
-
 			op := document.Op{
 				ClientID:   m.rpc.ClientID(),
 				Type:       document.OpInsert,
 				InsertLine: m.cursor.Line,
 				InsertCol:  m.cursor.Col,
-				InsertText: text,
+				InsertText: string(r) + string(closer),
 			}
-			m.cursor.Col += len(msg.Runes)
+			m.cursor.Col++
 			m2, cmd := applyOp(m, op)
-			// Auto-trigger sig help on '(' or ','.
-			if r == '(' || r == ',' {
+			if r == '(' {
 				return m2, tea.Batch(cmd, m2.fetchSignatureHelp())
-			}
-			// Close sig help on ')'.
-			if r == ')' {
-				m2.sigHelp = nil
-			}
-			// Auto-trigger completions on '.' (member access) or while typing an
-			// identifier when the popup isn't already open. Delayed so DidChange
-			// reaches the LSP server before Complete does; the seq token cancels
-			// all but the latest pending trigger, so a burst of keystrokes causes
-			// a single fetch. Once the popup is open, further typing narrows the
-			// cached list (handleInsert) rather than re-fetching.
-			if !m2.snippetOn && (r == '.' || (isWordChar(r) && !m2.completionOn)) {
-				m2.completionSeq++
-				seq := m2.completionSeq
-				delayed := tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
-					return triggerCompletionMsg{seq: seq}
-				})
-				return m2, tea.Batch(cmd, delayed)
 			}
 			return m2, cmd
 		}
 	}
-	return m, nil
+
+	op := document.Op{
+		ClientID:   m.rpc.ClientID(),
+		Type:       document.OpInsert,
+		InsertLine: m.cursor.Line,
+		InsertCol:  m.cursor.Col,
+		InsertText: text,
+	}
+	m.cursor.Col += len(msg.Runes)
+	m2, cmd := applyOp(m, op)
+	// Auto-trigger sig help on '(' or ','.
+	if r == '(' || r == ',' {
+		return m2, tea.Batch(cmd, m2.fetchSignatureHelp())
+	}
+	// Close sig help on ')'.
+	if r == ')' {
+		m2.sigHelp = nil
+	}
+	// Auto-trigger completions on '.' (member access) or while typing an
+	// identifier when the popup isn't already open. Delayed so DidChange
+	// reaches the LSP server before Complete does; the seq token cancels
+	// all but the latest pending trigger, so a burst of keystrokes causes
+	// a single fetch. Once the popup is open, further typing narrows the
+	// cached list (handleInsert) rather than re-fetching.
+	if !m2.snippetOn && (r == '.' || (isWordChar(r) && !m2.completionOn)) {
+		m2.completionSeq++
+		seq := m2.completionSeq
+		delayed := tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
+			return triggerCompletionMsg{seq: seq}
+		})
+		return m2, tea.Batch(cmd, delayed)
+	}
+	return m2, cmd
 }
 
 // insertPastedText inserts multi-line text (from a terminal paste or an

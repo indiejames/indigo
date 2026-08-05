@@ -9,22 +9,22 @@ import (
 // --- findCommand ---
 
 func TestFindCommandSingleKey(t *testing.T) {
-	cmd, ok := findCommand([]rune{'m'})
+	cmd, ok := findCommand([]string{"m"})
 	if !ok {
 		t.Fatal("findCommand('m') should return ok=true")
 	}
-	if cmd.key != 'm' {
-		t.Errorf("cmd.key = %c, want m", cmd.key)
+	if cmd.key != "m" {
+		t.Errorf("cmd.key = %s, want m", cmd.key)
 	}
 }
 
 func TestFindCommandMultiKey(t *testing.T) {
-	cmd, ok := findCommand([]rune{'m', 'i'})
+	cmd, ok := findCommand([]string{"m", "i"})
 	if !ok {
 		t.Fatal("findCommand('m','i') should return ok=true")
 	}
-	if cmd.key != 'i' {
-		t.Errorf("cmd.key = %c, want i", cmd.key)
+	if cmd.key != "i" {
+		t.Errorf("cmd.key = %s, want i", cmd.key)
 	}
 	if len(cmd.children) == 0 {
 		t.Error("mi should have children")
@@ -32,7 +32,7 @@ func TestFindCommandMultiKey(t *testing.T) {
 }
 
 func TestFindCommandLeaf(t *testing.T) {
-	cmd, ok := findCommand([]rune{'m', 'i', 'w'})
+	cmd, ok := findCommand([]string{"m", "i", "w"})
 	if !ok {
 		t.Fatal("findCommand('m','i','w') should return ok=true")
 	}
@@ -42,14 +42,14 @@ func TestFindCommandLeaf(t *testing.T) {
 }
 
 func TestFindCommandUnknown(t *testing.T) {
-	_, ok := findCommand([]rune{'z'})
+	_, ok := findCommand([]string{"ctrl+z"})
 	if ok {
-		t.Error("findCommand('z') should return ok=false")
+		t.Error("findCommand('ctrl+z') should return ok=false")
 	}
 }
 
 func TestFindCommandEmpty(t *testing.T) {
-	cmd, ok := findCommand([]rune{})
+	cmd, ok := findCommand([]string{})
 	if ok || cmd != nil {
 		t.Error("findCommand(empty) should return nil, false")
 	}
@@ -220,14 +220,14 @@ func TestHandleNormalPrefixCommandM(t *testing.T) {
 	m := newTestModel("")
 	m2, _ := m.handleNormal(fakeKey("m"))
 	got := m2.(Model)
-	if len(got.prefixSeq) != 1 || got.prefixSeq[0] != 'm' {
+	if len(got.prefixSeq) != 1 || got.prefixSeq[0] != "m" {
 		t.Errorf("after m: prefixSeq = %v, want [m]", got.prefixSeq)
 	}
 }
 
 func TestHandleNormalPrefixEscCancels(t *testing.T) {
 	m := newTestModel("")
-	m.prefixSeq = []rune{'m'}
+	m.prefixSeq = []string{"m"}
 	m2, _ := m.handleNormal(fakeKey("esc"))
 	got := m2.(Model)
 	if len(got.prefixSeq) != 0 {
@@ -238,7 +238,7 @@ func TestHandleNormalPrefixEscCancels(t *testing.T) {
 func TestHandleNormalPrefixMIWExecutes(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.cursor = document.Pos{Line: 0, Col: 2}
-	m.prefixSeq = []rune{'m', 'i'}
+	m.prefixSeq = []string{"m", "i"}
 	m2, _ := m.handleNormal(fakeKey("w"))
 	got := m2.(Model)
 	if got.sel == nil {
@@ -508,7 +508,7 @@ func TestHandleNormalPrefixCommandCapitalM(t *testing.T) {
 	m := newTestModel("")
 	m2, _ := m.handleNormal(fakeKey("M"))
 	got := m2.(Model)
-	if len(got.prefixSeq) != 1 || got.prefixSeq[0] != 'M' {
+	if len(got.prefixSeq) != 1 || got.prefixSeq[0] != "M" {
 		t.Errorf("after M: prefixSeq = %v, want [M]", got.prefixSeq)
 	}
 }
@@ -516,7 +516,7 @@ func TestHandleNormalPrefixCommandCapitalM(t *testing.T) {
 func TestHandleNormalPrefixMjMovesLineDown(t *testing.T) {
 	m := newTestModel("foo\nbar\n")
 	m.cursor = document.Pos{Line: 0, Col: 0}
-	m.prefixSeq = []rune{'M'}
+	m.prefixSeq = []string{"M"}
 	m2, _ := m.handleNormal(fakeKey("j"))
 	got := m2.(Model)
 	if got.buf.Line(0) != "bar" || got.buf.Line(1) != "foo" {
@@ -530,7 +530,7 @@ func TestHandleNormalPrefixMjMovesLineDown(t *testing.T) {
 func TestHandleNormalPrefixMkMovesLineUp(t *testing.T) {
 	m := newTestModel("foo\nbar\n")
 	m.cursor = document.Pos{Line: 1, Col: 0}
-	m.prefixSeq = []rune{'M'}
+	m.prefixSeq = []string{"M"}
 	m2, _ := m.handleNormal(fakeKey("k"))
 	got := m2.(Model)
 	if got.buf.Line(0) != "bar" || got.buf.Line(1) != "foo" {

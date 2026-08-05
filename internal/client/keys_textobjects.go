@@ -703,13 +703,43 @@ func moveLines(m Model, dir int) (tea.Model, tea.Cmd) {
 		block = append(block, m.buf.Line(ln))
 	}
 
+	// Reindent the block to fit the line it will end up right after — the
+	// same rule handleEnter uses for a freshly typed line landing there —
+	// so it settles into the right indentation the moment it crosses a
+	// brace (or other block) boundary, rather than carrying its old
+	// indentation with it. prevLine is that line's content, as it stands
+	// before the swap below (dir<0: the line above the neighbor being
+	// swapped past, since that neighbor ends up between it and the block;
+	// dir>0: the neighbor itself, which the block swaps below). Passing -1
+	// for contextIndent's line number deliberately skips its tree-sitter
+	// dedent check: that check only makes sense for content spliced in
+	// right before an already-typed closer *on the same line*, and prevLine
+	// here is always used at its own end-of-line, so it would never apply —
+	// worse, doing the equivalent check against the line the block lands
+	// *before* would dedent it to the enclosing scope's own level even when
+	// a sibling statement right above (prevLine) already establishes the
+	// correct, deeper body indent.
 	var from, to int
-	var lines []string
+	var prevLine string
 	if dir < 0 {
 		from, to = startLine-1, endLine
-		lines = append(append([]string{}, block...), m.buf.Line(from))
+		if from > 0 {
+			prevLine = m.buf.Line(from - 1)
+		}
 	} else {
 		from, to = startLine, endLine+1
+		prevLine = m.buf.Line(to)
+	}
+	var indentDelta int
+	if baseline, ok := blockBaseIndent(block); ok {
+		target := m.contextIndent(prevLine, -1, len([]rune(prevLine)))
+		block, indentDelta = reindentLines(block, baseline, target)
+	}
+
+	var lines []string
+	if dir < 0 {
+		lines = append(append([]string{}, block...), m.buf.Line(from))
+	} else {
 		lines = append([]string{m.buf.Line(to)}, block...)
 	}
 
@@ -729,9 +759,32 @@ func moveLines(m Model, dir int) (tea.Model, tea.Cmd) {
 		InsertText: newText,
 	}
 
+	// Adjust cursor and selection positions for both line and column changes.
+	// Line numbers shift by dir; columns on moved non-blank lines shift by indentDelta.
+	// Check against original positions before moving.
+	if m.cursor.Line >= startLine && m.cursor.Line <= endLine {
+		movedLineIdx := m.cursor.Line - startLine
+		if movedLineIdx >= 0 && movedLineIdx < len(block) && strings.TrimSpace(block[movedLineIdx]) != "" {
+			m.cursor.Col = max(0, m.cursor.Col+indentDelta)
+		}
+	}
 	m.cursor.Line += dir
+
 	if m.sel != nil {
+		if m.sel.Anchor.Line >= startLine && m.sel.Anchor.Line <= endLine {
+			movedLineIdx := m.sel.Anchor.Line - startLine
+			if movedLineIdx >= 0 && movedLineIdx < len(block) && strings.TrimSpace(block[movedLineIdx]) != "" {
+				m.sel.Anchor.Col = max(0, m.sel.Anchor.Col+indentDelta)
+			}
+		}
 		m.sel.Anchor.Line += dir
+
+		if m.sel.Head.Line >= startLine && m.sel.Head.Line <= endLine {
+			movedLineIdx := m.sel.Head.Line - startLine
+			if movedLineIdx >= 0 && movedLineIdx < len(block) && strings.TrimSpace(block[movedLineIdx]) != "" {
+				m.sel.Head.Col = max(0, m.sel.Head.Col+indentDelta)
+			}
+		}
 		m.sel.Head.Line += dir
 	}
 	return applyBatch(m, []document.Op{delOp, insOp})

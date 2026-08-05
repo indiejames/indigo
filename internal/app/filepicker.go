@@ -17,24 +17,32 @@ var builtInIgnoredDirs = []string{
 	".svn", ".hg", "__pycache__", ".cache",
 }
 
-// ignoredDirs is the effective set of directories to hide, rebuilt on each
-// configuration load from builtInIgnoredDirs + Config.PickerIgnoreDirs.
-var ignoredDirs = map[string]bool{}
+// ignoredDirs is the effective set of directories to hide, seeded from
+// builtInIgnoredDirs so it's always non-empty even if addIgnoredDirs is
+// never called, and rebuilt on each configuration load to fold in
+// Config.PickerIgnoreDirs.
+var ignoredDirs = newIgnoredDirsSet(nil)
+
+// newIgnoredDirsSet builds an ignore set from builtInIgnoredDirs plus extra.
+func newIgnoredDirsSet(extra []string) map[string]bool {
+	set := make(map[string]bool, len(builtInIgnoredDirs)+len(extra))
+	for _, name := range builtInIgnoredDirs {
+		set[name] = true
+	}
+	for _, name := range extra {
+		if name != "" {
+			set[name] = true
+		}
+	}
+	return set
+}
 
 // addIgnoredDirs rebuilds the ignoredDirs set from built-in defaults plus
 // additional directory names (from Config.PickerIgnoreDirs) to hide from the
 // file picker, recent files, and workspace grep. Removed entries no longer
 // persist across configuration reloads.
 func addIgnoredDirs(names []string) {
-	ignoredDirs = make(map[string]bool)
-	for _, name := range builtInIgnoredDirs {
-		ignoredDirs[name] = true
-	}
-	for _, name := range names {
-		if name != "" {
-			ignoredDirs[name] = true
-		}
-	}
+	ignoredDirs = newIgnoredDirsSet(names)
 }
 
 // pickerEntry is one row in the directory browser.

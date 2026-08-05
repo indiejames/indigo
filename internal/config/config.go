@@ -34,6 +34,26 @@ type Keybind struct {
 	Action string `toml:"action"`
 }
 
+// LinterConfig maps file extensions to an external linter command whose
+// output is parsed into diagnostics alongside whatever the file's LSP server
+// already reports. Command may be a bare name (looked up in PATH) or a
+// full/tilde path. Use {file} in Args as a placeholder for the file path.
+// Format selects which output parser to use (see internal/lint) — it must
+// match one of that package's registered parsers (e.g. "golangci-lint-json").
+type LinterConfig struct {
+	Extensions []string `toml:"extensions"`
+	Command    string   `toml:"command"`
+	Args       []string `toml:"args,omitempty"`
+	Format     string   `toml:"format"`
+}
+
+// DefaultLinters are tried when no user linter config matches an extension.
+// Only entries whose command is found in PATH (or node_modules/.bin) are used.
+var DefaultLinters = []LinterConfig{
+	{Extensions: []string{"go"}, Command: "golangci-lint",
+		Args: []string{"run", "--out-format", "json", "{file}"}, Format: "golangci-lint-json"},
+}
+
 // DefaultFormatters are tried (in order) when no user formatter config matches
 // an extension. Only entries whose command is found in PATH are used.
 // {file} in Args is replaced with the actual file path at runtime.
@@ -149,6 +169,9 @@ type Config struct {
 	// Keybinds override or add Normal-/Insert-mode key bindings. See the
 	// Keybind type for the shape of each entry.
 	Keybinds []Keybind `toml:"keybind"`
+	// Linters override or add an external linter for a given set of file
+	// extensions, merged alongside the file's LSP-reported diagnostics.
+	Linters []LinterConfig `toml:"linter"`
 }
 
 func defaults() *Config {
@@ -361,6 +384,21 @@ const defaultConfigTemplate = `# Indigo editor configuration
 # extensions = ["js", "ts"]
 # command    = "prettier"
 # args       = ["--stdin-filepath", "{file}"]
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Linters
+#
+# Indigo has a built-in default for Go (golangci-lint). Add a [[linter]]
+# block to override or add a linter for a given set of file extensions.
+# Results are merged with the file's LSP-reported diagnostics. format must
+# name one of internal/lint's registered output parsers.
+#
+# [[linter]]
+# extensions = ["go"]
+# command    = "golangci-lint"
+# args       = ["run", "--out-format", "json", "{file}"]
+# format     = "golangci-lint-json"
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------

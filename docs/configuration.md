@@ -92,6 +92,35 @@ command    = "ruff"
 args       = ["format", "-"]
 ```
 
+## Linters
+
+Linter results run automatically after `:w` (asynchronously — a save isn't blocked waiting
+on them) and are merged with whatever diagnostics the file's LSP server already reports, so
+they show up the same way (gutter markers, the `D`-popup) with no extra keybinding needed.
+
+### Built-in defaults
+
+| Extensions | Linter |
+|-----------|--------|
+| `.go` | `golangci-lint run --out-format json {file}` |
+
+Only linters whose command is found in PATH (or `node_modules/.bin`) are used; missing
+tools are silently skipped, same as formatters.
+
+### Custom linters
+
+Add a `[[linter]]` block to override or extend the defaults. `format` must name one of
+`internal/lint`'s registered output parsers (currently `golangci-lint-json`); a linter
+whose output indigo doesn't know how to parse yet can't be added this way.
+
+```toml
+[[linter]]
+extensions = ["go"]
+command    = "golangci-lint"
+args       = ["run", "--out-format", "json", "{file}"]
+format     = "golangci-lint-json"
+```
+
 ## File type aliases
 
 Map a file extension or an exact filename to an existing syntax-highlighting language, for

@@ -415,6 +415,7 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 	entry.buf.SetClean()
 	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
 	go s.lspMgr.DidSave(path)
+	go s.lintMgr.RunAsync(path)
 	go s.pluginMgr.DispatchBufferSave(context.Background(), bufID, path)
 
 	_, err := call.AllocResults()

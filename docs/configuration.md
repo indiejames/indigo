@@ -107,6 +107,72 @@ files that don't use their language's usual extension. Built in: `.env`→sh, `.
 Keys are matched as either a leading-dot extension or a bare filename; values are a
 registered language key (`go`, `sh`, `md`, `json`, etc.).
 
+## Key bindings
+
+Rebind an existing Normal- or Insert-mode action to a different key, or bind an additional
+key to it, with one `[[keybind]]` block per binding:
+
+```toml
+[[keybind]]
+mode   = "normal"
+key    = "ctrl+p"
+action = "open-file-picker"
+```
+
+`mode` is `"normal"` or `"insert"`. `key` follows the same names Bubble Tea reports
+(`"ctrl+p"`, `"shift+up"`, `"alt+s"`, plain characters like `"j"`, ...). `action` must be one
+of the built-in action names below. A key that's currently a multi-key prefix menu (like `g`
+or `m`) can't be overridden this way — indigo logs a startup warning and leaves it alone.
+An unknown `mode` or `action` is likewise reported as a warning rather than silently ignored.
+
+### Normal-mode actions (default key)
+
+| Action | Default key | Action | Default key |
+| --- | --- | --- | --- |
+| `open-file-picker` | `ctrl+p` | `search-next` | `n` |
+| `search-previous` | `N` | `insert-before-cursor` | `i` |
+| `quit-hint` | `ctrl+c` | `command-mode` | `:` |
+| `search` | `/` | `cancel-selection` | `esc` |
+| `append-after-cursor` | `a` | `append-line-end` | `A` |
+| `open-line-below` | `o` | `open-line-above` | `O` |
+| `save` | `ctrl+s` | `hover-docs` | `K` |
+| `join-lines` | `J` | `toggle-diagnostics-popup` | `D` |
+| `undo` | `u` | `redo` | `U` |
+| `extend-next-word-start` | `W` | `extend-word-forward` | `E` |
+| `select-line` | `x` | `extend-line-backward` | `X` |
+| `select-all` | `%` | `clear-selections` | `;` |
+| `flip-selection` | `alt+;` | `delete-selection` | `d` |
+| `change-selection` | `c` | `yank` | `y` |
+| `cursor-left` | `h`, `left` | `cursor-right` | `l`, `right` |
+| `cursor-down` | `j`, `down` | `cursor-up` | `k`, `up` |
+| `page-down` | `ctrl+f`, `pgdown` | `page-up` | `ctrl+b`, `pgup` |
+| `go-to-last-line` | `G` | `go-to-line-start` | `0`, `home` |
+| `go-to-first-non-blank` | `^` | `go-to-line-end` | `$`, `end` |
+| `next-word-start` | `w` | `previous-word-start` | `b` |
+| `word-end` | `e` | `paste` | `p` |
+| `extend-word-backward` | `B` | `select-next-occurrence` | `ctrl+d` |
+| `add-cursor-below` | `C` | `toggle-comment` | `ctrl+/`, `ctrl+_` |
+| `show-plugin-bindings` | `?` | `split-selection-into-cursors` | `alt+s` |
+| `set-mark` | `z` | `select-to-mark` | `Z` |
+| `indent` | `>` | `unindent` | `<` |
+| `move-line-up` | `shift+up` | `move-line-down` | `shift+down` |
+| `jump-back` | `-` | `jump-forward` | `=`, `+` |
+
+Multi-key sequences (the `g`, `m`, `M`, `~`, and Space menus) aren't individually
+overridable yet — only the keys listed above and in the table below.
+
+### Insert-mode actions (default key)
+
+| Action | Default key | Action | Default key |
+| --- | --- | --- | --- |
+| `trigger-completion` | `ctrl+@`, `ctrl+space` | `exit-insert-mode` | `esc`, `ctrl+c` |
+| `save` | `ctrl+s` | `backspace` | `backspace` |
+| `delete-forward` | `delete` | `newline` | `enter` |
+| `insert-tab` | `tab` | `cursor-left` | `left` |
+| `cursor-right` | `right` | `cursor-up` | `up` |
+| `cursor-down` | `down` | `line-start` | `home` |
+| `line-end` | `end` | | |
+
 ## Themes
 
 Set the active theme by name:

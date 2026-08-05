@@ -161,22 +161,22 @@ func (m Model) snippetEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // call. Any key not listed here falls through to insertSelfInsert.
 var insertCmds = []command{
 	// ctrl+space sends NUL → "ctrl+@" in most terminals.
-	{key: "ctrl+@", label: "Trigger completion", execute: executeTriggerCompletion},
-	{key: "ctrl+space", label: "Trigger completion", execute: executeTriggerCompletion},
-	{key: "esc", label: "Exit insert mode", execute: executeInsertEsc},
+	{key: "ctrl+@", name: "trigger-completion", label: "Trigger completion", execute: executeTriggerCompletion},
+	{key: "ctrl+space", name: "trigger-completion", label: "Trigger completion", execute: executeTriggerCompletion},
+	{key: "esc", name: "exit-insert-mode", label: "Exit insert mode", execute: executeInsertEsc},
 	// Escape to normal mode (vim convention) — never close from insert mode.
-	{key: "ctrl+c", label: "Exit insert mode", execute: executeInsertCtrlC},
-	{key: "ctrl+s", label: "Save", execute: executeSave},
-	{key: "backspace", label: "Backspace", execute: executeInsertBackspace},
-	{key: "delete", label: "Delete forward", execute: executeInsertDelete},
-	{key: "enter", label: "Newline", execute: executeInsertEnter},
-	{key: "tab", label: "Insert tab", execute: executeInsertTab},
-	{key: "left", label: "Cursor left", execute: executeInsertMoveLeft},
-	{key: "right", label: "Cursor right", execute: executeInsertMoveRight},
-	{key: "up", label: "Cursor up", execute: executeInsertMoveUp},
-	{key: "down", label: "Cursor down", execute: executeInsertMoveDown},
-	{key: "home", label: "Line start", execute: executeInsertHome},
-	{key: "end", label: "Line end", execute: executeInsertEnd},
+	{key: "ctrl+c", name: "exit-insert-mode", label: "Exit insert mode", execute: executeInsertCtrlC},
+	{key: "ctrl+s", name: "save", label: "Save", execute: executeSave},
+	{key: "backspace", name: "backspace", label: "Backspace", execute: executeInsertBackspace},
+	{key: "delete", name: "delete-forward", label: "Delete forward", execute: executeInsertDelete},
+	{key: "enter", name: "newline", label: "Newline", execute: executeInsertEnter},
+	{key: "tab", name: "insert-tab", label: "Insert tab", execute: executeInsertTab},
+	{key: "left", name: "cursor-left", label: "Cursor left", execute: executeInsertMoveLeft},
+	{key: "right", name: "cursor-right", label: "Cursor right", execute: executeInsertMoveRight},
+	{key: "up", name: "cursor-up", label: "Cursor up", execute: executeInsertMoveUp},
+	{key: "down", name: "cursor-down", label: "Cursor down", execute: executeInsertMoveDown},
+	{key: "home", name: "line-start", label: "Line start", execute: executeInsertHome},
+	{key: "end", name: "line-end", label: "Line end", execute: executeInsertEnd},
 }
 
 // handleInsertKey handles a single insert-mode key edit. Completion-popup

@@ -560,3 +560,93 @@ func TestHandleNormalShiftUpMovesLineUp(t *testing.T) {
 		t.Errorf("shift+up: Line(0)=%q Line(1)=%q, want bar/foo", got.buf.Line(0), got.buf.Line(1))
 	}
 }
+
+// --- keyRune regression tests ---
+
+// TestKeyRuneModifiedKey verifies that modified plugin keys like "ctrl+p" are
+// returned unchanged, not truncated to the first rune. This is a regression
+// test for a bug where keyRune would return only "c" for "ctrl+p".
+func TestKeyRuneModifiedKey(t *testing.T) {
+	result := keyRune("ctrl+p", "Open file picker")
+	if result != "ctrl+p" {
+		t.Errorf("keyRune(\"ctrl+p\", ...) = %q, want \"ctrl+p\"", result)
+	}
+}
+
+// TestKeyRuneEmptyKeyUsesLabel verifies that when key is empty, keyRune
+// derives the result from the first rune of the lowercased label.
+func TestKeyRuneEmptyKeyUsesLabel(t *testing.T) {
+	result := keyRune("", "Symbol picker")
+	if result != "s" {
+		t.Errorf("keyRune(\"\", \"Symbol picker\") = %q, want \"s\"", result)
+	}
+}
+
+// TestKeyRuneSingleChar verifies that single-character keys are returned unchanged.
+func TestKeyRuneSingleChar(t *testing.T) {
+	result := keyRune("p", "Paste")
+	if result != "p" {
+		t.Errorf("keyRune(\"p\", \"Paste\") = %q, want \"p\"", result)
+	}
+}
+
+// TestKeyRuneEmptyBoth verifies that when both key and label are empty, an empty string is returned.
+func TestKeyRuneEmptyBoth(t *testing.T) {
+	result := keyRune("", "")
+	if result != "" {
+		t.Errorf("keyRune(\"\", \"\") = %q, want \"\"", result)
+	}
+}
+
+// TestClientMenuItemsToCommandsModifiedKey verifies that plugin menu items with
+// modified keys (e.g., "ctrl+p") are correctly converted to commands with the
+// full key preserved for both display and dispatch.
+func TestClientMenuItemsToCommandsModifiedKey(t *testing.T) {
+	items := []ClientMenuItem{
+		{
+			Key:        "ctrl+p",
+			Label:      "Open file picker",
+			PluginName: "test-plugin",
+			Command:    "open-picker",
+		},
+	}
+
+	cmds := clientMenuItemsToCommands(items)
+	if len(cmds) != 1 {
+		t.Fatalf("clientMenuItemsToCommands returned %d commands, want 1", len(cmds))
+	}
+
+	cmd := cmds[0]
+	if cmd.key != "ctrl+p" {
+		t.Errorf("command.key = %q, want \"ctrl+p\"", cmd.key)
+	}
+	if cmd.label != "Open file picker" {
+		t.Errorf("command.label = %q, want \"Open file picker\"", cmd.label)
+	}
+	if cmd.execute == nil {
+		t.Error("command.execute should be set for leaf menu items")
+	}
+}
+
+// TestClientMenuItemsToCommandsEmptyKey verifies that when a plugin menu item
+// has an empty key, the first rune of the lowercased label is used.
+func TestClientMenuItemsToCommandsEmptyKey(t *testing.T) {
+	items := []ClientMenuItem{
+		{
+			Key:        "",
+			Label:      "Symbol picker",
+			PluginName: "test-plugin",
+			Command:    "symbol-picker",
+		},
+	}
+
+	cmds := clientMenuItemsToCommands(items)
+	if len(cmds) != 1 {
+		t.Fatalf("clientMenuItemsToCommands returned %d commands, want 1", len(cmds))
+	}
+
+	cmd := cmds[0]
+	if cmd.key != "s" {
+		t.Errorf("command.key = %q, want \"s\" (first rune of lowercased label)", cmd.key)
+	}
+}

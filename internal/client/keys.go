@@ -348,8 +348,8 @@ func clientMenuItemsToCommands(items []ClientMenuItem) []command {
 // keyRune picks the popup-selector key for a plugin menu item: the declared
 // Key if set, otherwise the lowercased first rune of Label.
 func keyRune(key, label string) string {
-	if r := []rune(key); len(r) > 0 {
-		return string(r[0])
+	if key != "" {
+		return key
 	}
 	for _, r := range strings.ToLower(label) {
 		return string(r)

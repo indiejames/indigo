@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/indiejames/indigo/internal/proto/pluginproto"
 )
 
 // TestManagerWaitReady reproduces the bug where GetMenuItems/GetPluginBindings

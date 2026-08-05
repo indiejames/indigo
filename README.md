@@ -285,6 +285,8 @@ Type `:` in normal mode, then one of:
 
 **Auto-formatting** — On `:w` with `format_on_save = true`, indigo runs the appropriate formatter (gofmt, prettier, rustfmt, etc.) automatically. See [Language Support](docs/language-support.md) for the full list.
 
+**Linting** — On `:w`, indigo runs the appropriate linter (golangci-lint, eslint, ruff, cargo clippy, etc.) asynchronously and merges its results with LSP diagnostics, so they show up the same way (gutter markers, the `D`-popup) with no extra keybinding needed. See [Configuration](docs/configuration.md#linters) for the built-in defaults and how to add custom linters.
+
 **Multi-buffer** — Open multiple files in the same session. A tab bar appears when more than one buffer is open. Use `]b` / `[b` or `Ctrl+P` to navigate.
 
 **Crash recovery** — File content is written to a recovery directory every 5 seconds. If indigo exits uncleanly, the next open will offer to restore your unsaved work.
@@ -302,7 +304,7 @@ fuzzy_search    = true   # fuzzy matching in the file picker
 format_on_save  = false  # run formatter automatically on :w
 ```
 
-Full configuration reference, including how to add custom language servers and formatters: [Configuration](docs/configuration.md).
+Full configuration reference, including how to add custom language servers, formatters, and linters: [Configuration](docs/configuration.md).
 
 ## About the Logo
 

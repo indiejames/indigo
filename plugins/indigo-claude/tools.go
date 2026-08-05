@@ -91,18 +91,6 @@ func allTools() []toolDef {
 			},
 		},
 		{
-			Name:        "goto_file",
-			Description: "Navigate the user's editor window to a file (and optionally a line), so they can see it directly instead of just reading a path in chat. Use this after locating where something is implemented, e.g. in response to 'take me to X' or 'where is X handled'.",
-			InputSchema: toolSchema{
-				Type: "object",
-				Properties: map[string]schemaProp{
-					"path": {Type: "string", Description: "File to open, relative to workspace root or absolute."},
-					"line": {Type: "integer", Description: "1-based line number to jump to. Omit or 0 to just open the file."},
-				},
-				Required: []string{"path"},
-			},
-		},
-		{
 			Name:        "save_file",
 			Description: "Write a file's live editor buffer to disk. Approved edits apply to the buffer immediately but the on-disk file stays stale until saved — call this on every file you edited before running disk-based commands (builds, tests, grep). If the file is open in the editor the user is asked to approve the save (it may include their own unsaved changes).",
 			InputSchema: toolSchema{

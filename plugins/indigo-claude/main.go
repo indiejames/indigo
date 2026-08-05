@@ -91,6 +91,13 @@ type Model struct {
 	// Only messages with more than collapseThreshold rendered lines are collapsible.
 	collapsedMsgs map[int]bool
 
+	// mdRenderCache memoizes renderMarkdown by conv index, so View() — called
+	// on every keystroke and status tick — doesn't re-run glamour (markdown
+	// parse + syntax highlighting) over the entire conversation history each
+	// time. Entries are invalidated automatically when content or width
+	// changes (e.g. the in-progress streaming message, or a terminal resize).
+	mdRenderCache map[int]mdCacheEntry
+
 	// Permission dialog: false = "approve" highlighted, true = "reject" highlighted.
 	permChoice bool
 
@@ -195,6 +202,7 @@ func newModel(rpc *client.RPC, prog *programLink, apiKey, workDir string) Model 
 		streamingConvIdx: -1,
 		conv:             []ConvMsg{{Role: RoleStatus, Content: "Connected · " + mode}},
 		collapsedMsgs:    map[int]bool{},
+		mdRenderCache:    map[int]mdCacheEntry{},
 	}
 }
 
@@ -446,6 +454,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Slash commands.
 		if text == "/clear" {
 			m.conv = []ConvMsg{{Role: RoleStatus, Content: "Conversation cleared."}}
+			m.mdRenderCache = map[int]mdCacheEntry{}
 			m.history = nil
 			m.sessionID = ""
 			m.input = nil
@@ -1151,9 +1160,10 @@ func (m Model) overlayPopupAbove(base string, popup []string) string {
 	totalH := len(lines)
 	startCol := max(0, (m.width-popW)/2)
 	// Position popup so its bottom edge sits just above the input box top border.
-	// The input box occupies rows [convHeight .. convHeight+inputHeight-1] (0-indexed).
-	// We want the popup to end at row convHeight-1.
-	inputBoxTopRow := m.convHeight()
+	// Row 0 is the control bar, rows [1 .. convHeight] are the conversation, and
+	// the input box starts right after at row convHeight+1. We want the popup to
+	// end at row convHeight, flush against the input box's top border.
+	inputBoxTopRow := m.convHeight() + 1
 	startRow := max(1, inputBoxTopRow-len(popup))
 
 	for i, popLine := range popup {
@@ -1445,7 +1455,7 @@ func (m Model) renderAllLinesIndexed() (lines []string, starts []userMsgStart) {
 			starts = append(starts, userMsgStart{convIdx: i, startLine: len(lines)})
 			lines = append(lines, m.renderUserMsg(i, msg, w)...)
 		} else {
-			lines = append(lines, m.renderMsg(msg, w)...)
+			lines = append(lines, m.renderMsg(i, msg, w)...)
 		}
 	}
 	return
@@ -1567,14 +1577,27 @@ func (m Model) toggleTopUserMsg() {
 	}
 }
 
-func (m Model) renderMsg(msg ConvMsg, w int) []string {
+// mdCacheEntry is one memoized renderMarkdown result, keyed by conv index in
+// Model.mdRenderCache and invalidated when content or width no longer match.
+type mdCacheEntry struct {
+	content string
+	width   int
+	lines   []string
+}
+
+func (m Model) renderMsg(convIdx int, msg ConvMsg, w int) []string {
 	switch msg.Role {
 	case RoleStatus:
 		return []string{padRight(statusStyle.Render("  · "+msg.Content), w)}
 
 	case RoleAssistant:
 		// No label — just the markdown content, like a chat response.
-		return renderMarkdown(msg.Content, w)
+		if e, ok := m.mdRenderCache[convIdx]; ok && e.content == msg.Content && e.width == w {
+			return e.lines
+		}
+		lines := renderMarkdown(msg.Content, w)
+		m.mdRenderCache[convIdx] = mdCacheEntry{content: msg.Content, width: w, lines: lines}
+		return lines
 
 	case RoleTool:
 		return []string{padRight(toolStyle.Render(msg.Content), w)}

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/indiejames/indigo/internal/document"
@@ -207,14 +208,18 @@ func (s *editorService) PluginKeyRegistered(trigger string) {
 
 	serverLog("PluginKeyRegistered: trigger=%q, clientMapLen=%d, clients=%d", trigger, mapLen, len(callbacks))
 
-	ctx := context.Background()
+	// Fan out to all clients concurrently, each with its own timeout.
 	for i, cb := range callbacks {
-		fut, rel := cb.KeyRegistered(ctx, func(p proto.ClientCallback_keyRegistered_Params) error {
-			return p.SetTrigger(trigger)
-		})
-		_, err := fut.Struct()
-		rel()
-		serverLog("PluginKeyRegistered: KeyRegistered to client %d: err=%v", i, err)
+		go func(i int, cb proto.ClientCallback) {
+			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+			defer cancel()
+			fut, rel := cb.KeyRegistered(ctx, func(p proto.ClientCallback_keyRegistered_Params) error {
+				return p.SetTrigger(trigger)
+			})
+			_, err := fut.Struct()
+			rel()
+			serverLog("PluginKeyRegistered: KeyRegistered to client %d: err=%v", i, err)
+		}(i, cb)
 	}
 }
 
@@ -225,13 +230,17 @@ func (s *editorService) PluginInsertHookRegistered(char string) {
 	callbacks := s.allCallbacks()
 	s.mu.Unlock()
 
-	ctx := context.Background()
+	// Fan out to all clients concurrently, each with its own timeout.
 	for _, cb := range callbacks {
-		fut, rel := cb.InsertHookRegistered(ctx, func(p proto.ClientCallback_insertHookRegistered_Params) error {
-			return p.SetChar(char)
-		})
-		fut.Struct() //nolint:errcheck
-		rel()
+		go func(cb proto.ClientCallback) {
+			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+			defer cancel()
+			fut, rel := cb.InsertHookRegistered(ctx, func(p proto.ClientCallback_insertHookRegistered_Params) error {
+				return p.SetChar(char)
+			})
+			fut.Struct() //nolint:errcheck
+			rel()
+		}(cb)
 	}
 }
 
@@ -244,14 +253,18 @@ func (s *editorService) PluginDecorationsChanged(bufID uint32) {
 	callbacks := s.allCallbacks()
 	s.mu.Unlock()
 
-	ctx := context.Background()
+	// Fan out to all clients concurrently, each with its own timeout.
 	for _, cb := range callbacks {
-		fut, rel := cb.DecorationsChanged(ctx, func(p proto.ClientCallback_decorationsChanged_Params) error {
-			p.SetBufId(bufID)
-			return nil
-		})
-		fut.Struct() //nolint:errcheck
-		rel()
+		go func(cb proto.ClientCallback) {
+			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+			defer cancel()
+			fut, rel := cb.DecorationsChanged(ctx, func(p proto.ClientCallback_decorationsChanged_Params) error {
+				p.SetBufId(bufID)
+				return nil
+			})
+			fut.Struct() //nolint:errcheck
+			rel()
+		}(cb)
 	}
 }
 

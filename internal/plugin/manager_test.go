@@ -36,3 +36,38 @@ func TestManagerWaitReady(t *testing.T) {
 		t.Fatal("WaitReady did not return after Start completed")
 	}
 }
+
+// TestInsertHookVisibilityDuringStartup verifies that insert hooks registered
+// during plugin initialization are immediately visible to AllRegisteredInsertChars,
+// even if the call interleaves with the plugin's Initialize call. This prevents
+// a race where a client snapshot could miss hooks that were registered but not
+// yet visible in m.plugins.
+func TestInsertHookVisibilityDuringStartup(t *testing.T) {
+	m := NewManager(t.TempDir(), nil)
+
+	// Simulate a plugin being added to m.plugins with insert hooks already registered.
+	// In the real flow, the plugin is now appended to m.plugins BEFORE Initialize,
+	// so hooks registered during Initialize are immediately visible.
+	reg := &registeredPlugin{
+		name:        "test-plugin",
+		insertHooks: make(map[string]pluginproto.KeyHandler),
+	}
+
+	m.mu.Lock()
+	m.plugins = append(m.plugins, reg)
+	m.mu.Unlock()
+
+	// Simulate the plugin registering an insert hook during initialization.
+	reg.mu.Lock()
+	// We can't create a real KeyHandler without a Cap'n Proto connection,
+	// but we can use an invalid one for the test since AllRegisteredInsertChars
+	// only checks the map keys.
+	reg.insertHooks[")"] = pluginproto.KeyHandler{}
+	reg.mu.Unlock()
+
+	// A concurrent client snapshot should now see the hook immediately.
+	chars := m.AllRegisteredInsertChars()
+	if len(chars) != 1 || chars[0] != ")" {
+		t.Errorf("AllRegisteredInsertChars() = %v, want [\")\"]", chars)
+	}
+}

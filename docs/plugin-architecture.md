@@ -82,7 +82,7 @@ The render loop and keypress path **never block** on plugin I/O. Snappiness is e
 | Overlay / virtual text                    | Async, cached last result   | none    |
 | Status bar items                          | Async, cached last result   | none    |
 | **Key binding handler**                   | Await response              | 300 ms  |
-| **Insert-mode hook** (e.g. bracket close) | Fire-and-forget for the char itself; response applied if it arrives | 300 ms |
+| **Insert-mode hook** (e.g. bracket close) | Fire-and-forget notification after char is inserted; response applied if it arrives | 300 ms |
 | **Menu action handler** (Command menu)    | Await response              | 300 ms  |
 | **Action provider** (Shift+F actions)     | Await response              | 500 ms  |
 | **Fix provider** (fixable decorations)    | Await response              | 500 ms  |
@@ -121,9 +121,9 @@ Overlay decorations are rendered in a single pass through each visible line's ru
 | Move cursor          | Jump to a position or selection                 |
 | Open file            | Open a file in a new buffer                     |
 | Show message         | Write to the status bar transiently             |
-| Register key binding | Own a key sequence in normal or insert mode     |
+| Register key binding | Own a key sequence in normal mode               |
 | Register command     | Add a `:commandname` callable from command mode |
-| Register insert hook | Intercept a specific character in insert mode   |
+| Register insert hook | Receive asynchronous notification when a specific character is typed in insert mode |
 | Register menu action | Contribute an item to the space Command menu (invoked by selection, never bound to a physical key) |
 | Register action provider | Contribute context-sensitive actions to the Shift+F popup |
 

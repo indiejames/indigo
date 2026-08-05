@@ -183,7 +183,9 @@ func Dial(socketPath string) (*RPC, error) {
 		pluginKeys:      make(map[string]bool),
 		insertHookChars: make(map[string]bool),
 	}
+	cb.mu.Lock()
 	cb.rpc = r
+	cb.mu.Unlock()
 	clientLog("Dial: connected, clientID=%d", r.clientID)
 
 	// Monitor connection lifecycle.
@@ -192,12 +194,12 @@ func Dial(socketPath string) (*RPC, error) {
 		clientLog("server connection closed")
 	}()
 
-	// Fetch plugin keys/bindings/menu items in one round trip's worth of
-	// latency instead of three: issue all three calls before blocking on any
-	// of their results, so the server processes them concurrently. The
-	// bindings/menu-items handlers each wait for plugin startup to finish
-	// (see pluginReadyTimeout server-side); firing them together means that
-	// wait is paid once, not stacked three times.
+	// Fetch plugin keys, insert characters, bindings, and menu items in one
+	// round trip's worth of latency instead of four: issue all four calls
+	// before blocking on any of their results, so the server processes them
+	// concurrently. The bindings/menu-items handlers each wait for plugin
+	// startup to finish (see pluginReadyTimeout server-side); firing them
+	// together means that wait is paid once, not stacked four times.
 	kfut, krel := svc.GetPluginKeys(context.Background(), func(_ proto.EditorService_getPluginKeys_Params) error {
 		return nil
 	})

@@ -346,6 +346,14 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 		menuItems:      manifest.MenuItems,
 	}
 
+	// Add reg to m.plugins before initialization so insert-hook registrations
+	// are visible to AllRegisteredInsertChars immediately. If initialization
+	// fails, we'll need to remove it.
+	m.mu.Lock()
+	m.plugins = append(m.plugins, reg)
+	pluginIndex := len(m.plugins) - 1
+	m.mu.Unlock()
+
 	apiServer := &editorApiServer{reg: reg, bridge: m.bridge}
 	api := pluginproto.EditorApi_ServerToClient(apiServer)
 	defer api.Release()
@@ -364,6 +372,10 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 	defer rel()
 
 	if _, err := fut.Struct(); err != nil {
+		// Remove the plugin from m.plugins since initialization failed.
+		m.mu.Lock()
+		m.plugins = append(m.plugins[:pluginIndex], m.plugins[pluginIndex+1:]...)
+		m.mu.Unlock()
 		rpcConn.Close() //nolint:errcheck
 		proc.Kill()     //nolint:errcheck
 		return fmt.Errorf("plugin %s initialize: %w", name, err)
@@ -386,9 +398,6 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 		reg.mu.Unlock()
 	}
 
-	m.mu.Lock()
-	m.plugins = append(m.plugins, reg)
-	m.mu.Unlock()
 	return nil
 }
 

@@ -304,22 +304,30 @@ func parseSubstitute(rest string) (pattern, replacement string, ok bool) {
 }
 
 // splitUnescaped splits s on sep, treating "\"+sep as a literal, unescaped
-// sep character rather than a delimiter. Other backslash sequences (e.g. a
-// regex pattern's \d) are left untouched.
+// sep character rather than a delimiter. Consecutive backslashes before sep
+// are counted: odd means the sep is escaped (preserve backslashes and include
+// the separator), even means the sep is a delimiter (preserve backslashes).
+// Other backslash sequences (e.g. a regex pattern's \d) are left untouched.
 func splitUnescaped(s string, sep rune) []string {
 	var parts []string
 	var cur strings.Builder
 	runes := []rune(s)
 	for i := 0; i < len(runes); i++ {
 		r := runes[i]
-		if r == '\\' && i+1 < len(runes) && runes[i+1] == sep {
-			cur.WriteRune(sep)
-			i++
-			continue
-		}
 		if r == sep {
-			parts = append(parts, cur.String())
-			cur.Reset()
+			// Count consecutive backslashes before this separator
+			backslashCount := 0
+			for j := i - 1; j >= 0 && runes[j] == '\\'; j-- {
+				backslashCount++
+			}
+			if backslashCount%2 == 1 {
+				// Odd number of backslashes: separator is escaped
+				cur.WriteRune(sep)
+			} else {
+				// Even number (including zero): separator is a delimiter
+				parts = append(parts, cur.String())
+				cur.Reset()
+			}
 			continue
 		}
 		cur.WriteRune(r)

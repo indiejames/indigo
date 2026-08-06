@@ -465,3 +465,21 @@ func (s *editorService) GetPluginKeys(_ context.Context, call proto.EditorServic
 	}
 	return nil
 }
+
+func (s *editorService) GetPluginInsertChars(_ context.Context, call proto.EditorService_getPluginInsertChars) error {
+	chars := s.pluginMgr.AllRegisteredInsertChars()
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	list, err := res.NewChars(int32(len(chars)))
+	if err != nil {
+		return err
+	}
+	for i, c := range chars {
+		if err := list.Set(i, c); err != nil {
+			return err
+		}
+	}
+	return nil
+}

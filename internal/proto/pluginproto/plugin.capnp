@@ -55,6 +55,12 @@ interface EditorApi {
   wordAt       @13 (bufId :UInt32, pos :PluginPosition)                   -> (start :PluginPosition, end :PluginPosition, found :Bool);
   bufferInfo   @14 (bufId :UInt32)                                        -> (path :Text, languageId :Text, lineCount :UInt32, isDirty :Bool);
   visibleRange @15 (clientId :UInt64)                                     -> (startLine :UInt32, endLine :UInt32);
+  # refreshDecorations tells any client currently viewing bufId to refetch
+  # decorations now, instead of waiting for its next poll tick. Call this
+  # after async work (an LLM completion, a git blame fetch, ...) finishes
+  # and would change what DecorationProvider.getDecorations returns —
+  # fire-and-forget, does not itself carry the new decorations.
+  refreshDecorations @21 (bufId :UInt32)                                  -> ();
 }
 
 # Handler interfaces — implemented by the plugin, called by the server.

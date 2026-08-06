@@ -354,6 +354,24 @@ func (a *Api) DecorationsFull(h DecorationHandlers) error {
 	return err
 }
 
+// RefreshDecorations tells any client currently viewing bufID to refetch
+// decorations now, instead of waiting for its next poll tick (up to ~360ms).
+// Call this after async work (an LLM completion, a git blame fetch, ...)
+// finishes and would change what your DecorationProvider now returns for
+// this buffer — e.g. an inline-suggestion plugin, after computing a new
+// ghost-text overlay in response to an OnChange/OnInsert notification.
+// Fire-and-forget: this does not itself carry the new decorations, it only
+// tells the client to call GetDecorations again.
+func (a *Api) RefreshDecorations(bufID uint32) error {
+	fut, rel := a.api.RefreshDecorations(context.Background(), func(p pluginproto.EditorApi_refreshDecorations_Params) error {
+		p.SetBufId(bufID)
+		return nil
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
 // -- Editor effects --
 
 // ApplyEdit applies a sequence of text edits to a buffer.

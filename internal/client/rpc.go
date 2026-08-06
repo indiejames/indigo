@@ -37,7 +37,7 @@ func clientLog(format string, args ...any) {
 	if err != nil {
 		return
 	}
-	defer f.Close() //nolint:errcheck
+	defer f.Close()                                  //nolint:errcheck
 	fmt.Fprintf(f, "[client] "+format+"\n", args...) //nolint:errcheck
 }
 
@@ -121,10 +121,11 @@ type RPC struct {
 	clientID uint64
 	cb       *callbackServer
 
-	pluginKeysMu   sync.RWMutex
-	pluginKeys     map[string]bool
-	pluginBindings []ClientPluginBinding
-	menuItems      []ClientMenuItem
+	pluginKeysMu    sync.RWMutex
+	pluginKeys      map[string]bool
+	insertHookChars map[string]bool
+	pluginBindings  []ClientPluginBinding
+	menuItems       []ClientMenuItem
 }
 
 // ClientPluginBinding is a key binding contributed by a plugin, for the help popup.
@@ -175,13 +176,16 @@ func Dial(socketPath string) (*RPC, error) {
 	}
 
 	r := &RPC{
-		conn:       conn,
-		svc:        svc,
-		clientID:   res.ClientId(),
-		cb:         cb,
-		pluginKeys: make(map[string]bool),
+		conn:            conn,
+		svc:             svc,
+		clientID:        res.ClientId(),
+		cb:              cb,
+		pluginKeys:      make(map[string]bool),
+		insertHookChars: make(map[string]bool),
 	}
+	cb.mu.Lock()
 	cb.rpc = r
+	cb.mu.Unlock()
 	clientLog("Dial: connected, clientID=%d", r.clientID)
 
 	// Monitor connection lifecycle.
@@ -190,12 +194,12 @@ func Dial(socketPath string) (*RPC, error) {
 		clientLog("server connection closed")
 	}()
 
-	// Fetch plugin keys/bindings/menu items in one round trip's worth of
-	// latency instead of three: issue all three calls before blocking on any
-	// of their results, so the server processes them concurrently. The
-	// bindings/menu-items handlers each wait for plugin startup to finish
-	// (see pluginReadyTimeout server-side); firing them together means that
-	// wait is paid once, not stacked three times.
+	// Fetch plugin keys, insert characters, bindings, and menu items in one
+	// round trip's worth of latency instead of four: issue all four calls
+	// before blocking on any of their results, so the server processes them
+	// concurrently. The bindings/menu-items handlers each wait for plugin
+	// startup to finish (see pluginReadyTimeout server-side); firing them
+	// together means that wait is paid once, not stacked four times.
 	kfut, krel := svc.GetPluginKeys(context.Background(), func(_ proto.EditorService_getPluginKeys_Params) error {
 		return nil
 	})
@@ -203,6 +207,9 @@ func Dial(socketPath string) (*RPC, error) {
 		return nil
 	})
 	mfut, mrel := svc.GetMenuItems(context.Background(), func(_ proto.EditorService_getMenuItems_Params) error {
+		return nil
+	})
+	ifut, irel := svc.GetPluginInsertChars(context.Background(), func(_ proto.EditorService_getPluginInsertChars_Params) error {
 		return nil
 	})
 
@@ -246,6 +253,19 @@ func Dial(socketPath string) (*RPC, error) {
 		}
 	}
 	mrel()
+
+	// Chars with a registered insert hook. Same race-handling rationale as
+	// GetPluginKeys above; insertHookRegistered covers late registration.
+	if ires, err := ifut.Struct(); err == nil {
+		if chars, err := ires.Chars(); err == nil {
+			for i := 0; i < chars.Len(); i++ {
+				if c, err := chars.At(i); err == nil {
+					r.addInsertHookChar(c)
+				}
+			}
+		}
+	}
+	irel()
 
 	return r, nil
 }
@@ -296,6 +316,13 @@ func (r *RPC) addPluginKey(trigger string) {
 	clientLog("addPluginKey: %q", trigger)
 	r.pluginKeysMu.Lock()
 	r.pluginKeys[trigger] = true
+	r.pluginKeysMu.Unlock()
+}
+
+// addInsertHookChar records that a plugin owns this OnInsert char.
+func (r *RPC) addInsertHookChar(char string) {
+	r.pluginKeysMu.Lock()
+	r.insertHookChars[char] = true
 	r.pluginKeysMu.Unlock()
 }
 

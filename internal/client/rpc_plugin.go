@@ -38,6 +38,13 @@ func (r *RPC) HasPluginKey(key string) bool {
 	return r.pluginKeys[key]
 }
 
+// HasInsertHook reports whether any plugin registered an OnInsert hook for char.
+func (r *RPC) HasInsertHook(char string) bool {
+	r.pluginKeysMu.RLock()
+	defer r.pluginKeysMu.RUnlock()
+	return r.insertHookChars[char]
+}
+
 // HandlePluginKey asks the server to dispatch a keypress to the owning plugin.
 func (r *RPC) HandlePluginKey(ctx context.Context, key, mode string, bufID uint32, cursorLine, cursorCol uint32) (PluginKeyResult, error) {
 	select {

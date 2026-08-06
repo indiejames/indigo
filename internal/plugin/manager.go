@@ -48,6 +48,12 @@ type ServerBridge interface {
 
 	// Key registration notification — called so the server can push to clients.
 	PluginKeyRegistered(trigger string)
+	// Insert-hook registration notification — same purpose as
+	// PluginKeyRegistered, for OnInsert instead of OnKey.
+	PluginInsertHookRegistered(char string)
+	// PluginDecorationsChanged pushes an immediate decoration refetch to any
+	// client viewing bufID, instead of it waiting for the next poll tick.
+	PluginDecorationsChanged(bufID uint32)
 
 	// PluginOpenBuffers returns all currently-open (bufID, path) pairs so plugins
 	// can receive OnOpen for buffers that were opened before the plugin started.
@@ -100,8 +106,8 @@ type PluginDecoration struct {
 	UnderlineColor string
 
 	// Fix fields
-	Fixable  bool
-	FixData  string
+	Fixable    bool
+	FixData    string
 	PluginName string // which plugin owns this decoration (for fix routing)
 
 	// TextColor is the hex foreground color for gutter/overlay text; empty = default.
@@ -286,7 +292,7 @@ func pluginLog(format string, args ...any) {
 	if err != nil {
 		return
 	}
-	defer f.Close() //nolint:errcheck
+	defer f.Close()                      //nolint:errcheck
 	fmt.Fprintf(f, format+"\n", args...) //nolint:errcheck
 }
 
@@ -340,6 +346,14 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 		menuItems:      manifest.MenuItems,
 	}
 
+	// Add reg to m.plugins before initialization so insert-hook registrations
+	// are visible to AllRegisteredInsertChars immediately. If initialization
+	// fails, we'll need to remove it.
+	m.mu.Lock()
+	m.plugins = append(m.plugins, reg)
+	pluginIndex := len(m.plugins) - 1
+	m.mu.Unlock()
+
 	apiServer := &editorApiServer{reg: reg, bridge: m.bridge}
 	api := pluginproto.EditorApi_ServerToClient(apiServer)
 	defer api.Release()
@@ -358,6 +372,10 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 	defer rel()
 
 	if _, err := fut.Struct(); err != nil {
+		// Remove the plugin from m.plugins since initialization failed.
+		m.mu.Lock()
+		m.plugins = append(m.plugins[:pluginIndex], m.plugins[pluginIndex+1:]...)
+		m.mu.Unlock()
 		rpcConn.Close() //nolint:errcheck
 		proc.Kill()     //nolint:errcheck
 		return fmt.Errorf("plugin %s initialize: %w", name, err)
@@ -380,9 +398,6 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 		reg.mu.Unlock()
 	}
 
-	m.mu.Lock()
-	m.plugins = append(m.plugins, reg)
-	m.mu.Unlock()
 	return nil
 }
 
@@ -400,6 +415,23 @@ func (m *Manager) AllRegisteredKeys() []string {
 		p.mu.RUnlock()
 	}
 	return keys
+}
+
+// AllRegisteredInsertChars returns every char with an OnInsert hook
+// registered across all loaded plugins.
+func (m *Manager) AllRegisteredInsertChars() []string {
+	m.mu.Lock()
+	plugins := m.plugins
+	m.mu.Unlock()
+	var chars []string
+	for _, p := range plugins {
+		p.mu.RLock()
+		for c := range p.insertHooks {
+			chars = append(chars, c)
+		}
+		p.mu.RUnlock()
+	}
+	return chars
 }
 
 // PluginBinding describes one key binding contributed by a plugin.
@@ -815,10 +847,11 @@ func (m *Manager) Shutdown() {
 // HandleKey routes a keypress to the appropriate plugin handler.
 //
 // In "capture" mode the key goes to whichever handler last returned captureKeys>0,
-// regardless of the key name. In all other modes the key is looked up by name in
-// each plugin's registered key bindings.
+// regardless of the key name. In "insert" mode the key (a single typed char) is
+// looked up in each plugin's registered OnInsert hooks. In all other modes the
+// key is looked up by name in each plugin's registered key bindings.
 //
-// Plugin handlers are called with a 30 ms deadline; timeout → handled=false.
+// Plugin handlers are called with a 300 ms deadline; timeout → handled=false.
 func (m *Manager) HandleKey(ctx context.Context, key, mode string, bufID uint32, clientID uint64, curLine, curCol uint32) (
 	handled bool, edits []TextEdit, cursorLine, cursorCol uint32, hasCursor bool, captureKeys uint32, err error,
 ) {
@@ -842,7 +875,13 @@ func (m *Manager) HandleKey(ctx context.Context, key, mode string, bufID uint32,
 
 	for _, p := range plugins {
 		p.mu.RLock()
-		handler, ok := p.keyBindings[key]
+		var handler pluginproto.KeyHandler
+		var ok bool
+		if mode == "insert" {
+			handler, ok = p.insertHooks[key]
+		} else {
+			handler, ok = p.keyBindings[key]
+		}
 		p.mu.RUnlock()
 		if !ok {
 			continue
@@ -906,8 +945,8 @@ func (m *Manager) callHandler(ctx context.Context, handler pluginproto.KeyHandle
 		newText, _ := item.NewText()
 		edits[i] = TextEdit{
 			FromLine: from.Line(), FromCol: from.Col(),
-			ToLine:   to.Line(), ToCol: to.Col(),
-			NewText:  newText,
+			ToLine: to.Line(), ToCol: to.Col(),
+			NewText: newText,
 		}
 	}
 
@@ -1052,8 +1091,8 @@ func (m *Manager) pluginSocketPath(pluginName string) string {
 	h := sha256.Sum256([]byte(m.workDir))
 	// Match the server's directory naming: include UID to isolate per-user.
 	dir := filepath.Join(os.TempDir(), fmt.Sprintf("indigo-%d-%x", os.Getuid(), h[:8]))
-	os.MkdirAll(dir, 0o700)  //nolint:errcheck
-	os.Chmod(dir, 0o700)     //nolint:errcheck
+	os.MkdirAll(dir, 0o700) //nolint:errcheck
+	os.Chmod(dir, 0o700)    //nolint:errcheck
 	return filepath.Join(dir, "plugin-"+pluginName+".sock")
 }
 

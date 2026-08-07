@@ -159,7 +159,9 @@ registered language key (`go`, `sh`, `md`, `json`, etc.).
 ## Search & replace
 
 `/` searches the current buffer (`n`/`N` repeat forward/backward); prefix the query with `\`
-for a Go-regexp search instead of literal smart-case text (e.g. `\d+`).
+for a Go-regexp search instead of literal smart-case text (e.g. `\[0-9]+`). Since the leading
+`\` marks regex mode, patterns needing a literal backslash escape (like `\d` for digits) must
+use the character-class form (`[0-9]`) or write the double backslash (`\\d`) instead.
 
 `:s/pattern/replacement/` substitutes every match in the current buffer and undoes as a
 single step. `pattern` follows the same literal-vs-regex rule as `/` search. A literal `/`

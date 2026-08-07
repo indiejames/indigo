@@ -225,12 +225,15 @@ func TestFindSubstituteMatchesRegexBackreferences(t *testing.T) {
 func TestFindSubstituteMatchesLiteralHasNoBackreferences(t *testing.T) {
 	// $1 has no special meaning outside regex mode — used verbatim.
 	buf := document.New("", "a$1b\n")
-	matches, err := findSubstituteMatches(buf, "a$1b", "literal", nil)
+	matches, err := findSubstituteMatches(buf, "a$1b", "$1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(matches) != 1 || matches[0].replacement != "literal" {
-		t.Fatalf("expected 1 literal match, got %+v", matches)
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(matches))
+	}
+	if matches[0].replacement != "$1" {
+		t.Errorf("replacement = %q, want $1", matches[0].replacement)
 	}
 }
 

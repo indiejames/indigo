@@ -45,6 +45,14 @@ var decorOverlayStyle = lipgloss.NewStyle().
 var (
 	searchMatchStyle   = lipgloss.NewStyle().Background(lipgloss.Color("#444400")).Foreground(lipgloss.Color("#FFFF88"))
 	searchCurrentStyle = lipgloss.NewStyle().Background(lipgloss.Color("#AAAA00")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+
+	// replaceOldStyle/replaceOldCurrentStyle restyle a matched span during a
+	// live search-and-replace preview (/pattern/replacement); replaceNewStyle
+	// is injected immediately after it to show what it would become — a
+	// git-diff-style red/green pair. Nothing here touches the buffer.
+	replaceOldStyle        = lipgloss.NewStyle().Background(lipgloss.Color("#5A1E1E")).Foreground(lipgloss.Color("#FFAAAA"))
+	replaceOldCurrentStyle = lipgloss.NewStyle().Background(lipgloss.Color("#8A2A2A")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+	replaceNewStyle        = lipgloss.NewStyle().Background(lipgloss.Color("#1E5A2A")).Foreground(lipgloss.Color("#AAFFAA"))
 )
 
 // inlayHintStyle renders LSP inlay hints (inferred types, parameter names) —

@@ -76,6 +76,8 @@ func executeEnterCommandMode(m Model) (tea.Model, tea.Cmd) {
 
 func executeEnterSearchMode(m Model) (tea.Model, tea.Cmd) {
 	m.searchQuery = ""
+	m.searchReplace = ""
+	m.searchReplacing = false
 	m.searchMatches = nil
 	m.searchIdx = -1
 	m.searchOrigin = m.cursor

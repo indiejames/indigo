@@ -271,7 +271,7 @@ func TestFindSubstituteMatchesInvalidRegex(t *testing.T) {
 }
 
 func TestMatchIdxAtOrAfter(t *testing.T) {
-	matches := []searchMatch{
+	matches := []substituteMatch{
 		{line: 0, col: 5},
 		{line: 2, col: 0},
 		{line: 4, col: 3},
@@ -293,6 +293,31 @@ func TestMatchIdxAtOrAfter(t *testing.T) {
 func TestMatchIdxAtOrAfterEmpty(t *testing.T) {
 	if i := matchIdxAtOrAfter(nil, 0, 0); i != -1 {
 		t.Errorf("empty: got %d, want -1", i)
+	}
+}
+
+func TestSplitSearchQuery(t *testing.T) {
+	cases := []struct {
+		query       string
+		wantPattern string
+		wantRepl    string
+		wantReplace bool
+	}{
+		{"foo", "foo", "", false},
+		{"", "", "", false},
+		{"foo/bar", "foo", "bar", true},
+		{"foo/", "foo", "", true}, // empty replacement = delete matches
+		{`foo\/bar`, "foo/bar", "", false},
+		{`foo\/bar/baz`, "foo/bar", "baz", true},
+		{`\d+/N`, `\d+`, "N", true},             // regex-trigger backslash untouched
+		{"foo/bar/baz", "foo", "bar/baz", true}, // no third field — rest is replacement
+	}
+	for _, c := range cases {
+		pattern, repl, isReplace := splitSearchQuery(c.query)
+		if pattern != c.wantPattern || repl != c.wantRepl || isReplace != c.wantReplace {
+			t.Errorf("splitSearchQuery(%q) = (%q,%q,%v), want (%q,%q,%v)",
+				c.query, pattern, repl, isReplace, c.wantPattern, c.wantRepl, c.wantReplace)
+		}
 	}
 }
 

@@ -621,8 +621,12 @@ func (m Model) buildInlayHintOverlays(layout []layoutEntry, cw int) [][]lineOver
 	return rows
 }
 
-// buildSearchOverlays builds per-row overlays for all search matches. Overlay
-// column values are chunk-relative. Returns nil when there are no matches.
+// buildSearchOverlays builds per-row overlays for all search matches. During
+// a live search-and-replace preview (m.searchReplacing), each match is
+// restyled red and its computed replacement text is injected right after it
+// in green — a git-diff-style pair that previews the edit without touching
+// the buffer. Overlay column values are chunk-relative. Returns nil when
+// there are no matches.
 func (m Model) buildSearchOverlays(layout []layoutEntry, cw int) [][]lineOverlay {
 	if len(m.searchMatches) == 0 {
 		return nil
@@ -652,8 +656,12 @@ func (m Model) buildSearchOverlays(layout []layoutEntry, cw int) [][]lineOverlay
 		chunkStart := layout[row].chunkStart
 		matchEnd := min(sm.col+sm.length, len(lineRunes))
 		style := searchMatchStyle
+		current := searchCurrentStyle
+		if m.searchReplacing {
+			style, current = replaceOldStyle, replaceOldCurrentStyle
+		}
 		if i == m.searchIdx {
-			style = searchCurrentStyle
+			style = current
 		}
 
 		// For the current match, leave the cursor column uncovered so the cursor
@@ -676,6 +684,7 @@ func (m Model) buildSearchOverlays(layout []layoutEntry, cw int) [][]lineOverlay
 						w:    matchEnd - (m.cursor.Col + 1),
 					})
 				}
+				m.appendReplacePreview(rows, layout, cw, colMap[matchEnd], sm)
 				continue
 			}
 		}
@@ -685,6 +694,7 @@ func (m Model) buildSearchOverlays(layout []layoutEntry, cw int) [][]lineOverlay
 			text: style.Render(string(lineRunes[sm.col:matchEnd])),
 			w:    sm.length,
 		})
+		m.appendReplacePreview(rows, layout, cw, colMap[matchEnd], sm)
 	}
 	for ri, ovls := range rows {
 		for j := 1; j < len(ovls); j++ {
@@ -695,6 +705,32 @@ func (m Model) buildSearchOverlays(layout []layoutEntry, cw int) [][]lineOverlay
 		rows[ri] = ovls
 	}
 	return rows
+}
+
+// appendReplacePreview injects sm's replacement text, styled green, as a
+// zero-width overlay (see lineOverlay.w) right after its matched span, so it
+// renders inline without displacing or overwriting any real character. A
+// no-op outside search-and-replace mode, and for an empty replacement (a
+// deletion has nothing to preview inserting).
+//
+// The injection point gets its own screenRowOf lookup rather than reusing
+// the match's row: a match sitting right at a soft-wrap boundary can have
+// its end land on the next screen row, and reusing the wrong chunkStart
+// would place the green text at a nonsense column.
+func (m Model) appendReplacePreview(rows [][]lineOverlay, layout []layoutEntry, cw, matchEndVisCol int, sm substituteMatch) {
+	if !m.searchReplacing || sm.replacement == "" {
+		return
+	}
+	row := screenRowOf(layout, sm.line, matchEndVisCol, cw)
+	if row < 0 || row >= len(rows) {
+		return
+	}
+	chunkStart := layout[row].chunkStart
+	rows[row] = append(rows[row], lineOverlay{
+		col:  matchEndVisCol - chunkStart,
+		text: replaceNewStyle.Render(sm.replacement),
+		w:    0,
+	})
 }
 
 // buildIndentGuideOverlays returns per-row overlays that draw a dim vertical
@@ -830,6 +866,7 @@ var helpEntries = []helpEntry{
 	{key: ""},
 	{key: "Search"},
 	{key: "/", desc: "Start search"},
+	{key: "/pat/repl", desc: "Live replace preview; Enter applies"},
 	{key: "n", desc: "Next match"},
 	{key: "N", desc: "Previous match"},
 	{key: ""},

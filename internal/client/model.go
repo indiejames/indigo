@@ -486,8 +486,10 @@ type Model struct {
 	diagPopup           bool           // when true, show diagnostic detail popup for cursor line
 	diagPopupSuppressed bool           // Escape pressed; don't re-show until cursor leaves the range
 	prefixSeq           []string       // keys typed so far for a multi-key Normal-mode command
-	searchQuery         string
-	searchMatches       []searchMatch
+	searchQuery         string         // raw text typed after '/' (see splitSearchQuery)
+	searchReplace       string         // parsed replacement text, only meaningful when searchReplacing
+	searchReplacing     bool           // true once an unescaped '/' delimiter has been typed — live search-and-replace preview
+	searchMatches       []substituteMatch
 	searchIdx           int
 	searchOrigin        document.Pos
 	searchErr           string // non-empty when regex fails to compile

@@ -83,11 +83,15 @@ func (m Model) handleSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = ModeNormal
 		m.cursor = m.searchOrigin
 		m.scrollToCursor()
-		m.searchQuery = ""
-		m.searchMatches = nil
-		m.searchIdx = -1
-		m.searchErr = ""
+		m = m.withClearedSearch()
 	case "enter":
+		// A second, unescaped '/' switches search into a live
+		// search-and-replace preview (see splitSearchQuery) — Enter there
+		// commits it. Plain search just confirms the current match position,
+		// same as always.
+		if m.searchReplacing {
+			return m.applySearchReplace()
+		}
 		m.mode = ModeNormal
 		m.searchErr = ""
 		if len(m.searchMatches) > 0 && m.searchIdx >= 0 {
@@ -104,9 +108,7 @@ func (m Model) handleSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = ModeNormal
 			m.cursor = m.searchOrigin
 			m.scrollToCursor()
-			m.searchMatches = nil
-			m.searchIdx = -1
-			m.searchErr = ""
+			m = m.withClearedSearch()
 		}
 	default:
 		if len(msg.Runes) > 0 {
@@ -117,10 +119,27 @@ func (m Model) handleSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateSearch recomputes matches for the current searchQuery and advances the
-// cursor to the first match at or after searchOrigin.
+// updateSearch reparses searchQuery (see splitSearchQuery) and recomputes
+// matches — and, once a search-and-replace delimiter has been typed, each
+// match's replacement text — scoped to the active selection if one exists,
+// or the whole buffer otherwise. Advances the cursor to the first match at
+// or after searchOrigin.
 func (m *Model) updateSearch() {
-	matches, err := findMatches(m.buf, m.searchQuery)
+	pattern, replacement, isReplace := splitSearchQuery(m.searchQuery)
+	m.searchReplace = replacement
+	m.searchReplacing = isReplace
+
+	var bounds *substituteBounds
+	if m.sel != nil {
+		from, to := m.sel.ordered()
+		bounds = &substituteBounds{from: from, to: to}
+	}
+
+	repl := ""
+	if isReplace {
+		repl = replacement
+	}
+	matches, err := findSubstituteMatches(m.buf, pattern, repl, bounds)
 	if err != nil {
 		m.searchErr = err.Error()
 		m.searchMatches = nil
@@ -137,19 +156,57 @@ func (m *Model) updateSearch() {
 	}
 }
 
+// applySearchReplace commits the current search-and-replace preview
+// (Enter while searchReplacing): every previewed match's replacement is
+// applied as a single undo entry, bottom-to-top so an earlier match's
+// coordinates are never shifted by a not-yet-applied later one. The
+// selection that scoped the preview (if any) is cleared afterward, since
+// its endpoints no longer necessarily bound anything meaningful once the
+// text has changed.
+func (m Model) applySearchReplace() (tea.Model, tea.Cmd) {
+	matches := m.searchMatches
+	hadSelection := m.sel != nil
+	m.mode = ModeNormal
+
+	if len(matches) == 0 {
+		m.status = "E: pattern not found"
+		return m.withClearedSearch(), nil
+	}
+	if hadSelection {
+		m.sel = nil
+	}
+
+	ops := make([]document.Op, 0, len(matches)*2)
+	for i := len(matches) - 1; i >= 0; i-- {
+		mt := matches[i]
+		ops = append(ops,
+			document.Op{
+				ClientID: m.rpc.ClientID(),
+				Type:     document.OpDelete,
+				FromLine: mt.line, FromCol: mt.col,
+				ToLine: mt.line, ToCol: mt.col + mt.length,
+			},
+			document.Op{
+				ClientID:   m.rpc.ClientID(),
+				Type:       document.OpInsert,
+				InsertLine: mt.line, InsertCol: mt.col,
+				InsertText: mt.replacement,
+			},
+		)
+	}
+
+	m2, cmd := applyBatch(m, ops)
+	first := matches[0]
+	m2.cursor = document.Pos{Line: first.line, Col: first.col}
+	m2.scrollToCursor()
+	m2.status = fmt.Sprintf("%d substitution(s)", len(matches))
+	return m2.withClearedSearch(), cmd
+}
+
 func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 	cmd := strings.TrimSpace(m.cmdBuf)
 	m.mode = ModeNormal
 	m.cmdBuf = ""
-
-	// :s/pattern/replacement/ — substitute, scoped to the active selection
-	// (if any) or the whole buffer otherwise. Checked before the "s"/"save"
-	// exact-match case below, since "s/..." never equals the bare string "s".
-	if rest, ok := strings.CutPrefix(cmd, "s"); ok {
-		if pattern, replacement, ok := parseSubstitute(rest); ok {
-			return m.doSubstitute(pattern, replacement)
-		}
-	}
 
 	// :grep/:find [pattern] [glob] — workspace search; falls back to current search query.
 	// The optional trailing token is treated as a file glob if it contains *, ?, [ or ends with /.
@@ -164,7 +221,7 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		pattern, glob := parseGrepArgs(strings.TrimSpace(searchRest))
 		if pattern == "" {
 			if m.searchQuery != "" {
-				pattern = m.searchQuery
+				pattern, _, _ = splitSearchQuery(m.searchQuery)
 			} else {
 				// e.g. ":grep *.go" with no prior query — treat glob as literal pattern.
 				pattern, glob = glob, ""
@@ -268,6 +325,8 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 // highlights and disabling n/N navigation until the next search.
 func (m Model) withClearedSearch() Model {
 	m.searchQuery = ""
+	m.searchReplace = ""
+	m.searchReplacing = false
 	m.searchMatches = nil
 	m.searchIdx = -1
 	m.searchErr = ""
@@ -285,104 +344,4 @@ func parseGrepArgs(s string) (pattern, glob string) {
 		}
 	}
 	return s, ""
-}
-
-// parseSubstitute parses the argument to :s/pattern/replacement/ — the text
-// immediately after "s" (no space). Delimiters are '/'; a literal '/' inside
-// pattern or replacement is written as '\/'. ok is false when rest doesn't
-// start with '/', or has fewer than two delimited parts — in particular for
-// every other command starting with "s" (bare "s", "save", "set ft=...").
-func parseSubstitute(rest string) (pattern, replacement string, ok bool) {
-	if len(rest) == 0 || rest[0] != '/' {
-		return "", "", false
-	}
-	parts := splitUnescaped(rest[1:], '/')
-	if len(parts) < 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
-}
-
-// splitUnescaped splits s on sep, treating "\"+sep as a literal, unescaped
-// sep character rather than a delimiter, and "\\" as a literal backslash —
-// so a run of backslashes immediately before sep resolves the same way
-// standard escaping does (an escaped backslash can't also escape the
-// separator behind it). Other backslash sequences (e.g. a regex pattern's
-// \d) are left untouched.
-func splitUnescaped(s string, sep rune) []string {
-	var parts []string
-	var cur strings.Builder
-	runes := []rune(s)
-	for i := 0; i < len(runes); i++ {
-		r := runes[i]
-		if r == '\\' && i+1 < len(runes) && (runes[i+1] == sep || runes[i+1] == '\\') {
-			cur.WriteRune(runes[i+1])
-			i++
-			continue
-		}
-		if r == sep {
-			parts = append(parts, cur.String())
-			cur.Reset()
-			continue
-		}
-		cur.WriteRune(r)
-	}
-	parts = append(parts, cur.String())
-	return parts
-}
-
-// doSubstitute replaces every match of pattern with replacement (regex
-// backreferences already expanded per match — see findSubstituteMatches),
-// scoped to the active selection if one exists, or the whole buffer
-// otherwise. All replacements apply as a single undo entry. The selection
-// (if any) is cleared afterward, since its endpoints no longer necessarily
-// bound anything meaningful once the text has changed.
-func (m Model) doSubstitute(pattern, replacement string) (tea.Model, tea.Cmd) {
-	var bounds *substituteBounds
-	hadSelection := m.sel != nil
-	if m.sel != nil {
-		from, to := m.sel.ordered()
-		bounds = &substituteBounds{from: from, to: to}
-	}
-
-	matches, err := findSubstituteMatches(m.buf, pattern, replacement, bounds)
-	if err != nil {
-		m.status = "E: " + err.Error()
-		return m, nil
-	}
-	if len(matches) == 0 {
-		m.status = "E: pattern not found"
-		return m, nil
-	}
-	if hadSelection {
-		m.sel = nil
-	}
-
-	// Apply bottom-to-top so an earlier-in-buffer match's coordinates are
-	// never shifted by a not-yet-applied later one.
-	ops := make([]document.Op, 0, len(matches)*2)
-	for i := len(matches) - 1; i >= 0; i-- {
-		mt := matches[i]
-		ops = append(ops,
-			document.Op{
-				ClientID: m.rpc.ClientID(),
-				Type:     document.OpDelete,
-				FromLine: mt.line, FromCol: mt.col,
-				ToLine: mt.line, ToCol: mt.col + mt.length,
-			},
-			document.Op{
-				ClientID:   m.rpc.ClientID(),
-				Type:       document.OpInsert,
-				InsertLine: mt.line, InsertCol: mt.col,
-				InsertText: mt.replacement,
-			},
-		)
-	}
-
-	m2, cmd := applyBatch(m, ops)
-	first := matches[0]
-	m2.cursor = document.Pos{Line: first.line, Col: first.col}
-	m2.scrollToCursor()
-	m2.status = fmt.Sprintf("%d substitution(s)", len(matches))
-	return m2, cmd
 }

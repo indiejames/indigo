@@ -14,7 +14,7 @@ func TestBuildSearchOverlaysSkipsStaleMatchPastEndOfLine(t *testing.T) {
 	m := newTestModel("short\n")
 	// Recorded before an edit shrank this line down to "short" (5 runes) —
 	// column 9 no longer exists on the line.
-	m.searchMatches = []searchMatch{{line: 0, col: 9, length: 5}}
+	m.searchMatches = []substituteMatch{{line: 0, col: 9, length: 5}}
 	m.searchIdx = -1
 	cw := 80
 	layout := m.buildScreenLayout(1, cw)
@@ -30,7 +30,7 @@ func TestBuildSearchOverlaysSkipsStaleMatchPastEndOfLine(t *testing.T) {
 // still render normally, so the staleness guard isn't over-broad.
 func TestBuildSearchOverlaysRendersValidMatch(t *testing.T) {
 	m := newTestModel("hello world\n")
-	m.searchMatches = []searchMatch{{line: 0, col: 6, length: 5}} // "world"
+	m.searchMatches = []substituteMatch{{line: 0, col: 6, length: 5}} // "world"
 	m.searchIdx = -1
 	cw := 80
 	layout := m.buildScreenLayout(1, cw)
@@ -48,7 +48,7 @@ func TestBuildSearchOverlaysRendersValidMatch(t *testing.T) {
 // in *line count* (not just line length) out from under a stale match.
 func TestBuildSearchOverlaysSkipsMatchOnDeletedLine(t *testing.T) {
 	m := newTestModel("only line\n")
-	m.searchMatches = []searchMatch{{line: 5, col: 2, length: 3}} // line 5 no longer exists
+	m.searchMatches = []substituteMatch{{line: 5, col: 2, length: 3}} // line 5 no longer exists
 	m.searchIdx = -1
 	cw := 80
 	layout := m.buildScreenLayout(1, cw)

@@ -2,15 +2,12 @@ package client
 
 import (
 	"regexp"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/indiejames/indigo/internal/document"
 )
-
-type searchMatch struct {
-	line, col, length int
-}
 
 // regexExpr tests whether pattern is a regex search (starts with \) and
 // extracts the expression to compile. The trailing \ is optional — useful
@@ -31,82 +28,16 @@ func regexExpr(pattern string) (expr string, ok bool) {
 }
 
 // findMatches returns all non-overlapping matches of pattern in buf, in
-// document order. Returns an error only for an invalid regex pattern.
+// document order, with no replacement text and no scope restriction — a
+// convenience wrapper over findSubstituteMatches for plain search. Returns
+// an error only for an invalid regex pattern.
 //
 // Pattern syntax:
 //   - Plain text → smart-case literal search (case-insensitive unless
 //     pattern contains an uppercase letter).
 //   - \expr or \expr\ → Go regexp, always case-sensitive (use (?i) if needed).
-func findMatches(buf *document.Buffer, pattern string) ([]searchMatch, error) {
-	if pattern == "" {
-		return nil, nil
-	}
-	if expr, ok := regexExpr(pattern); ok {
-		return findRegexMatches(buf, expr)
-	}
-	return findLiteralMatches(buf, pattern), nil
-}
-
-// findLiteralMatches performs smart-case literal search.
-func findLiteralMatches(buf *document.Buffer, pattern string) []searchMatch {
-	sensitive := isSmartCaseSensitive(pattern)
-	patRunes := []rune(pattern)
-	if !sensitive {
-		for i, r := range patRunes {
-			patRunes[i] = unicode.ToLower(r)
-		}
-	}
-	patLen := len(patRunes)
-
-	var matches []searchMatch
-	lineCount := buf.LineCount()
-	for l := 0; l < lineCount; l++ {
-		lineRunes := []rune(buf.Line(l))
-		searchRunes := lineRunes
-		if !sensitive {
-			searchRunes = make([]rune, len(lineRunes))
-			for i, r := range lineRunes {
-				searchRunes[i] = unicode.ToLower(r)
-			}
-		}
-		n := len(searchRunes)
-		for offset := 0; offset <= n-patLen; {
-			if runesMatch(searchRunes[offset:], patRunes) {
-				matches = append(matches, searchMatch{line: l, col: offset, length: patLen})
-				offset += patLen
-			} else {
-				offset++
-			}
-		}
-	}
-	return matches
-}
-
-// findRegexMatches compiles expr as a Go regexp and searches every line.
-// Returns an error if expr is invalid.
-func findRegexMatches(buf *document.Buffer, expr string) ([]searchMatch, error) {
-	if expr == "" {
-		return nil, nil
-	}
-	re, err := regexp.Compile(expr)
-	if err != nil {
-		return nil, err
-	}
-	var matches []searchMatch
-	lineCount := buf.LineCount()
-	for l := 0; l < lineCount; l++ {
-		lineStr := buf.Line(l)
-		for _, loc := range re.FindAllStringIndex(lineStr, -1) {
-			startCol := utf8.RuneCountInString(lineStr[:loc[0]])
-			endCol := utf8.RuneCountInString(lineStr[:loc[1]])
-			matches = append(matches, searchMatch{
-				line:   l,
-				col:    startCol,
-				length: endCol - startCol,
-			})
-		}
-	}
-	return matches, nil
+func findMatches(buf *document.Buffer, pattern string) ([]substituteMatch, error) {
+	return findSubstituteMatches(buf, pattern, "", nil)
 }
 
 // isSmartCaseSensitive returns true if pattern contains any uppercase letter.
@@ -128,20 +59,23 @@ func runesMatch(line, pat []rune) bool {
 	return true
 }
 
-// substituteMatch is one match found for :s, paired with its replacement
-// text. For regex patterns the replacement has already been expanded
-// against this match's captured groups (Go's $1/$2/${name} syntax); for
-// literal patterns there are no groups, so replacement is used as-is.
+// substituteMatch is one match found by / search (searchReplacing or not),
+// paired with its replacement text. For regex patterns the replacement has
+// already been expanded against this match's captured groups (Go's
+// $1/$2/${name} syntax); for literal patterns there are no groups, so
+// replacement is used as-is. replacement is unused (left "") for a plain
+// search with no replace delimiter.
 type substituteMatch struct {
 	line, col, length int
 	replacement       string
 }
 
 // substituteBounds restricts findSubstituteMatches to an inclusive document
-// range — used to scope :s to the active selection (charwise or linewise;
-// both store Anchor/Head such that end.Col+1 is the right exclusive bound,
-// so no separate IsLine handling is needed here). A nil *substituteBounds
-// passed to findSubstituteMatches means the whole buffer.
+// range — used to scope / search (and search-and-replace) to the active
+// selection instead of the whole buffer. Both charwise and linewise
+// selections store Anchor/Head such that end.Col+1 is the right exclusive
+// bound, so no separate IsLine handling is needed here. A nil
+// *substituteBounds passed to findSubstituteMatches means the whole buffer.
 type substituteBounds struct {
 	from, to document.Pos
 }
@@ -239,7 +173,7 @@ func findSubstituteMatches(buf *document.Buffer, pattern, replacement string, bo
 
 // matchIdxAtOrAfter returns the index of the first match at or after (line, col),
 // wrapping to 0 if none exist at or after that position. Returns -1 if empty.
-func matchIdxAtOrAfter(matches []searchMatch, line, col int) int {
+func matchIdxAtOrAfter(matches []substituteMatch, line, col int) int {
 	if len(matches) == 0 {
 		return -1
 	}
@@ -249,4 +183,47 @@ func matchIdxAtOrAfter(matches []searchMatch, line, col int) int {
 		}
 	}
 	return 0 // wrap around
+}
+
+// splitSearchQuery parses the raw text typed after '/' into a search
+// pattern and, when an unescaped '/' delimiter is present, a replacement —
+// switching search into live search-and-replace preview. A literal '/'
+// inside the pattern is written '\/'; once past the delimiter, everything
+// else typed is the replacement verbatim (there's no third field, unlike
+// vim's :s flags — a second or later unescaped '/' is just replacement
+// text).
+func splitSearchQuery(query string) (pattern, replacement string, isReplace bool) {
+	parts := splitUnescaped(query, '/')
+	if len(parts) < 2 {
+		return parts[0], "", false
+	}
+	return parts[0], strings.Join(parts[1:], "/"), true
+}
+
+// splitUnescaped splits s on sep, treating "\"+sep as a literal, unescaped
+// sep character rather than a delimiter, and "\\" as a literal backslash —
+// so a run of backslashes immediately before sep resolves the same way
+// standard escaping does (an escaped backslash can't also escape the
+// separator behind it). Other backslash sequences (e.g. a regex pattern's
+// \d) are left untouched.
+func splitUnescaped(s string, sep rune) []string {
+	var parts []string
+	var cur strings.Builder
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if r == '\\' && i+1 < len(runes) && (runes[i+1] == sep || runes[i+1] == '\\') {
+			cur.WriteRune(runes[i+1])
+			i++
+			continue
+		}
+		if r == sep {
+			parts = append(parts, cur.String())
+			cur.Reset()
+			continue
+		}
+		cur.WriteRune(r)
+	}
+	parts = append(parts, cur.String())
+	return parts
 }

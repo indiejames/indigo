@@ -156,6 +156,29 @@ files that don't use their language's usual extension. Built in: `.env`→sh, `.
 Keys are matched as either a leading-dot extension or a bare filename; values are a
 registered language key (`go`, `sh`, `md`, `json`, etc.).
 
+## Search & replace
+
+`/` searches the current buffer (`n`/`N` repeat forward/backward); prefix the query with `\`
+for a Go-regexp search instead of literal smart-case text (e.g. `\[0-9]+`). Since the leading
+`\` marks regex mode, patterns needing a literal backslash escape (like `\d` for digits) must
+use the character-class form (`[0-9]`) or write the double backslash (`\\d`) instead.
+
+`:s/pattern/replacement/` substitutes every match in the current buffer and undoes as a
+single step. `pattern` follows the same literal-vs-regex rule as `/` search. A literal `/`
+inside `pattern` or `replacement` is written `\/`. With a regex pattern, `replacement` can
+reference captured groups Go-style — `$1`, `$2`, `${name}`:
+
+```
+:s/\(\w+)-(\w+)/$2-$1/      " swap-hyphenated → hyphenated-swap
+```
+
+If a selection is active when `:s` runs, the substitution is scoped to it instead of the
+whole buffer — select a line with `x` (or extend across several) to replace only within it,
+or make any selection first. The selection is cleared afterward.
+
+For search/replace across the whole workspace instead of one buffer, see `:grep`/`:find` and
+the search & replace dialog (Command menu: `Space`, then `s`).
+
 ## Key bindings
 
 Rebind an existing Normal- or Insert-mode action to a different key, or bind an additional

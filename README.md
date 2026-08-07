@@ -270,9 +270,15 @@ Type `:` in normal mode, then one of:
 
 ## Features
 
-**Search** — Press `/` to search within the current buffer. Supports incremental literal search with smart-case and regex search (prefix with `\`). Match count displayed in the status bar; `n` / `N` navigates between matches. Use `:grep [pattern]` for workspace-wide search across all files.
+**Local search** — Press `/` to search within the current buffer. Supports incremental literal search with smart-case and regex search (prefix with `\`). Match count displayed in the status bar; `n` / `N` navigates between matches. 
 
-**Search & replace** — Press `s` for a floating dialog that searches and replaces across the whole workspace, with independent case/regex checkboxes, a live per-match diff preview, and either one-at-a-time or all-at-once apply.
+**Local replace** - Use `:s/<search term>/<replace value>` to search and replace in the current buffer. Replaces across the entire buffer or the selected area. Supports regulare expressions with capture groups using `:s/\<regex>/<replace value>`
+Example: `:s/\foo\((.*?)\)/goo$1()` would replace `foo(4)` with `goo4()`.
+
+**Global search**
+Use `:grep [pattern]` for workspace-wide search across all files.
+
+**Global search & replace** — Press `space + s` for a floating dialog that searches and replaces across the whole workspace, with independent case/regex checkboxes, a live per-match diff preview, and either one-at-a-time or all-at-once apply.
 
 **Syntax highlighting** — 40+ languages via Tree-sitter grammars. See [Language Support](docs/language-support.md).
 

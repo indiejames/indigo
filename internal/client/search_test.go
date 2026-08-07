@@ -7,7 +7,10 @@ import (
 )
 
 func TestIsSmartCaseSensitive(t *testing.T) {
-	cases := []struct{ pat string; want bool }{
+	cases := []struct {
+		pat  string
+		want bool
+	}{
 		{"hello", false},
 		{"Hello", true},
 		{"WORLD", true},
@@ -181,6 +184,89 @@ func TestFindMatchesRegexMultipleLines(t *testing.T) {
 	}
 	if matches[0].line != 0 || matches[1].line != 2 {
 		t.Errorf("regex multi-line: lines %d,%d, want 0,2", matches[0].line, matches[1].line)
+	}
+}
+
+// --- substitute matching ---
+
+func TestFindSubstituteMatchesLiteral(t *testing.T) {
+	buf := document.New("", "foo bar foo\n")
+	matches, err := findSubstituteMatches(buf, "foo", "baz", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 matches, got %d", len(matches))
+	}
+	for _, m := range matches {
+		if m.replacement != "baz" {
+			t.Errorf("replacement = %q, want baz", m.replacement)
+		}
+	}
+}
+
+func TestFindSubstituteMatchesRegexBackreferences(t *testing.T) {
+	buf := document.New("", "alice-bob carol-dave\n")
+	matches, err := findSubstituteMatches(buf, `\(\w+)-(\w+)`, "$2-$1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 matches, got %d", len(matches))
+	}
+	if matches[0].replacement != "bob-alice" {
+		t.Errorf("match[0].replacement = %q, want bob-alice", matches[0].replacement)
+	}
+	if matches[1].replacement != "dave-carol" {
+		t.Errorf("match[1].replacement = %q, want dave-carol", matches[1].replacement)
+	}
+}
+
+func TestFindSubstituteMatchesLiteralHasNoBackreferences(t *testing.T) {
+	// $1 has no special meaning outside regex mode — used verbatim.
+	buf := document.New("", "a$1b\n")
+	matches, err := findSubstituteMatches(buf, "a$1b", "$1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(matches))
+	}
+	if matches[0].replacement != "$1" {
+		t.Errorf("replacement = %q, want $1", matches[0].replacement)
+	}
+}
+
+func TestFindSubstituteMatchesBoundedToOneLine(t *testing.T) {
+	buf := document.New("", "foo\nfoo\nfoo\n")
+	bounds := &substituteBounds{from: document.Pos{Line: 1, Col: 0}, to: document.Pos{Line: 1, Col: 2}}
+	matches, err := findSubstituteMatches(buf, "foo", "bar", bounds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].line != 1 {
+		t.Fatalf("expected 1 match on line 1, got %+v", matches)
+	}
+}
+
+func TestFindSubstituteMatchesBoundedPartialLine(t *testing.T) {
+	// Bounds cover only "foo foo" — up to but not including the third foo.
+	buf := document.New("", "foo foo foo\n")
+	bounds := &substituteBounds{from: document.Pos{Line: 0, Col: 0}, to: document.Pos{Line: 0, Col: 6}}
+	matches, err := findSubstituteMatches(buf, "foo", "x", bounds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 matches within bounds, got %d", len(matches))
+	}
+}
+
+func TestFindSubstituteMatchesInvalidRegex(t *testing.T) {
+	buf := document.New("", "hello\n")
+	_, err := findSubstituteMatches(buf, `\[unclosed`, "x", nil)
+	if err == nil {
+		t.Error("invalid regex: expected error, got nil")
 	}
 }
 

@@ -72,6 +72,37 @@ func executeSelectInsideWord(m Model) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// executeSelectInsideWhitespace selects the contiguous run of horizontal
+// whitespace (spaces/tabs) touching the cursor, on the current line only.
+// Distinct from mis "iw"/"aw" so a run of indentation or inter-word gaps
+// can be selected (and e.g. deleted) without conflating it with word motions.
+func executeSelectInsideWhitespace(m Model) (tea.Model, tea.Cmd) {
+	m.applyToAllCursors(func(m *Model) {
+		runes := []rune(m.buf.Line(m.cursor.Line))
+		if len(runes) == 0 {
+			return
+		}
+		col := min(m.cursor.Col, len(runes)-1)
+		if !isSpaceChar(runes[col]) {
+			return
+		}
+		start := col
+		for start > 0 && isSpaceChar(runes[start-1]) {
+			start--
+		}
+		end := col
+		for end < len(runes)-1 && isSpaceChar(runes[end+1]) {
+			end++
+		}
+		m.sel = &Selection{
+			Anchor: document.Pos{Line: m.cursor.Line, Col: start},
+			Head:   document.Pos{Line: m.cursor.Line, Col: end},
+		}
+		m.cursor = document.Pos{Line: m.cursor.Line, Col: end}
+	})
+	return m, nil
+}
+
 var openBrackets = map[rune]rune{'(': ')', '[': ']', '{': '}'}
 var closeBrackets = map[rune]rune{')': '(', ']': '[', '}': '{'}
 

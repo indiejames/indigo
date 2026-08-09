@@ -245,6 +245,10 @@ func isWordChar(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
 }
 
+func isSpaceChar(r rune) bool {
+	return r == ' ' || r == '\t'
+}
+
 // findWholeWordAt returns the inclusive [start, end] of the word that contains col,
 // scanning backward to the word start and forward to the word end.
 // Unlike findWordAt (which only scans forward), this is used for double-click selection.

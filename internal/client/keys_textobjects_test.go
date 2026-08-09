@@ -100,6 +100,37 @@ func TestExecuteSelectInsideCharEmptyQuotes(t *testing.T) {
 	}
 }
 
+// TestExecuteSelectInsideWhitespaceSelectsRun verifies mis selects a
+// contiguous run of leading indentation, not just a single space.
+func TestExecuteSelectInsideWhitespaceSelectsRun(t *testing.T) {
+	m := newTestModel("  foo\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+
+	got, _ := executeSelectInsideWhitespace(m)
+	m2 := got.(Model)
+
+	if m2.sel == nil {
+		t.Fatal("executeSelectInsideWhitespace: sel is nil")
+	}
+	if text := m2.selectedText(); text != "  " {
+		t.Errorf("selectedText() = %q, want %q", text, "  ")
+	}
+}
+
+// TestExecuteSelectInsideWhitespaceNoopOnNonSpace verifies mis leaves the
+// selection untouched when the cursor isn't on whitespace.
+func TestExecuteSelectInsideWhitespaceNoopOnNonSpace(t *testing.T) {
+	m := newTestModel("foo\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+
+	got, _ := executeSelectInsideWhitespace(m)
+	m2 := got.(Model)
+
+	if m2.sel != nil {
+		t.Errorf("executeSelectInsideWhitespace: sel = %v, want nil", m2.sel)
+	}
+}
+
 // TestExecuteSelectInsideBracketsExcludesTrailingBracket is a regression
 // test: mim must select only the bracketed content, not the closing bracket.
 func TestExecuteSelectInsideBracketsExcludesTrailingBracket(t *testing.T) {

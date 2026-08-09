@@ -110,15 +110,15 @@ func FromHelix(data []byte) (*Theme, error) {
 	t.UI = def.UI
 
 	helixUIMap := map[string]*string{
-		"ui.statusline":          &t.UI.BarBg,
-		"ui.linenr":              &t.UI.GutterFg,
-		"ui.linenr.selected":     &t.UI.GutterCurFg,
-		"ui.selection":           &t.UI.SelectionBg,
-		"ui.popup":               &t.UI.PopupBg,
-		"diagnostic.error":       &t.UI.DiagErrorFg,
-		"warning":                &t.UI.DiagWarnFg,
-		"hint":                   &t.UI.DiagInfoFg,
-		"ui.menu":                &t.UI.PopupBg,
+		"ui.statusline":      &t.UI.BarBg,
+		"ui.linenr":          &t.UI.GutterFg,
+		"ui.linenr.selected": &t.UI.GutterCurFg,
+		"ui.selection":       &t.UI.SelectionBg,
+		"ui.popup":           &t.UI.PopupBg,
+		"diagnostic.error":   &t.UI.DiagErrorFg,
+		"warning":            &t.UI.DiagWarnFg,
+		"hint":               &t.UI.DiagInfoFg,
+		"ui.menu":            &t.UI.PopupBg,
 	}
 
 	for key, raw := range raw {
@@ -163,9 +163,9 @@ func FromHelix(data []byte) (*Theme, error) {
 // the `semanticTokenColors` extension.
 func FromVSCode(data []byte) (*Theme, error) {
 	var raw struct {
-		Name        string                   `json:"name"`
-		Colors      map[string]string        `json:"colors"`
-		TokenColors []vsCodeTokenColor       `json:"tokenColors"`
+		Name        string             `json:"name"`
+		Colors      map[string]string  `json:"colors"`
+		TokenColors []vsCodeTokenColor `json:"tokenColors"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, err
@@ -186,21 +186,21 @@ func FromVSCode(data []byte) (*Theme, error) {
 
 	// Map VS Code UI color keys → our UI fields.
 	uiColors := map[string]*string{
-		"statusBar.background":              &t.UI.BarBg,
-		"statusBar.foreground":              &t.UI.BarFg,
-		"statusBarItem.remoteBackground":    &t.UI.BarDarkBg,
-		"editor.selectionBackground":        &t.UI.SelectionBg,
-		"editor.selectionForeground":        &t.UI.SelectionFg,
-		"editorLineNumber.foreground":       &t.UI.GutterFg,
-		"editorLineNumber.activeForeground": &t.UI.GutterCurFg,
-		"editorHoverWidget.background":      &t.UI.PopupBg,
-		"editorHoverWidget.border":          &t.UI.PopupBorderFg,
-		"editorWidget.background":           &t.UI.PopupBg,
-		"editor.findMatchBackground":        &t.UI.SearchMatchBg,
+		"statusBar.background":                &t.UI.BarBg,
+		"statusBar.foreground":                &t.UI.BarFg,
+		"statusBarItem.remoteBackground":      &t.UI.BarDarkBg,
+		"editor.selectionBackground":          &t.UI.SelectionBg,
+		"editor.selectionForeground":          &t.UI.SelectionFg,
+		"editorLineNumber.foreground":         &t.UI.GutterFg,
+		"editorLineNumber.activeForeground":   &t.UI.GutterCurFg,
+		"editorHoverWidget.background":        &t.UI.PopupBg,
+		"editorHoverWidget.border":            &t.UI.PopupBorderFg,
+		"editorWidget.background":             &t.UI.PopupBg,
+		"editor.findMatchBackground":          &t.UI.SearchMatchBg,
 		"editor.findMatchHighlightBackground": &t.UI.SearchMatchBg,
-		"editorError.foreground":            &t.UI.DiagErrorFg,
-		"editorWarning.foreground":          &t.UI.DiagWarnFg,
-		"editorInfo.foreground":             &t.UI.DiagInfoFg,
+		"editorError.foreground":              &t.UI.DiagErrorFg,
+		"editorWarning.foreground":            &t.UI.DiagWarnFg,
+		"editorInfo.foreground":               &t.UI.DiagInfoFg,
 	}
 	for k, ptr := range uiColors {
 		if v, ok := raw.Colors[k]; ok && v != "" {
@@ -359,6 +359,13 @@ func writeThemeTOML(w io.Writer, t *Theme) {
 	tw.pf("bar_dark_bg     = %q\n", t.UI.BarDarkBg)
 	tw.pf("normal_mode_fg  = %q\n", t.UI.NormalModeFg)
 	tw.pf("insert_mode_fg  = %q\n", t.UI.InsertModeFg)
+	insertCursorBg := t.UI.InsertCursorBg
+	if insertCursorBg == "" {
+		// Helix/VS Code have no equivalent concept to convert from; fall
+		// back to the label color rather than writing an empty value.
+		insertCursorBg = t.UI.InsertModeFg
+	}
+	tw.pf("insert_cursor_bg = %q\n", insertCursorBg)
 	tw.pf("selection_bg    = %q\n", t.UI.SelectionBg)
 	tw.pf("selection_fg    = %q\n", t.UI.SelectionFg)
 	tw.pf("gutter_fg       = %q\n", t.UI.GutterFg)

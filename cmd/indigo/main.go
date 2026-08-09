@@ -81,6 +81,7 @@ func main() {
 			fatalf("stat %s: %v", absTarget, err)
 		}
 	}
+	absTarget = resolvePath(absTarget)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -164,6 +165,21 @@ func waitForServer(sockPath string, timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for %s", sockPath)
 }
 
+// resolvePath returns path with any symlinks resolved, falling back to path
+// unchanged if it can't be resolved (e.g. the path doesn't exist yet, or a
+// permission error). The OS resolves symlinks in a child process's cwd even
+// when Go's own path handling does not, so without this, a workspace opened
+// through a symlinked directory (e.g. macOS's /tmp -> /private/tmp)
+// disagrees with what a linter/formatter spawned in that directory reports
+// as its own cwd — ESLint in particular rejects the file as outside its
+// "base path" when that happens.
+func resolvePath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
+}
+
 func gitRoot(path string) string {
 	dir := path
 	if info, err := os.Stat(dir); err == nil && !info.IsDir() {
@@ -187,6 +203,7 @@ func openUntitled(startLine int) {
 	if err != nil {
 		fatalf("getwd: %v", err)
 	}
+	workDir = resolvePath(workDir)
 	// Walk up from cwd to find a git root so the server covers the workspace.
 	if root := gitRoot(workDir); root != "" {
 		workDir = root

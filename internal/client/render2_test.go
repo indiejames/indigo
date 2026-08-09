@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/theme"
 )
 
 // --- renderLineRunes ---
@@ -40,6 +42,83 @@ func TestRenderLineRunesEmpty(t *testing.T) {
 	}
 }
 
+// TestRenderLineRunesTrailingOverlaysAreSpacedByColumn covers a blank line
+// (no real characters) carrying two overlays past end-of-content — the case
+// for two indent guides on a blank line inside a nested block. The trailing
+// overlay-drain loop used to concatenate overlay text with no regard for
+// .col, collapsing the gap between them to zero instead of padding with
+// spaces up to each overlay's column.
+func TestRenderLineRunesTrailingOverlaysAreSpacedByColumn(t *testing.T) {
+	var sb strings.Builder
+	renderLineRunes(&sb, []rune{}, -1, -1, -1, nil, []lineOverlay{
+		{col: 0, text: "|", w: 1},
+		{col: 2, text: "|", w: 1},
+	}, nil)
+	if got, want := sb.String(), "| |"; got != want {
+		t.Errorf("trailing overlays = %q, want %q", got, want)
+	}
+}
+
+// TestRenderLineRunesOverlayInSelectionUsesSelectionStyle verifies an overlay
+// with a plain glyph set (e.g. an indent guide) renders with selectionStyle,
+// not its own fixed style, when its column falls inside the active
+// selection — otherwise it visually stands out as unselected against the
+// highlighted text around it.
+func TestRenderLineRunesOverlayInSelectionUsesSelectionStyle(t *testing.T) {
+	guideOverlay := lineOverlay{col: 0, text: indentGuideStyle.Render("▏"), w: 1, plain: "▏"}
+
+	var selected strings.Builder
+	renderLineRunes(&selected, []rune("  x"), 0, 2, -1, nil, []lineOverlay{guideOverlay}, nil)
+	want := selectionStyle.Render("▏") + selectionStyle.Render(" ") + selectionStyle.Render("x")
+	if got := selected.String(); got != want {
+		t.Errorf("overlay inside selection = %q, want %q", got, want)
+	}
+
+	var unselected strings.Builder
+	renderLineRunes(&unselected, []rune("  x"), -1, -1, -1, nil, []lineOverlay{guideOverlay}, nil)
+	if got := unselected.String(); !strings.Contains(got, guideOverlay.text) {
+		t.Errorf("overlay outside selection = %q, want it to keep its own style %q", got, guideOverlay.text)
+	}
+}
+
+// TestRenderLineRunesTrailingOverlayInSelectionUsesSelectionStyle covers the
+// same rule for the past-end-of-content path (a blank, selected line): the
+// overlay at column 0 and the padding before a later overlay must also pick
+// up selectionStyle when inside [selA, selB].
+func TestRenderLineRunesTrailingOverlayInSelectionUsesSelectionStyle(t *testing.T) {
+	guide := lineOverlay{col: 0, text: indentGuideStyle.Render("▏"), w: 1, plain: "▏"}
+
+	var sb strings.Builder
+	renderLineRunes(&sb, []rune{}, 0, 0, -1, nil, []lineOverlay{guide}, nil)
+	if got, want := sb.String(), selectionStyle.Render("▏"); got != want {
+		t.Errorf("blank selected line overlay = %q, want %q", got, want)
+	}
+}
+
+// TestRenderLineRunesTrailingOverlayPaddingSplitsAtSelectionBoundary covers a
+// blank line where the selection ends partway through the gap before a later
+// overlay: only the padding cells inside [selA, selB] should pick up
+// selectionStyle, the rest of the gap must stay unselected instead of the
+// whole span (keyed off just the gap's start column) rendering as selected.
+func TestRenderLineRunesTrailingOverlayPaddingSplitsAtSelectionBoundary(t *testing.T) {
+	// Render() is a no-op without a color profile (as in a normal `go test`
+	// run with no tty), which would make the old all-or-nothing styling and
+	// the fixed split-at-boundary styling produce identical plain-text
+	// output. Force real ANSI output so the two are actually distinguishable.
+	orig := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(orig)
+
+	guide := lineOverlay{col: 4, text: indentGuideStyle.Render("▏"), w: 1, plain: "▏"}
+
+	var sb strings.Builder
+	renderLineRunes(&sb, []rune{}, 0, 1, -1, nil, []lineOverlay{guide}, nil)
+	want := selectionStyle.Render("  ") + "  " + guide.text
+	if got := sb.String(); got != want {
+		t.Errorf("blank selected line padding before overlay = %q, want %q", got, want)
+	}
+}
+
 func TestRenderLineChunkTrailingEmptyLineReverseSelection(t *testing.T) {
 	// "a\nb\n" has a trailing phantom empty line (index 2) that isn't part
 	// of displayLineCount. Select from line 0 through that phantom line,
@@ -51,7 +130,7 @@ func TestRenderLineChunkTrailingEmptyLineReverseSelection(t *testing.T) {
 	m.sel = &Selection{
 		Anchor: document.Pos{Line: 2, Col: 0},
 		Head:   document.Pos{Line: 0, Col: 0},
- 	}
+	}
 	m.cursor = document.Pos{Line: 0, Col: 0}
 
 	cw := 80
@@ -167,6 +246,50 @@ func TestRenderLineNormal(t *testing.T) {
 	}
 	if !strings.Contains(line, "hello") {
 		t.Errorf("renderLine should contain 'hello', got: %q", line)
+	}
+}
+
+// TestViewSelectsCursorStyleByMode verifies View() picks insertCursorStyle
+// while in insert mode and normalCursorStyle otherwise, so the buffer cursor
+// visibly changes color as a mode indicator distinct from the status bar.
+func TestViewSelectsCursorStyleByMode(t *testing.T) {
+	m := newTestModel("hello\n")
+
+	m.mode = ModeInsert
+	m.View()
+	if cursorStyle.GetBackground() != insertCursorStyle.GetBackground() {
+		t.Errorf("insert mode: cursorStyle background = %v, want insertCursorStyle's %v",
+			cursorStyle.GetBackground(), insertCursorStyle.GetBackground())
+	}
+
+	m.mode = ModeNormal
+	m.View()
+	if cursorStyle.GetBackground() != normalCursorStyle.GetBackground() {
+		t.Errorf("normal mode: cursorStyle background = %v, want normalCursorStyle's %v",
+			cursorStyle.GetBackground(), normalCursorStyle.GetBackground())
+	}
+}
+
+// TestApplyThemeUsesInsertCursorBgFromTheme verifies ApplyTheme drives both
+// the insert-mode cursor and its status bar label from theme.UI.InsertCursorBg,
+// so a custom theme's color choice actually takes effect instead of the
+// pre-theme-load fallback constant winning.
+func TestApplyThemeUsesInsertCursorBgFromTheme(t *testing.T) {
+	defer applyDefaultDark() // restore package-level style vars for later tests
+
+	th := &theme.Theme{
+		UI: theme.UI{
+			BarBg:          "#000000",
+			InsertCursorBg: "#FF00FF",
+		},
+	}
+	ApplyTheme(th)
+
+	if got := insertCursorStyle.GetBackground(); got != lipgloss.Color("#FF00FF") {
+		t.Errorf("insertCursorStyle background = %v, want theme's InsertCursorBg #FF00FF", got)
+	}
+	if got := insertModeStyle.GetForeground(); got != lipgloss.Color("#FF00FF") {
+		t.Errorf("insertModeStyle foreground = %v, want theme's InsertCursorBg #FF00FF", got)
 	}
 }
 

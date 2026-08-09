@@ -6,6 +6,7 @@ bar_fg          = "#EBDBB2"
 bar_dark_bg     = "#3C3836"
 normal_mode_fg  = "#B8BB26"
 insert_mode_fg  = "#83A598"
+insert_cursor_bg = "#B8BB26" # matches this theme's normal_mode_fg
 selection_bg    = "#665C54"
 selection_fg    = "#EBDBB2"
 gutter_fg       = "#928374"

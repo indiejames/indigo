@@ -202,6 +202,7 @@ var prefixCmds = []command{
 				menuTitle: "Match Inside",
 				children: []command{
 					{key: "w", label: "Word", execute: executeSelectInsideWord},
+					{key: "s", label: "Whitespace", execute: executeSelectInsideWhitespace},
 					{key: "m", label: "Closest surrounding pair", execute: executeSelectInsideBrackets},
 					{key: ".", label: "Quote/delimiter pair", execute: executeSelectInsideChar},
 					{key: "f", label: "Function", execute: executeSelectInsideFunction},
@@ -216,6 +217,7 @@ var prefixCmds = []command{
 				menuTitle: "Match Around",
 				children: []command{
 					{key: "w", label: "Word", execute: executeSelectInsideWord},
+					{key: "s", label: "Whitespace", execute: executeSelectInsideWhitespace},
 					{key: "m", label: "Closest surrounding pair", execute: executeSelectAroundBrackets},
 					{key: ".", label: "Quote/delimiter pair", execute: executeSelectAroundChar},
 					{key: "f", label: "Function", execute: executeSelectAroundFunction},

@@ -67,6 +67,12 @@ type lineOverlay struct {
 	col  int
 	text string
 	w    int
+	// plain is the unstyled glyph to draw instead of text when col falls
+	// inside the active selection, so the overlay merges into the selection
+	// highlight instead of keeping its own fixed style on top of it. Empty
+	// for overlay kinds (search matches, inlay hints, decorations) whose
+	// style is meant to stay put regardless of selection.
+	plain string
 }
 
 // metricsInnerW is the fixed visible width between the box borders.
@@ -454,6 +460,17 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 		return math.MaxInt
 	}
 
+	// overlayText picks ovl's rendering: its own fixed style normally, or its
+	// plain glyph re-rendered with selectionStyle when ovl's column falls
+	// inside the active selection, so it merges into the highlight instead of
+	// keeping its own style on top of it (see lineOverlay.plain).
+	overlayText := func(ovl lineOverlay) string {
+		if ovl.plain != "" && hasSel && ovl.col >= selA && ovl.col <= selB {
+			return selectionStyle.Render(ovl.plain)
+		}
+		return ovl.text
+	}
+
 	i := 0
 	for i < n {
 		// Drain and inject overlays whose column ≤ i (handles skipped positions too).
@@ -465,7 +482,7 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 					oi++
 					continue
 				}
-				sb.WriteString(overlays[oi].text)
+				sb.WriteString(overlayText(overlays[oi]))
 				i += overlays[oi].w
 				if i > n {
 					i = n
@@ -532,12 +549,40 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 
 	if hasCursor && curCol >= n {
 		sb.WriteString(cursorStyle.Render(" "))
-	} else if n == 0 && hasSel && selA <= selB {
+	} else if n == 0 && hasSel && selA <= selB && oi >= len(overlays) {
+		// A blank selected line with no overlays left to draw still needs
+		// one highlighted cell so the selection is visible on this row; when
+		// overlays remain, the loop below draws the row (and its padding)
+		// instead so this placeholder doesn't add a spurious extra column.
 		sb.WriteString(selectionStyle.Render(" "))
 	}
-	// Write overlays that fall at or past end of content.
+	// Write overlays that fall at or past end of content, padding with spaces
+	// to reach each one's column. Past the end of real content there are no
+	// characters to anchor against, so without this the gap between two such
+	// overlays (e.g. two indent guides on a blank line) collapses to zero
+	// instead of the columns apart they're meant to be.
 	for ; oi < len(overlays); oi++ {
-		sb.WriteString(overlays[oi].text)
+		if overlays[oi].col > i {
+			end := overlays[oi].col
+			for pos := i; pos < end; {
+				switch {
+				case hasSel && pos >= selA && pos <= selB:
+					segEnd := min(end, selB+1)
+					sb.WriteString(selectionStyle.Render(strings.Repeat(" ", segEnd-pos)))
+					pos = segEnd
+				case hasSel && pos < selA:
+					segEnd := min(end, selA)
+					sb.WriteString(strings.Repeat(" ", segEnd-pos))
+					pos = segEnd
+				default:
+					sb.WriteString(strings.Repeat(" ", end-pos))
+					pos = end
+				}
+			}
+			i = overlays[oi].col
+		}
+		sb.WriteString(overlayText(overlays[oi]))
+		i += overlays[oi].w
 	}
 }
 

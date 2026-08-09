@@ -280,6 +280,7 @@ bar_fg          = "#FFFFFF"   # status bar text
 bar_dark_bg     = "#065A96"   # file type / LSP segments in the status bar
 normal_mode_fg  = "#AAFFAA"   # "NORMAL" mode label color
 insert_mode_fg  = "#AADDFF"   # "INSERT" mode label color
+insert_cursor_bg = "#AAFFAA"  # insert-mode cursor fill color (normal mode's cursor is reverse-video, no fixed color)
 selection_bg    = "#2D5F8A"
 selection_fg    = "#FFFFFF"
 gutter_fg       = "#606060"   # line numbers

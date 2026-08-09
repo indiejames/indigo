@@ -156,6 +156,62 @@ func TestEnterDetectedIndentOverridesConfig(t *testing.T) {
 	}
 }
 
+// TestBlockBaseIndentUsesMinimumNotFirstLine is a regression test: the
+// baseline must be the *shallowest* non-blank line in the block, not
+// whichever line comes first. A block like a wrapped import has its
+// shallowest lines first and last, with a deeper line in between; blindly
+// taking the first line still happens to get this case right, so the
+// interesting assertion is that a deeper first line doesn't win over a
+// shallower later one.
+func TestBlockBaseIndentUsesMinimumNotFirstLine(t *testing.T) {
+	lines := []string{
+		"\tFoo,",          // deeper: 1 tab
+		"} from './foo';", // shallowest: 0
+	}
+	indent, ok := blockBaseIndent(lines)
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	if indent != "" {
+		t.Errorf("indent = %q, want %q (least-indented line, not the first)", indent, "")
+	}
+}
+
+// TestBlockBaseIndentFirstLineAlreadyMinimum is a control case: when the
+// first line already is the shallowest, the result is unchanged from
+// simply taking the first line.
+func TestBlockBaseIndentFirstLineAlreadyMinimum(t *testing.T) {
+	lines := []string{
+		"if x {",
+		"\tbar()",
+		"}",
+	}
+	indent, ok := blockBaseIndent(lines)
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	if indent != "" {
+		t.Errorf("indent = %q, want %q", indent, "")
+	}
+}
+
+// TestBlockBaseIndentUniformBody is a regression test for a bug introduced
+// by an earlier fix attempt: a block whose lines are all at the same depth
+// must use that shared depth as the baseline, not zero.
+func TestBlockBaseIndentUniformBody(t *testing.T) {
+	lines := []string{
+		"\tbar();",
+		"\tbaz();",
+	}
+	indent, ok := blockBaseIndent(lines)
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	if indent != "\t" {
+		t.Errorf("indent = %q, want %q", indent, "\t")
+	}
+}
+
 // TestReindentLinesTabToSpace is a regression test: reindentLines must convert
 // tab-based baseline indentation to space-based target indentation, preserving
 // relative nesting within the block.

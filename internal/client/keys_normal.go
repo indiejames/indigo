@@ -123,14 +123,16 @@ func executeOpenLineBelow(m Model) (tea.Model, tea.Cmd) {
 	m.insertLineCount = m.buf.LineCount()
 	m.mode = ModeInsert
 	line := m.cursor.Line
+	lineEnd := m.buf.LineLen(line)
+	indent := m.contextIndent(m.buf.Line(line), line, lineEnd)
 	op := document.Op{
 		ClientID:   m.rpc.ClientID(),
 		Type:       document.OpInsert,
 		InsertLine: line,
-		InsertCol:  m.buf.LineLen(line),
-		InsertText: "\n",
+		InsertCol:  lineEnd,
+		InsertText: "\n" + indent,
 	}
-	m.cursor = document.Pos{Line: line + 1, Col: 0}
+	m.cursor = document.Pos{Line: line + 1, Col: len(indent)}
 	return applyOp(m, op)
 }
 
@@ -141,18 +143,21 @@ func executeOpenLineAbove(m Model) (tea.Model, tea.Cmd) {
 	m.groupBefore = m.cursorSnap()
 	m.insertLineCount = m.buf.LineCount()
 	m.mode = ModeInsert
+	prevLineNum := m.cursor.Line - 1
 	col := 0
-	if m.cursor.Line > 0 {
-		col = m.buf.LineLen(m.cursor.Line - 1)
+	indent := ""
+	if prevLineNum >= 0 {
+		col = m.buf.LineLen(prevLineNum)
+		indent = m.contextIndent(m.buf.Line(prevLineNum), prevLineNum, col)
 	}
 	op := document.Op{
 		ClientID:   m.rpc.ClientID(),
 		Type:       document.OpInsert,
-		InsertLine: max(0, m.cursor.Line-1),
+		InsertLine: max(0, prevLineNum),
 		InsertCol:  col,
-		InsertText: "\n",
+		InsertText: "\n" + indent,
 	}
-	m.cursor = document.Pos{Line: m.cursor.Line, Col: 0}
+	m.cursor = document.Pos{Line: m.cursor.Line, Col: len(indent)}
 	return applyOp(m, op)
 }
 

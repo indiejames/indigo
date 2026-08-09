@@ -223,6 +223,27 @@ func TestRenderLineNormal(t *testing.T) {
 	}
 }
 
+// TestViewSelectsCursorStyleByMode verifies View() picks insertCursorStyle
+// while in insert mode and normalCursorStyle otherwise, so the buffer cursor
+// visibly changes color as a mode indicator distinct from the status bar.
+func TestViewSelectsCursorStyleByMode(t *testing.T) {
+	m := newTestModel("hello\n")
+
+	m.mode = ModeInsert
+	m.View()
+	if cursorStyle.GetBackground() != insertCursorStyle.GetBackground() {
+		t.Errorf("insert mode: cursorStyle background = %v, want insertCursorStyle's %v",
+			cursorStyle.GetBackground(), insertCursorStyle.GetBackground())
+	}
+
+	m.mode = ModeNormal
+	m.View()
+	if cursorStyle.GetBackground() != normalCursorStyle.GetBackground() {
+		t.Errorf("normal mode: cursorStyle background = %v, want normalCursorStyle's %v",
+			cursorStyle.GetBackground(), normalCursorStyle.GetBackground())
+	}
+}
+
 func TestRenderLineTildeForEmptyRows(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.height = 24

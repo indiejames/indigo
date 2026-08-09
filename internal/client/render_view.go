@@ -40,6 +40,12 @@ func (m Model) View() string {
 		return "loading…"
 	}
 
+	if m.mode == ModeInsert {
+		cursorStyle = insertCursorStyle
+	} else {
+		cursorStyle = normalCursorStyle
+	}
+
 	// Record timing via the shared pointer so the value receiver can write back.
 	if m.metrics != nil {
 		viewStart := time.Now()
@@ -534,7 +540,7 @@ func (m Model) renderStatusBar() string {
 	switch {
 	case m.recoveryPrompt:
 		centerContent = "Recovery file found!   Use it [y]   Ignore and delete [n]"
-case m.status != "":
+	case m.status != "":
 		centerContent = dp + dirtyMark + "   " + m.status
 	default:
 		centerContent = dp + dirtyMark

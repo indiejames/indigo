@@ -270,12 +270,31 @@ type metricsData struct {
 	keyToFrameDuration time.Duration
 }
 
+// normalAccentColor/insertAccentColor drive both the status bar's mode label
+// and the buffer cursor for each mode, so the two always read as the same
+// color. Fixed rather than theme-derived for now — see the TODO on
+// insertCursorStyle. insertAccentColor reuses the green that used to be
+// Normal's label color; Normal's label moves to white to match its
+// already-white (reverse-video) cursor.
+const (
+	normalAccentColor = "#FFFFFF"
+	insertAccentColor = "#AAFFAA"
+)
+
 // UI styles — initialized to default-dark values; replaced by ApplyTheme before first render.
 var (
 	barStyle        lipgloss.Style
 	normalModeStyle lipgloss.Style
 	insertModeStyle lipgloss.Style
-	cursorStyle     lipgloss.Style
+
+	// cursorStyle is the style actually used to render the buffer cursor —
+	// View() picks it from normalCursorStyle/insertCursorStyle each frame
+	// based on m.mode, so the many cursor call sites (render.go,
+	// multicursor.go) that read this global don't need mode threaded through
+	// their signatures.
+	cursorStyle       lipgloss.Style
+	normalCursorStyle lipgloss.Style
+	insertCursorStyle lipgloss.Style
 
 	popupBg          lipgloss.Color
 	popupBorderStyle lipgloss.Style
@@ -331,9 +350,13 @@ func ApplyTheme(t *theme.Theme) {
 	pb := lipgloss.Color(t.UI.PopupBg)
 
 	barStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(t.UI.BarFg))
-	normalModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(t.UI.NormalModeFg)).Bold(true)
-	insertModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(t.UI.InsertModeFg)).Bold(true)
-	cursorStyle = lipgloss.NewStyle().Reverse(true)
+	// normalModeStyle/insertModeStyle use the fixed accent colors below rather
+	// than t.UI.NormalModeFg/InsertModeFg — see the TODO on normalAccentColor.
+	normalModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(normalAccentColor)).Bold(true)
+	insertModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(insertAccentColor)).Bold(true)
+	normalCursorStyle = lipgloss.NewStyle().Reverse(true)
+	insertCursorStyle = lipgloss.NewStyle().Background(lipgloss.Color(insertAccentColor)).Foreground(lipgloss.Color("#000000"))
+	cursorStyle = normalCursorStyle
 
 	popupBg = pb
 	popupBorderStyle = lipgloss.NewStyle().Background(pb).Foreground(lipgloss.Color(t.UI.PopupBorderFg))
@@ -387,9 +410,11 @@ func applyDefaultDark() {
 	pb := lipgloss.Color("#1E2A38")
 
 	barStyle = lipgloss.NewStyle().Background(barBg).Foreground(barFg)
-	normalModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color("#AAFFAA")).Bold(true)
-	insertModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color("#AADDFF")).Bold(true)
-	cursorStyle = lipgloss.NewStyle().Reverse(true)
+	normalModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(normalAccentColor)).Bold(true)
+	insertModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(insertAccentColor)).Bold(true)
+	normalCursorStyle = lipgloss.NewStyle().Reverse(true)
+	insertCursorStyle = lipgloss.NewStyle().Background(lipgloss.Color(insertAccentColor)).Foreground(lipgloss.Color("#000000"))
+	cursorStyle = normalCursorStyle
 
 	popupBg = pb
 	popupBorderStyle = lipgloss.NewStyle().Background(pb).Foreground(lipgloss.Color("#4488CC"))

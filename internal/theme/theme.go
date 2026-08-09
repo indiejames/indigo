@@ -25,13 +25,18 @@ type SyntaxStyle struct {
 // UI holds all theme colors and style options for the editor UI.
 type UI struct {
 	// Status bar
-	BarBg        string `toml:"bar_bg"`
-	BarFg        string `toml:"bar_fg"`
-	BarDarkBg    string `toml:"bar_dark_bg"` // file type + LSP segments
+	BarBg     string `toml:"bar_bg"`
+	BarFg     string `toml:"bar_fg"`
+	BarDarkBg string `toml:"bar_dark_bg"` // file type + LSP segments
 
 	// Mode label foregrounds (background = BarBg)
 	NormalModeFg string `toml:"normal_mode_fg"`
 	InsertModeFg string `toml:"insert_mode_fg"`
+
+	// InsertCursorBg is the fill color of the buffer cursor while in insert
+	// mode (normal mode stays reverse-video, so it has no separate color
+	// setting). Also used for the "INSERT" status bar label so the two match.
+	InsertCursorBg string `toml:"insert_cursor_bg"`
 
 	// Editor
 	SelectionBg string `toml:"selection_bg"`
@@ -145,6 +150,11 @@ func parse(data []byte) (*Theme, error) {
 	}
 	if t.UI.PopupBorder == "" {
 		t.UI.PopupBorder = "rounded"
+	}
+	if t.UI.InsertCursorBg == "" {
+		// Older/imported themes predating this key: fall back to the label
+		// color rather than rendering an unstyled/invisible cursor block.
+		t.UI.InsertCursorBg = t.UI.InsertModeFg
 	}
 	if t.Syntax == nil {
 		t.Syntax = map[string]SyntaxStyle{}

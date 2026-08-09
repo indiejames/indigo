@@ -270,12 +270,15 @@ type metricsData struct {
 	keyToFrameDuration time.Duration
 }
 
-// normalAccentColor/insertAccentColor drive both the status bar's mode label
-// and the buffer cursor for each mode, so the two always read as the same
-// color. Fixed rather than theme-derived for now — see the TODO on
-// insertCursorStyle. insertAccentColor reuses the green that used to be
-// Normal's label color; Normal's label moves to white to match its
-// already-white (reverse-video) cursor.
+// normalAccentColor is Normal mode's status bar label color. Fixed rather
+// than theme-derived: Normal's cursor is reverse-video (no fixed color of
+// its own to match against), so unlike Insert there's no per-theme value to
+// pull it from yet.
+//
+// insertAccentColor is the pre-theme-load fallback for Insert's label and
+// cursor color (see applyDefaultDark), used only before the real config
+// theme is applied at startup. Once ApplyTheme runs, both are driven by
+// theme.UI.InsertCursorBg instead — see [theme.UI.InsertCursorBg].
 const (
 	normalAccentColor = "#FFFFFF"
 	insertAccentColor = "#AAFFAA"
@@ -351,11 +354,12 @@ func ApplyTheme(t *theme.Theme) {
 
 	barStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(t.UI.BarFg))
 	// normalModeStyle/insertModeStyle use the fixed accent colors below rather
-	// than t.UI.NormalModeFg/InsertModeFg — see the TODO on normalAccentColor.
+	// than t.UI.NormalModeFg — normal mode has no separate cursor color to
+	// match (its cursor is reverse-video), so its label isn't themeable yet.
 	normalModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(normalAccentColor)).Bold(true)
-	insertModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(insertAccentColor)).Bold(true)
+	insertModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(t.UI.InsertCursorBg)).Bold(true)
 	normalCursorStyle = lipgloss.NewStyle().Reverse(true)
-	insertCursorStyle = lipgloss.NewStyle().Background(lipgloss.Color(insertAccentColor)).Foreground(lipgloss.Color("#000000"))
+	insertCursorStyle = lipgloss.NewStyle().Background(lipgloss.Color(t.UI.InsertCursorBg)).Foreground(lipgloss.Color("#000000"))
 	cursorStyle = normalCursorStyle
 
 	popupBg = pb

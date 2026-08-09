@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/theme"
 )
 
 // --- renderLineRunes ---
@@ -241,6 +242,29 @@ func TestViewSelectsCursorStyleByMode(t *testing.T) {
 	if cursorStyle.GetBackground() != normalCursorStyle.GetBackground() {
 		t.Errorf("normal mode: cursorStyle background = %v, want normalCursorStyle's %v",
 			cursorStyle.GetBackground(), normalCursorStyle.GetBackground())
+	}
+}
+
+// TestApplyThemeUsesInsertCursorBgFromTheme verifies ApplyTheme drives both
+// the insert-mode cursor and its status bar label from theme.UI.InsertCursorBg,
+// so a custom theme's color choice actually takes effect instead of the
+// pre-theme-load fallback constant winning.
+func TestApplyThemeUsesInsertCursorBgFromTheme(t *testing.T) {
+	defer applyDefaultDark() // restore package-level style vars for later tests
+
+	th := &theme.Theme{
+		UI: theme.UI{
+			BarBg:          "#000000",
+			InsertCursorBg: "#FF00FF",
+		},
+	}
+	ApplyTheme(th)
+
+	if got := insertCursorStyle.GetBackground(); got != lipgloss.Color("#FF00FF") {
+		t.Errorf("insertCursorStyle background = %v, want theme's InsertCursorBg #FF00FF", got)
+	}
+	if got := insertModeStyle.GetForeground(); got != lipgloss.Color("#FF00FF") {
+		t.Errorf("insertModeStyle foreground = %v, want theme's InsertCursorBg #FF00FF", got)
 	}
 }
 

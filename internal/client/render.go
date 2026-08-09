@@ -563,11 +563,21 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 	// instead of the columns apart they're meant to be.
 	for ; oi < len(overlays); oi++ {
 		if overlays[oi].col > i {
-			pad := overlays[oi].col - i
-			if hasSel && i >= selA && i <= selB {
-				sb.WriteString(selectionStyle.Render(strings.Repeat(" ", pad)))
-			} else {
-				sb.WriteString(strings.Repeat(" ", pad))
+			end := overlays[oi].col
+			for pos := i; pos < end; {
+				switch {
+				case hasSel && pos >= selA && pos <= selB:
+					segEnd := min(end, selB+1)
+					sb.WriteString(selectionStyle.Render(strings.Repeat(" ", segEnd-pos)))
+					pos = segEnd
+				case hasSel && pos < selA:
+					segEnd := min(end, selA)
+					sb.WriteString(strings.Repeat(" ", segEnd-pos))
+					pos = segEnd
+				default:
+					sb.WriteString(strings.Repeat(" ", end-pos))
+					pos = end
+				}
 			}
 			i = overlays[oi].col
 		}

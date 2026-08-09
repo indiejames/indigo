@@ -171,21 +171,31 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 	return applyOp(m, op)
 }
 
-// blockBaseIndent returns the leading whitespace of the first non-blank
-// line in lines, used as the reference point a moved or pasted block's
-// indentation is shifted relative to. Blank lines are skipped so an empty
-// leading line in the block doesn't masquerade as zero indentation; ok is
-// false when every line is blank, since there's then nothing to anchor a
-// shift to.
+// blockBaseIndent returns the leading whitespace of the *least*-indented
+// non-blank line in lines, used as the reference point a moved or pasted
+// block's indentation is shifted relative to: lines deeper than this keep
+// their extra nesting, lines at this level land exactly on target. The
+// first non-blank line isn't necessarily representative — e.g. a wrapped
+// import's opening line sits at the block's own level while its middle
+// line is nested one deeper — so every line is checked, not just the
+// first. Blank lines are skipped so an empty leading line in the block
+// doesn't masquerade as zero indentation; ok is false when every line is
+// blank, since there's then nothing to anchor a shift to.
 func blockBaseIndent(lines []string) (indent string, ok bool) {
+	best := -1
 	for _, l := range lines {
 		if strings.TrimSpace(l) == "" {
 			continue
 		}
 		runs := []rune(l)
-		return string(runs[:leadingWhitespace(runs)]), true
+		n := leadingWhitespace(runs)
+		if best == -1 || n < best {
+			best = n
+			indent = string(runs[:n])
+			ok = true
+		}
 	}
-	return "", false
+	return indent, ok
 }
 
 // reindentLines replaces the leading whitespace (baseline) of every non-blank

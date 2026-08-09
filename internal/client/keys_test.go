@@ -3,6 +3,7 @@ package client
 import (
 	"testing"
 
+	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
 )
 
@@ -501,6 +502,26 @@ func TestUnindentNoIndent(t *testing.T) {
 	got := m2.(Model)
 	if got.buf.Line(0) != "hello" {
 		t.Errorf("unindent with no indent: line changed unexpectedly to %q", got.buf.Line(0))
+	}
+}
+
+// TestIndentUsesDetectedSpaceIndent is a regression test: on a buffer whose
+// content is already 2-space indented, > must insert 2 spaces (via
+// indentUnit), not a raw tab char, so unindent (<) followed by indent (>)
+// round-trips back to the original indentation instead of over-indenting.
+func TestIndentUsesDetectedSpaceIndent(t *testing.T) {
+	m := newTestModel("if x:\n  hello\n")
+	m.detectedIndent = &config.IndentSettings{Style: "spaces", Width: 2}
+	m.cursor = document.Pos{Line: 1, Col: 0}
+	m2, _ := executeUnindent(m)
+	got := m2.(Model)
+	if got.buf.Line(1) != "hello" {
+		t.Fatalf("unindent: line = %q, want %q", got.buf.Line(1), "hello")
+	}
+	m3, _ := executeIndent(got)
+	got2 := m3.(Model)
+	if got2.buf.Line(1) != "  hello" {
+		t.Errorf("indent after unindent: line = %q, want %q", got2.buf.Line(1), "  hello")
 	}
 }
 

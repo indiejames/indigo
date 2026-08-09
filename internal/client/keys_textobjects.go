@@ -604,11 +604,13 @@ func (m Model) selectionLineRange() (startLine, endLine int) {
 	return start.Line, end.Line
 }
 
-// executeIndent adds one tab stop at the start of every selected line (or the
+// executeIndent adds one indent unit (the buffer's detected/configured tab
+// or space width, via indentUnit) at the start of every selected line (or the
 // cursor line). The selection is preserved as a line range so the user can
 // press > repeatedly without re-selecting.
 func executeIndent(m Model) (tea.Model, tea.Cmd) {
 	startLine, endLine := m.selectionLineRange()
+	unit := m.indentUnit()
 	ops := make([]document.Op, 0, endLine-startLine+1)
 	for ln := startLine; ln <= endLine; ln++ {
 		ops = append(ops, document.Op{
@@ -616,7 +618,7 @@ func executeIndent(m Model) (tea.Model, tea.Cmd) {
 			Type:       document.OpInsert,
 			InsertLine: ln,
 			InsertCol:  0,
-			InsertText: "\t",
+			InsertText: unit,
 		})
 	}
 	m, cmd := applyBatch(m, ops)
@@ -624,11 +626,16 @@ func executeIndent(m Model) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// executeUnindent removes one tab stop from the start of every selected line
-// (or the cursor line): one '\t', or up to four leading spaces.
-// The selection is preserved as a line range so repeated < keeps working.
+// executeUnindent removes one indent unit from the start of every selected
+// line (or the cursor line): one '\t', or up to the buffer's indent width in
+// leading spaces. The selection is preserved as a line range so repeated <
+// keeps working.
 func executeUnindent(m Model) (tea.Model, tea.Cmd) {
 	startLine, endLine := m.selectionLineRange()
+	width := m.effectiveIndentSettings().Width
+	if width <= 0 {
+		width = 4
+	}
 	ops := make([]document.Op, 0, endLine-startLine+1)
 	for ln := startLine; ln <= endLine; ln++ {
 		runes := []rune(m.buf.Line(ln))
@@ -639,7 +646,7 @@ func executeUnindent(m Model) (tea.Model, tea.Cmd) {
 		if runes[0] == '\t' {
 			remove = 1
 		} else {
-			for remove < len(runes) && runes[remove] == ' ' && remove < 4 {
+			for remove < len(runes) && runes[remove] == ' ' && remove < width {
 				remove++
 			}
 		}

@@ -735,7 +735,10 @@ func (m Model) appendReplacePreview(rows [][]lineOverlay, layout []layoutEntry, 
 
 // buildIndentGuideOverlays returns per-row overlays that draw a dim vertical
 // bar (│) at each tab-stop in the leading whitespace of lines.
-// Only rows whose buffer line has actual non-whitespace content are decorated.
+// Blank (or whitespace-only) lines have no indentation of their own, so they
+// borrow the deeper of the nearest non-blank line above and below — this
+// lets a guide flow through a gap in a block, including a run of blank lines
+// right before that block's closing brace.
 func (m Model) buildIndentGuideOverlays(layout []layoutEntry, cw int) [][]lineOverlay {
 	if m.cfg == nil || !m.cfg.IndentGuides {
 		return nil
@@ -743,44 +746,87 @@ func (m Model) buildIndentGuideOverlays(layout []layoutEntry, cw int) [][]lineOv
 	vis := len(layout)
 	rows := make([][]lineOverlay, vis)
 	guideText := indentGuideStyle.Render("▏")
+	indentWidth := m.effectiveIndentSettings().Width
+	if indentWidth <= 0 {
+		indentWidth = tabWidth
+	}
 	for row, entry := range layout {
 		bufLine := entry.bufLine
 		if bufLine >= m.buf.LineCount() {
 			continue
 		}
-		runes := []rune(m.buf.Line(bufLine))
-		expandedRunes, _ := expandTabsRemap(runes)
-
-		// Find the first non-whitespace visual column.
-		contentStart := -1
-		for i, r := range expandedRunes {
-			if r != ' ' {
-				contentStart = i
-				break
-			}
+		contentStart := m.lineIndentStop(bufLine)
+		if contentStart < 0 {
+			contentStart = m.blankLineIndentStop(bufLine)
 		}
-		// Skip empty or all-whitespace lines.
 		if contentStart <= 0 {
 			continue
 		}
 
 		chunkStart := entry.chunkStart
 
-		// Draw one guide at each tab-stop from 0 up to (but not including) contentStart.
-		// Col 0 marks the outermost indent level, col 4 marks the next, etc.
-		for guideCol := 0; guideCol < contentStart; guideCol += tabWidth {
+		// Draw one guide at each indent stop from 0 up to (but not including)
+		// contentStart, spaced by the buffer's own indent width so guides
+		// land where this file's blocks actually nest (e.g. every 2 columns
+		// for a 2-space-indented file, not a hardcoded 4).
+		for guideCol := 0; guideCol < contentStart; guideCol += indentWidth {
 			if guideCol < chunkStart || guideCol >= chunkStart+cw {
 				continue
 			}
 			rows[row] = append(rows[row], lineOverlay{
-				col:  guideCol - chunkStart,
-				text: guideText,
-				w:    1,
+				col:   guideCol - chunkStart,
+				text:  guideText,
+				w:     1,
+				plain: "▏",
 			})
 		}
 		// Overlays are added in ascending column order already; no sort needed.
 	}
 	return rows
+}
+
+// lineIndentStop returns the visual column of the first non-space rune on
+// bufLine, or -1 if the line is empty or all whitespace.
+func (m Model) lineIndentStop(bufLine int) int {
+	runes := []rune(m.buf.Line(bufLine))
+	expandedRunes, _ := expandTabsRemap(runes)
+	for i, r := range expandedRunes {
+		if r != ' ' {
+			return i
+		}
+	}
+	return -1
+}
+
+// blankLineIndentStop computes the effective indent stop for a blank line by
+// looking outward to the nearest non-blank line above and below and taking
+// the deeper of the two, so guides keep flowing through a gap for as long as
+// either side is still inside that block — e.g. a run of blank lines right
+// before a closing brace still shows the guide for the block that brace
+// closes, matching the indented content above it. Returns 0 (no guides) if
+// neither side has one.
+func (m Model) blankLineIndentStop(bufLine int) int {
+	prev := -1
+	for l := bufLine - 1; l >= 0; l-- {
+		if s := m.lineIndentStop(l); s >= 0 {
+			prev = s
+			break
+		}
+	}
+	next := -1
+	for l := bufLine + 1; l < m.buf.LineCount(); l++ {
+		if s := m.lineIndentStop(l); s >= 0 {
+			next = s
+			break
+		}
+	}
+	if prev < 0 {
+		prev = 0
+	}
+	if next < 0 {
+		next = 0
+	}
+	return max(prev, next)
 }
 
 // mergeOverlays combines two sorted overlay slices into one sorted slice.

@@ -40,6 +40,59 @@ func TestRenderLineRunesEmpty(t *testing.T) {
 	}
 }
 
+// TestRenderLineRunesTrailingOverlaysAreSpacedByColumn covers a blank line
+// (no real characters) carrying two overlays past end-of-content — the case
+// for two indent guides on a blank line inside a nested block. The trailing
+// overlay-drain loop used to concatenate overlay text with no regard for
+// .col, collapsing the gap between them to zero instead of padding with
+// spaces up to each overlay's column.
+func TestRenderLineRunesTrailingOverlaysAreSpacedByColumn(t *testing.T) {
+	var sb strings.Builder
+	renderLineRunes(&sb, []rune{}, -1, -1, -1, nil, []lineOverlay{
+		{col: 0, text: "|", w: 1},
+		{col: 2, text: "|", w: 1},
+	}, nil)
+	if got, want := sb.String(), "| |"; got != want {
+		t.Errorf("trailing overlays = %q, want %q", got, want)
+	}
+}
+
+// TestRenderLineRunesOverlayInSelectionUsesSelectionStyle verifies an overlay
+// with a plain glyph set (e.g. an indent guide) renders with selectionStyle,
+// not its own fixed style, when its column falls inside the active
+// selection — otherwise it visually stands out as unselected against the
+// highlighted text around it.
+func TestRenderLineRunesOverlayInSelectionUsesSelectionStyle(t *testing.T) {
+	guideOverlay := lineOverlay{col: 0, text: indentGuideStyle.Render("▏"), w: 1, plain: "▏"}
+
+	var selected strings.Builder
+	renderLineRunes(&selected, []rune("  x"), 0, 2, -1, nil, []lineOverlay{guideOverlay}, nil)
+	want := selectionStyle.Render("▏") + selectionStyle.Render(" ") + selectionStyle.Render("x")
+	if got := selected.String(); got != want {
+		t.Errorf("overlay inside selection = %q, want %q", got, want)
+	}
+
+	var unselected strings.Builder
+	renderLineRunes(&unselected, []rune("  x"), -1, -1, -1, nil, []lineOverlay{guideOverlay}, nil)
+	if got := unselected.String(); !strings.Contains(got, guideOverlay.text) {
+		t.Errorf("overlay outside selection = %q, want it to keep its own style %q", got, guideOverlay.text)
+	}
+}
+
+// TestRenderLineRunesTrailingOverlayInSelectionUsesSelectionStyle covers the
+// same rule for the past-end-of-content path (a blank, selected line): the
+// overlay at column 0 and the padding before a later overlay must also pick
+// up selectionStyle when inside [selA, selB].
+func TestRenderLineRunesTrailingOverlayInSelectionUsesSelectionStyle(t *testing.T) {
+	guide := lineOverlay{col: 0, text: indentGuideStyle.Render("▏"), w: 1, plain: "▏"}
+
+	var sb strings.Builder
+	renderLineRunes(&sb, []rune{}, 0, 0, -1, nil, []lineOverlay{guide}, nil)
+	if got, want := sb.String(), selectionStyle.Render("▏"); got != want {
+		t.Errorf("blank selected line overlay = %q, want %q", got, want)
+	}
+}
+
 func TestRenderLineChunkTrailingEmptyLineReverseSelection(t *testing.T) {
 	// "a\nb\n" has a trailing phantom empty line (index 2) that isn't part
 	// of displayLineCount. Select from line 0 through that phantom line,
@@ -51,7 +104,7 @@ func TestRenderLineChunkTrailingEmptyLineReverseSelection(t *testing.T) {
 	m.sel = &Selection{
 		Anchor: document.Pos{Line: 2, Col: 0},
 		Head:   document.Pos{Line: 0, Col: 0},
- 	}
+	}
 	m.cursor = document.Pos{Line: 0, Col: 0}
 
 	cw := 80

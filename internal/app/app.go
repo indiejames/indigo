@@ -420,6 +420,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.searchReplace = nil
 		if msg.applied != nil {
 			am := msg.applied
+			stale := am.idx < 0 || am.idx >= len(a.buffers) || a.buffers[am.idx].FilePath() != am.model.FilePath()
+			if stale {
+				// The tab closed (or tabs shifted) while the edit was in
+				// flight. The op was already applied locally to am.model and
+				// am.cmd still sends it to the server, so just let that
+				// happen without touching a.buffers/a.active.
+				return a, am.cmd
+			}
 			a.buffers[am.idx] = am.model
 			a.active = am.idx
 			a.buffers[a.active] = a.buffers[a.active].AtMatch(am.line, am.col, max(am.matchLen, 1), a.bufHeight())

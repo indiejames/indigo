@@ -4,6 +4,9 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/indiejames/indigo/internal/client"
+	"github.com/indiejames/indigo/internal/config"
 )
 
 func TestOldTextOf(t *testing.T) {
@@ -133,7 +136,6 @@ func TestSraResultsNoAutoFocusWhenEmpty(t *testing.T) {
 	}
 }
 
-
 // TestSearchReplaceEnterOpensMatchWhenReplaceClosed reproduces the bug where
 // selecting a result and pressing Enter in plain-search mode (replace field
 // not toggled open) deleted the matched text — acceptSearchReplaceMatch
@@ -186,5 +188,95 @@ func TestOpenSearchReplaceMatchOutOfBounds(t *testing.T) {
 	a := App{searchReplace: d}
 	if cmd := a.openSearchReplaceMatch(d); cmd != nil {
 		t.Error("expected nil command when there are no results")
+	}
+}
+
+func newSraTestModel(absPath string) client.Model {
+	return client.New(&client.RPC{}, 1, "", 0, absPath, "/tmp", nil, false)
+}
+
+// TestSraSingleResultAppliedOutOfBoundsDoesNotPanic reproduces closing a tab
+// while a search-and-replace "accept match" RPC is in flight: by the time
+// sraSingleResultMsg arrives, am.idx no longer exists in a.buffers. The
+// handler must not panic indexing a.buffers[am.idx], and must still return
+// am.cmd so the already-applied edit still gets sent to the server.
+func TestSraSingleResultAppliedOutOfBoundsDoesNotPanic(t *testing.T) {
+	a := App{
+		searchReplace: newSearchReplaceDialog("/tmp", 100, 40),
+		buffers:       []client.Model{newSraTestModel("/tmp/a.go")},
+		active:        0,
+	}
+	sentinelCmd := func() tea.Msg { return nil }
+	msg := sraSingleResultMsg{applied: &bufferAppliedMsg{
+		idx:   5, // out of range for a single-buffer App
+		model: newSraTestModel("/tmp/b.go"),
+		cmd:   sentinelCmd,
+		line:  0, col: 0, matchLen: 3,
+	}}
+
+	updated, cmd := a.Update(msg)
+	a2 := updated.(App)
+
+	if len(a2.buffers) != 1 || a2.buffers[0].FilePath() != "/tmp/a.go" {
+		t.Errorf("existing buffer was mutated on a stale/out-of-range idx: %+v", a2.buffers)
+	}
+	if cmd == nil {
+		t.Error("expected am.cmd to still be returned so the edit reaches the server")
+	}
+}
+
+// TestSraSingleResultAppliedStaleIndexReusedByAnotherBuffer covers the
+// subtler case: am.idx is still in range, but a different tab closed in the
+// meantime and the slice shifted, so that index now names a different file.
+// Applying blindly would silently overwrite the wrong tab.
+func TestSraSingleResultAppliedStaleIndexReusedByAnotherBuffer(t *testing.T) {
+	a := App{
+		searchReplace: newSearchReplaceDialog("/tmp", 100, 40),
+		buffers:       []client.Model{newSraTestModel("/tmp/other.go")},
+		active:        0,
+	}
+	msg := sraSingleResultMsg{applied: &bufferAppliedMsg{
+		idx:   0,
+		model: newSraTestModel("/tmp/a.go"), // no longer matches buffers[0]
+		cmd:   func() tea.Msg { return nil },
+		line:  0, col: 0, matchLen: 3,
+	}}
+
+	updated, cmd := a.Update(msg)
+	a2 := updated.(App)
+
+	if a2.buffers[0].FilePath() != "/tmp/other.go" {
+		t.Errorf("buffers[0] = %q, want unchanged %q (stale idx reused by a different buffer)", a2.buffers[0].FilePath(), "/tmp/other.go")
+	}
+	if cmd == nil {
+		t.Error("expected am.cmd to still be returned so the edit reaches the server")
+	}
+}
+
+// TestSraSingleResultAppliedValidIndex is the happy path: idx still points
+// at the same buffer, so the model/active/cursor should update normally.
+func TestSraSingleResultAppliedValidIndex(t *testing.T) {
+	a := App{
+		searchReplace: newSearchReplaceDialog("/tmp", 100, 40),
+		buffers:       []client.Model{newSraTestModel("/tmp/a.go")},
+		active:        0,
+		cfg:           &config.Config{},
+	}
+	newModel := newSraTestModel("/tmp/a.go")
+	msg := sraSingleResultMsg{applied: &bufferAppliedMsg{
+		idx:   0,
+		model: newModel,
+		cmd:   func() tea.Msg { return nil },
+		line:  0, col: 0, matchLen: 3,
+	}}
+
+	updated, cmd := a.Update(msg)
+	a2 := updated.(App)
+
+	if a2.active != 0 {
+		t.Errorf("active = %d, want 0", a2.active)
+	}
+	if cmd == nil {
+		t.Error("expected a non-nil command on the happy path")
 	}
 }

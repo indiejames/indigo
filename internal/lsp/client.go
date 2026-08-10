@@ -102,7 +102,7 @@ func (c *Client) Initialize() error {
 						},
 					},
 				},
-				PublishDiagnostics: &PublishDiagnosticsClientCapabilities{RelatedInformation: true},
+				PublishDiagnostics: &PublishDiagnosticsClientCapabilities{RelatedInformation: true, VersionSupport: true},
 				SemanticTokens: &SemanticTokensClientCapabilities{
 					Requests: SemanticTokensRequestClientCapabilities{Range: true},
 					TokenTypes: []string{
@@ -816,8 +816,23 @@ func (c *Client) Shutdown() {
 	defer cancel()
 	c.conn.Call(ctx, "shutdown", nil) //nolint:errcheck
 	c.conn.Notify("exit", nil)        //nolint:errcheck
-	c.cmd.Process.Kill()              //nolint:errcheck
-	c.cmd.Wait()                      //nolint:errcheck
+	c.terminate()
+}
+
+// terminate reaps the underlying OS process and releases its resources
+// (log file) without attempting the graceful LSP shutdown handshake —
+// unlike Shutdown's request/notify pair, this is safe to call on a
+// connection that's already dead (e.g. after a crash, where there's no
+// reader left to ever answer a "shutdown" request). Idempotent: safe to
+// call on an already-exited process.
+func (c *Client) terminate() {
+	if c.cmd != nil && c.cmd.Process != nil {
+		c.cmd.Process.Kill() //nolint:errcheck
+		c.cmd.Wait()         //nolint:errcheck
+	}
+	if c.logFile != nil {
+		c.logFile.Close() //nolint:errcheck
+	}
 }
 
 func (c *Client) handleNotification(method string, params json.RawMessage) {
@@ -827,14 +842,14 @@ func (c *Client) handleNotification(method string, params json.RawMessage) {
 		if err := json.Unmarshal(params, &p); err != nil {
 			return
 		}
-		if p.Version != 0 {
+		if p.Version != nil {
 			c.mu.Lock()
 			current := c.docVersions[p.URI]
 			c.mu.Unlock()
-			if p.Version < current {
-				// Stale: computed against an older version than what we've
-				// since sent via DidChange. Discard rather than clobbering
-				// diagnostics for the buffer's current content.
+			if *p.Version != current {
+				// Stale (or anomalously ahead of what we've sent via
+				// DidChange/DidOpen) — discard rather than risk showing
+				// diagnostics computed against the wrong buffer state.
 				return
 			}
 		}

@@ -145,6 +145,24 @@ func TestRunExternalEmptyOutputNonEmptyInputErrors(t *testing.T) {
 	}
 }
 
+// TestRunExternalWhitespaceOnlyOutputErrors extends the empty-output guard
+// to whitespace-only output — a formatter that emits only spaces/tabs/
+// newlines for non-empty input is just as clearly broken as one producing
+// nothing at all, and should be rejected the same way.
+func TestRunExternalWhitespaceOnlyOutputErrors(t *testing.T) {
+	content := "package main\n"
+	got, changed, err := runExternal(makeFC("sh", "-c", "printf ' \\n\\t \\n'"), "/tmp/test.go", content)
+	if err == nil {
+		t.Fatal("expected error from formatter producing whitespace-only output for non-empty input, got nil")
+	}
+	if changed {
+		t.Error("changed should be false when the empty-output guard rejects the result")
+	}
+	if got != content {
+		t.Errorf("got %q, want original content %q preserved on rejection", got, content)
+	}
+}
+
 // TestRunExternalEmptyInputEmptyOutputOK verifies the guard doesn't false
 // positive on the legitimate case of formatting an already-empty file.
 func TestRunExternalEmptyInputEmptyOutputOK(t *testing.T) {

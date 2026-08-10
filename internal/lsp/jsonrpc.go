@@ -125,10 +125,10 @@ func (c *jsonrpcConn) write(msg jsonrpcMsg) error {
 }
 
 func (c *jsonrpcConn) readLoop(r io.Reader) {
-	defer c.failPending()
 	if c.onClose != nil {
 		defer c.onClose()
 	}
+	defer c.failPending()
 	br := bufio.NewReader(r)
 	for {
 		// Read headers until blank line.

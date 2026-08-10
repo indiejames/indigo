@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"net"
+	"os/exec"
 	"testing"
 	"time"
 )
@@ -49,8 +50,42 @@ func TestClientForPathRespawnsAfterCrash(t *testing.T) {
 	dir := t.TempDir()
 	langID := languageIDForExt("zzz")
 
-	dead := &Client{}
-	dead.closed.Store(true)
+	// A real, still-running child process stands in for the crashed
+	// language server, so the cleanup path (Client.terminate reaping the
+	// process via Kill+Wait) is exercised against an actual *exec.Cmd
+	// rather than a nil one.
+	cmd := exec.Command("sleep", "100")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Skipf("could not start test child process: %v", err)
+	}
+
+	dead := &Client{cmd: cmd}
+	closedCh := make(chan struct{})
+	dead.conn = newJSONRPCConnWithClose(stdout, stdin, nil, nil, func() {
+		dead.closed.Store(true)
+		close(closedCh)
+	})
+
+	// Simulate a crash: sever the read side without killing the process
+	// itself, so Client.terminate's Kill() call — not an already-dead
+	// process's Wait() — is what's actually under test below.
+	stdout.Close() //nolint:errcheck
+	select {
+	case <-closedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("onClose never fired after severing the connection")
+	}
+	if dead.Alive() {
+		t.Fatal("test setup: dead client should report not-alive")
+	}
 
 	// A command that will fail to spawn, so the respawn attempt below fails
 	// fast (via recordFailedStart) rather than needing a real, working fake
@@ -77,5 +112,9 @@ func TestClientForPathRespawnsAfterCrash(t *testing.T) {
 	}
 	if !respawnAttempted {
 		t.Error("clientForPath should have attempted (and recorded a failed) respawn — dead-client detection never reached startClient")
+	}
+
+	if cmd.ProcessState == nil {
+		t.Error("dead client's process was never reaped (Client.terminate's Kill+Wait never ran)")
 	}
 }

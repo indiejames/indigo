@@ -441,17 +441,37 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 	}
 	s.unmarkSaving(path)
 
+	recoveryPath := recoveryFilePath(s.recDir, path)
 	s.mu.Lock()
 	entry, ok = s.buffers[bufID]
-	if ok && entry.buf == baseBuf && entry.buf.Version() == baseVersion {
+	switch {
+	case ok && entry.buf == baseBuf && entry.buf.Version() == baseVersion:
+		// What's on disk matches the buffer's content — safe to mark clean
+		// and drop the recovery file.
 		entry.buf.SetClean()
+		s.mu.Unlock()
+		os.Remove(recoveryPath) //nolint:errcheck
+	case ok:
+		// The buffer changed again during the disk write (or a concurrent
+		// format-on-save race) — leave it dirty, since what's on disk no
+		// longer matches its current content, and refresh the recovery
+		// file immediately with the current content rather than leaving a
+		// stale-or-absent one until the next periodic flushDirtyBuffers
+		// tick, so a crash right now doesn't lose the newer edit.
+		current := entry.buf.Content()
+		within := int64(entry.buf.ByteLen()) <= s.cfg.RecoveryMaxBytes
+		s.mu.Unlock()
+		if within {
+			os.WriteFile(recoveryPath, []byte(current), 0600) //nolint:errcheck
+		} else {
+			os.Remove(recoveryPath) //nolint:errcheck
+		}
+	default:
+		// Buffer was closed entirely during the write.
+		s.mu.Unlock()
+		os.Remove(recoveryPath) //nolint:errcheck
 	}
-	// else: the buffer changed again during the disk write (or the buffer
-	// was closed) — leave it dirty, since what's on disk no longer matches
-	// its current content.
-	s.mu.Unlock()
 
-	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
 	go s.lspMgr.DidSave(path)
 	s.lintMgr.RunAsync(path, content)
 	go s.pluginMgr.DispatchBufferSave(context.Background(), bufID, path)

@@ -89,6 +89,12 @@ func (m *Manager) clientForPath(path string) *Client {
 			// itself fails, startClient's own recordFailedStart still
 			// throttles retries via the cooldown check below.
 			delete(m.clients, langID)
+			m.mu.Unlock()
+			// Reap the process and close its log file outside the lock —
+			// Process.Wait can block briefly and must not stall other
+			// languages' clientForPath calls.
+			c.terminate()
+			continue
 		}
 		if last, failed := m.failedStarts[langID]; failed && time.Since(last) < startRetryCooldown {
 			m.mu.Unlock()

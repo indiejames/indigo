@@ -126,6 +126,40 @@ func TestRunExternalNonZeroExit(t *testing.T) {
 	}
 }
 
+// TestRunExternalEmptyOutputNonEmptyInputErrors is a regression test: a
+// formatter that exits 0 but produces no output (misconfigured flag, silent
+// crash that still returns 0) must not be treated as "successfully deleted
+// all the content" — it should error and leave the original content
+// untouched instead of blanking the buffer/file.
+func TestRunExternalEmptyOutputNonEmptyInputErrors(t *testing.T) {
+	content := "package main\n"
+	got, changed, err := runExternal(makeFC("true"), "/tmp/test.go", content)
+	if err == nil {
+		t.Fatal("expected error from formatter producing empty output for non-empty input, got nil")
+	}
+	if changed {
+		t.Error("changed should be false when the empty-output guard rejects the result")
+	}
+	if got != content {
+		t.Errorf("got %q, want original content %q preserved on rejection", got, content)
+	}
+}
+
+// TestRunExternalEmptyInputEmptyOutputOK verifies the guard doesn't false
+// positive on the legitimate case of formatting an already-empty file.
+func TestRunExternalEmptyInputEmptyOutputOK(t *testing.T) {
+	got, changed, err := runExternal(makeFC("cat"), "/tmp/test.go", "")
+	if err != nil {
+		t.Fatalf("runExternal(cat, empty input): %v", err)
+	}
+	if changed {
+		t.Error("changed should be false for empty→empty")
+	}
+	if got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
+
 // ---- Manager.Format ----
 
 // fakeLSP is a stub LSPFormatter that records the options it was called

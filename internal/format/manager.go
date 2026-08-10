@@ -133,6 +133,9 @@ func runExternal(fc config.FormatterConfig, filePath, content string) (string, b
 	}
 
 	result := out.String()
+	if strings.TrimSpace(result) == "" && strings.TrimSpace(content) != "" {
+		return content, false, fmt.Errorf("%s: produced empty output for non-empty input, refusing to apply", fc.Command)
+	}
 	return result, result != content, nil
 }
 

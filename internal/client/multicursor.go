@@ -83,6 +83,16 @@ func selectNextOccurrence(m *Model) bool {
 	if !found {
 		return false
 	}
+	if isAlreadySelected(m, fLine, fCol) {
+		// Found an occurrence that already has a cursor on it — either the
+		// wrap-around search cycled all the way back to one, or (once a
+		// wrap has added a cursor earlier in the buffer than a
+		// previously-added one) a plain forward search re-found it. Either
+		// way every occurrence is already selected, so don't add a
+		// duplicate ExtraCursor at the same position (a following
+		// multi-cursor insert would then double-insert there).
+		return false
+	}
 
 	newSel := &Selection{
 		Anchor: document.Pos{Line: fLine, Col: fCol},
@@ -93,6 +103,28 @@ func selectNextOccurrence(m *Model) bool {
 		sel: newSel,
 	})
 	return true
+}
+
+// isAlreadySelected reports whether (line, col) is the start of the primary
+// selection or any extra cursor's selection.
+func isAlreadySelected(m *Model, line, col int) bool {
+	if selectionStartsAt(m.sel, line, col) {
+		return true
+	}
+	for _, ec := range m.extraCursors {
+		if selectionStartsAt(ec.sel, line, col) {
+			return true
+		}
+	}
+	return false
+}
+
+func selectionStartsAt(sel *Selection, line, col int) bool {
+	if sel == nil {
+		return false
+	}
+	start, _ := sel.ordered()
+	return start.Line == line && start.Col == col
 }
 
 // findOccurrence searches for textRunes in the buffer starting at (fromLine, fromCol).
@@ -300,6 +332,7 @@ func applyInsertToAllCursors(m Model, text string) (Model, tea.Cmd) {
 	lineAdj := 0
 	textRunes := []rune(text)
 	isNewline := text == "\n"
+	atLine, delta := -1, 0
 
 	type newPos struct{ line, col int }
 	newPositions := make([]newPos, len(entries))
@@ -315,6 +348,11 @@ func applyInsertToAllCursors(m Model, text string) (Model, tea.Cmd) {
 			InsertCol:  adjCol,
 			InsertText: text,
 		}
+		al, d := opLineDelta(op)
+		if atLine < 0 || al < atLine {
+			atLine = al
+		}
+		delta += d
 		inv := inverseOp(m, op)
 		if m.currentGroup != nil {
 			m.currentGroup = append(m.currentGroup, inv)
@@ -348,6 +386,14 @@ func applyInsertToAllCursors(m Model, text string) (Model, tea.Cmd) {
 	}
 	m.scrollToCursor()
 
+	if atLine < 0 {
+		atLine = 0
+	}
+	m = m.shiftLSPOverlayLines(atLine, delta)
+	var refreshCmd tea.Cmd
+	m, refreshCmd = m.scheduleLSPOverlayRefresh()
+	cmds = append(cmds, refreshCmd)
+
 	return m, tea.Batch(append(cmds, m.reparseHighlight())...)
 }
 
@@ -375,6 +421,7 @@ func applyBackspaceToAllCursors(m Model) (Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	type newPos struct{ line, col int }
 	newPositions := make([]newPos, len(entries))
+	atLine, delta := -1, 0
 
 	for i, e := range entries {
 		if e.line == 0 && e.col == 0 {
@@ -396,6 +443,11 @@ func applyBackspaceToAllCursors(m Model) (Model, tea.Cmd) {
 			FromLine: fromLine, FromCol: fromCol,
 			ToLine: toLine, ToCol: toCol,
 		}
+		al, d := opLineDelta(op)
+		if atLine < 0 || al < atLine {
+			atLine = al
+		}
+		delta += d
 		inv := inverseOp(m, op)
 		if m.currentGroup != nil {
 			m.currentGroup = append(m.currentGroup, inv)
@@ -417,6 +469,14 @@ func applyBackspaceToAllCursors(m Model) (Model, tea.Cmd) {
 		}
 	}
 	m.scrollToCursor()
+
+	if atLine < 0 {
+		atLine = 0
+	}
+	m = m.shiftLSPOverlayLines(atLine, delta)
+	var refreshCmd tea.Cmd
+	m, refreshCmd = m.scheduleLSPOverlayRefresh()
+	cmds = append(cmds, refreshCmd)
 
 	return m, tea.Batch(append(cmds, m.reparseHighlight())...)
 }

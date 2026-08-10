@@ -250,7 +250,7 @@ var commandMenuRoot = command{
 		}},
 		{key: "l", label: "Message Log", execute: func(m Model) (tea.Model, tea.Cmd) {
 			m.msgLogVisible = true
-			m.msgLogScroll = 1 << 30 // clamped to the last page in the popup handlers/renderer
+			m.msgLogScroll = messageLogMaxScroll(m.width, m.height, m.messageLog) // start on the last page (most recent)
 			return m, nil
 		}},
 		{key: "n", label: "New file", execute: func(m Model) (tea.Model, tea.Cmd) {
@@ -427,10 +427,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Scroll keys navigate the message-log popup; q/esc dismiss it.
 	if m.msgLogVisible {
-		logLines := messageLogPopupLines(m.messageLog, messageLogInnerWidth(m.width))
-		maxPopH := max(6, m.height-5)
-		contentH := maxPopH - 2
-		maxScroll := max(0, len(logLines)-contentH)
+		maxScroll := messageLogMaxScroll(m.width, m.height, m.messageLog)
 		switch msg.String() {
 		case "j", "down":
 			m.msgLogScroll = min(m.msgLogScroll+1, maxScroll)

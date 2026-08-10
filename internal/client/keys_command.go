@@ -199,7 +199,7 @@ func (m Model) applySearchReplace() (tea.Model, tea.Cmd) {
 	first := matches[0]
 	m2.cursor = document.Pos{Line: first.line, Col: first.col}
 	m2.scrollToCursor()
-	m2.status = fmt.Sprintf("%d substitution(s)", len(matches))
+	m2 = m2.pushStatus(fmt.Sprintf("%d substitution(s)", len(matches)))
 	return m2.withClearedSearch(), cmd
 }
 

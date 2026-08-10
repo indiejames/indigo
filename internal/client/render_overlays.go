@@ -1075,6 +1075,16 @@ func messageLogInnerWidth(width int) int {
 	return innerW
 }
 
+// messageLogMaxScroll returns the maximum valid scroll offset for the
+// message-log popup at the given terminal size, mirroring the box-sizing
+// renderMessageLogPopup and the space-l/scroll handlers in keys.go use.
+func messageLogMaxScroll(termW, termH int, log []logEntry) int {
+	logLines := messageLogPopupLines(log, messageLogInnerWidth(termW))
+	maxPopH := max(6, termH-5) // matches vis-4 in View() where vis = m.height-1
+	contentH := maxPopH - 2
+	return max(0, len(logLines)-contentH)
+}
+
 // messageLogPopupLines formats each logged status message as "HH:MM:SS  text",
 // truncated to fit innerW columns, styled red for error ("E:"/"ERR:") entries.
 func messageLogPopupLines(log []logEntry, innerW int) []string {

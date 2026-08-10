@@ -300,3 +300,34 @@ func TestMessageLogPopupOpenScrollClose(t *testing.T) {
 		t.Errorf("msgLogScroll after close = %d, want 0", m.msgLogScroll)
 	}
 }
+
+// TestMessageLogPopupOpensScrolledToLastPage verifies opening the popup with
+// enough entries to overflow one page starts scrolled to the most recent
+// messages (not a raw sentinel that takes many "k" presses to unstick).
+func TestMessageLogPopupOpensScrolledToLastPage(t *testing.T) {
+	m := newTestModel("")
+	for i := 0; i < 200; i++ {
+		m = m.pushStatus("msg")
+	}
+
+	cmd, _ := findCommand([]string{" ", "l"})
+	if cmd == nil || cmd.execute == nil {
+		t.Fatal("space-l command not found in commandMenuRoot")
+	}
+	res, _ := cmd.execute(m)
+	m = res.(Model)
+
+	maxScroll := messageLogMaxScroll(m.width, m.height, m.messageLog)
+	if maxScroll == 0 {
+		t.Fatal("test setup: expected enough entries to require scrolling")
+	}
+	if m.msgLogScroll != maxScroll {
+		t.Fatalf("msgLogScroll after open = %d, want %d (last page)", m.msgLogScroll, maxScroll)
+	}
+
+	res, _ = m.handleKey(fakeKey("k"))
+	m = res.(Model)
+	if m.msgLogScroll != maxScroll-1 {
+		t.Errorf("msgLogScroll after one k = %d, want %d (one line up from the last page)", m.msgLogScroll, maxScroll-1)
+	}
+}

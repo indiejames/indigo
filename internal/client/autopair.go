@@ -67,7 +67,19 @@ func (m Model) shouldAutoPair(r rune) bool {
 		if isWordChar(m.charBeforeCursor()) || isWordChar(m.charAfterCursor()) {
 			return false
 		}
-		return m.charAfterCursor() != r
+		if m.charAfterCursor() != r {
+			return true
+		}
+		// The next character is the same quote we're about to type. If a
+		// later quote on the line matches it (countUnescapedQuotes from here
+		// to end-of-line is even), it's the opener of its own complete
+		// string and this is a separate pair to nest in front of it. If
+		// there's no later partner (odd), it's a stray closer waiting to be
+		// claimed (see insertSelfInsert's skip-over check) rather than
+		// nested redundantly.
+		runes := []rune(m.buf.Line(m.cursor.Line))
+		col := min(m.cursor.Col, len(runes))
+		return countUnescapedQuotes(runes[col:], r)%2 == 0
 	}
 	closer := autoPairs[r]
 	if m.charAfterCursor() != closer {
@@ -87,17 +99,30 @@ func (m Model) shouldAutoPair(r rune) bool {
 // other quote entirely"; parity of the count is the standard stand-in.
 func (m Model) insideOpenQuote(r rune) bool {
 	runes := []rune(m.buf.Line(m.cursor.Line))
-	col := m.cursor.Col
-	if col > len(runes) {
-		col = len(runes)
-	}
+	col := min(m.cursor.Col, len(runes))
+	return countUnescapedQuotes(runes[:col], r)%2 == 1
+}
+
+// countUnescapedQuotes counts occurrences of r in runes, skipping any
+// character immediately preceded by an unescaped backslash — so an escaped
+// quote like the \" in "a\"" isn't mistaken for a real delimiter.
+func countUnescapedQuotes(runes []rune, r rune) int {
 	count := 0
-	for _, c := range runes[:col] {
+	escaped := false
+	for _, c := range runes {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' {
+			escaped = true
+			continue
+		}
 		if c == r {
 			count++
 		}
 	}
-	return count%2 == 1
+	return count
 }
 
 // bracketBalance counts unmatched opener runes among content[:upTo],

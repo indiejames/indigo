@@ -124,6 +124,41 @@ func TestAutoPairQuoteInsideOpenStringStillSkipsOver(t *testing.T) {
 	}
 }
 
+func TestAutoPairOpenerBeforeMatchedEmptyStringNestsFully(t *testing.T) {
+	// An empty "" ahead of the cursor is already a complete string, not a
+	// stray closer to claim — typing '"' here should nest a whole new pair
+	// in front of it rather than degrading into a lone triple-quote.
+	m := newAutoPairTestModel("\"\"\n")
+	m.cursor.Col = 0 // before the already-complete empty string
+	m2, _ := m.handleInsert(fakeKey("\""))
+	got := m2.(Model)
+
+	if got.buf.Line(0) != "\"\"\"\"" {
+		t.Errorf("line = %q, want %q (new pair nests before the existing string)", got.buf.Line(0), "\"\"\"\"")
+	}
+	if got.cursor.Col != 1 {
+		t.Errorf("cursor.Col = %d, want 1 (between the new pair)", got.cursor.Col)
+	}
+}
+
+func TestAutoPairQuoteSkipsOverRealCloserPastEscapedQuote(t *testing.T) {
+	// Content is: " a \ " " (5 runes) — an escaped quote before the real
+	// closing quote. The escaped one must not count as a delimiter when
+	// deciding whether the cursor is inside an open string.
+	m := newAutoPairTestModel("\"a\\\"\"\n")
+	m.cursor.Col = 4 // between the escaped \" and the real closing quote
+	m2, _ := m.handleInsert(fakeKey("\""))
+	got := m2.(Model)
+
+	want := "\"a\\\"\""
+	if got.buf.Line(0) != want {
+		t.Errorf("line = %q, want %q (no duplicate quote)", got.buf.Line(0), want)
+	}
+	if got.cursor.Col != 5 {
+		t.Errorf("cursor.Col = %d, want 5 (moved past the real closing quote)", got.cursor.Col)
+	}
+}
+
 func TestAutoPairOpenerBeforeUnmatchedCloserDoesNotNest(t *testing.T) {
 	m := newAutoPairTestModel(")\n")
 	m.cursor.Col = 0 // before the stray, unmatched ')'

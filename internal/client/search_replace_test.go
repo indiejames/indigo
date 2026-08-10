@@ -55,6 +55,9 @@ func TestSearchReplaceEnterCommits(t *testing.T) {
 	if final.status != "2 substitution(s)" {
 		t.Errorf("status = %q, want '2 substitution(s)'", final.status)
 	}
+	if len(final.messageLog) != 1 || final.messageLog[0].text != "2 substitution(s)" {
+		t.Errorf("messageLog = %+v, want a single '2 substitution(s)' entry", final.messageLog)
+	}
 	// Search state should be fully cleared after committing.
 	if final.searchReplacing || final.searchQuery != "" || len(final.searchMatches) != 0 {
 		t.Errorf("search state not cleared after commit: %+v", final)

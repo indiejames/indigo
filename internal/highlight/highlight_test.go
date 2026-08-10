@@ -10,6 +10,27 @@ func TestNewUnknownExtension(t *testing.T) {
 	}
 }
 
+// TestHexToANSIMalformedInputDoesNotPanic is a regression test: a theme
+// file with a malformed color (short hex, non-hex characters, empty
+// string) must degrade to the terminal's default foreground instead of
+// panicking the editor on startup via a slice-bounds-out-of-range.
+func TestHexToANSIMalformedInputDoesNotPanic(t *testing.T) {
+	for _, hex := range []string{"#fff", "#12345", "#gggggg", "red", "", "#"} {
+		got := hexToANSI(hex)
+		if got != defaultFgANSI {
+			t.Errorf("hexToANSI(%q) = %q, want default fallback %q", hex, got, defaultFgANSI)
+		}
+	}
+}
+
+func TestHexToANSIValidInput(t *testing.T) {
+	got := hexToANSI("#569CD6")
+	want := "\x1b[38;2;86;156;214m"
+	if got != want {
+		t.Errorf("hexToANSI(#569CD6) = %q, want %q", got, want)
+	}
+}
+
 func TestCaptureANSIFallsBackToMostSpecificEntry(t *testing.T) {
 	// "function.method" is a real captureTable entry; the fallback for
 	// "function.method.private" (not itself in the table) must land there

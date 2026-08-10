@@ -383,27 +383,54 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 }
 
 func (s *editorService) Save(_ context.Context, call proto.EditorService_save) error {
+	// Save can block on a synchronous format call (up to 10s — see Format
+	// above) plus a disk write; call.Go() so a slow save doesn't freeze
+	// every other RPC on this connection (typing, etc.) behind it.
+	call.Go()
+
 	args := call.Args()
 	bufID := args.BufferId()
 
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
-	s.mu.Unlock()
 	if !ok {
+		s.mu.Unlock()
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
-
 	path := entry.buf.Path()
-	content := entry.buf.Content()
+	baseBuf := entry.buf
+	baseVersion := baseBuf.Version()
+	content := baseBuf.Content()
+	s.mu.Unlock()
 
 	if s.cfg.FormatOnSave {
 		if formatted, changed, err := s.fmtMgr.Format(path, content); err == nil && changed {
-			content = formatted
-			entry.buf = document.New(path, content)
 			s.mu.Lock()
-			s.buffers[bufID] = entry
-			s.mu.Unlock()
-			go s.lspMgr.DidChange(path, content)
+			entry, ok = s.buffers[bufID]
+			// Same compare-and-swap Format() uses: only apply the formatted
+			// result if the buffer is still the exact object/version we
+			// formatted. Otherwise a concurrent edit landed while the
+			// formatter (an external process, up to 10s) was running.
+			if ok && entry.buf == baseBuf && entry.buf.Version() == baseVersion {
+				newBuf := document.New(path, formatted)
+				newBuf.MarkDirty()
+				entry.buf = newBuf
+				baseBuf = newBuf
+				baseVersion = newBuf.Version()
+				content = formatted
+				s.mu.Unlock()
+				go s.lspMgr.DidChange(path, formatted)
+			} else if ok {
+				// Discard the stale formatted result rather than clobbering
+				// the newer edit — save the buffer's actual current state.
+				baseBuf = entry.buf
+				baseVersion = baseBuf.Version()
+				content = baseBuf.Content()
+				s.mu.Unlock()
+			} else {
+				s.mu.Unlock()
+				return fmt.Errorf("unknown buffer %d", bufID)
+			}
 		}
 	}
 
@@ -413,8 +440,38 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 		return err
 	}
 	s.unmarkSaving(path)
-	entry.buf.SetClean()
-	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
+
+	recoveryPath := recoveryFilePath(s.recDir, path)
+	s.mu.Lock()
+	entry, ok = s.buffers[bufID]
+	switch {
+	case ok && entry.buf == baseBuf && entry.buf.Version() == baseVersion:
+		// What's on disk matches the buffer's content — safe to mark clean
+		// and drop the recovery file.
+		entry.buf.SetClean()
+		s.mu.Unlock()
+		os.Remove(recoveryPath) //nolint:errcheck
+	case ok:
+		// The buffer changed again during the disk write (or a concurrent
+		// format-on-save race) — leave it dirty, since what's on disk no
+		// longer matches its current content, and refresh the recovery
+		// file immediately with the current content rather than leaving a
+		// stale-or-absent one until the next periodic flushDirtyBuffers
+		// tick, so a crash right now doesn't lose the newer edit.
+		current := entry.buf.Content()
+		within := int64(entry.buf.ByteLen()) <= s.cfg.RecoveryMaxBytes
+		s.mu.Unlock()
+		if within {
+			os.WriteFile(recoveryPath, []byte(current), 0600) //nolint:errcheck
+		} else {
+			os.Remove(recoveryPath) //nolint:errcheck
+		}
+	default:
+		// Buffer was closed entirely during the write.
+		s.mu.Unlock()
+		os.Remove(recoveryPath) //nolint:errcheck
+	}
+
 	go s.lspMgr.DidSave(path)
 	s.lintMgr.RunAsync(path, content)
 	go s.pluginMgr.DispatchBufferSave(context.Background(), bufID, path)
@@ -424,6 +481,10 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 }
 
 func (s *editorService) SaveAs(_ context.Context, call proto.EditorService_saveAs) error {
+	// Disk I/O to a new path can stall briefly; call.Go() so it doesn't
+	// block other RPCs on this connection behind it, matching Save/Format.
+	call.Go()
+
 	args := call.Args()
 	bufID := args.BufferId()
 	newPath, err := args.Path()
@@ -433,19 +494,39 @@ func (s *editorService) SaveAs(_ context.Context, call proto.EditorService_saveA
 
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
-	s.mu.Unlock()
 	if !ok {
+		s.mu.Unlock()
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
+	baseBuf := entry.buf
+	baseVersion := baseBuf.Version()
+	content := baseBuf.Content()
+	oldPath := baseBuf.Path()
+	s.mu.Unlock()
 
-	content := entry.buf.Content()
-	oldPath := entry.buf.Path()
 	s.markSaving(newPath)
 	if err := atomicWriteFile(newPath, []byte(content), 0o644); err != nil {
 		s.unmarkSaving(newPath)
 		return err
 	}
 	s.unmarkSaving(newPath)
+
+	s.mu.Lock()
+	entry, ok = s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	if entry.buf != baseBuf || entry.buf.Version() != baseVersion {
+		// A concurrent edit landed on the buffer while the write to newPath
+		// was in flight, so newPath now holds a stale snapshot of the
+		// buffer's content. Don't repoint the live (newer) buffer at it —
+		// that would silently discard the concurrent edit. The file at
+		// newPath is left as-is; the caller should retry SaveAs to pick up
+		// the buffer's current content.
+		s.mu.Unlock()
+		return fmt.Errorf("buffer changed while saving to %s; try again", newPath)
+	}
 	if oldPath != newPath {
 		s.removePathWatch(oldPath)
 		s.addPathWatch(newPath)
@@ -453,8 +534,6 @@ func (s *editorService) SaveAs(_ context.Context, call proto.EditorService_saveA
 	entry.buf = document.New(newPath, content)
 	entry.buf.SetClean()
 	entry.canonPath = canonicalPath(newPath)
-	s.mu.Lock()
-	s.buffers[bufID] = entry
 	s.mu.Unlock()
 
 	if oldPath != "" {

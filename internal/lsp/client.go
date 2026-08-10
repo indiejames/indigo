@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -27,7 +28,15 @@ type Client struct {
 
 	diagMu      sync.RWMutex
 	diagnostics map[string][]Diagnostic // uri → diags
+
+	closed atomic.Bool // set once the connection's read loop exits (process died)
 }
+
+// Alive reports whether the language server's connection is still up. It
+// goes false once the process crashes or its pipe closes; callers (namely
+// Manager) should stop using a Client once this is false and start a fresh
+// one instead of letting every call against it hang until its own timeout.
+func (c *Client) Alive() bool { return !c.closed.Load() }
 
 // NewClient starts the language server process and returns a ready-to-use client.
 // Initialize() must be called before using the client.
@@ -40,7 +49,7 @@ func NewClient(command string, args []string, rootDir string) (*Client, error) {
 	if err != nil {
 		if logFile != nil {
 			fmt.Fprintf(logFile, "LookPath(%q) failed: %v\nPATH=%s\n", command, err, os.Getenv("PATH")) //nolint:errcheck
-			logFile.Close() //nolint:errcheck
+			logFile.Close()                                                                             //nolint:errcheck
 		}
 		return nil, fmt.Errorf("language server %q not found: %w", command, err)
 	}
@@ -69,7 +78,7 @@ func NewClient(command string, args []string, rootDir string) (*Client, error) {
 		diagnostics: make(map[string][]Diagnostic),
 		rootURI:     pathToURI(rootDir),
 	}
-	c.conn = newJSONRPCConn(stdout, stdin, c.handleNotification, nil)
+	c.conn = newJSONRPCConnWithClose(stdout, stdin, c.handleNotification, nil, func() { c.closed.Store(true) })
 	return c, nil
 }
 
@@ -93,7 +102,7 @@ func (c *Client) Initialize() error {
 						},
 					},
 				},
-				PublishDiagnostics: &PublishDiagnosticsClientCapabilities{RelatedInformation: true},
+				PublishDiagnostics: &PublishDiagnosticsClientCapabilities{RelatedInformation: true, VersionSupport: true},
 				SemanticTokens: &SemanticTokensClientCapabilities{
 					Requests: SemanticTokensRequestClientCapabilities{Range: true},
 					TokenTypes: []string{
@@ -807,8 +816,23 @@ func (c *Client) Shutdown() {
 	defer cancel()
 	c.conn.Call(ctx, "shutdown", nil) //nolint:errcheck
 	c.conn.Notify("exit", nil)        //nolint:errcheck
-	c.cmd.Process.Kill() //nolint:errcheck
-	c.cmd.Wait() //nolint:errcheck
+	c.terminate()
+}
+
+// terminate reaps the underlying OS process and releases its resources
+// (log file) without attempting the graceful LSP shutdown handshake —
+// unlike Shutdown's request/notify pair, this is safe to call on a
+// connection that's already dead (e.g. after a crash, where there's no
+// reader left to ever answer a "shutdown" request). Idempotent: safe to
+// call on an already-exited process.
+func (c *Client) terminate() {
+	if c.cmd != nil && c.cmd.Process != nil {
+		c.cmd.Process.Kill() //nolint:errcheck
+		c.cmd.Wait()         //nolint:errcheck
+	}
+	if c.logFile != nil {
+		c.logFile.Close() //nolint:errcheck
+	}
 }
 
 func (c *Client) handleNotification(method string, params json.RawMessage) {
@@ -817,6 +841,17 @@ func (c *Client) handleNotification(method string, params json.RawMessage) {
 		var p PublishDiagnosticsParams
 		if err := json.Unmarshal(params, &p); err != nil {
 			return
+		}
+		if p.Version != nil {
+			c.mu.Lock()
+			current := c.docVersions[p.URI]
+			c.mu.Unlock()
+			if *p.Version != current {
+				// Stale (or anomalously ahead of what we've sent via
+				// DidChange/DidOpen) — discard rather than risk showing
+				// diagnostics computed against the wrong buffer state.
+				return
+			}
 		}
 		c.diagMu.Lock()
 		c.diagnostics[p.URI] = p.Diagnostics

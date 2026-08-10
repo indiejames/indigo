@@ -153,6 +153,11 @@ type CodeActionClientCapabilities struct {
 // error, just permanent silence for that document.
 type PublishDiagnosticsClientCapabilities struct {
 	RelatedInformation bool `json:"relatedInformation,omitempty"`
+	// VersionSupport tells the server we understand and use the
+	// notification's version field — without declaring this, a
+	// spec-conformant server may omit it, defeating handleNotification's
+	// staleness check.
+	VersionSupport bool `json:"versionSupport,omitempty"`
 }
 
 // CompletionItemResolveSupport advertises which CompletionItem properties the
@@ -269,7 +274,14 @@ type Diagnostic struct {
 }
 
 type PublishDiagnosticsParams struct {
-	URI         string       `json:"uri"`
+	URI string `json:"uri"`
+	// Version is the document version the server computed these diagnostics
+	// against (optional per spec — omitted by some servers). A pointer so an
+	// explicit 0 can be told apart from an omitted field; a notification
+	// whose version doesn't match what we've since tracked via DidChange is
+	// stale (or anomalously ahead) and must not overwrite current
+	// diagnostics; see handleNotification.
+	Version     *int         `json:"version,omitempty"`
 	Diagnostics []Diagnostic `json:"diagnostics"`
 }
 

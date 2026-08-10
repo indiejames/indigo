@@ -40,11 +40,18 @@ type Keybind struct {
 // full/tilde path. Use {file} in Args as a placeholder for the file path.
 // Format selects which output parser to use (see internal/lint) — it must
 // match one of that package's registered parsers (e.g. "golangci-lint-json").
+// Stdin marks a linter that reads source from stdin (with {file} passed
+// separately, e.g. via --stdin-filename, purely for config/parser
+// resolution) rather than from disk — this is what lets it re-lint the
+// buffer's live, unsaved content on every edit instead of only on save.
+// Linters without an in-memory/stdin mode (golangci-lint, cargo clippy —
+// both need a real on-disk project to compile against) stay save-triggered.
 type LinterConfig struct {
 	Extensions []string `toml:"extensions"`
 	Command    string   `toml:"command"`
 	Args       []string `toml:"args,omitempty"`
 	Format     string   `toml:"format"`
+	Stdin      bool     `toml:"stdin,omitempty"`
 }
 
 // DefaultLinters are tried when no user linter config matches an extension.
@@ -53,9 +60,11 @@ var DefaultLinters = []LinterConfig{
 	{Extensions: []string{"go"}, Command: "golangci-lint",
 		Args: []string{"run", "--output.json.path=stdout", "{file}"}, Format: "golangci-lint-json"},
 	{Extensions: []string{"js", "jsx", "ts", "tsx"}, Command: "eslint",
-		Args: []string{"--format", "json", "{file}"}, Format: "eslint-json"},
+		Args:   []string{"--stdin", "--stdin-filename", "{file}", "--format", "json"},
+		Format: "eslint-json", Stdin: true},
 	{Extensions: []string{"py"}, Command: "ruff",
-		Args: []string{"check", "--output-format", "json", "{file}"}, Format: "ruff-json"},
+		Args:   []string{"check", "--stdin-filename", "{file}", "--output-format", "json", "-"},
+		Format: "ruff-json", Stdin: true},
 	// cargo clippy has no single-file argument — it lints the whole crate
 	// containing the saved file, discovered from Manager's workDir.
 	{Extensions: []string{"rs"}, Command: "cargo",

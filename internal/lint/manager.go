@@ -31,6 +31,7 @@ type Manager struct {
 	cached  map[string][]lsp.Diagnostic // path -> most recently completed run
 	running map[string]bool             // path -> a run is currently in flight
 	pending map[string]bool             // path -> re-run once the in-flight one finishes
+	content map[string]string           // path -> content of the most recent (possibly still in-flight) request
 }
 
 // NewManager builds a Manager. autoLints are detected once at startup by
@@ -42,6 +43,7 @@ func NewManager(cfg *config.Config, workDir string) *Manager {
 		cached:    make(map[string][]lsp.Diagnostic),
 		running:   make(map[string]bool),
 		pending:   make(map[string]bool),
+		content:   make(map[string]string),
 	}
 	localBin := filepath.Join(workDir, "node_modules", ".bin")
 	for _, d := range config.DefaultLinters {
@@ -77,19 +79,41 @@ func (m *Manager) findLinter(ext string) (config.LinterConfig, bool) {
 }
 
 // RunAsync runs the configured/auto-detected linter for path in the
-// background (reading the file's on-disk content, so callers should invoke
-// this after the save that should be linted has been written). If a run for
-// path is already in flight, this call is coalesced into it: the in-flight
-// run triggers exactly one more run after it completes, rather than the
-// caller's request being dropped or a second process racing the first.
-func (m *Manager) RunAsync(path string) {
+// background against content. Linters that read from disk instead of stdin
+// (see LinterConfig.Stdin) ignore content and read the file directly, so
+// callers on that path should invoke this only after the save that should
+// be linted has been written. If a run for path is already in flight, this
+// call is coalesced into it: the in-flight run triggers exactly one more
+// run after it completes (using the latest content passed in, not the
+// content at the time the in-flight run started), rather than the caller's
+// request being dropped or a second process racing the first.
+func (m *Manager) RunAsync(path, content string) {
 	ext := strings.TrimPrefix(filepath.Ext(path), ".")
 	lc, ok := m.findLinter(ext)
 	if !ok {
 		return
 	}
+	m.runAsync(path, content, lc)
+}
 
+// RunOnEdit is RunAsync's live-typing counterpart: it only does anything for
+// linters that can lint in-memory content via stdin (LinterConfig.Stdin).
+// Disk-reading linters (golangci-lint, cargo clippy) are compile-based and
+// need a real on-disk project to run against, so re-invoking them on every
+// keystroke would just repeat the same stale-disk-content run for no
+// benefit — those stay save-triggered via RunAsync.
+func (m *Manager) RunOnEdit(path, content string) {
+	ext := strings.TrimPrefix(filepath.Ext(path), ".")
+	lc, ok := m.findLinter(ext)
+	if !ok || !lc.Stdin {
+		return
+	}
+	m.runAsync(path, content, lc)
+}
+
+func (m *Manager) runAsync(path, content string, lc config.LinterConfig) {
 	m.mu.Lock()
+	m.content[path] = content
 	if m.running[path] {
 		m.pending[path] = true
 		m.mu.Unlock()
@@ -102,7 +126,11 @@ func (m *Manager) RunAsync(path string) {
 }
 
 func (m *Manager) run(path string, lc config.LinterConfig) {
-	diags, err := runLinter(lc, path, m.workDir)
+	m.mu.Lock()
+	content := m.content[path]
+	m.mu.Unlock()
+
+	diags, err := runLinter(lc, path, content, m.workDir)
 
 	m.mu.Lock()
 	if err == nil {
@@ -114,7 +142,10 @@ func (m *Manager) run(path string, lc config.LinterConfig) {
 	m.mu.Unlock()
 
 	if rerun {
-		m.RunAsync(path)
+		m.mu.Lock()
+		latest := m.content[path]
+		m.mu.Unlock()
+		m.runAsync(path, latest, lc)
 	}
 }
 
@@ -132,8 +163,11 @@ func (m *Manager) GetDiagnostics(path string) []lsp.Diagnostic {
 // command-line argument, so without this it fails outright on any project
 // not launched from its own root. Most linters exit non-zero when they find
 // issues, so a non-zero exit is only treated as a fatal error when there's
-// no parseable output to fall back on.
-func runLinter(lc config.LinterConfig, filePath, workDir string) ([]lsp.Diagnostic, error) {
+// no parseable output to fall back on. When lc.Stdin is set, content is
+// piped to the process's stdin instead of the linter reading filePath off
+// disk itself, so this reflects the buffer's current (possibly unsaved)
+// state rather than what was last written to disk.
+func runLinter(lc config.LinterConfig, filePath, content, workDir string) ([]lsp.Diagnostic, error) {
 	parse, ok := parsers[lc.Format]
 	if !ok {
 		return nil, fmt.Errorf("lint: unknown format %q for %s", lc.Format, lc.Command)
@@ -147,6 +181,9 @@ func runLinter(lc config.LinterConfig, filePath, workDir string) ([]lsp.Diagnost
 
 	proc := exec.CommandContext(ctx, cmd, args...)
 	proc.Dir = workDir
+	if lc.Stdin {
+		proc.Stdin = strings.NewReader(content)
+	}
 	var out bytes.Buffer
 	proc.Stdout = &out
 	runErr := proc.Run()

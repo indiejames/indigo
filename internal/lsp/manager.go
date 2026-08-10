@@ -78,8 +78,17 @@ func (m *Manager) clientForPath(path string) *Client {
 	for {
 		m.mu.Lock()
 		if c, ok := m.clients[langID]; ok {
-			m.mu.Unlock()
-			return c
+			if c.Alive() {
+				m.mu.Unlock()
+				return c
+			}
+			// The server process died after a previously successful start.
+			// Drop the stale entry so the code below respawns it, rather
+			// than handing back a dead client every future call on it would
+			// just hang against until its own timeout. If the respawn
+			// itself fails, startClient's own recordFailedStart still
+			// throttles retries via the cooldown check below.
+			delete(m.clients, langID)
 		}
 		if last, failed := m.failedStarts[langID]; failed && time.Since(last) < startRetryCooldown {
 			m.mu.Unlock()

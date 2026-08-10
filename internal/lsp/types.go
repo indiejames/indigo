@@ -269,7 +269,12 @@ type Diagnostic struct {
 }
 
 type PublishDiagnosticsParams struct {
-	URI         string       `json:"uri"`
+	URI string `json:"uri"`
+	// Version is the document version the server computed these diagnostics
+	// against (optional per spec — omitted by some servers). A notification
+	// with an older version than what we've since sent via DidChange is
+	// stale and must not overwrite newer diagnostics; see handleNotification.
+	Version     int          `json:"version,omitempty"`
 	Diagnostics []Diagnostic `json:"diagnostics"`
 }
 

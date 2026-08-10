@@ -44,10 +44,20 @@ type jsonrpcConn struct {
 	pending    sync.Map // int64 → chan *jsonrpcMsg
 	handler    notificationHandler
 	reqHandler requestHandler
+	onClose    func() // called once, after readLoop exits (EOF/process died)
 }
 
 func newJSONRPCConn(r io.Reader, w io.Writer, handler notificationHandler, reqHandler requestHandler) *jsonrpcConn {
-	c := &jsonrpcConn{w: w, handler: handler, reqHandler: reqHandler}
+	return newJSONRPCConnWithClose(r, w, handler, reqHandler, nil)
+}
+
+// newJSONRPCConnWithClose is newJSONRPCConn plus an onClose hook. onClose
+// must be provided here rather than set on the returned *jsonrpcConn
+// afterward — readLoop starts running in its own goroutine immediately, so
+// a field assigned after construction could race a connection that closes
+// (or a process that crashes) fast enough to exit readLoop first.
+func newJSONRPCConnWithClose(r io.Reader, w io.Writer, handler notificationHandler, reqHandler requestHandler, onClose func()) *jsonrpcConn {
+	c := &jsonrpcConn{w: w, handler: handler, reqHandler: reqHandler, onClose: onClose}
 	go c.readLoop(r)
 	return c
 }
@@ -116,6 +126,9 @@ func (c *jsonrpcConn) write(msg jsonrpcMsg) error {
 
 func (c *jsonrpcConn) readLoop(r io.Reader) {
 	defer c.failPending()
+	if c.onClose != nil {
+		defer c.onClose()
+	}
 	br := bufio.NewReader(r)
 	for {
 		// Read headers until blank line.

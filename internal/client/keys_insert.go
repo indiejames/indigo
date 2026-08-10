@@ -373,7 +373,7 @@ func (m Model) insertHookCmd(r rune) tea.Cmd {
 		if err != nil {
 			return nil
 		}
-		return pluginKeyResultMsg{result: result}
+		return pluginKeyResultMsg{bufID: bufID, result: result}
 	}
 }
 

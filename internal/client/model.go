@@ -234,8 +234,14 @@ type QuitAllMsg struct {
 	SaveAll bool // :wqa — save dirty buffers first
 }
 
-// pluginKeyResultMsg carries the result of a plugin key RPC call.
-type pluginKeyResultMsg struct{ result PluginKeyResult }
+// pluginKeyResultMsg carries the result of a plugin key RPC call. bufID is
+// the buffer the request was made against (captured client-side at request
+// time, same as inlayHintsMsg/semanticTokensMsg), used to discard a result
+// that arrives after the user has switched to a different buffer.
+type pluginKeyResultMsg struct {
+	bufID  uint32
+	result PluginKeyResult
+}
 
 // decorationsMsg carries fresh plugin decorations from the server.
 type decorationsMsg struct {
@@ -1135,6 +1141,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pluginKeyResultMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
 		// Update capture mode based on what the plugin requested.
 		if msg.result.CaptureKeys > 0 {
 			m.captureMode = true

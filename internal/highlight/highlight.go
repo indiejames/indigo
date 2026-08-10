@@ -628,11 +628,22 @@ func runeColToByteCol(line string, runeCol int) int {
 // indigo's existing hex palette instead of maintaining a second one.
 func HexToANSI(hex string) string { return hexToANSI(hex) }
 
+// defaultFgANSI resets to the terminal's default foreground color — the
+// fallback used when a theme supplies a color string hexToANSI can't parse.
+const defaultFgANSI = "\x1b[39m"
+
 func hexToANSI(hex string) string {
 	hex = strings.TrimPrefix(hex, "#")
-	r, _ := strconv.ParseInt(hex[0:2], 16, 64)
-	g, _ := strconv.ParseInt(hex[2:4], 16, 64)
-	b, _ := strconv.ParseInt(hex[4:6], 16, 64)
+	if len(hex) != 6 {
+		return defaultFgANSI
+	}
+	v, err := strconv.ParseUint(hex, 16, 32)
+	if err != nil {
+		return defaultFgANSI
+	}
+	r := (v >> 16) & 0xFF
+	g := (v >> 8) & 0xFF
+	b := v & 0xFF
 	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b)
 }
 

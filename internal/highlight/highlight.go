@@ -203,6 +203,10 @@ func (h *Highlighter) TextObjectAt(content []byte, line, col int, kind string) (
 	if h == nil {
 		return TextObject{}, false
 	}
+	lines := strings.Split(string(content), "\n")
+	if line < 0 || line >= len(lines) {
+		return TextObject{}, false
+	}
 	p := sitter.NewParser()
 	p.SetLanguage(h.lang)
 	tree, err := p.ParseString(context.Background(), nil, content)
@@ -211,7 +215,10 @@ func (h *Highlighter) TextObjectAt(content []byte, line, col int, kind string) (
 	}
 	defer tree.Close()
 
-	pt := sitter.Point{Row: uint(line), Column: uint(col)}
+	// col is rune-based (matching the client's cursor column); tree-sitter
+	// Points use byte columns.
+	byteCol := runeColToByteCol(lines[line], col)
+	pt := sitter.Point{Row: uint(line), Column: uint(byteCol)}
 	leaf := tree.RootNode().DescendantForPointRange(pt, pt)
 	if leaf.IsNull() {
 		return TextObject{}, false
@@ -219,13 +226,13 @@ func (h *Highlighter) TextObjectAt(content []byte, line, col int, kind string) (
 
 	switch kind {
 	case "function":
-		return tsFunctionInside(leaf)
+		return tsFunctionInside(leaf, lines)
 	case "type":
-		return tsTypeInside(leaf)
+		return tsTypeInside(leaf, lines)
 	case "argument":
-		return tsArgumentAt(leaf, pt)
+		return tsArgumentAt(leaf, pt, lines)
 	case "comment":
-		return tsCommentAt(leaf)
+		return tsCommentAt(leaf, lines)
 	}
 	return TextObject{}, false
 }
@@ -237,6 +244,10 @@ func (h *Highlighter) TextObjectAround(content []byte, line, col int, kind strin
 	if h == nil {
 		return TextObject{}, false
 	}
+	lines := strings.Split(string(content), "\n")
+	if line < 0 || line >= len(lines) {
+		return TextObject{}, false
+	}
 	p := sitter.NewParser()
 	p.SetLanguage(h.lang)
 	tree, err := p.ParseString(context.Background(), nil, content)
@@ -245,7 +256,10 @@ func (h *Highlighter) TextObjectAround(content []byte, line, col int, kind strin
 	}
 	defer tree.Close()
 
-	pt := sitter.Point{Row: uint(line), Column: uint(col)}
+	// col is rune-based (matching the client's cursor column); tree-sitter
+	// Points use byte columns.
+	byteCol := runeColToByteCol(lines[line], col)
+	pt := sitter.Point{Row: uint(line), Column: uint(byteCol)}
 	leaf := tree.RootNode().DescendantForPointRange(pt, pt)
 	if leaf.IsNull() {
 		return TextObject{}, false
@@ -257,7 +271,7 @@ func (h *Highlighter) TextObjectAround(content []byte, line, col int, kind strin
 		if !ok {
 			return TextObject{}, false
 		}
-		return tsNodeSpan(fn), true
+		return tsNodeSpan(fn, lines), true
 	case "type":
 		tn, ok := tsAncestor(leaf, tsTypeTypes)
 		if !ok {
@@ -267,13 +281,13 @@ func (h *Highlighter) TextObjectAround(content []byte, line, col int, kind strin
 		// Walk up one more level if the direct ancestor is a nested spec.
 		parent := tn.Parent()
 		if !parent.IsNull() && tsTypeTypes[parent.Type()] {
-			return tsNodeSpan(parent), true
+			return tsNodeSpan(parent, lines), true
 		}
-		return tsNodeSpan(tn), true
+		return tsNodeSpan(tn, lines), true
 	case "argument":
-		return tsArgumentAt(leaf, pt)
+		return tsArgumentAt(leaf, pt, lines)
 	case "comment":
-		return tsCommentAt(leaf)
+		return tsCommentAt(leaf, lines)
 	}
 	return TextObject{}, false
 }
@@ -487,9 +501,11 @@ func leadingWS(s string) int {
 	return i
 }
 
-func tsNodeSpan(n sitter.Node) TextObject {
+func tsNodeSpan(n sitter.Node, lines []string) TextObject {
 	sp, ep := n.StartPoint(), n.EndPoint()
-	return TextObject{int(sp.Row), int(sp.Column), int(ep.Row), int(ep.Column)}
+	startCol := byteToRuneCol(lineAt(lines, int(sp.Row)), int(sp.Column))
+	endCol := byteToRuneCol(lineAt(lines, int(ep.Row)), int(ep.Column))
+	return TextObject{int(sp.Row), startCol, int(ep.Row), endCol}
 }
 
 func tsAncestor(node sitter.Node, types map[string]bool) (sitter.Node, bool) {
@@ -505,14 +521,17 @@ func tsAncestor(node sitter.Node, types map[string]bool) (sitter.Node, bool) {
 // blockInsideSpan returns the span of a block's content, excluding the brace lines.
 // EndCol is set to math.MaxInt for multi-line blocks; callers should clamp to the
 // actual line length before storing into a cursor or selection.
-func blockInsideSpan(block sitter.Node) TextObject {
+func blockInsideSpan(block sitter.Node, lines []string) TextObject {
 	sp := block.StartPoint()
 	ep := block.EndPoint()
 	if ep.Row > sp.Row {
 		return TextObject{int(sp.Row) + 1, 0, int(ep.Row) - 1, math.MaxInt}
 	}
-	// Single-line block: select between the braces.
-	sc, ec := int(sp.Column)+1, int(ep.Column)-1
+	// Single-line block: select between the braces. sp/ep are byte columns
+	// on the same line; convert to rune columns before adjusting by ±1 so
+	// the ±1 lands on a rune boundary rather than mid-character.
+	line := lineAt(lines, int(sp.Row))
+	sc, ec := byteToRuneCol(line, int(sp.Column))+1, byteToRuneCol(line, int(ep.Column))-1
 	if ec < sc {
 		ec = sc
 	}
@@ -538,29 +557,32 @@ func findDescendantBlock(node sitter.Node, depth int) (sitter.Node, bool) {
 	return sitter.Node{}, false
 }
 
-func tsFunctionInside(node sitter.Node) (TextObject, bool) {
+func tsFunctionInside(node sitter.Node, lines []string) (TextObject, bool) {
 	fn, ok := tsAncestor(node, tsFunctionTypes)
 	if !ok {
 		return TextObject{}, false
 	}
 	if block, found := findDescendantBlock(fn, 4); found {
-		return blockInsideSpan(block), true
+		return blockInsideSpan(block, lines), true
 	}
-	return tsNodeSpan(fn), true
+	return tsNodeSpan(fn, lines), true
 }
 
-func tsTypeInside(node sitter.Node) (TextObject, bool) {
+func tsTypeInside(node sitter.Node, lines []string) (TextObject, bool) {
 	tn, ok := tsAncestor(node, tsTypeTypes)
 	if !ok {
 		return TextObject{}, false
 	}
 	if block, found := findDescendantBlock(tn, 4); found {
-		return blockInsideSpan(block), true
+		return blockInsideSpan(block, lines), true
 	}
-	return tsNodeSpan(tn), true
+	return tsNodeSpan(tn, lines), true
 }
 
-func tsArgumentAt(node sitter.Node, pt sitter.Point) (TextObject, bool) {
+// tsArgumentAt finds the argument-list child containing pt. pt is a
+// byte-column tree-sitter Point (already converted by the caller), matching
+// the byte columns of child.StartPoint()/EndPoint() compared against it.
+func tsArgumentAt(node sitter.Node, pt sitter.Point, lines []string) (TextObject, bool) {
 	argList, ok := tsAncestor(node, tsArgListTypes)
 	if !ok {
 		return TextObject{}, false
@@ -575,18 +597,18 @@ func tsArgumentAt(node sitter.Node, pt sitter.Point) (TextObject, bool) {
 		colOK := (sp.Row < pt.Row || sp.Column <= pt.Column) &&
 			(ep.Row > pt.Row || ep.Column >= pt.Column)
 		if colOK {
-			return tsNodeSpan(child), true
+			return tsNodeSpan(child, lines), true
 		}
 	}
 	return TextObject{}, false
 }
 
-func tsCommentAt(node sitter.Node) (TextObject, bool) {
+func tsCommentAt(node sitter.Node, lines []string) (TextObject, bool) {
 	cn, ok := tsAncestor(node, tsCommentTypes)
 	if !ok {
 		return TextObject{}, false
 	}
-	return tsNodeSpan(cn), true
+	return tsNodeSpan(cn, lines), true
 }
 
 func lineAt(lines []string, n int) string {

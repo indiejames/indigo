@@ -110,18 +110,26 @@ args       = ["format", "-"]
 
 ## Linters
 
-Linter results run automatically after `:w` (asynchronously — a save isn't blocked waiting
-on them) and are merged with whatever diagnostics the file's LSP server already reports, so
-they show up the same way (gutter markers, the `D`-popup) with no extra keybinding needed.
+Linter results are merged with whatever diagnostics the file's LSP server already reports,
+so they show up the same way (gutter markers, the `D`-popup) with no extra keybinding
+needed. When a linter supports it (`stdin = true`, see below), it also reruns live as you
+type, against the buffer's current unsaved content — not just after `:w`. Either way, runs
+are asynchronous and never block editing or saving.
 
 ### Built-in defaults
 
-| Extensions | Linter |
-|-----------|--------|
-| `.go` | `golangci-lint run --output.json.path=stdout {file}` |
-| `.js` `.jsx` `.ts` `.tsx` | `eslint --format json {file}` |
-| `.py` | `ruff check --output-format json {file}` |
-| `.rs` | `cargo clippy --message-format json` (whole crate, not a single file) |
+| Extensions | Linter | Live (as-you-type) |
+|-----------|--------|---------------------|
+| `.go` | `golangci-lint run --output.json.path=stdout {file}` | no — save-triggered only |
+| `.js` `.jsx` `.ts` `.tsx` | `eslint --stdin --stdin-filename {file} --format json` | yes |
+| `.py` | `ruff check --stdin-filename {file} --output-format json -` | yes |
+| `.rs` | `cargo clippy --message-format json` (whole crate, not a single file) | no — save-triggered only |
+
+golangci-lint and cargo clippy compile the project to produce their results, so they need a
+real on-disk build and can only be run after a save. eslint and ruff can lint source handed
+to them directly, so indigo pipes the live buffer content to their stdin and reruns them on
+every edit (coalesced: a burst of keystrokes collapses into one rerun after the linter
+finishes, not one process per keystroke).
 
 Only linters whose command is found in PATH (or `node_modules/.bin`) are used; missing
 tools are silently skipped, same as formatters.
@@ -131,7 +139,9 @@ tools are silently skipped, same as formatters.
 Add a `[[linter]]` block to override or extend the defaults. `format` must name one of
 `internal/lint`'s registered output parsers — `golangci-lint-json`, `eslint-json`,
 `ruff-json`, or `cargo-clippy-json`; a linter whose output indigo doesn't know how to
-parse yet can't be added this way.
+parse yet can't be added this way. Set `stdin = true` if the command reads source from
+stdin (with `{file}` passed separately, purely so it can resolve config/parser by path) —
+that's what enables as-you-type reruns instead of save-only ones.
 
 ```toml
 [[linter]]

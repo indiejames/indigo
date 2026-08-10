@@ -217,3 +217,86 @@ func TestHandleCommandEsc(t *testing.T) {
 		t.Errorf("esc: cmdBuf = %q, want empty", got.cmdBuf)
 	}
 }
+
+
+// TestPushStatusLogsMessage verifies pushStatus records non-empty messages
+// in messageLog and classifies "E:"/"ERR:"-prefixed ones as errors.
+func TestPushStatusLogsMessage(t *testing.T) {
+	m := newTestModel("")
+	m = m.pushStatus("copied")
+	m = m.pushStatus("E: pattern not found")
+
+	if m.status != "E: pattern not found" {
+		t.Errorf("status = %q, want %q", m.status, "E: pattern not found")
+	}
+	if len(m.messageLog) != 2 {
+		t.Fatalf("len(messageLog) = %d, want 2", len(m.messageLog))
+	}
+	if m.messageLog[0].text != "copied" || m.messageLog[0].isErr {
+		t.Errorf("messageLog[0] = %+v, want text=copied isErr=false", m.messageLog[0])
+	}
+	if m.messageLog[1].text != "E: pattern not found" || !m.messageLog[1].isErr {
+		t.Errorf("messageLog[1] = %+v, want text=E:... isErr=true", m.messageLog[1])
+	}
+}
+
+// TestPushStatusClearDoesNotLog verifies clearing the status (empty string)
+// doesn't add a spurious entry to messageLog.
+func TestPushStatusClearDoesNotLog(t *testing.T) {
+	m := newTestModel("")
+	m = m.pushStatus("copied")
+	m = m.pushStatus("")
+
+	if m.status != "" {
+		t.Errorf("status = %q, want empty", m.status)
+	}
+	if len(m.messageLog) != 1 {
+		t.Fatalf("len(messageLog) = %d, want 1", len(m.messageLog))
+	}
+}
+
+// TestPushStatusCapsLog verifies messageLog never grows past maxMessageLog,
+// keeping the most recent entries.
+func TestPushStatusCapsLog(t *testing.T) {
+	m := newTestModel("")
+	for i := 0; i < maxMessageLog+10; i++ {
+		m = m.pushStatus("msg")
+	}
+	if len(m.messageLog) != maxMessageLog {
+		t.Fatalf("len(messageLog) = %d, want %d", len(m.messageLog), maxMessageLog)
+	}
+}
+
+// TestMessageLogPopupOpenScrollClose verifies the space-l menu action opens
+// the popup, j/k scroll it, and esc/q close it without leaking scroll state.
+func TestMessageLogPopupOpenScrollClose(t *testing.T) {
+	m := newTestModel("")
+	for i := 0; i < 5; i++ {
+		m = m.pushStatus("msg")
+	}
+
+	m2, _ := findCommand([]string{" ", "l"})
+	if m2 == nil || m2.execute == nil {
+		t.Fatal("space-l command not found in commandMenuRoot")
+	}
+	res, _ := m2.execute(m)
+	m = res.(Model)
+	if !m.msgLogVisible {
+		t.Fatal("space-l did not open the message log popup")
+	}
+
+	res, _ = m.handleKey(fakeKey("k"))
+	m = res.(Model)
+	if !m.msgLogVisible {
+		t.Error("k should scroll, not close, the popup")
+	}
+
+	res, _ = m.handleKey(fakeKey("esc"))
+	m = res.(Model)
+	if m.msgLogVisible {
+		t.Error("esc did not close the message log popup")
+	}
+	if m.msgLogScroll != 0 {
+		t.Errorf("msgLogScroll after close = %d, want 0", m.msgLogScroll)
+	}
+}

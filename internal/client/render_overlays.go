@@ -1063,3 +1063,95 @@ func renderHelpPopup(width, scroll, maxH int, pluginBindings []ClientPluginBindi
 	out = append(out, bottom)
 	return out
 }
+
+// messageLogInnerWidth mirrors the innerW calculation renderMessageLogPopup
+// uses, so handleKey can compute the same content width for scroll-clamping
+// without duplicating the popup's box-sizing logic.
+func messageLogInnerWidth(width int) int {
+	innerW := min(width-4, 100) // cap so it doesn't sprawl on huge terminals
+	if innerW < 30 {
+		innerW = max(30, width-4)
+	}
+	return innerW
+}
+
+// messageLogPopupLines formats each logged status message as "HH:MM:SS  text",
+// truncated to fit innerW columns, styled red for error ("E:"/"ERR:") entries.
+func messageLogPopupLines(log []logEntry, innerW int) []string {
+	if len(log) == 0 {
+		return []string{popupTextStyle.Render("No messages yet.")}
+	}
+	lines := make([]string, len(log))
+	for i, e := range log {
+		ts := e.at.Format("15:04:05") + "  "
+		avail := max(0, innerW-len([]rune(ts)))
+		textRunes := []rune(e.text)
+		if len(textRunes) > avail {
+			textRunes = append([]rune(string(textRunes[:max(0, avail-1)])), '…')
+		}
+		style := popupTextStyle
+		if e.isErr {
+			style = diagErrorStyle.Background(popupBg)
+		}
+		lines[i] = popupTextStyle.Render(ts) + style.Render(string(textRunes))
+	}
+	return lines
+}
+
+// renderMessageLogPopup renders the message-log popup (space l) as a slice of
+// styled, full-width lines. Mirrors renderHelpPopup's layout/scroll handling.
+func renderMessageLogPopup(width, scroll, maxH int, log []logEntry) []string {
+	innerW := messageLogInnerWidth(width)
+
+	bodyLines := messageLogPopupLines(log, innerW)
+	total := len(bodyLines)
+	contentH := maxH - 2
+	if contentH < 1 {
+		contentH = 1
+	}
+	// Clamp scroll.
+	if scroll > total-contentH {
+		scroll = max(0, total-contentH)
+	}
+	end := min(scroll+contentH, total)
+	visible := bodyLines[scroll:end]
+	// Pad to fixed height so the box doesn't shrink near the bottom.
+	for len(visible) < contentH {
+		visible = append(visible, "")
+	}
+
+	// Pad each line to innerW visual columns.
+	padded := make([]string, len(visible))
+	for i, line := range visible {
+		lw := lipgloss.Width(line)
+		if lw < innerW {
+			line += popupTextStyle.Render(strings.Repeat(" ", innerW-lw))
+		}
+		padded[i] = line
+	}
+
+	title := "Messages — q to close"
+	titleRunes := []rune(title)
+	dashes := max(0, innerW-len(titleRunes))
+	top := popupBorderStyle.Render(bdrTL+string(titleRunes)) +
+		popupBorderStyle.Render(strings.Repeat(bdrH, dashes)+bdrTR)
+
+	out := []string{top}
+	for _, line := range padded {
+		out = append(out, popupBorderStyle.Render(bdrV)+line+popupBorderStyle.Render(bdrV))
+	}
+
+	needsScroll := total > contentH
+	var bottom string
+	if needsScroll {
+		shown := min(scroll+contentH, total)
+		indicator := fmt.Sprintf(" j/k scroll   %d/%d ", shown, total)
+		indicatorRunes := []rune(indicator)
+		remainDashes := max(0, innerW-len(indicatorRunes))
+		bottom = popupBorderStyle.Render(bdrBL + indicator + strings.Repeat(bdrH, remainDashes) + bdrBR)
+	} else {
+		bottom = popupBorderStyle.Render(bdrBL + strings.Repeat(bdrH, innerW) + bdrBR)
+	}
+	out = append(out, bottom)
+	return out
+}

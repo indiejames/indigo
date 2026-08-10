@@ -248,6 +248,11 @@ var commandMenuRoot = command{
 		{key: "f", label: "File picker", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return OpenPickerMsg{} }
 		}},
+		{key: "l", label: "Message Log", execute: func(m Model) (tea.Model, tea.Cmd) {
+			m.msgLogVisible = true
+			m.msgLogScroll = 1 << 30 // clamped to the last page in the popup handlers/renderer
+			return m, nil
+		}},
 		{key: "n", label: "New file", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return OpenNewFileMsg{} }
 		}},
@@ -420,6 +425,36 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Scroll keys navigate the message-log popup; q/esc dismiss it.
+	if m.msgLogVisible {
+		logLines := messageLogPopupLines(m.messageLog, messageLogInnerWidth(m.width))
+		maxPopH := max(6, m.height-5)
+		contentH := maxPopH - 2
+		maxScroll := max(0, len(logLines)-contentH)
+		switch msg.String() {
+		case "j", "down":
+			m.msgLogScroll = min(m.msgLogScroll+1, maxScroll)
+			return m, nil
+		case "k", "up":
+			m.msgLogScroll = max(0, m.msgLogScroll-1)
+			return m, nil
+		case "ctrl+f":
+			m.msgLogScroll = min(m.msgLogScroll+m.height/4, maxScroll)
+			return m, nil
+		case "ctrl+b":
+			m.msgLogScroll = max(0, m.msgLogScroll-m.height/4)
+			return m, nil
+		case "esc", "q":
+			m.msgLogVisible = false
+			m.msgLogScroll = 0
+			return m, nil
+		default:
+			m.msgLogVisible = false
+			m.msgLogScroll = 0
+			// Don't consume: let the key fall through to normal handling.
+		}
+	}
+
 	// Scroll keys navigate the hover popup; all other keys dismiss it.
 	if m.hoverContent != nil {
 		// contentH mirrors the calculation in renderHoverPopup.
@@ -453,7 +488,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSaveAsDialog(msg)
 	}
 	// Clear transient error on any key.
-	m.status = ""
+	m = m.pushStatus("")
 	switch m.mode {
 	case ModeNormal:
 		return m.handleNormal(msg)
@@ -481,7 +516,7 @@ func (m Model) handleSaveAsDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		newPath, err := filepath.Abs(input)
 		if err != nil {
-			m.status = fmt.Sprintf("E: bad path: %v", err)
+			m = m.pushStatus(fmt.Sprintf("E: bad path: %v", err))
 			m.saveAsThenClose = false
 			return m, nil
 		}

@@ -63,7 +63,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func executeCancelHint(m Model) (tea.Model, tea.Cmd) {
-	m.status = "Use :q to quit"
+	m = m.pushStatus("Use :q to quit")
 	return m, nil
 }
 
@@ -173,7 +173,7 @@ func executeToggleDiagPopup(m Model) (tea.Model, tea.Cmd) {
 	if len(m.diagsAtPos(m.cursor.Line, m.cursor.Col)) > 0 {
 		m.diagPopup = !m.diagPopup
 	} else {
-		m.status = "No diagnostics on this line"
+		m = m.pushStatus("No diagnostics on this line")
 	}
 	return m, nil
 }
@@ -330,9 +330,9 @@ func executeChangeSelection(m Model) (tea.Model, tea.Cmd) {
 func executeYank(m Model) (tea.Model, tea.Cmd) {
 	if text := m.selectedText(); text != "" {
 		if err := writeClipboard(text); err != nil {
-			m.status = "clipboard: " + err.Error()
+			m = m.pushStatus("clipboard: " + err.Error())
 		} else {
-			m.status = "copied"
+			m = m.pushStatus("copied")
 		}
 		m.sel = nil
 	}
@@ -439,7 +439,7 @@ func executeWordEnd(m Model) (tea.Model, tea.Cmd) {
 func executePaste(m Model) (tea.Model, tea.Cmd) {
 	text, err := readClipboard()
 	if err != nil {
-		m.status = "clipboard: " + err.Error()
+		m = m.pushStatus("clipboard: " + err.Error())
 		return m, nil
 	}
 	if strings.Contains(text, "\n") {
@@ -480,11 +480,11 @@ func executeFetchPluginBindings(m Model) (tea.Model, tea.Cmd) {
 
 func executeSplitSelectionIntoCursors(m Model) (tea.Model, tea.Cmd) {
 	if m.sel == nil {
-		m.status = "alt+s: select multiple lines first (x to select, X to extend)"
+		m = m.pushStatus("alt+s: select multiple lines first (x to select, X to extend)")
 		return m, nil
 	}
 	if start, end := m.sel.ordered(); start.Line == end.Line {
-		m.status = "alt+s: selection must span multiple lines"
+		m = m.pushStatus("alt+s: selection must span multiple lines")
 		return m, nil
 	}
 	splitSelectionIntoCursors(&m)
@@ -494,17 +494,17 @@ func executeSplitSelectionIntoCursors(m Model) (tea.Model, tea.Cmd) {
 func executeSetMark(m Model) (tea.Model, tea.Cmd) {
 	pos := m.cursor
 	m.mark = &pos
-	m.status = "mark set"
+	m = m.pushStatus("mark set")
 	return m, nil
 }
 
 func executeSelectToMark(m Model) (tea.Model, tea.Cmd) {
 	if m.mark == nil {
-		m.status = "no mark set (press z to set mark)"
+		m = m.pushStatus("no mark set (press z to set mark)")
 		return m, nil
 	}
 	m.sel = &Selection{Anchor: *m.mark, Head: m.cursor}
-	m.status = ""
+	m = m.pushStatus("")
 	return m, nil
 }
 

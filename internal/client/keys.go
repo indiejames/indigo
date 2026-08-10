@@ -380,7 +380,7 @@ func (m Model) handleMenuActionRPC(pluginName, action string) (tea.Model, tea.Cm
 		if err != nil {
 			return errorMsg{err}
 		}
-		return pluginKeyResultMsg{result: result}
+		return pluginKeyResultMsg{bufID: bufID, result: result}
 	}
 }
 
@@ -587,7 +587,7 @@ func (m Model) handleCapturedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return errorMsg{err}
 		}
-		return pluginKeyResultMsg{result: result}
+		return pluginKeyResultMsg{bufID: bufID, result: result}
 	}
 }
 
@@ -604,7 +604,7 @@ func (m Model) handlePluginKeyRPC(key string) (tea.Model, tea.Cmd) {
 		if err != nil {
 			return errorMsg{err}
 		}
-		return pluginKeyResultMsg{result: result}
+		return pluginKeyResultMsg{bufID: bufID, result: result}
 	}
 }
 

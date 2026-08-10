@@ -139,12 +139,18 @@ func (m *Manager) run(path string, lc config.LinterConfig) {
 	m.running[path] = false
 	rerun := m.pending[path]
 	m.pending[path] = false
+	var latest string
+	if rerun {
+		latest = m.content[path]
+	} else {
+		// No rerun queued: content was only needed to feed this run's
+		// stdin, so drop it rather than holding the file's full text in
+		// memory for the rest of the session.
+		delete(m.content, path)
+	}
 	m.mu.Unlock()
 
 	if rerun {
-		m.mu.Lock()
-		latest := m.content[path]
-		m.mu.Unlock()
 		m.runAsync(path, latest, lc)
 	}
 }

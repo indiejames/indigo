@@ -53,13 +53,74 @@ func (m Model) charBeforeCursor() rune {
 }
 
 // shouldAutoPair decides whether typing opener r should also insert its
-// matching closer. Brackets always pair; quotes only pair when the cursor
-// isn't adjacent to a word character on either side.
+// matching closer. Quotes only pair when the cursor isn't adjacent to a
+// word character on either side, and not when the cursor sits right
+// before a stray, unmatched quote (see insideOpenQuote) — that quote gets
+// claimed as the closer instead of nesting a redundant new pair. Brackets
+// follow the same "claim, don't nest" rule via bracketBalance: pairing is
+// skipped when the very next character is already an unmatched instance
+// of the closer (e.g. the cursor sits right before a stray ')' with no
+// '(' before it to claim it), so typing '(' before a lone ')' yields "()"
+// instead of "())".
 func (m Model) shouldAutoPair(r rune) bool {
-	if !autoPairQuotes[r] {
+	if autoPairQuotes[r] {
+		if isWordChar(m.charBeforeCursor()) || isWordChar(m.charAfterCursor()) {
+			return false
+		}
+		return m.charAfterCursor() != r
+	}
+	closer := autoPairs[r]
+	if m.charAfterCursor() != closer {
 		return true
 	}
-	return !isWordChar(m.charBeforeCursor()) && !isWordChar(m.charAfterCursor())
+	content := []rune(m.buf.Content())
+	offset := m.buf.RuneOffset(m.cursor.Line, m.cursor.Col)
+	return bracketBalance(content, offset, r, closer) > 0
+}
+
+// insideOpenQuote reports whether an odd number of quote characters r
+// precede the cursor on the current line, i.e. whether the cursor sits
+// inside a string opened earlier on this line rather than next to an
+// unrelated, unmatched quote character. Quotes are self-symmetric (the
+// opener and closer are the same rune), so — unlike brackets — a running
+// stack can't tell "the closer of the string I'm in" apart from "some
+// other quote entirely"; parity of the count is the standard stand-in.
+func (m Model) insideOpenQuote(r rune) bool {
+	runes := []rune(m.buf.Line(m.cursor.Line))
+	col := m.cursor.Col
+	if col > len(runes) {
+		col = len(runes)
+	}
+	count := 0
+	for _, c := range runes[:col] {
+		if c == r {
+			count++
+		}
+	}
+	return count%2 == 1
+}
+
+// bracketBalance counts unmatched opener runes among content[:upTo],
+// i.e. openers not yet closed by a following closer within that prefix.
+// A positive result means an earlier, still-open opener is waiting for a
+// closer, so the closer rune sitting right after upTo belongs to it
+// rather than being "free" for a newly typed opener to claim.
+func bracketBalance(content []rune, upTo int, opener, closer rune) int {
+	balance := 0
+	if upTo > len(content) {
+		upTo = len(content)
+	}
+	for _, r := range content[:upTo] {
+		switch r {
+		case opener:
+			balance++
+		case closer:
+			if balance > 0 {
+				balance--
+			}
+		}
+	}
+	return balance
 }
 
 // shouldExpandBraceBlock decides whether typing '{' should expand into an

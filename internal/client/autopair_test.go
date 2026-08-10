@@ -92,6 +92,66 @@ func TestAutoPairTypingCloserWithoutMatchInsertsNormally(t *testing.T) {
 	}
 }
 
+func TestAutoPairOpenerBeforeStrayQuotePairsWithIt(t *testing.T) {
+	// Simulates: type '"' (-> "\"\""), forward-delete the opening quote
+	// (leaving a lone, unmatched '"'), then type '"' again — should pair
+	// with the stray quote instead of skipping over it and leaving just
+	// one '"' behind.
+	m := newAutoPairTestModel("\"\n")
+	m.cursor.Col = 0 // before the stray, unmatched '"'
+	m2, _ := m.handleInsert(fakeKey("\""))
+	got := m2.(Model)
+
+	if got.buf.Line(0) != "\"\"" {
+		t.Errorf("line = %q, want %q (opener should pair with the stray quote)", got.buf.Line(0), "\"\"")
+	}
+	if got.cursor.Col != 1 {
+		t.Errorf("cursor.Col = %d, want 1 (between the pair)", got.cursor.Col)
+	}
+}
+
+func TestAutoPairQuoteInsideOpenStringStillSkipsOver(t *testing.T) {
+	m := newAutoPairTestModel("\"hello\"\n")
+	m.cursor.Col = 6 // between "o" and the closing quote, inside the string
+	m2, _ := m.handleInsert(fakeKey("\""))
+	got := m2.(Model)
+
+	if got.buf.Line(0) != "\"hello\"" {
+		t.Errorf("line = %q, want %q (no duplicate quote)", got.buf.Line(0), "\"hello\"")
+	}
+	if got.cursor.Col != 7 {
+		t.Errorf("cursor.Col = %d, want 7 (moved past the closing quote)", got.cursor.Col)
+	}
+}
+
+func TestAutoPairOpenerBeforeUnmatchedCloserDoesNotNest(t *testing.T) {
+	m := newAutoPairTestModel(")\n")
+	m.cursor.Col = 0 // before the stray, unmatched ')'
+	m2, _ := m.handleInsert(fakeKey("("))
+	got := m2.(Model)
+
+	if got.buf.Line(0) != "()" {
+		t.Errorf("line = %q, want %q (opener should complete the existing closer)", got.buf.Line(0), "()")
+	}
+	if got.cursor.Col != 1 {
+		t.Errorf("cursor.Col = %d, want 1 (between the pair)", got.cursor.Col)
+	}
+}
+
+func TestAutoPairOpenerBeforeMatchedCloserStillNests(t *testing.T) {
+	m := newAutoPairTestModel("(a)\n")
+	m.cursor.Col = 2 // between "a" and ")", which already closes the leading "("
+	m2, _ := m.handleInsert(fakeKey("("))
+	got := m2.(Model)
+
+	if got.buf.Line(0) != "(a())" {
+		t.Errorf("line = %q, want %q (closer belongs to the earlier opener, so this one still nests)", got.buf.Line(0), "(a())")
+	}
+	if got.cursor.Col != 3 {
+		t.Errorf("cursor.Col = %d, want 3 (between the new pair)", got.cursor.Col)
+	}
+}
+
 func TestAutoPairBackspaceCollapsesEmptyPair(t *testing.T) {
 	m := newAutoPairTestModel("()\n")
 	m.cursor.Col = 1 // between ( and )

@@ -169,7 +169,7 @@ func (m Model) applySearchReplace() (tea.Model, tea.Cmd) {
 	m.mode = ModeNormal
 
 	if len(matches) == 0 {
-		m.status = "E: pattern not found"
+		m = m.pushStatus("E: pattern not found")
 		return m.withClearedSearch(), nil
 	}
 	if hadSelection {
@@ -199,7 +199,7 @@ func (m Model) applySearchReplace() (tea.Model, tea.Cmd) {
 	first := matches[0]
 	m2.cursor = document.Pos{Line: first.line, Col: first.col}
 	m2.scrollToCursor()
-	m2.status = fmt.Sprintf("%d substitution(s)", len(matches))
+	m2 = m2.pushStatus(fmt.Sprintf("%d substitution(s)", len(matches)))
 	return m2.withClearedSearch(), cmd
 }
 
@@ -234,7 +234,7 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 	if n, err := strconv.Atoi(cmd); err == nil {
 		lc := m.displayLineCount()
 		if n < 1 || n > lc {
-			m.status = fmt.Sprintf("E: line %d out of range (1-%d)", n, lc)
+			m = m.pushStatus(fmt.Sprintf("E: line %d out of range (1-%d)", n, lc))
 			return m, nil
 		}
 		m.cursor = document.Pos{Line: n - 1, Col: 0}
@@ -249,7 +249,7 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		return m, m.doSave()
 	case "q", "quit":
 		if m.buf.Dirty() {
-			m.status = "E: unsaved changes (use :q! to discard)"
+			m = m.pushStatus("E: unsaved changes (use :q! to discard)")
 			return m, nil
 		}
 		return m, m.doCloseBuffer()
@@ -275,7 +275,7 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		if path, ok := strings.CutPrefix(cmd, "w "); ok && strings.TrimSpace(path) != "" {
 			newPath, err := filepath.Abs(strings.TrimSpace(path))
 			if err != nil {
-				m.status = fmt.Sprintf("E: bad path: %v", err)
+				m = m.pushStatus(fmt.Sprintf("E: bad path: %v", err))
 				return m, nil
 			}
 			return m, m.doSaveAsNow(newPath, false)
@@ -283,7 +283,7 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		if path, ok := strings.CutPrefix(cmd, "wq "); ok && strings.TrimSpace(path) != "" {
 			newPath, err := filepath.Abs(strings.TrimSpace(path))
 			if err != nil {
-				m.status = fmt.Sprintf("E: bad path: %v", err)
+				m = m.pushStatus(fmt.Sprintf("E: bad path: %v", err))
 				return m, nil
 			}
 			return m, m.doSaveAsNow(newPath, true)
@@ -303,20 +303,20 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		if rest, ok := strings.CutPrefix(cmd, "set ft="); ok {
 			lang := strings.TrimSpace(rest)
 			if lang == "" {
-				m.status = "E: usage: set ft=<lang>"
+				m = m.pushStatus("E: usage: set ft=<lang>")
 				return m, nil
 			}
 			hlr := highlight.NewForKey(lang)
 			if hlr == nil {
-				m.status = fmt.Sprintf("E: unknown file type: %s", lang)
+				m = m.pushStatus(fmt.Sprintf("E: unknown file type: %s", lang))
 				return m, nil
 			}
 			m.hlr = hlr
 			m.hlSpans = nil
-			m.status = fmt.Sprintf("File type: %s", lang)
+			m = m.pushStatus(fmt.Sprintf("File type: %s", lang))
 			return m, m.reparseHighlight()
 		}
-		m.status = fmt.Sprintf("E: unknown command: %s", cmd)
+		m = m.pushStatus(fmt.Sprintf("E: unknown command: %s", cmd))
 	}
 	return m, nil
 }

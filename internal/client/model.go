@@ -551,6 +551,13 @@ type Model struct {
 	helpVisible bool // true = help popup visible
 	helpScroll  int  // scroll offset within the help popup
 
+	// Message log (space l): every status-bar message since the buffer was
+	// opened, so a message that scrolled off or got truncated in the status
+	// bar can still be reviewed.
+	messageLog    []logEntry
+	msgLogVisible bool
+	msgLogScroll  int
+
 	hoverContent     *string            // non-nil = hover popup visible
 	hoverScroll      int                // scroll offset within the hover popup
 	hoverTotalLines  int                // total rendered body lines; used to clamp scroll
@@ -609,7 +616,7 @@ type Model struct {
 // Used for hot-reloading preferences at runtime.
 func (m Model) WithConfig(cfg *config.Config) Model {
 	m.cfg = cfg
-	m.status = strings.Join(applyKeybindOverrides(cfg), "; ")
+	m = m.pushStatus(strings.Join(applyKeybindOverrides(cfg), "; "))
 	return m
 }
 
@@ -653,6 +660,32 @@ func (m Model) clientID() uint64 {
 		return 0
 	}
 	return m.rpc.ClientID()
+}
+
+// maxMessageLog caps how many status messages the message-log popup retains.
+const maxMessageLog = 300
+
+// logEntry records one status-bar message for the message-log popup (space l).
+type logEntry struct {
+	at    time.Time
+	text  string
+	isErr bool
+}
+
+// pushStatus sets the transient status-bar message and, unless it's a clear
+// (text == ""), appends it to messageLog for later review. Error messages
+// follow the "E: "/"ERR: " convention used throughout this package.
+func (m Model) pushStatus(text string) Model {
+	m.status = text
+	if text == "" {
+		return m
+	}
+	isErr := strings.HasPrefix(text, "E:") || strings.HasPrefix(text, "ERR:")
+	m.messageLog = append(m.messageLog, logEntry{at: time.Now(), text: text, isErr: isErr})
+	if len(m.messageLog) > maxMessageLog {
+		m.messageLog = append([]logEntry(nil), m.messageLog[len(m.messageLog)-maxMessageLog:]...)
+	}
+	return m
 }
 
 // cursorSnap captures the current cursor, selection, and extra-cursor state.
@@ -804,17 +837,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case errorMsg:
-		m.status = "ERR: " + msg.err.Error()
+		m = m.pushStatus("ERR: " + msg.err.Error())
 		return m, nil
 
 	case PluginShowMsgMsg:
 		// Plugin messages show in the status bar (center segment).
-		m.status = msg.Text
+		m = m.pushStatus(msg.Text)
 		return m, nil
 
 	case savedMsg:
 		m.buf.SetClean()
-		m.status = ""
+		m = m.pushStatus("")
 		m.savedUndoDepth = len(m.undoStack)
 		return m, nil
 
@@ -822,7 +855,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filePath = msg.newPath
 		m.saveAsThenClose = false
 		m.buf.SetClean()
-		m.status = ""
+		m = m.pushStatus("")
 		m.savedUndoDepth = len(m.undoStack)
 		if msg.thenClose {
 			return m, m.doCloseBuffer()
@@ -875,7 +908,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.hoverScroll = 0
 			m.hoverTotalLines = len(hoverBodyLines(msg.result.Contents, m.width))
 		} else if !msg.result.Found {
-			m.status = "No hover info"
+			m = m.pushStatus("No hover info")
 		}
 		return m, nil
 
@@ -920,26 +953,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.fixDecor = msg.decor
 			m.fixIdx = 0
 		} else {
-			m.status = "No fixes available"
+			m = m.pushStatus("No fixes available")
 		}
 		return m, nil
 
 	case renameSymbolDoneMsg:
 		switch {
 		case msg.err != nil:
-			m.status = fmt.Sprintf("E: rename failed: %v", msg.err)
+			m = m.pushStatus(fmt.Sprintf("E: rename failed: %v", msg.err))
 		case msg.applied == 0:
-			m.status = "Rename: nothing to change (no language server for this file, or rename not supported)"
+			m = m.pushStatus("Rename: nothing to change (no language server for this file, or rename not supported)")
 		default:
-			m.status = fmt.Sprintf("Renamed %d occurrence(s) across %d file(s)", msg.applied, msg.files)
+			m = m.pushStatus(fmt.Sprintf("Renamed %d occurrence(s) across %d file(s)", msg.applied, msg.files))
 		}
 		return m, nil
 
 	case moveFunctionDoneMsg:
 		if msg.err != nil {
-			m.status = fmt.Sprintf("E: move failed: %v", msg.err)
+			m = m.pushStatus(fmt.Sprintf("E: move failed: %v", msg.err))
 		} else {
-			m.status = fmt.Sprintf("Moved function to %s", msg.destPath)
+			m = m.pushStatus(fmt.Sprintf("Moved function to %s", msg.destPath))
 		}
 		return m, nil
 
@@ -962,7 +995,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.scrollToCursor()
 			if !msg.thenSave {
-				m.status = "Formatted"
+				m = m.pushStatus("Formatted")
 			}
 			// The formatter can move code arbitrarily, so the pre-format
 			// tree-sitter spans and semantic-token/inlay-hint caches no
@@ -976,9 +1009,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			refreshCmd = tea.Batch(m.reparseHighlight(), refreshCmd)
 		} else if !msg.thenSave {
 			if msg.noFormatter {
-				m.status = "No formatter available"
+				m = m.pushStatus("No formatter available")
 			} else {
-				m.status = "Already formatted"
+				m = m.pushStatus("Already formatted")
 			}
 		}
 		if msg.thenSave {
@@ -988,7 +1021,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case definitionMsg:
 		if !msg.found {
-			m.status = "No definition found"
+			m = m.pushStatus("No definition found")
 			return m, nil
 		}
 		if msg.loc.Path == m.filePath {
@@ -1004,7 +1037,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case referencesMsg:
 		if len(msg.refs) == 0 {
-			m.status = "No references found"
+			m = m.pushStatus("No references found")
 			return m, nil
 		}
 		refs := msg.refs
@@ -1012,7 +1045,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case docSymbolsMsg:
 		if len(msg.syms) == 0 {
-			m.status = "No symbols found"
+			m = m.pushStatus("No symbols found")
 			return m, nil
 		}
 		syms := msg.syms

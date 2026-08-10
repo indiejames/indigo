@@ -307,6 +307,24 @@ func (m Model) View() string {
 		}
 	}
 
+	// Overlay message-log popup (space l, centered).
+	if m.msgLogVisible {
+		maxPopH := max(6, vis-4)
+		popup := renderMessageLogPopup(m.width, m.msgLogScroll, maxPopH, m.messageLog)
+		popH := len(popup)
+		popW := lipgloss.Width(popup[0])
+		popCol := (m.width - popW) / 2
+		if popCol < 0 {
+			popCol = 0
+		}
+		startRow := max(0, vis/2-popH/2)
+		for pi, popLine := range popup {
+			if row := startRow + pi; row < vis {
+				lines[row] = overlayRight(lines[row], popLine, popCol)
+			}
+		}
+	}
+
 	var sb strings.Builder
 	for _, line := range lines {
 		sb.WriteString(line)

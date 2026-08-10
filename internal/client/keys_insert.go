@@ -402,9 +402,13 @@ func (m Model) insertSelfInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	r := msg.Runes[0]
 
-	// Typing a closer that's already the next character just moves
-	// past it, instead of inserting a duplicate.
-	if len(msg.Runes) == 1 && autoPairClosers[r] && m.charAfterCursor() == r {
+	// Typing a closer that's already the next character just moves past
+	// it, instead of inserting a duplicate. For quotes (self-symmetric,
+	// so the next char being r doesn't by itself mean it's "the closer")
+	// this only applies when the cursor is inside a string already open
+	// on this line; otherwise it's a stray quote to pair with below.
+	if len(msg.Runes) == 1 && autoPairClosers[r] && m.charAfterCursor() == r &&
+		(!autoPairQuotes[r] || m.insideOpenQuote(r)) {
 		m.cursor.Col++
 		if r == ')' {
 			m.sigHelp = nil

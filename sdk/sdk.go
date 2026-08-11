@@ -83,6 +83,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	capnp "capnproto.org/go/capnp/v3"
 	"capnproto.org/go/capnp/v3/rpc"
@@ -360,16 +361,21 @@ func (a *Api) DecorationsFull(h DecorationHandlers) error {
 // finishes and would change what your DecorationProvider now returns for
 // this buffer — e.g. an inline-suggestion plugin, after computing a new
 // ghost-text overlay in response to an OnChange/OnInsert notification.
-// Fire-and-forget: this does not itself carry the new decorations, it only
-// tells the client to call GetDecorations again.
-func (a *Api) RefreshDecorations(bufID uint32) error {
-	fut, rel := a.api.RefreshDecorations(context.Background(), func(p pluginproto.EditorApi_refreshDecorations_Params) error {
-		p.SetBufId(bufID)
-		return nil
-	})
-	defer rel()
-	_, err := fut.Struct()
-	return err
+// Fire-and-forget: it returns immediately without waiting for the server's
+// response — this does not itself carry the new decorations, it only tells
+// the client to call GetDecorations again, so there is nothing for a
+// synchronous caller to usefully wait on or a result to report back.
+func (a *Api) RefreshDecorations(bufID uint32) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		fut, rel := a.api.RefreshDecorations(ctx, func(p pluginproto.EditorApi_refreshDecorations_Params) error {
+			p.SetBufId(bufID)
+			return nil
+		})
+		defer rel()
+		fut.Struct() //nolint:errcheck
+	}()
 }
 
 // -- Editor effects --

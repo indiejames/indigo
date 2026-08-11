@@ -38,6 +38,22 @@ type updatesMsg struct {
 // errorMsg carries a non-fatal error to display in the status bar.
 type errorMsg struct{ err error }
 
+// applyOpFailedMsg carries an ApplyOp RPC failure. Unlike other RPC errors
+// (which just show a status message), this one means the local buffer has
+// applied an edit the server never received — client and server have
+// diverged. See applyOpFailed's handler for the hard-resync response.
+type applyOpFailedMsg struct{ err error }
+
+// bufferResyncMsg carries the result of re-fetching a buffer's authoritative
+// content from the server after applyOpFailedMsg, to recover from the
+// divergence rather than leaving it permanent and silent.
+type bufferResyncMsg struct {
+	bufID   uint32
+	content string
+	version uint64
+	err     error
+}
+
 // savedMsg signals a successful save.
 type savedMsg struct{}
 
@@ -845,6 +861,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errorMsg:
 		m = m.pushStatus("ERR: " + msg.err.Error())
 		return m, nil
+
+	case applyOpFailedMsg:
+		m = m.pushStatus("ERR: edit failed to reach server, resyncing: " + msg.err.Error())
+		return m, m.resyncFromServer()
+
+	case bufferResyncMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
+		if msg.err != nil {
+			m = m.pushStatus("ERR: resync failed, buffer may be out of sync with the server: " + msg.err.Error())
+			return m, nil
+		}
+		m.buf = document.New(m.filePath, msg.content)
+		m.buf.MarkDirty() // server's content may itself be unsaved-to-disk; err toward "unsaved" rather than a false-clean marker
+		m.version = msg.version
+		m.undoStack = nil
+		m.redoStack = nil
+		m.currentGroup = nil
+		m.sel = nil
+		m.extraCursors = nil
+		m.savedUndoDepth = -1 // never matches len(undoStack); only an explicit Save should clear dirty from here
+		lc := m.buf.LineCount()
+		if m.cursor.Line >= lc {
+			m.cursor.Line = max(0, lc-1)
+		}
+		if lineLen := m.buf.LineLen(m.cursor.Line); m.cursor.Col > lineLen {
+			m.cursor.Col = lineLen
+		}
+		m.scrollToCursor()
+		m = m.pushStatus("Buffer resynced from server after a failed edit — please check your last change")
+		return m, m.reparseHighlight()
 
 	case PluginShowMsgMsg:
 		// Plugin messages show in the status bar (center segment).

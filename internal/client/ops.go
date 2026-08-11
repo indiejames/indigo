@@ -55,16 +55,41 @@ func (m Model) sendOp(op document.Op) tea.Cmd {
 
 // sendToServer sends op to the server without applying it locally.
 // Used by undo when local apply is handled separately.
+//
+// If the RPC fails, the local buffer has already applied op (or, for undo,
+// whatever produced it) while the server never received it — client and
+// server have now diverged. Rather than leave that silent and permanent,
+// this returns applyOpFailedMsg, whose handler triggers a hard resync from
+// the server's authoritative content. Unix-socket network blips are rare
+// enough that a resync (visible, but never silently corrupting/losing
+// content) is preferable to a retry: a retried op's line/col coordinates
+// may no longer be valid if the user kept typing before the retry lands.
 func (m Model) sendToServer(op document.Op) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		ver, err := m.rpc.ApplyOp(ctx, m.bufID, op)
+		_, err := m.rpc.ApplyOp(ctx, m.bufID, op)
 		if err != nil {
-			return errorMsg{err}
+			return applyOpFailedMsg{err}
 		}
-		m.version = ver
 		return nil
+	}
+}
+
+// resyncFromServer re-fetches this buffer's authoritative content from the
+// server after an ApplyOp failure, to recover from client/server divergence.
+// Reuses OpenFile rather than a dedicated RPC: the buffer is already open
+// server-side, so OpenFile's existing dedup-by-path branch just returns its
+// current content/version without side effects (no fresh DidOpen/
+// DispatchBufferOpen — those only fire for a brand-new buffer).
+func (m Model) resyncFromServer() tea.Cmd {
+	bufID := m.bufID
+	path := m.filePath
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, content, version, _, err := m.rpc.OpenFile(ctx, path)
+		return bufferResyncMsg{bufID: bufID, content: content, version: version, err: err}
 	}
 }
 

@@ -262,14 +262,14 @@ func (a App) acceptSearchReplaceMatch(d *searchReplaceDialog) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		bufID, _, _, _, err := rpc.OpenFile(ctx, absPath)
+		bufID, _, _, _, _, err := rpc.OpenFile(ctx, absPath)
 		if err != nil {
 			return sraSingleResultMsg{err: err}
 		}
 		if _, err := rpc.ApplyOps(ctx, bufID, []document.Op{delOp, insOp}); err != nil {
 			return sraSingleResultMsg{err: err}
 		}
-		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, absPath)
+		bufID, content, version, fromRecovery, _, err := rpc.OpenFile(ctx, absPath)
 		if err != nil {
 			return sraSingleResultMsg{err: err}
 		}
@@ -319,9 +319,9 @@ var (
 	sraDialogBorderStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color("#4488CC")).
-				// Background(lipgloss.Color("#1E2A38")).
-				// Background(lipgloss.Color("#000000")).
-				Padding(0, 1)
+		// Background(lipgloss.Color("#1E2A38")).
+		// Background(lipgloss.Color("#000000")).
+		Padding(0, 1)
 )
 
 func checkbox(label string, checked, focused bool) string {

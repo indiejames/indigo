@@ -197,7 +197,7 @@ func execTool(ctx context.Context, rpc *client.RPC, prog *programLink, workDir, 
 
 func execReadFile(ctx context.Context, rpc *client.RPC, workDir, path string) (string, bool) {
 	abs := absPath(workDir, path)
-	bufID, content, _, _, err := rpc.OpenFile(ctx, abs)
+	bufID, content, _, _, _, err := rpc.OpenFile(ctx, abs)
 	if err != nil {
 		data, ferr := os.ReadFile(abs)
 		if ferr != nil {
@@ -343,7 +343,7 @@ func execApplyEdits(ctx context.Context, rpc *client.RPC, prog *programLink, wor
 	}
 
 	// Open the buffer (idempotent if already open).
-	bufID, content, version, _, err := rpc.OpenFile(ctx, abs)
+	bufID, content, version, _, _, err := rpc.OpenFile(ctx, abs)
 	if err != nil {
 		return fmt.Sprintf("cannot open %s: %v", in.Path, err), true
 	}
@@ -434,7 +434,7 @@ func execInsertAtLine(ctx context.Context, rpc *client.RPC, prog *programLink, w
 		return "edit rejected by user", true
 	}
 
-	bufID, content, _, _, err := rpc.OpenFile(ctx, abs)
+	bufID, content, _, _, _, err := rpc.OpenFile(ctx, abs)
 	if err != nil {
 		return fmt.Sprintf("cannot open %s: %v", in.Path, err), true
 	}
@@ -499,7 +499,7 @@ func execGotoFile(ctx context.Context, rpc *client.RPC, workDir string, in gotoF
 // byte was already approved edit by edit and the save is silent.
 func execSaveFile(ctx context.Context, rpc *client.RPC, prog *programLink, workDir, path string) (string, bool) {
 	abs := absPath(workDir, path)
-	bufID, _, _, _, err := rpc.OpenFile(ctx, abs)
+	bufID, _, _, _, _, err := rpc.OpenFile(ctx, abs)
 	if err != nil {
 		return fmt.Sprintf("cannot open %s: %v", path, err), true
 	}

@@ -181,7 +181,7 @@ func bufferContent(rpc *client.RPC, filePath string) string {
 	if rpc != nil && filePath != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		if bufID, c, _, _, err := rpc.OpenFile(ctx, filePath); err == nil {
+		if bufID, c, _, _, _, err := rpc.OpenFile(ctx, filePath); err == nil {
 			content = c
 			if count, cerr := rpc.BufferClientCount(ctx, bufID); cerr == nil && count == 1 {
 				rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
@@ -565,7 +565,7 @@ func runClaudeSubprocess(prog *programLink, rpc *client.RPC, workDir, prompt, se
 		newSessionID string
 		lastTextLen  int
 		// Track announced tool calls by ID so partial events don't double-emit.
-		announced    = map[string]bool{}
+		announced = map[string]bool{}
 		// Map tool_use ID → display name so tool_result events can name the tool.
 		pendingTools = map[string]string{}
 	)

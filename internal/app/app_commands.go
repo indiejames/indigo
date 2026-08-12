@@ -36,7 +36,7 @@ func (a App) doOpenFileAt(absPath string, line int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, absPath)
+		bufID, content, version, fromRecovery, _, err := rpc.OpenFile(ctx, absPath)
 		if err != nil {
 			return errorOpenMsg{err}
 		}
@@ -60,7 +60,7 @@ func (a App) doOpenFileAtMatch(absPath string, line, col, matchLen int) tea.Cmd 
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, absPath)
+		bufID, content, version, fromRecovery, _, err := rpc.OpenFile(ctx, absPath)
 		if err != nil {
 			return errorOpenMsg{err}
 		}
@@ -247,7 +247,7 @@ func (a App) doOpenFileAtPos(absPath string, line, col int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, absPath)
+		bufID, content, version, fromRecovery, _, err := rpc.OpenFile(ctx, absPath)
 		if err != nil {
 			return errorOpenMsg{err}
 		}
@@ -277,7 +277,7 @@ func (a App) doReloadBuffer(idx int) tea.Cmd {
 			appLog("doReloadBuffer: CloseBuffer error: %v", err)
 		}
 		appLog("doReloadBuffer: CloseBuffer done, calling OpenFile path=%q", path)
-		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, path)
+		bufID, content, version, fromRecovery, _, err := rpc.OpenFile(ctx, path)
 		if err != nil {
 			appLog("doReloadBuffer: OpenFile error: %v", err)
 			return errorOpenMsg{err}

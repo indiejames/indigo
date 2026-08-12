@@ -99,6 +99,11 @@ type bufferEntry struct {
 	// the entry is created (or renamed via SaveAs) — see canonicalPath's doc
 	// comment for why this exists.
 	canonPath string
+	// generation increments every time buf is replaced with a new
+	// *document.Buffer object (format-on-save, SaveAs, DiscardRecovery,
+	// explicit Format) rather than edited via buf.Apply. See the
+	// generation doc comment on openFile/getUpdates in editor.capnp.
+	generation uint64
 }
 
 // clientEntry holds connection metadata for a connected client.

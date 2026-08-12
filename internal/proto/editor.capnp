@@ -27,11 +27,19 @@ interface ClientCallback {
 interface EditorService {
   connect         @0 (callback :ClientCallback)                                -> (clientId :UInt64);
   disconnect      @1 (clientId :UInt64)                                        -> ();
-  openFile        @2 (clientId :UInt64, path :Text)                            -> (bufferId :UInt32, content :Text, version :UInt64, fromRecovery :Bool);
+  # generation increments every time the server replaces this buffer's
+  # underlying object wholesale (format-on-save, SaveAs, DiscardRecovery,
+  # explicit Format) rather than applying an incremental Op — version alone
+  # can't signal this, since a fresh buffer object always starts at 0.
+  openFile        @2 (clientId :UInt64, path :Text)                            -> (bufferId :UInt32, content :Text, version :UInt64, fromRecovery :Bool, generation :UInt64);
   # savedHash is the sha256 of the buffer content at its last save; clients
   # compare it against their own content hash to keep dirty markers accurate
   # when another client (e.g. an agent) saves the buffer.
-  getUpdates      @3 (clientId :UInt64, bufferId :UInt32, sinceVersion :UInt64) -> (ops :List(EditOp), version :UInt64, savedHash :Data);
+  # generation: see openFile's doc comment. A client whose remembered
+  # generation doesn't match this must discard ops and do a full resync
+  # (e.g. via openFile) instead of applying them — they describe changes to
+  # a different buffer object than the one it has locally.
+  getUpdates      @3 (clientId :UInt64, bufferId :UInt32, sinceVersion :UInt64) -> (ops :List(EditOp), version :UInt64, savedHash :Data, generation :UInt64);
   applyOp         @4 (clientId :UInt64, bufferId :UInt32, op :EditOp)          -> (version :UInt64);
   save            @5 (clientId :UInt64, bufferId :UInt32)                      -> ();
   closeBuffer     @6 (clientId :UInt64, bufferId :UInt32)                      -> ();

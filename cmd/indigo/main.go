@@ -119,7 +119,7 @@ func main() {
 		a = app.NewWithPicker(rpc, cfg, absTarget)
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, absTarget)
+		bufID, content, version, fromRecovery, _, err := rpc.OpenFile(ctx, absTarget)
 		cancel()
 		if err != nil {
 			fatalf("open file: %v", err)
@@ -229,7 +229,7 @@ func openUntitled(startLine int) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	bufID, content, version, _, err := rpc.OpenFile(ctx, "")
+	bufID, content, version, _, _, err := rpc.OpenFile(ctx, "")
 	cancel()
 	if err != nil {
 		fatalf("open untitled buffer: %v", err)

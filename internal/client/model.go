@@ -30,9 +30,10 @@ type tickMsg struct{}
 // updatesMsg carries ops received from the server, plus the sha256 of the
 // buffer content at its last save (for dirty-marker reconciliation).
 type updatesMsg struct {
-	ops       []document.Op
-	version   uint64
-	savedHash []byte
+	ops        []document.Op
+	version    uint64
+	savedHash  []byte
+	generation uint64
 }
 
 // errorMsg carries a non-fatal error to display in the status bar.
@@ -48,10 +49,11 @@ type applyOpFailedMsg struct{ err error }
 // content from the server after applyOpFailedMsg, to recover from the
 // divergence rather than leaving it permanent and silent.
 type bufferResyncMsg struct {
-	bufID   uint32
-	content string
-	version uint64
-	err     error
+	bufID      uint32
+	content    string
+	version    uint64
+	generation uint64
+	err        error
 }
 
 // savedMsg signals a successful save.
@@ -514,6 +516,8 @@ type Model struct {
 	cfg                 *config.Config
 	bufID               uint32
 	version             uint64
+	generation          uint64 // last-known buffer generation; see updatesMsg's handler
+	generationKnown     bool   // false until the first updatesMsg/bufferResyncMsg establishes a baseline
 	mode                Mode
 	cursor              document.Pos
 	topLine             int // first visible line
@@ -812,6 +816,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case updatesMsg:
+		if m.generationKnown && msg.generation != m.generation {
+			// The server replaced this buffer's object wholesale since our
+			// last known generation (format-on-save, SaveAs, DiscardRecovery,
+			// explicit Format) — msg.ops describe changes to that different
+			// object and can't be safely applied against our current one.
+			m = m.pushStatus("Buffer changed on the server, resyncing...")
+			return m, m.resyncFromServer()
+		}
+		m.generation = msg.generation
+		m.generationKnown = true
 		// Ops from other clients (agents, other windows) are undoable locally:
 		// record inverses as a single undo entry so `u` reverts the whole batch.
 		// GetUpdates never echoes this client's own ops back.
@@ -877,6 +891,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.buf = document.New(m.filePath, msg.content)
 		m.buf.MarkDirty() // server's content may itself be unsaved-to-disk; err toward "unsaved" rather than a false-clean marker
 		m.version = msg.version
+		m.generation = msg.generation
+		m.generationKnown = true
 		m.undoStack = nil
 		m.redoStack = nil
 		m.currentGroup = nil
@@ -891,7 +907,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor.Col = lineLen
 		}
 		m.scrollToCursor()
-		m = m.pushStatus("Buffer resynced from server after a failed edit — please check your last change")
+		m = m.pushStatus("Buffer resynced from server — please check your last change")
 		return m, m.reparseHighlight()
 
 	case PluginShowMsgMsg:

@@ -7,8 +7,11 @@ import (
 	proto "github.com/indiejames/indigo/internal/proto"
 )
 
-// OpenFile asks the server to open path and returns (bufferID, content, version, fromRecovery).
-func (r *RPC) OpenFile(ctx context.Context, path string) (uint32, string, uint64, bool, error) {
+// OpenFile asks the server to open path and returns (bufferID, content,
+// version, fromRecovery, generation). generation increments every time the
+// server replaces this buffer's object wholesale (format-on-save, SaveAs,
+// DiscardRecovery, explicit Format) — see GetUpdates.
+func (r *RPC) OpenFile(ctx context.Context, path string) (uint32, string, uint64, bool, uint64, error) {
 	fut, rel := r.svc.OpenFile(ctx, func(p proto.EditorService_openFile_Params) error {
 		p.SetClientId(r.clientID)
 		return p.SetPath(path)
@@ -16,13 +19,13 @@ func (r *RPC) OpenFile(ctx context.Context, path string) (uint32, string, uint64
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return 0, "", 0, false, err
+		return 0, "", 0, false, 0, err
 	}
 	content, err := res.Content()
 	if err != nil {
-		return 0, "", 0, false, err
+		return 0, "", 0, false, 0, err
 	}
-	return res.BufferId(), content, res.Version(), res.FromRecovery(), nil
+	return res.BufferId(), content, res.Version(), res.FromRecovery(), res.Generation(), nil
 }
 
 // DiscardRecovery tells the server to delete the recovery file and reload the
@@ -172,7 +175,9 @@ func (r *RPC) ApplyWorkspaceEdits(ctx context.Context, edits []WorkspaceEdit) (a
 }
 
 // GetUpdates polls for ops on bufID that arrived after sinceVersion.
-func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]document.Op, uint64, []byte, error) {
+// generation increments every time the server replaces the buffer's object
+// wholesale — see OpenFile.
+func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]document.Op, uint64, []byte, uint64, error) {
 	fut, rel := r.svc.GetUpdates(ctx, func(p proto.EditorService_getUpdates_Params) error {
 		p.SetClientId(r.clientID)
 		p.SetBufferId(bufID)
@@ -182,13 +187,13 @@ func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]doc
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return nil, 0, nil, err
+		return nil, 0, nil, 0, err
 	}
 	savedHash, _ := res.SavedHash()
 
 	opList, err := res.Ops()
 	if err != nil {
-		return nil, 0, nil, err
+		return nil, 0, nil, 0, err
 	}
 
 	ops := make([]document.Op, opList.Len())
@@ -216,7 +221,7 @@ func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]doc
 		}
 		ops[i] = op
 	}
-	return ops, res.Version(), savedHash, nil
+	return ops, res.Version(), savedHash, res.Generation(), nil
 }
 
 // Save asks the server to flush bufID to disk.

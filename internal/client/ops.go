@@ -88,8 +88,8 @@ func (m Model) resyncFromServer() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, content, version, _, err := m.rpc.OpenFile(ctx, path)
-		return bufferResyncMsg{bufID: bufID, content: content, version: version, err: err}
+		_, content, version, _, generation, err := m.rpc.OpenFile(ctx, path)
+		return bufferResyncMsg{bufID: bufID, content: content, version: version, generation: generation, err: err}
 	}
 }
 
@@ -362,13 +362,13 @@ func (m Model) fetchUpdates() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		ops, ver, savedHash, err := m.rpc.GetUpdates(ctx, m.bufID, m.version)
+		ops, ver, savedHash, generation, err := m.rpc.GetUpdates(ctx, m.bufID, m.version)
 		if err != nil {
 			return nil
 		}
 		// Deliver even with zero ops: savedHash keeps the dirty marker
 		// accurate when another client (e.g. an agent) saves this buffer.
-		return updatesMsg{ops: ops, version: ver, savedHash: savedHash}
+		return updatesMsg{ops: ops, version: ver, savedHash: savedHash, generation: generation}
 	}
 }
 

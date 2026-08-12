@@ -660,6 +660,7 @@ func (s *editorService) Format(_ context.Context, call proto.EditorService_forma
 			newBuf := document.New(path, formatted)
 			newBuf.MarkDirty()
 			entry.buf = newBuf
+			entry.generation++
 			s.buffers[bufID] = entry
 			s.mu.Unlock()
 			go s.lspMgr.DidChange(path, formatted)

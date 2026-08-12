@@ -62,6 +62,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 			if e.canonPath == canonPath {
 				e.clients[clientID] = struct{}{}
 				ver := e.buf.Version()
+				gen := e.generation
 				s.mu.Unlock()
 
 				res, err := call.AllocResults()
@@ -73,6 +74,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 					return err
 				}
 				res.SetVersion(ver)
+				res.SetGeneration(gen)
 				return nil
 			}
 		}
@@ -102,6 +104,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	}
 	res.SetVersion(ver)
 	res.SetFromRecovery(fromRecovery)
+	res.SetGeneration(0)
 	if path != "" {
 		go s.lspMgr.DidOpen(path, content)
 		go s.pluginMgr.DispatchBufferOpen(context.Background(), bufID, path)
@@ -149,6 +152,7 @@ func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorServ
 	s.mu.Lock()
 	if e, ok := s.buffers[bufID]; ok {
 		e.buf = document.New(path, content)
+		e.generation++
 	}
 	s.mu.Unlock()
 
@@ -207,6 +211,7 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 		return err
 	}
 	res.SetVersion(entry.buf.Version())
+	res.SetGeneration(entry.generation)
 	// Saved-content hash lets clients keep their dirty markers accurate when
 	// another client (e.g. an agent) saves the buffer.
 	h := entry.buf.SavedHash()
@@ -415,6 +420,7 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 				newBuf := document.New(path, formatted)
 				newBuf.MarkDirty()
 				entry.buf = newBuf
+				entry.generation++
 				baseBuf = newBuf
 				baseVersion = newBuf.Version()
 				content = formatted
@@ -534,6 +540,7 @@ func (s *editorService) SaveAs(_ context.Context, call proto.EditorService_saveA
 	entry.buf = document.New(newPath, content)
 	entry.buf.SetClean()
 	entry.canonPath = canonicalPath(newPath)
+	entry.generation++
 	s.mu.Unlock()
 
 	if oldPath != "" {

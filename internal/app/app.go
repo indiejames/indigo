@@ -170,9 +170,9 @@ func watchConfig(path string, lastMod time.Time) tea.Cmd {
 // startLine is 0-based; pass 0 for no jump.
 func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 	absPath string, cfg *config.Config, fromRecovery bool,
-	workDir string, startLine int) *App {
+	workDir string, startLine int, generation uint64) *App {
 
-	m := client.New(rpc, bufID, content, version, absPath, workDir, cfg, fromRecovery)
+	m := client.New(rpc, bufID, content, version, absPath, workDir, cfg, fromRecovery, generation)
 	if startLine > 0 {
 		m = m.AtLine(startLine)
 	}

@@ -30,13 +30,32 @@ type tickMsg struct{}
 // updatesMsg carries ops received from the server, plus the sha256 of the
 // buffer content at its last save (for dirty-marker reconciliation).
 type updatesMsg struct {
-	ops       []document.Op
-	version   uint64
-	savedHash []byte
+	ops        []document.Op
+	version    uint64
+	savedHash  []byte
+	generation uint64
 }
 
 // errorMsg carries a non-fatal error to display in the status bar.
 type errorMsg struct{ err error }
+
+// applyOpFailedMsg carries an ApplyOp RPC failure. Unlike other RPC errors
+// (which just show a status message), this one means the local buffer has
+// applied an edit the server never received — client and server have
+// diverged. See applyOpFailed's handler for the hard-resync response.
+type applyOpFailedMsg struct{ err error }
+
+// bufferResyncMsg carries the result of re-fetching a buffer's authoritative
+// content from the server after applyOpFailedMsg, to recover from the
+// divergence rather than leaving it permanent and silent.
+type bufferResyncMsg struct {
+	bufID      uint32
+	content    string
+	version    uint64
+	generation uint64
+	path       string
+	err        error
+}
 
 // savedMsg signals a successful save.
 type savedMsg struct{}
@@ -498,6 +517,8 @@ type Model struct {
 	cfg                 *config.Config
 	bufID               uint32
 	version             uint64
+	generation          uint64 // last-known buffer generation; see updatesMsg's handler
+	generationKnown     bool   // false until the first updatesMsg/bufferResyncMsg establishes a baseline
 	mode                Mode
 	cursor              document.Pos
 	topLine             int // first visible line
@@ -627,7 +648,10 @@ func (m Model) WithConfig(cfg *config.Config) Model {
 }
 
 // New creates a Model after the buffer is already open with the server.
-func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workDir string, cfg *config.Config, fromRecovery bool) Model {
+// generation is OpenFile's reported buffer generation, establishing the
+// swap-detection baseline immediately rather than waiting for the first
+// updatesMsg poll (see the generation field's doc comment).
+func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workDir string, cfg *config.Config, fromRecovery bool, generation uint64) Model {
 	buf := document.New(filePath, content)
 	if fromRecovery {
 		buf.MarkDirty()
@@ -644,6 +668,8 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 		status:              status,
 		bufID:               bufID,
 		version:             version,
+		generation:          generation,
+		generationKnown:     true,
 		filePath:            filePath,
 		workDir:             workDir,
 		hlr:                 highlight.New(filePath),
@@ -796,6 +822,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case updatesMsg:
+		if m.generationKnown && msg.generation != m.generation {
+			// The server replaced this buffer's object wholesale since our
+			// last known generation (format-on-save, SaveAs, DiscardRecovery,
+			// explicit Format) — msg.ops describe changes to that different
+			// object and can't be safely applied against our current one.
+			m = m.pushStatus("Buffer changed on the server, resyncing...")
+			return m, m.resyncFromServer()
+		}
+		m.generation = msg.generation
+		m.generationKnown = true
 		// Ops from other clients (agents, other windows) are undoable locally:
 		// record inverses as a single undo entry so `u` reverts the whole batch.
 		// GetUpdates never echoes this client's own ops back.
@@ -845,6 +881,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errorMsg:
 		m = m.pushStatus("ERR: " + msg.err.Error())
 		return m, nil
+
+	case applyOpFailedMsg:
+		m = m.pushStatus("ERR: edit failed to reach server, resyncing: " + msg.err.Error())
+		return m, m.resyncFromServer()
+
+	case bufferResyncMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
+		if msg.err != nil {
+			m = m.pushStatus("ERR: resync failed, buffer may be out of sync with the server: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.path != "" && msg.path != m.filePath {
+			m.filePath = msg.path
+			m.hlr = highlight.New(msg.path)
+		}
+		m.buf = document.New(m.filePath, msg.content)
+		m.buf.MarkDirty() // server's content may itself be unsaved-to-disk; err toward "unsaved" rather than a false-clean marker
+		m.version = msg.version
+		m.generation = msg.generation
+		m.generationKnown = true
+		m.undoStack = nil
+		m.redoStack = nil
+		m.currentGroup = nil
+		m.sel = nil
+		m.extraCursors = nil
+		m.savedUndoDepth = -1 // never matches len(undoStack); only an explicit Save should clear dirty from here
+		lc := m.buf.LineCount()
+		if m.cursor.Line >= lc {
+			m.cursor.Line = max(0, lc-1)
+		}
+		if lineLen := m.buf.LineLen(m.cursor.Line); m.cursor.Col > lineLen {
+			m.cursor.Col = lineLen
+		}
+		m.scrollToCursor()
+		m = m.pushStatus("Buffer resynced from server — please check your last change")
+		return m, m.reparseHighlight()
 
 	case PluginShowMsgMsg:
 		// Plugin messages show in the status bar (center segment).

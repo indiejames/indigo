@@ -99,6 +99,11 @@ type bufferEntry struct {
 	// the entry is created (or renamed via SaveAs) — see canonicalPath's doc
 	// comment for why this exists.
 	canonPath string
+	// generation increments every time buf is replaced with a new
+	// *document.Buffer object (format-on-save, SaveAs, DiscardRecovery,
+	// explicit Format) rather than edited via buf.Apply. See the
+	// generation doc comment on openFile/getUpdates in editor.capnp.
+	generation uint64
 }
 
 // clientEntry holds connection metadata for a connected client.
@@ -136,6 +141,15 @@ type editorService struct {
 	// Plugin-driven input prompt state.
 	inputOnConfirm func(text string)
 	inputOnCancel  func()
+
+	// popupDispatchMu serializes PluginShowPopup/PluginShowInputPrompt's
+	// client notification dispatch: each call's fan-out to every client
+	// runs under this lock (clients notified in parallel within one call,
+	// but one call's dispatch fully finishes before the next call's
+	// begins), so a later call's UI push can never reach a client before
+	// an earlier call's and leave it showing stale popup/prompt contents
+	// bound to an already-replaced server-side callback.
+	popupDispatchMu sync.Mutex
 
 	// activeCtx tracks the most recently active client buffer for external tools.
 	activeCtxMu sync.RWMutex

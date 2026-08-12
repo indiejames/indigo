@@ -192,7 +192,7 @@ func TestOpenSearchReplaceMatchOutOfBounds(t *testing.T) {
 }
 
 func newSraTestModel(absPath string) client.Model {
-	return client.New(&client.RPC{}, 1, "", 0, absPath, "/tmp", nil, false)
+	return client.New(&client.RPC{}, 1, "", 0, absPath, "/tmp", nil, false, 0)
 }
 
 // TestSraSingleResultAppliedOutOfBoundsDoesNotPanic reproduces closing a tab

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -433,61 +434,108 @@ func (s *editorService) PluginOpenBuffers() []plugin.PluginBufferRef {
 // Stores the selection callbacks and pushes showPluginPopup to all clients.
 func (s *editorService) PluginShowPopup(title string, items []plugin.PluginPopupItem, onSelect func(data string), onCancel func()) {
 	s.mu.Lock()
+	prevCancel := s.popupOnCancel
 	s.popupOnSelect = onSelect
 	s.popupOnCancel = onCancel
 	s.popupItems = items
 	callbacks := s.allCallbacks()
 	s.mu.Unlock()
 
-	ctx := context.Background()
-	for _, cb := range callbacks {
-		fut, rel := cb.ShowPluginPopup(ctx, func(p proto.ClientCallback_showPluginPopup_Params) error {
-			if err := p.SetTitle(title); err != nil {
-				return err
-			}
-			list, err := p.NewItems(int32(len(items)))
-			if err != nil {
-				return err
-			}
-			for i, item := range items {
-				pi := list.At(i)
-				if err := pi.SetLabel(item.Label); err != nil {
-					return err
-				}
-				if err := pi.SetSublabel(item.Sublabel); err != nil {
-					return err
-				}
-				if err := pi.SetData(item.Data); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-		fut.Struct() //nolint:errcheck
-		rel()
+	if prevCancel != nil {
+		// A popup was already pending (never resolved) — cancel it now so
+		// its handler capability is released instead of silently leaked by
+		// being replaced with no cleanup.
+		go prevCancel()
 	}
+
+	// Fan out to all clients concurrently within this call (each with its
+	// own timeout, matching PluginDecorationsChanged so one slow/hung
+	// client can't block this call or the plugin's own ShowPopup RPC), but
+	// serialize the dispatch *across* calls via popupDispatchMu — see its
+	// doc comment — so an older popup's UI push can never land after a
+	// newer one's.
+	go func() {
+		s.popupDispatchMu.Lock()
+		defer s.popupDispatchMu.Unlock()
+		var wg sync.WaitGroup
+		for _, cb := range callbacks {
+			wg.Add(1)
+			go func(cb proto.ClientCallback) {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+				defer cancel()
+				fut, rel := cb.ShowPluginPopup(ctx, func(p proto.ClientCallback_showPluginPopup_Params) error {
+					if err := p.SetTitle(title); err != nil {
+						return err
+					}
+					list, err := p.NewItems(int32(len(items)))
+					if err != nil {
+						return err
+					}
+					for i, item := range items {
+						pi := list.At(i)
+						if err := pi.SetLabel(item.Label); err != nil {
+							return err
+						}
+						if err := pi.SetSublabel(item.Sublabel); err != nil {
+							return err
+						}
+						if err := pi.SetData(item.Data); err != nil {
+							return err
+						}
+					}
+					return nil
+				})
+				defer rel()
+				fut.Struct() //nolint:errcheck
+			}(cb)
+		}
+		wg.Wait()
+	}()
 }
 
 // PluginShowInputPrompt implements plugin.ServerBridge.
 // Stores the confirm/cancel callbacks and pushes showInputPrompt to all clients.
 func (s *editorService) PluginShowInputPrompt(title, placeholder string, onConfirm func(text string), onCancel func()) {
 	s.mu.Lock()
+	prevCancel := s.inputOnCancel
 	s.inputOnConfirm = onConfirm
 	s.inputOnCancel = onCancel
 	callbacks := s.allCallbacks()
 	s.mu.Unlock()
 
-	ctx := context.Background()
-	for _, cb := range callbacks {
-		fut, rel := cb.ShowInputPrompt(ctx, func(p proto.ClientCallback_showInputPrompt_Params) error {
-			if err := p.SetTitle(title); err != nil {
-				return err
-			}
-			return p.SetPlaceholder(placeholder)
-		})
-		fut.Struct() //nolint:errcheck
-		rel()
+	if prevCancel != nil {
+		// A prompt was already pending (never resolved) — cancel it now so
+		// its handler capability is released instead of silently leaked by
+		// being replaced with no cleanup.
+		go prevCancel()
 	}
+
+	// Fan out to all clients concurrently within this call, serialized
+	// across calls via the same popupDispatchMu PluginShowPopup uses — see
+	// its doc comment.
+	go func() {
+		s.popupDispatchMu.Lock()
+		defer s.popupDispatchMu.Unlock()
+		var wg sync.WaitGroup
+		for _, cb := range callbacks {
+			wg.Add(1)
+			go func(cb proto.ClientCallback) {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+				defer cancel()
+				fut, rel := cb.ShowInputPrompt(ctx, func(p proto.ClientCallback_showInputPrompt_Params) error {
+					if err := p.SetTitle(title); err != nil {
+						return err
+					}
+					return p.SetPlaceholder(placeholder)
+				})
+				defer rel()
+				fut.Struct() //nolint:errcheck
+			}(cb)
+		}
+		wg.Wait()
+	}()
 }
 
 // PluginRunProcess implements plugin.ServerBridge.

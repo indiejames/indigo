@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"time"
 
 	"github.com/indiejames/indigo/internal/proto/pluginproto"
 )
@@ -468,7 +469,9 @@ func (s *editorApiServer) ShowPopup(_ context.Context, call pluginproto.EditorAp
 	// Keep the handler capability alive past this call by adding a reference.
 	handler := args.Handler().AddRef()
 	onSelect := func(data string) {
-		fut, rel := handler.Selected(context.Background(), func(p pluginproto.PopupHandler_selected_Params) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		fut, rel := handler.Selected(ctx, func(p pluginproto.PopupHandler_selected_Params) error {
 			return p.SetData(data)
 		})
 		fut.Struct() //nolint:errcheck
@@ -476,7 +479,9 @@ func (s *editorApiServer) ShowPopup(_ context.Context, call pluginproto.EditorAp
 		handler.Release()
 	}
 	onCancel := func() {
-		fut, rel := handler.Cancelled(context.Background(), nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		fut, rel := handler.Cancelled(ctx, nil)
 		fut.Struct() //nolint:errcheck
 		rel()
 		handler.Release()
@@ -514,7 +519,9 @@ func (s *editorApiServer) ShowInputPrompt(_ context.Context, call pluginproto.Ed
 	}
 	handler := args.Handler().AddRef()
 	onConfirm := func(text string) {
-		fut, rel := handler.Confirmed(context.Background(), func(p pluginproto.InputPromptHandler_confirmed_Params) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		fut, rel := handler.Confirmed(ctx, func(p pluginproto.InputPromptHandler_confirmed_Params) error {
 			return p.SetText(text)
 		})
 		fut.Struct() //nolint:errcheck
@@ -522,7 +529,9 @@ func (s *editorApiServer) ShowInputPrompt(_ context.Context, call pluginproto.Ed
 		handler.Release()
 	}
 	onCancel := func() {
-		fut, rel := handler.Cancelled(context.Background(), nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		fut, rel := handler.Cancelled(ctx, nil)
 		fut.Struct() //nolint:errcheck
 		rel()
 		handler.Release()

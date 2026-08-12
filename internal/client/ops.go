@@ -55,16 +55,40 @@ func (m Model) sendOp(op document.Op) tea.Cmd {
 
 // sendToServer sends op to the server without applying it locally.
 // Used by undo when local apply is handled separately.
+//
+// If the RPC fails, the local buffer has already applied op (or, for undo,
+// whatever produced it) while the server never received it — client and
+// server have now diverged. Rather than leave that silent and permanent,
+// this returns applyOpFailedMsg, whose handler triggers a hard resync from
+// the server's authoritative content. Unix-socket network blips are rare
+// enough that a resync (visible, but never silently corrupting/losing
+// content) is preferable to a retry: a retried op's line/col coordinates
+// may no longer be valid if the user kept typing before the retry lands.
 func (m Model) sendToServer(op document.Op) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		ver, err := m.rpc.ApplyOp(ctx, m.bufID, op)
+		_, err := m.rpc.ApplyOp(ctx, m.bufID, op, m.generation)
 		if err != nil {
-			return errorMsg{err}
+			return applyOpFailedMsg{err}
 		}
-		m.version = ver
 		return nil
+	}
+}
+
+// resyncFromServer re-fetches this buffer's authoritative content from the
+// server after an ApplyOp failure or a detected generation mismatch, to
+// recover from client/server divergence. Uses GetBufferSnapshot (keyed by
+// bufferID) rather than OpenFile (keyed by path): the client's own
+// remembered path can itself be stale if a different client renamed this
+// buffer via SaveAs since it last synced.
+func (m Model) resyncFromServer() tea.Cmd {
+	bufID := m.bufID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		content, version, generation, path, err := m.rpc.GetBufferSnapshot(ctx, bufID)
+		return bufferResyncMsg{bufID: bufID, content: content, version: version, generation: generation, path: path, err: err}
 	}
 }
 
@@ -337,13 +361,13 @@ func (m Model) fetchUpdates() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		ops, ver, savedHash, err := m.rpc.GetUpdates(ctx, m.bufID, m.version)
+		ops, ver, savedHash, generation, err := m.rpc.GetUpdates(ctx, m.bufID, m.version)
 		if err != nil {
 			return nil
 		}
 		// Deliver even with zero ops: savedHash keeps the dirty marker
 		// accurate when another client (e.g. an agent) saves this buffer.
-		return updatesMsg{ops: ops, version: ver, savedHash: savedHash}
+		return updatesMsg{ops: ops, version: ver, savedHash: savedHash, generation: generation}
 	}
 }
 

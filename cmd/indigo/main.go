@@ -119,12 +119,12 @@ func main() {
 		a = app.NewWithPicker(rpc, cfg, absTarget)
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		bufID, content, version, fromRecovery, err := rpc.OpenFile(ctx, absTarget)
+		bufID, content, version, fromRecovery, generation, err := rpc.OpenFile(ctx, absTarget)
 		cancel()
 		if err != nil {
 			fatalf("open file: %v", err)
 		}
-		a = app.New(rpc, bufID, content, version, absTarget, cfg, fromRecovery, workDir, startLine)
+		a = app.New(rpc, bufID, content, version, absTarget, cfg, fromRecovery, workDir, startLine, generation)
 	}
 
 	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus(), tea.WithoutSignalHandler())
@@ -229,13 +229,13 @@ func openUntitled(startLine int) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	bufID, content, version, _, err := rpc.OpenFile(ctx, "")
+	bufID, content, version, _, generation, err := rpc.OpenFile(ctx, "")
 	cancel()
 	if err != nil {
 		fatalf("open untitled buffer: %v", err)
 	}
 
-	a := app.New(rpc, bufID, content, version, "", cfg, false, workDir, startLine)
+	a := app.New(rpc, bufID, content, version, "", cfg, false, workDir, startLine, generation)
 	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus(), tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
 	if _, err := p.Run(); err != nil {

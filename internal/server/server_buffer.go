@@ -62,6 +62,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 			if e.canonPath == canonPath {
 				e.clients[clientID] = struct{}{}
 				ver := e.buf.Version()
+				gen := e.generation
 				s.mu.Unlock()
 
 				res, err := call.AllocResults()
@@ -73,6 +74,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 					return err
 				}
 				res.SetVersion(ver)
+				res.SetGeneration(gen)
 				return nil
 			}
 		}
@@ -102,6 +104,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	}
 	res.SetVersion(ver)
 	res.SetFromRecovery(fromRecovery)
+	res.SetGeneration(0)
 	if path != "" {
 		go s.lspMgr.DidOpen(path, content)
 		go s.pluginMgr.DispatchBufferOpen(context.Background(), bufID, path)
@@ -137,6 +140,8 @@ func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorServ
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 	path := entry.buf.Path()
+	baseBuf := entry.buf
+	baseVersion := baseBuf.Version()
 	s.mu.Unlock()
 
 	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
@@ -147,9 +152,21 @@ func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorServ
 	}
 
 	s.mu.Lock()
-	if e, ok := s.buffers[bufID]; ok {
-		e.buf = document.New(path, content)
+	entry, ok = s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
 	}
+	if entry.buf != baseBuf || entry.buf.Version() != baseVersion {
+		// A concurrent edit landed on the buffer while we were reading the
+		// disk content — applying the disk content now would silently
+		// discard that edit. Reject rather than clobber it; the caller can
+		// retry to pick up the buffer's current state.
+		s.mu.Unlock()
+		return fmt.Errorf("buffer %d changed while discarding recovery; try again", bufID)
+	}
+	entry.buf = document.New(path, content)
+	entry.generation++
 	s.mu.Unlock()
 
 	res, err := call.AllocResults()
@@ -207,6 +224,7 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 		return err
 	}
 	res.SetVersion(entry.buf.Version())
+	res.SetGeneration(entry.generation)
 	// Saved-content hash lets clients keep their dirty markers accurate when
 	// another client (e.g. an agent) saves the buffer.
 	h := entry.buf.SavedHash()
@@ -245,6 +263,39 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 	return nil
 }
 
+// GetBufferSnapshot returns a buffer's current authoritative content by ID.
+// Used by clients resyncing after a failed ApplyOp or a detected generation
+// mismatch — unlike OpenFile, this is keyed by bufferId, not path, so it
+// still finds the right buffer even if the client's own remembered path is
+// stale (e.g. a different client renamed it via SaveAs since this one last
+// synced).
+func (s *editorService) GetBufferSnapshot(_ context.Context, call proto.EditorService_getBufferSnapshot) error {
+	bufID := call.Args().BufferId()
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	content := entry.buf.Content()
+	version := entry.buf.Version()
+	generation := entry.generation
+	path := entry.buf.Path()
+	s.mu.Unlock()
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	if err := res.SetContent(content); err != nil {
+		return err
+	}
+	res.SetVersion(version)
+	res.SetGeneration(generation)
+	return res.SetPath(path)
+}
+
 // protoToOp converts a wire EditOp into a document.Op for the given client.
 func protoToOp(protoOp proto.EditOp, clientID uint64) document.Op {
 	insertText, _ := protoOp.InsertText()
@@ -273,6 +324,7 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	args := call.Args()
 	clientID := args.ClientId()
 	bufID := args.BufferId()
+	clientGeneration := args.Generation()
 	protoOp, err := args.Op()
 	if err != nil {
 		return err
@@ -280,6 +332,10 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
+	if ok && entry.generation != clientGeneration {
+		s.mu.Unlock()
+		return fmt.Errorf("buffer %d generation mismatch: client has %d, server has %d", bufID, clientGeneration, entry.generation)
+	}
 	s.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("unknown buffer %d", bufID)
@@ -415,6 +471,7 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 				newBuf := document.New(path, formatted)
 				newBuf.MarkDirty()
 				entry.buf = newBuf
+				entry.generation++
 				baseBuf = newBuf
 				baseVersion = newBuf.Version()
 				content = formatted
@@ -534,6 +591,7 @@ func (s *editorService) SaveAs(_ context.Context, call proto.EditorService_saveA
 	entry.buf = document.New(newPath, content)
 	entry.buf.SetClean()
 	entry.canonPath = canonicalPath(newPath)
+	entry.generation++
 	s.mu.Unlock()
 
 	if oldPath != "" {

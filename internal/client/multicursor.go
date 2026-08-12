@@ -83,6 +83,16 @@ func selectNextOccurrence(m *Model) bool {
 	if !found {
 		return false
 	}
+	if isAlreadySelected(m, fLine, fCol) {
+		// Found an occurrence that already has a cursor on it — either the
+		// wrap-around search cycled all the way back to one, or (once a
+		// wrap has added a cursor earlier in the buffer than a
+		// previously-added one) a plain forward search re-found it. Either
+		// way every occurrence is already selected, so don't add a
+		// duplicate ExtraCursor at the same position (a following
+		// multi-cursor insert would then double-insert there).
+		return false
+	}
 
 	newSel := &Selection{
 		Anchor: document.Pos{Line: fLine, Col: fCol},
@@ -93,6 +103,28 @@ func selectNextOccurrence(m *Model) bool {
 		sel: newSel,
 	})
 	return true
+}
+
+// isAlreadySelected reports whether (line, col) is the start of the primary
+// selection or any extra cursor's selection.
+func isAlreadySelected(m *Model, line, col int) bool {
+	if selectionStartsAt(m.sel, line, col) {
+		return true
+	}
+	for _, ec := range m.extraCursors {
+		if selectionStartsAt(ec.sel, line, col) {
+			return true
+		}
+	}
+	return false
+}
+
+func selectionStartsAt(sel *Selection, line, col int) bool {
+	if sel == nil {
+		return false
+	}
+	start, _ := sel.ordered()
+	return start.Line == line && start.Col == col
 }
 
 // findOccurrence searches for textRunes in the buffer starting at (fromLine, fromCol).
@@ -315,6 +347,12 @@ func applyInsertToAllCursors(m Model, text string) (Model, tea.Cmd) {
 			InsertCol:  adjCol,
 			InsertText: text,
 		}
+		al, d := opLineDelta(op)
+		// Shift immediately, one op at a time, in the same adjusted
+		// coordinate space each op is applied in — a single combined
+		// shift (min atLine, summed delta) would over-shift an overlay
+		// line sitting between two edit points on different lines.
+		m = m.shiftLSPOverlayLines(al, d)
 		inv := inverseOp(m, op)
 		if m.currentGroup != nil {
 			m.currentGroup = append(m.currentGroup, inv)
@@ -347,6 +385,10 @@ func applyInsertToAllCursors(m Model, text string) (Model, tea.Cmd) {
 		}
 	}
 	m.scrollToCursor()
+
+	var refreshCmd tea.Cmd
+	m, refreshCmd = m.scheduleLSPOverlayRefresh()
+	cmds = append(cmds, refreshCmd)
 
 	return m, tea.Batch(append(cmds, m.reparseHighlight())...)
 }
@@ -396,6 +438,11 @@ func applyBackspaceToAllCursors(m Model) (Model, tea.Cmd) {
 			FromLine: fromLine, FromCol: fromCol,
 			ToLine: toLine, ToCol: toCol,
 		}
+		al, d := opLineDelta(op)
+		// Shift immediately, one op at a time (back-to-front, matching
+		// application order) — see the identical comment in
+		// applyInsertToAllCursors for why a single combined shift is wrong.
+		m = m.shiftLSPOverlayLines(al, d)
 		inv := inverseOp(m, op)
 		if m.currentGroup != nil {
 			m.currentGroup = append(m.currentGroup, inv)
@@ -417,6 +464,10 @@ func applyBackspaceToAllCursors(m Model) (Model, tea.Cmd) {
 		}
 	}
 	m.scrollToCursor()
+
+	var refreshCmd tea.Cmd
+	m, refreshCmd = m.scheduleLSPOverlayRefresh()
+	cmds = append(cmds, refreshCmd)
 
 	return m, tea.Batch(append(cmds, m.reparseHighlight())...)
 }

@@ -325,12 +325,14 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 
 	if err := waitForSocket(sockPath, 5*time.Second); err != nil {
 		proc.Kill() //nolint:errcheck
+		proc.Wait() //nolint:errcheck
 		return fmt.Errorf("plugin %s socket: %w", name, err)
 	}
 
 	netConn, err := net.Dial("unix", sockPath)
 	if err != nil {
 		proc.Kill() //nolint:errcheck
+		proc.Wait() //nolint:errcheck
 		return fmt.Errorf("plugin %s connect: %w", name, err)
 	}
 
@@ -366,7 +368,9 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 	plugin := pluginproto.Plugin(rpcConn.Bootstrap(ctx))
 	defer plugin.Release()
 
-	fut, rel := plugin.Initialize(ctx, func(p pluginproto.Plugin_initialize_Params) error {
+	initCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	fut, rel := plugin.Initialize(initCtx, func(p pluginproto.Plugin_initialize_Params) error {
 		return p.SetApi(pluginproto.EditorApi(capnp.Client(api).AddRef()))
 	})
 	defer rel()
@@ -378,6 +382,7 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 		m.mu.Unlock()
 		rpcConn.Close() //nolint:errcheck
 		proc.Kill()     //nolint:errcheck
+		proc.Wait()     //nolint:errcheck
 		return fmt.Errorf("plugin %s initialize: %w", name, err)
 	}
 
@@ -398,7 +403,28 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 		reg.mu.Unlock()
 	}
 
+	// Reap the process once its RPC connection goes down — whether from a
+	// mid-session crash (no dispatch path otherwise ever calls Wait, so the
+	// process would sit as a zombie until the whole server exits) or from
+	// Shutdown closing rpcConn as part of ordinary teardown.
+	reapOnDisconnect(proc, rpcConn)
+
 	return nil
+}
+
+// reapOnDisconnect waits for rpcConn to close and then reaps proc via Wait
+// so a crashed (or deliberately torn down) plugin process doesn't sit as a
+// zombie for the remainder of the server's lifetime. The returned channel
+// closes once reaping completes; production callers can ignore it — it
+// exists so tests can synchronize on completion instead of polling.
+func reapOnDisconnect(proc *os.Process, rpcConn *rpc.Conn) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-rpcConn.Done()
+		proc.Wait() //nolint:errcheck
+	}()
+	return done
 }
 
 // AllRegisteredKeys returns every key trigger registered across all loaded plugins.
@@ -803,7 +829,9 @@ func (m *Manager) DispatchEditEvent(ctx context.Context, bufID uint32, filePath 
 			continue
 		}
 		go func(h pluginproto.EditEventHandler) {
-			fut, rel := h.LinesChanged(ctx, func(ps pluginproto.EditEventHandler_linesChanged_Params) error {
+			tctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+			defer cancel()
+			fut, rel := h.LinesChanged(tctx, func(ps pluginproto.EditEventHandler_linesChanged_Params) error {
 				ps.SetBufId(bufID)
 				if err := ps.SetFilePath(filePath); err != nil {
 					return err
@@ -981,7 +1009,9 @@ func (m *Manager) DispatchBufferOpen(ctx context.Context, bufID uint32, path str
 			continue
 		}
 		go func(h pluginproto.BufferEventHandler) {
-			fut, rel := h.OnOpen(ctx, func(ps pluginproto.BufferEventHandler_onOpen_Params) error {
+			tctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+			defer cancel()
+			fut, rel := h.OnOpen(tctx, func(ps pluginproto.BufferEventHandler_onOpen_Params) error {
 				ev, err := ps.NewEvent()
 				if err != nil {
 					return err
@@ -1008,7 +1038,9 @@ func (m *Manager) DispatchBufferChange(ctx context.Context, bufID uint32, path s
 			continue
 		}
 		go func(h pluginproto.BufferEventHandler) {
-			fut, rel := h.OnChange(ctx, func(ps pluginproto.BufferEventHandler_onChange_Params) error {
+			tctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+			defer cancel()
+			fut, rel := h.OnChange(tctx, func(ps pluginproto.BufferEventHandler_onChange_Params) error {
 				ev, err := ps.NewEvent()
 				if err != nil {
 					return err
@@ -1035,7 +1067,9 @@ func (m *Manager) DispatchBufferSave(ctx context.Context, bufID uint32, path str
 			continue
 		}
 		go func(h pluginproto.BufferEventHandler) {
-			fut, rel := h.OnSave(ctx, func(ps pluginproto.BufferEventHandler_onSave_Params) error {
+			tctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+			defer cancel()
+			fut, rel := h.OnSave(tctx, func(ps pluginproto.BufferEventHandler_onSave_Params) error {
 				ev, err := ps.NewEvent()
 				if err != nil {
 					return err
@@ -1062,7 +1096,9 @@ func (m *Manager) DispatchBufferClose(ctx context.Context, bufID uint32, path st
 			continue
 		}
 		go func(h pluginproto.BufferEventHandler) {
-			fut, rel := h.OnClose(ctx, func(ps pluginproto.BufferEventHandler_onClose_Params) error {
+			tctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+			defer cancel()
+			fut, rel := h.OnClose(tctx, func(ps pluginproto.BufferEventHandler_onClose_Params) error {
 				ev, err := ps.NewEvent()
 				if err != nil {
 					return err

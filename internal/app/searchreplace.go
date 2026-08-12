@@ -269,11 +269,11 @@ func (a App) acceptSearchReplaceMatch(d *searchReplaceDialog) tea.Cmd {
 		if _, err := rpc.ApplyOps(ctx, bufID, []document.Op{delOp, insOp}); err != nil {
 			return sraSingleResultMsg{err: err}
 		}
-		bufID, content, version, fromRecovery, _, err := rpc.OpenFile(ctx, absPath)
+		bufID, content, version, fromRecovery, generation, err := rpc.OpenFile(ctx, absPath)
 		if err != nil {
 			return sraSingleResultMsg{err: err}
 		}
-		m := client.New(rpc, bufID, content, version, absPath, workDir, cfg, fromRecovery)
+		m := client.New(rpc, bufID, content, version, absPath, workDir, cfg, fromRecovery, generation)
 		return sraSingleResultMsg{opened: &bufferOpenedMsg{model: m, line: line, col: col, matchLen: matchLen}}
 	}
 }

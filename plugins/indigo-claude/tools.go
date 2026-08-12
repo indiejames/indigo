@@ -434,14 +434,14 @@ func execInsertAtLine(ctx context.Context, rpc *client.RPC, prog *programLink, w
 		return "edit rejected by user", true
 	}
 
-	bufID, content, _, _, _, err := rpc.OpenFile(ctx, abs)
+	bufID, content, _, _, generation, err := rpc.OpenFile(ctx, abs)
 	if err != nil {
 		return fmt.Sprintf("cannot open %s: %v", in.Path, err), true
 	}
 	count, _ := rpc.BufferClientCount(ctx, bufID)
 	weOpened := count == 1
 
-	if _, err := rpc.ApplyOp(ctx, bufID, insertLineOp(content, in.Text, in.Line)); err != nil {
+	if _, err := rpc.ApplyOp(ctx, bufID, insertLineOp(content, in.Text, in.Line), generation); err != nil {
 		if weOpened {
 			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
 		}

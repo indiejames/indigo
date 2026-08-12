@@ -142,6 +142,15 @@ type editorService struct {
 	inputOnConfirm func(text string)
 	inputOnCancel  func()
 
+	// popupDispatchMu serializes PluginShowPopup/PluginShowInputPrompt's
+	// client notification dispatch: each call's fan-out to every client
+	// runs under this lock (clients notified in parallel within one call,
+	// but one call's dispatch fully finishes before the next call's
+	// begins), so a later call's UI push can never reach a client before
+	// an earlier call's and leave it showing stale popup/prompt contents
+	// bound to an already-replaced server-side callback.
+	popupDispatchMu sync.Mutex
+
 	// activeCtx tracks the most recently active client buffer for external tools.
 	activeCtxMu sync.RWMutex
 	activeCtx   activeContext

@@ -19,6 +19,10 @@ func TestReapOnDisconnectReapsProcessWhenConnCloses(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Skipf("could not start test child process: %v", err)
 	}
+	t.Cleanup(func() {
+		cmd.Process.Kill() //nolint:errcheck // no-op if already reaped by the test body
+		cmd.Process.Wait() //nolint:errcheck
+	})
 
 	clientEnd, serverEnd := net.Pipe()
 	defer serverEnd.Close() //nolint:errcheck

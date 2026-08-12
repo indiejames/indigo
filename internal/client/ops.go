@@ -68,7 +68,7 @@ func (m Model) sendToServer(op document.Op) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, err := m.rpc.ApplyOp(ctx, m.bufID, op)
+		_, err := m.rpc.ApplyOp(ctx, m.bufID, op, m.generation)
 		if err != nil {
 			return applyOpFailedMsg{err}
 		}
@@ -77,19 +77,18 @@ func (m Model) sendToServer(op document.Op) tea.Cmd {
 }
 
 // resyncFromServer re-fetches this buffer's authoritative content from the
-// server after an ApplyOp failure, to recover from client/server divergence.
-// Reuses OpenFile rather than a dedicated RPC: the buffer is already open
-// server-side, so OpenFile's existing dedup-by-path branch just returns its
-// current content/version without side effects (no fresh DidOpen/
-// DispatchBufferOpen — those only fire for a brand-new buffer).
+// server after an ApplyOp failure or a detected generation mismatch, to
+// recover from client/server divergence. Uses GetBufferSnapshot (keyed by
+// bufferID) rather than OpenFile (keyed by path): the client's own
+// remembered path can itself be stale if a different client renamed this
+// buffer via SaveAs since it last synced.
 func (m Model) resyncFromServer() tea.Cmd {
 	bufID := m.bufID
-	path := m.filePath
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, content, version, _, generation, err := m.rpc.OpenFile(ctx, path)
-		return bufferResyncMsg{bufID: bufID, content: content, version: version, generation: generation, err: err}
+		content, version, generation, path, err := m.rpc.GetBufferSnapshot(ctx, bufID)
+		return bufferResyncMsg{bufID: bufID, content: content, version: version, generation: generation, path: path, err: err}
 	}
 }
 

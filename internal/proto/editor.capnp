@@ -37,10 +37,24 @@ interface EditorService {
   # when another client (e.g. an agent) saves the buffer.
   # generation: see openFile's doc comment. A client whose remembered
   # generation doesn't match this must discard ops and do a full resync
-  # (e.g. via openFile) instead of applying them — they describe changes to
-  # a different buffer object than the one it has locally.
+  # (e.g. via getBufferSnapshot) instead of applying them — they describe
+  # changes to a different buffer object than the one it has locally.
   getUpdates      @3 (clientId :UInt64, bufferId :UInt32, sinceVersion :UInt64) -> (ops :List(EditOp), version :UInt64, savedHash :Data, generation :UInt64);
-  applyOp         @4 (clientId :UInt64, bufferId :UInt32, op :EditOp)          -> (version :UInt64);
+  # getBufferSnapshot fetches a buffer's current authoritative content by
+  # ID rather than path — used to resync after a failed ApplyOp or a
+  # detected generation mismatch. Path lookup (openFile) can't be used for
+  # this: the client's own remembered path may itself be stale if a
+  # *different* client renamed the buffer via SaveAs since this one last
+  # synced, which would make openFile spuriously create a second buffer
+  # for the (possibly now-nonexistent) old path instead of finding the
+  # existing one.
+  getBufferSnapshot @49 (bufferId :UInt32) -> (content :Text, version :UInt64, generation :UInt64, path :Text);
+  # generation must match the buffer's current generation (see openFile's
+  # doc comment) or the op is rejected — a client unaware of a wholesale
+  # buffer swap must not have its (now-meaningless) coordinates applied to
+  # the new buffer object. The client should resync (getBufferSnapshot) on
+  # rejection rather than retry.
+  applyOp         @4 (clientId :UInt64, bufferId :UInt32, op :EditOp, generation :UInt64) -> (version :UInt64);
   save            @5 (clientId :UInt64, bufferId :UInt32)                      -> ();
   closeBuffer     @6 (clientId :UInt64, bufferId :UInt32)                      -> ();
   bufferClientCount @7 (bufferId :UInt32)                                      -> (count :UInt32);

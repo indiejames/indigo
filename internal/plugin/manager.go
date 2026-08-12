@@ -325,12 +325,14 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 
 	if err := waitForSocket(sockPath, 5*time.Second); err != nil {
 		proc.Kill() //nolint:errcheck
+		proc.Wait() //nolint:errcheck
 		return fmt.Errorf("plugin %s socket: %w", name, err)
 	}
 
 	netConn, err := net.Dial("unix", sockPath)
 	if err != nil {
 		proc.Kill() //nolint:errcheck
+		proc.Wait() //nolint:errcheck
 		return fmt.Errorf("plugin %s connect: %w", name, err)
 	}
 

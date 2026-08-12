@@ -96,6 +96,30 @@ func TestBufferResyncMsgClampsCursor(t *testing.T) {
 	}
 }
 
+// TestBufferResyncMsgAdoptsRenamedPath is a regression test: resyncFromServer
+// used to call OpenFile keyed by the client's own remembered m.filePath,
+// which goes stale if a *different* client renamed the buffer via SaveAs —
+// OpenFile(oldPath) would then spuriously open a second buffer for the old
+// (possibly now-nonexistent) path instead of finding the existing one.
+// GetBufferSnapshot is keyed by bufferID instead, so the resync must adopt
+// whatever path it reports.
+func TestBufferResyncMsgAdoptsRenamedPath(t *testing.T) {
+	m := newTestModel("old content\n")
+	m.bufID = 1
+	m.filePath = "/tmp/old.go"
+
+	msg := bufferResyncMsg{bufID: 1, content: "new content\n", version: 3, path: "/tmp/new.go"}
+	updated, _ := m.Update(msg)
+	m2 := updated.(Model)
+
+	if m2.filePath != "/tmp/new.go" {
+		t.Errorf("filePath = %q, want %q", m2.filePath, "/tmp/new.go")
+	}
+	if m2.buf.Path() != "/tmp/new.go" {
+		t.Errorf("buf.Path() = %q, want %q", m2.buf.Path(), "/tmp/new.go")
+	}
+}
+
 // TestBufferResyncMsgDiscardsStaleBuffer mirrors inlayHintsMsg/
 // semanticTokensMsg's bufID staleness check.
 func TestBufferResyncMsgDiscardsStaleBuffer(t *testing.T) {

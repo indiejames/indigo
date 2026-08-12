@@ -73,4 +73,119 @@ func TestSaveAsBumpsGenerationAndGetUpdatesReflectsIt(t *testing.T) {
 	if res.Generation() != 1 {
 		t.Errorf("GetUpdates response generation = %d, want 1", res.Generation())
 	}
+
+	// GetBufferSnapshot is what a client actually resyncs with — keyed by
+	// bufferID rather than path, so it must report the buffer's new path
+	// too (not just content/version/generation), for a client whose own
+	// remembered path is now stale after this rename.
+	fut3, rel3 := client.GetBufferSnapshot(context.Background(), func(p proto.EditorService_getBufferSnapshot_Params) error {
+		p.SetBufferId(1)
+		return nil
+	})
+	defer rel3()
+	res3, err := fut3.Struct()
+	if err != nil {
+		t.Fatalf("GetBufferSnapshot errored: %v", err)
+	}
+	content, err := res3.Content()
+	if err != nil {
+		t.Fatalf("res3.Content(): %v", err)
+	}
+	if content != "package main\n" {
+		t.Errorf("GetBufferSnapshot content = %q, want %q", content, "package main\n")
+	}
+	if res3.Generation() != 1 {
+		t.Errorf("GetBufferSnapshot generation = %d, want 1", res3.Generation())
+	}
+	path, err := res3.Path()
+	if err != nil {
+		t.Fatalf("res3.Path(): %v", err)
+	}
+	if path != newPath {
+		t.Errorf("GetBufferSnapshot path = %q, want %q (the post-rename path, not the client's stale one)", path, newPath)
+	}
+}
+
+// TestGetBufferSnapshotUnknownBufferErrors verifies the error path.
+func TestGetBufferSnapshotUnknownBufferErrors(t *testing.T) {
+	s := &editorService{buffers: map[uint32]*bufferEntry{}}
+	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
+
+	fut, rel := client.GetBufferSnapshot(context.Background(), func(p proto.EditorService_getBufferSnapshot_Params) error {
+		p.SetBufferId(99)
+		return nil
+	})
+	defer rel()
+	if _, err := fut.Struct(); err == nil {
+		t.Error("expected an error for an unknown buffer, got nil")
+	}
+}
+
+// TestApplyOpRejectsStaleGeneration is a regression test: ApplyOp had no
+// staleness check at all, so a client unaware of a wholesale buffer swap
+// (format-on-save/SaveAs/DiscardRecovery/Format) could send an op whose
+// coordinates were computed against the old content, silently corrupting
+// the new buffer at the wrong position instead of being told to resync.
+func TestApplyOpRejectsStaleGeneration(t *testing.T) {
+	s := &editorService{
+		buffers: map[uint32]*bufferEntry{
+			1: {buf: document.New("/tmp/x.go", "hello\n"), generation: 2},
+		},
+	}
+	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
+
+	fut, rel := client.ApplyOp(context.Background(), func(p proto.EditorService_applyOp_Params) error {
+		p.SetClientId(1)
+		p.SetBufferId(1)
+		p.SetGeneration(1) // stale — the buffer is actually at generation 2
+		op, err := p.NewOp()
+		if err != nil {
+			return err
+		}
+		op.SetType(proto.EditOp_OpType_insert)
+		op.SetInsertLine(0)
+		op.SetInsertCol(0)
+		return op.SetInsertText("x")
+	})
+	defer rel()
+	_, err := fut.Struct()
+	if err == nil {
+		t.Fatal("expected ApplyOp to reject a stale generation, got nil error")
+	}
+	if got := s.buffers[1].buf.Content(); got != "hello\n" {
+		t.Errorf("buffer content = %q, want unchanged %q — the stale op must not be applied", got, "hello\n")
+	}
+}
+
+// TestApplyOpAcceptsMatchingGeneration is the happy path.
+func TestApplyOpAcceptsMatchingGeneration(t *testing.T) {
+	s := &editorService{
+		buffers: map[uint32]*bufferEntry{
+			1: {buf: document.New("/tmp/x.go", "hello\n"), generation: 2},
+		},
+		lspMgr:    lsp.NewManager("/tmp", nil),
+		pluginMgr: &plugin.Manager{},
+	}
+	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
+
+	fut, rel := client.ApplyOp(context.Background(), func(p proto.EditorService_applyOp_Params) error {
+		p.SetClientId(1)
+		p.SetBufferId(1)
+		p.SetGeneration(2) // matches
+		op, err := p.NewOp()
+		if err != nil {
+			return err
+		}
+		op.SetType(proto.EditOp_OpType_insert)
+		op.SetInsertLine(0)
+		op.SetInsertCol(0)
+		return op.SetInsertText("x")
+	})
+	defer rel()
+	if _, err := fut.Struct(); err != nil {
+		t.Fatalf("ApplyOp with matching generation errored: %v", err)
+	}
+	if got := s.buffers[1].buf.Content(); got != "xhello\n" {
+		t.Errorf("buffer content = %q, want %q", got, "xhello\n")
+	}
 }

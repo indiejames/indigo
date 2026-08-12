@@ -53,6 +53,7 @@ type bufferResyncMsg struct {
 	content    string
 	version    uint64
 	generation uint64
+	path       string
 	err        error
 }
 
@@ -647,7 +648,10 @@ func (m Model) WithConfig(cfg *config.Config) Model {
 }
 
 // New creates a Model after the buffer is already open with the server.
-func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workDir string, cfg *config.Config, fromRecovery bool) Model {
+// generation is OpenFile's reported buffer generation, establishing the
+// swap-detection baseline immediately rather than waiting for the first
+// updatesMsg poll (see the generation field's doc comment).
+func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workDir string, cfg *config.Config, fromRecovery bool, generation uint64) Model {
 	buf := document.New(filePath, content)
 	if fromRecovery {
 		buf.MarkDirty()
@@ -664,6 +668,8 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 		status:              status,
 		bufID:               bufID,
 		version:             version,
+		generation:          generation,
+		generationKnown:     true,
 		filePath:            filePath,
 		workDir:             workDir,
 		hlr:                 highlight.New(filePath),
@@ -887,6 +893,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m = m.pushStatus("ERR: resync failed, buffer may be out of sync with the server: " + msg.err.Error())
 			return m, nil
+		}
+		if msg.path != "" && msg.path != m.filePath {
+			m.filePath = msg.path
+			m.hlr = highlight.New(msg.path)
 		}
 		m.buf = document.New(m.filePath, msg.content)
 		m.buf.MarkDirty() // server's content may itself be unsaved-to-disk; err toward "unsaved" rather than a false-clean marker

@@ -36,11 +36,11 @@ func (a App) doOpenFileAt(absPath string, line int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		bufID, content, version, fromRecovery, _, err := rpc.OpenFile(ctx, absPath)
+		bufID, content, version, fromRecovery, generation, err := rpc.OpenFile(ctx, absPath)
 		if err != nil {
 			return errorOpenMsg{err}
 		}
-		m := client.New(rpc, bufID, content, version, absPath, a.workDir, cfg, fromRecovery)
+		m := client.New(rpc, bufID, content, version, absPath, a.workDir, cfg, fromRecovery, generation)
 		return bufferOpenedMsg{model: m, line: line, col: -1}
 	}
 }
@@ -60,11 +60,11 @@ func (a App) doOpenFileAtMatch(absPath string, line, col, matchLen int) tea.Cmd 
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		bufID, content, version, fromRecovery, _, err := rpc.OpenFile(ctx, absPath)
+		bufID, content, version, fromRecovery, generation, err := rpc.OpenFile(ctx, absPath)
 		if err != nil {
 			return errorOpenMsg{err}
 		}
-		m := client.New(rpc, bufID, content, version, absPath, a.workDir, cfg, fromRecovery)
+		m := client.New(rpc, bufID, content, version, absPath, a.workDir, cfg, fromRecovery, generation)
 		return bufferOpenedMsg{model: m, line: line, col: col, matchLen: matchLen}
 	}
 }
@@ -247,11 +247,11 @@ func (a App) doOpenFileAtPos(absPath string, line, col int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		bufID, content, version, fromRecovery, _, err := rpc.OpenFile(ctx, absPath)
+		bufID, content, version, fromRecovery, generation, err := rpc.OpenFile(ctx, absPath)
 		if err != nil {
 			return errorOpenMsg{err}
 		}
-		m := client.New(rpc, bufID, content, version, absPath, a.workDir, cfg, fromRecovery)
+		m := client.New(rpc, bufID, content, version, absPath, a.workDir, cfg, fromRecovery, generation)
 		return bufferOpenedMsg{model: m, line: line, col: col}
 	}
 }
@@ -277,13 +277,13 @@ func (a App) doReloadBuffer(idx int) tea.Cmd {
 			appLog("doReloadBuffer: CloseBuffer error: %v", err)
 		}
 		appLog("doReloadBuffer: CloseBuffer done, calling OpenFile path=%q", path)
-		bufID, content, version, fromRecovery, _, err := rpc.OpenFile(ctx, path)
+		bufID, content, version, fromRecovery, generation, err := rpc.OpenFile(ctx, path)
 		if err != nil {
 			appLog("doReloadBuffer: OpenFile error: %v", err)
 			return errorOpenMsg{err}
 		}
 		appLog("doReloadBuffer: OpenFile done, new bufID=%d contentLen=%d", bufID, len(content))
-		newModel := client.New(rpc, bufID, content, version, path, a.workDir, cfg, fromRecovery)
+		newModel := client.New(rpc, bufID, content, version, path, a.workDir, cfg, fromRecovery, generation)
 		return bufferReloadedMsg{idx: idx, model: newModel}
 	}
 }

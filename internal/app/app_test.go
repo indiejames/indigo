@@ -13,7 +13,7 @@ func TestActiveFileDir(t *testing.T) {
 	workDir := "/workspace/project"
 
 	newModelAt := func(absPath string) client.Model {
-		return client.New(&client.RPC{}, 1, "", 0, absPath, workDir, nil, false)
+		return client.New(&client.RPC{}, 1, "", 0, absPath, workDir, nil, false, 0)
 	}
 
 	t.Run("no buffers", func(t *testing.T) {

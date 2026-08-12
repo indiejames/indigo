@@ -71,10 +71,11 @@ func encodeOp(protoOp proto.EditOp, op document.Op) error {
 }
 
 // ApplyOp sends an edit operation to the server and returns the new version.
-func (r *RPC) ApplyOp(ctx context.Context, bufID uint32, op document.Op) (uint64, error) {
+func (r *RPC) ApplyOp(ctx context.Context, bufID uint32, op document.Op, generation uint64) (uint64, error) {
 	fut, rel := r.svc.ApplyOp(ctx, func(p proto.EditorService_applyOp_Params) error {
 		p.SetClientId(r.clientID)
 		p.SetBufferId(bufID)
+		p.SetGeneration(generation)
 		protoOp, err := p.NewOp()
 		if err != nil {
 			return err
@@ -222,6 +223,31 @@ func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]doc
 		ops[i] = op
 	}
 	return ops, res.Version(), savedHash, res.Generation(), nil
+}
+
+// GetBufferSnapshot fetches bufID's current authoritative content, version,
+// generation, and path directly by ID. Used to resync after a failed
+// ApplyOp or a detected generation mismatch — unlike OpenFile, this doesn't
+// depend on the caller's own (possibly stale) remembered path.
+func (r *RPC) GetBufferSnapshot(ctx context.Context, bufID uint32) (content string, version, generation uint64, path string, err error) {
+	fut, rel := r.svc.GetBufferSnapshot(ctx, func(p proto.EditorService_getBufferSnapshot_Params) error {
+		p.SetBufferId(bufID)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return "", 0, 0, "", err
+	}
+	content, err = res.Content()
+	if err != nil {
+		return "", 0, 0, "", err
+	}
+	path, err = res.Path()
+	if err != nil {
+		return "", 0, 0, "", err
+	}
+	return content, res.Version(), res.Generation(), path, nil
 }
 
 // Save asks the server to flush bufID to disk.

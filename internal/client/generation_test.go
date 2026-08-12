@@ -59,6 +59,33 @@ func TestUpdatesMsgEstablishesGenerationBaselineOnFirstPoll(t *testing.T) {
 	}
 }
 
+// TestNewEstablishesGenerationBaselineImmediately is a regression test for
+// the gap left by not threading generation through New: previously a
+// Model's generationKnown stayed false until its first updatesMsg poll
+// (~120ms later), so a swap landing in that window would have been
+// silently absorbed as the new baseline instead of detected. New now
+// receives OpenFile's generation directly, closing that window.
+func TestNewEstablishesGenerationBaselineImmediately(t *testing.T) {
+	m := New(&RPC{}, 1, "original content\n", 0, "/tmp/x.go", "/tmp", nil, false, 3)
+
+	if !m.generationKnown || m.generation != 3 {
+		t.Fatalf("generation = %d, generationKnown = %v, want (3, true) immediately after New", m.generation, m.generationKnown)
+	}
+
+	// A swap that happened between OpenFile and this client's very first
+	// poll must now be caught rather than silently adopted as baseline.
+	msg := updatesMsg{version: 0, generation: 4}
+	updated, cmd := m.Update(msg)
+	m2 := updated.(Model)
+
+	if m2.buf.Content() != "original content\n" {
+		t.Errorf("buf.Content() = %q, want unchanged — the swap must trigger a resync, not be silently absorbed", m2.buf.Content())
+	}
+	if cmd == nil {
+		t.Error("expected a non-nil resync command")
+	}
+}
+
 // TestUpdatesMsgAppliesOpsWhenGenerationMatches is the happy path: a
 // matching generation applies the incoming ops as before.
 func TestUpdatesMsgAppliesOpsWhenGenerationMatches(t *testing.T) {

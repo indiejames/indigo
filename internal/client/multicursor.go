@@ -332,7 +332,6 @@ func applyInsertToAllCursors(m Model, text string) (Model, tea.Cmd) {
 	lineAdj := 0
 	textRunes := []rune(text)
 	isNewline := text == "\n"
-	atLine, delta := -1, 0
 
 	type newPos struct{ line, col int }
 	newPositions := make([]newPos, len(entries))
@@ -349,10 +348,11 @@ func applyInsertToAllCursors(m Model, text string) (Model, tea.Cmd) {
 			InsertText: text,
 		}
 		al, d := opLineDelta(op)
-		if atLine < 0 || al < atLine {
-			atLine = al
-		}
-		delta += d
+		// Shift immediately, one op at a time, in the same adjusted
+		// coordinate space each op is applied in — a single combined
+		// shift (min atLine, summed delta) would over-shift an overlay
+		// line sitting between two edit points on different lines.
+		m = m.shiftLSPOverlayLines(al, d)
 		inv := inverseOp(m, op)
 		if m.currentGroup != nil {
 			m.currentGroup = append(m.currentGroup, inv)
@@ -386,10 +386,6 @@ func applyInsertToAllCursors(m Model, text string) (Model, tea.Cmd) {
 	}
 	m.scrollToCursor()
 
-	if atLine < 0 {
-		atLine = 0
-	}
-	m = m.shiftLSPOverlayLines(atLine, delta)
 	var refreshCmd tea.Cmd
 	m, refreshCmd = m.scheduleLSPOverlayRefresh()
 	cmds = append(cmds, refreshCmd)
@@ -421,7 +417,6 @@ func applyBackspaceToAllCursors(m Model) (Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	type newPos struct{ line, col int }
 	newPositions := make([]newPos, len(entries))
-	atLine, delta := -1, 0
 
 	for i, e := range entries {
 		if e.line == 0 && e.col == 0 {
@@ -444,10 +439,10 @@ func applyBackspaceToAllCursors(m Model) (Model, tea.Cmd) {
 			ToLine: toLine, ToCol: toCol,
 		}
 		al, d := opLineDelta(op)
-		if atLine < 0 || al < atLine {
-			atLine = al
-		}
-		delta += d
+		// Shift immediately, one op at a time (back-to-front, matching
+		// application order) — see the identical comment in
+		// applyInsertToAllCursors for why a single combined shift is wrong.
+		m = m.shiftLSPOverlayLines(al, d)
 		inv := inverseOp(m, op)
 		if m.currentGroup != nil {
 			m.currentGroup = append(m.currentGroup, inv)
@@ -470,10 +465,6 @@ func applyBackspaceToAllCursors(m Model) (Model, tea.Cmd) {
 	}
 	m.scrollToCursor()
 
-	if atLine < 0 {
-		atLine = 0
-	}
-	m = m.shiftLSPOverlayLines(atLine, delta)
 	var refreshCmd tea.Cmd
 	m, refreshCmd = m.scheduleLSPOverlayRefresh()
 	cmds = append(cmds, refreshCmd)

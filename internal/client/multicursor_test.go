@@ -42,6 +42,58 @@ func TestApplyInsertToAllCursorsShiftsLSPOverlays(t *testing.T) {
 	}
 }
 
+// TestApplyInsertToAllCursorsShiftsOverlayBetweenEditsOnce is a regression
+// test: shifting overlays with one combined (min atLine, summed delta) call
+// over-shifts a line sitting *between* two cursors' edit points. Cursors at
+// lines 1 and 4 each insert a newline; an overlay at line 3 sits between
+// them and must end up shifted by the first edit only (+1, to line 4), not
+// by both (+2, to line 5) — the second edit (adjusted to line 5) lands
+// below the overlay's already-shifted position and shouldn't touch it.
+func TestApplyInsertToAllCursorsShiftsOverlayBetweenEditsOnce(t *testing.T) {
+	m := newTestModel("line0\nline1\nline2\nline3\nline4\nline5\n")
+	m.rpc = &RPC{}
+	m.cursor = document.Pos{Line: 1, Col: 0}
+	m.extraCursors = []ExtraCursor{{pos: document.Pos{Line: 4, Col: 0}}}
+	m.semanticSpans = highlight.LineSpans{3: []highlight.Span{{StartCol: 0, EndCol: 5, ANSI: "x"}}}
+
+	m2, _ := applyInsertToAllCursors(m, "\n")
+
+	if _, stillAt3 := m2.semanticSpans[3]; stillAt3 {
+		t.Error("semanticSpans still has a stale entry at line 3 — not shifted")
+	}
+	if spans, ok := m2.semanticSpans[4]; !ok || len(spans) != 1 {
+		t.Errorf("semanticSpans = %v, want the span shifted to line 4 (once, by the first edit only)", m2.semanticSpans)
+	}
+	if _, overShifted := m2.semanticSpans[5]; overShifted {
+		t.Error("semanticSpans has an entry at line 5 — over-shifted by both edits instead of just the first")
+	}
+}
+
+// TestApplyBackspaceToAllCursorsShiftsOverlayBetweenEditsOnce is the
+// backspace counterpart: cursors at lines 2 and 5 each join with the
+// previous line (back-to-front processing order). An overlay at line 3
+// sits between the two join points and must shift by the second-processed
+// edit only (-1, to line 2), not by both (-2, to line 1).
+func TestApplyBackspaceToAllCursorsShiftsOverlayBetweenEditsOnce(t *testing.T) {
+	m := newTestModel("line0\nline1\nline2\nline3\nline4\nline5\n")
+	m.rpc = &RPC{}
+	m.cursor = document.Pos{Line: 2, Col: 0}
+	m.extraCursors = []ExtraCursor{{pos: document.Pos{Line: 5, Col: 0}}}
+	m.semanticSpans = highlight.LineSpans{3: []highlight.Span{{StartCol: 0, EndCol: 5, ANSI: "x"}}}
+
+	m2, _ := applyBackspaceToAllCursors(m)
+
+	if _, stillAt3 := m2.semanticSpans[3]; stillAt3 {
+		t.Error("semanticSpans still has a stale entry at line 3 — not shifted")
+	}
+	if spans, ok := m2.semanticSpans[2]; !ok || len(spans) != 1 {
+		t.Errorf("semanticSpans = %v, want the span shifted to line 2 (once, by the second-processed edit only)", m2.semanticSpans)
+	}
+	if _, overShifted := m2.semanticSpans[1]; overShifted {
+		t.Error("semanticSpans has an entry at line 1 — over-shifted by both edits instead of just one")
+	}
+}
+
 // TestApplyBackspaceToAllCursorsShiftsLSPOverlays is applyBackspaceToAllCursors's
 // counterpart: backspacing a line join (deleting across a newline) with
 // multiple cursors must also shift cached overlay data down by the number

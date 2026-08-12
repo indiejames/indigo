@@ -481,7 +481,7 @@ func (m Model) applyFixCmd(idx int) tea.Cmd {
 					ToCol:    item.ToCol,
 					ClientID: m.rpc.ClientID(),
 				}
-				if _, err := m.rpc.ApplyOp(ctx, m.bufID, delOp); err != nil {
+				if _, err := m.rpc.ApplyOp(ctx, m.bufID, delOp, m.generation); err != nil {
 					return errorMsg{err}
 				}
 			}
@@ -492,7 +492,7 @@ func (m Model) applyFixCmd(idx int) tea.Cmd {
 				InsertText: item.Replace,
 				ClientID:   m.rpc.ClientID(),
 			}
-			if _, err := m.rpc.ApplyOp(ctx, m.bufID, insOp); err != nil {
+			if _, err := m.rpc.ApplyOp(ctx, m.bufID, insOp, m.generation); err != nil {
 				return errorMsg{err}
 			}
 			return nil

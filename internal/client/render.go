@@ -171,6 +171,7 @@ type layoutEntry struct {
 func (m Model) buildScreenLayout(vis, cw int) []layoutEntry {
 	layout := make([]layoutEntry, 0, vis)
 	bufLine := m.topLine
+	startChunk := m.topChunk
 	for len(layout) < vis {
 		if bufLine >= m.buf.LineCount() {
 			layout = append(layout, layoutEntry{bufLine: bufLine})
@@ -180,7 +181,12 @@ func (m Model) buildScreenLayout(vis, cw int) []layoutEntry {
 		runes := []rune(m.buf.Line(bufLine))
 		exp, _ := expandTabsRemap(runes)
 		chunks := visualChunks(len(exp), cw)
-		for chunk := 0; chunk < chunks && len(layout) < vis; chunk++ {
+		// For the first line (topLine), start from topChunk instead of 0
+		firstChunk := 0
+		if bufLine == m.topLine {
+			firstChunk = min(startChunk, max(0, chunks-1))
+		}
+		for chunk := firstChunk; chunk < chunks && len(layout) < vis; chunk++ {
 			layout = append(layout, layoutEntry{
 				bufLine:    bufLine,
 				chunk:      chunk,
@@ -207,14 +213,20 @@ func screenRowOf(layout []layoutEntry, bufLine, visCol, cw int) int {
 	return -1
 }
 
-// cursorVisualRowFromTop returns how many screen rows below topLine the
-// cursor currently sits (accounting for soft-wrap).
+// cursorVisualRowFromTop returns how many screen rows below topLine/topChunk
+// the cursor currently sits (accounting for soft-wrap).
 func (m Model) cursorVisualRowFromTop(cw int) int {
 	row := 0
 	for l := m.topLine; l < m.cursor.Line && l < m.buf.LineCount(); l++ {
 		runes := []rune(m.buf.Line(l))
 		exp, _ := expandTabsRemap(runes)
-		row += visualChunks(len(exp), cw)
+		chunks := visualChunks(len(exp), cw)
+		// For topLine, skip topChunk chunks since they're above the viewport
+		if l == m.topLine {
+			row += max(0, chunks-m.topChunk)
+		} else {
+			row += chunks
+		}
 	}
 	if m.cursor.Line < m.buf.LineCount() {
 		runes := []rune(m.buf.Line(m.cursor.Line))
@@ -223,16 +235,23 @@ func (m Model) cursorVisualRowFromTop(cw int) int {
 		if m.cursor.Col < len(colMap) {
 			curVisCol = colMap[m.cursor.Col]
 		}
+		curChunk := 0
 		if cw > 0 {
-			row += curVisCol / cw
+			curChunk = curVisCol / cw
+		}
+		// If cursor is on topLine, adjust for topChunk
+		if m.cursor.Line == m.topLine {
+			row += max(0, curChunk-m.topChunk)
+		} else {
+			row += curChunk
 		}
 	}
 	return row
 }
 
-// findTopLineForCursor returns the buffer line that should be at the top of
-// the viewport so the cursor falls within the last visible row.
-func (m Model) findTopLineForCursor(cw, vis int) int {
+// findTopLineForCursor returns the buffer line and chunk that should be at
+// the top of the viewport so the cursor falls within the last visible row.
+func (m Model) findTopLineForCursor(cw, vis int) (int, int) {
 	// Determine which wrap chunk of the cursor's line the cursor is on.
 	cursorChunk := 0
 	if m.cursor.Line < m.buf.LineCount() {
@@ -249,17 +268,20 @@ func (m Model) findTopLineForCursor(cw, vis int) int {
 	return m.findTopLineForRow(m.cursor.Line, cursorChunk, cw, vis)
 }
 
-// findTopLineForRow returns the buffer line that should be at the top of the
-// viewport so that the given wrap chunk of the given buffer line falls
-// within the last visible row. findTopLineForCursor is the common case
+// findTopLineForRow returns the buffer line and chunk that should be at the
+// top of the viewport so that the given wrap chunk of the given buffer line
+// falls within the last visible row. findTopLineForCursor is the common case
 // (anchored on the cursor's own chunk); scrollToShowLineTail anchors on a
 // different chunk of the same line to bring a line's later wrap chunks into
 // view instead.
-func (m Model) findTopLineForRow(line, chunk, cw, vis int) int {
+func (m Model) findTopLineForRow(line, chunk, cw, vis int) (int, int) {
 	// Number of rows above the target chunk that we can fill.
 	rowsAbove := vis - 1 - chunk
 	if rowsAbove <= 0 {
-		return line
+		// The target line's chunks alone need all visible rows or more.
+		// Start from the chunk that puts the target chunk at the bottom.
+		targetChunk := max(0, chunk-(vis-1))
+		return line, targetChunk
 	}
 	l := line - 1
 	for l >= 0 {
@@ -267,22 +289,19 @@ func (m Model) findTopLineForRow(line, chunk, cw, vis int) int {
 		exp, _ := expandTabsRemap(runes)
 		chunks := visualChunks(len(exp), cw)
 		if chunks == rowsAbove {
-			return l
+			return l, 0
 		}
 		if chunks > rowsAbove {
 			// Line l alone has more wrap chunks than the remaining budget.
-			// topLine can only start a line at its own first chunk (there's
-			// no way to scroll to "line l, chunk 3"), so using l here would
-			// render all of its chunks and overflow past vis, pushing the
-			// target row (often the cursor) out of the visible layout
-			// entirely. Scroll to just after it instead — rowsAbove rows
-			// above the target go unfilled, but the target stays visible.
-			return l + 1
+			// We can now start from a specific chunk within line l to show
+			// exactly rowsAbove chunks above the target, filling the viewport.
+			startChunk := chunks - rowsAbove
+			return l, startChunk
 		}
 		rowsAbove -= chunks
 		l--
 	}
-	return max(0, l+1)
+	return max(0, l+1), 0
 }
 
 // scrollToShowLineTail scrolls so that as much of the given (possibly
@@ -301,14 +320,17 @@ func (m *Model) scrollToShowLineTail(line int) {
 	runes := []rune(m.buf.Line(line))
 	exp, _ := expandTabsRemap(runes)
 	lastChunk := visualChunks(len(exp), cw) - 1
-	if top := m.findTopLineForRow(line, lastChunk, cw, vis); top > m.topLine {
-		m.topLine = top
+	topLine, topChunk := m.findTopLineForRow(line, lastChunk, cw, vis)
+	if topLine > m.topLine || (topLine == m.topLine && topChunk > m.topChunk) {
+		m.topLine = topLine
+		m.topChunk = topChunk
 	}
 }
 
 func (m *Model) scrollToCursor() {
 	if m.cursor.Line < m.topLine {
 		m.topLine = m.cursor.Line
+		m.topChunk = 0
 		return
 	}
 	cw := m.contentWidth()
@@ -317,10 +339,9 @@ func (m *Model) scrollToCursor() {
 	if curVisRow < vis {
 		return
 	}
-	m.topLine = m.findTopLineForCursor(cw, vis)
-	if m.topLine < 0 {
-		m.topLine = 0
-	}
+	topLine, topChunk := m.findTopLineForCursor(cw, vis)
+	m.topLine = max(0, topLine)
+	m.topChunk = max(0, topChunk)
 }
 
 func (m Model) visibleLines() int {

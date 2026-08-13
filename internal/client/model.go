@@ -522,6 +522,7 @@ type Model struct {
 	mode                Mode
 	cursor              document.Pos
 	topLine             int // first visible line
+	topChunk            int // first visible wrap chunk of topLine (0-based)
 	width               int
 	height              int
 	filePath            string
@@ -757,6 +758,7 @@ func (m Model) AtPos(line, col, bufHeight int) Model {
 	m.cursor = document.Pos{Line: line, Col: col}
 	quarter := max(1, bufHeight/4)
 	m.topLine = max(0, line-quarter)
+	m.topChunk = 0
 	m.flashTick = 5
 	return m
 }
@@ -770,6 +772,7 @@ func (m Model) AtMatch(line, col, matchLen, bufHeight int) Model {
 	m.cursor = document.Pos{Line: line, Col: col}
 	quarter := max(1, bufHeight/4)
 	m.topLine = max(0, line-quarter)
+	m.topChunk = 0
 	if matchLen > 0 {
 		endCol := min(col+matchLen-1, max(0, lineLen-1))
 		if endCol >= col {

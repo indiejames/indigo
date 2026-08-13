@@ -402,6 +402,61 @@ func TestGoToEndCursorStaysVisibleWhenPrecedingLineOverflowsBudget(t *testing.T)
 	}
 }
 
+// TestGoToLastLineWithMoreChunksThanViewport is a regression test for the bug
+// where jumping to the end of a file (G command) with a final line that wraps
+// into more chunks than the visible height would incorrectly render starting
+// from chunk 0, hiding the tail chunks below the viewport. The fix uses topChunk
+// to start rendering from a later chunk, keeping the line's tail visible.
+func TestGoToLastLineWithMoreChunksThanViewport(t *testing.T) {
+	// Create a final line that wraps into 6 chunks at width 20
+	longLine := make([]byte, 120)
+	for i := range longLine {
+		longLine[i] = 'x'
+	}
+	m := newTestModel("a\nb\n" + string(longLine))
+	m.height = 4 // vis = 3, but the final line needs 6 chunks
+	m.width = 20
+
+	mi, _ := executeGoToLastLine(m)
+	m2 := mi.(Model)
+
+	cw := m2.contentWidth()
+	vis := m2.visibleLines()
+	layout := m2.buildScreenLayout(vis, cw)
+
+	// The viewport should show the last 3 chunks (chunks 3, 4, 5)
+	lastLine := m2.buf.LineCount() - 1
+	sawChunk := map[int]bool{}
+	for _, e := range layout {
+		if e.bufLine == lastLine {
+			sawChunk[e.chunk] = true
+		}
+	}
+
+	// We expect to see chunks 3, 4, and 5 (the last 3 chunks)
+	expectedChunks := []int{3, 4, 5}
+	for _, chunk := range expectedChunks {
+		if !sawChunk[chunk] {
+			t.Errorf("expected chunk %d of the last line to be visible; saw chunks %v, layout=%+v", chunk, sawChunk, layout)
+		}
+	}
+
+	// Chunk 0 should NOT be visible
+	if sawChunk[0] {
+		t.Errorf("chunk 0 should not be visible when showing the tail; saw chunks %v", sawChunk)
+	}
+
+	// The cursor should still be visible
+	if row := screenRowOf(layout, m2.cursor.Line, 0, cw); row < 0 {
+		t.Errorf("cursor not visible; topLine=%d topChunk=%d cursor=%+v layout=%+v", m2.topLine, m2.topChunk, m2.cursor, layout)
+	}
+
+	// Verify topChunk is set correctly (should be 3 to show chunks 3, 4, 5)
+	if m2.topChunk != 3 {
+		t.Errorf("topChunk = %d, want 3 (to show last 3 chunks)", m2.topChunk)
+	}
+}
+
 func TestScreenRowOf(t *testing.T) {
 	longLine := make([]byte, 100)
 	for i := range longLine {

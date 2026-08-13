@@ -152,6 +152,62 @@ func TestOpsSince(t *testing.T) {
 	}
 }
 
+func TestTrimHistory(t *testing.T) {
+	b := New("", "")
+	for i := 0; i < 5; i++ {
+		b.Apply(Op{Type: OpInsert, InsertLine: 0, InsertCol: i, InsertText: "x"})
+	}
+	if got := b.HistoryLen(); got != 5 {
+		t.Fatalf("HistoryLen before trim: got %d, want 5", got)
+	}
+
+	b.TrimHistory(3)
+	if got := b.HistoryLen(); got != 2 {
+		t.Fatalf("HistoryLen after TrimHistory(3): got %d, want 2", got)
+	}
+
+	// Ops at/before the trimmed version are gone; ops after it are unaffected.
+	ops := b.OpsSince(3)
+	if len(ops) != 2 {
+		t.Fatalf("OpsSince(3) after trim: got %d ops, want 2", len(ops))
+	}
+	if ops[0].Version != 4 || ops[1].Version != 5 {
+		t.Fatalf("OpsSince(3) after trim: got versions %d,%d, want 4,5", ops[0].Version, ops[1].Version)
+	}
+
+	// A request older than the trim point clamps to what's still retained
+	// instead of panicking or returning garbage.
+	ops = b.OpsSince(0)
+	if len(ops) != 2 {
+		t.Fatalf("OpsSince(0) after trim: got %d ops, want 2 (clamped)", len(ops))
+	}
+
+	// Further edits keep appending correctly after a trim.
+	b.Apply(Op{Type: OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "y"})
+	if got := b.HistoryLen(); got != 3 {
+		t.Fatalf("HistoryLen after post-trim edit: got %d, want 3", got)
+	}
+	ops = b.OpsSince(3)
+	if len(ops) != 3 {
+		t.Fatalf("OpsSince(3) after post-trim edit: got %d ops, want 3", len(ops))
+	}
+
+	// Trimming at or before the current base is a no-op.
+	b.TrimHistory(3)
+	if got := b.HistoryLen(); got != 3 {
+		t.Fatalf("HistoryLen after redundant TrimHistory(3): got %d, want 3", got)
+	}
+
+	// Trimming past the current version retains nothing but doesn't panic.
+	b.TrimHistory(1000)
+	if got := b.HistoryLen(); got != 0 {
+		t.Fatalf("HistoryLen after over-trim: got %d, want 0", got)
+	}
+	if ops := b.OpsSince(0); len(ops) != 0 {
+		t.Fatalf("OpsSince(0) after over-trim: got %d ops, want 0", len(ops))
+	}
+}
+
 func TestDirty(t *testing.T) {
 	b := New("", "hello")
 	if b.Dirty() {

@@ -104,6 +104,12 @@ type bufferEntry struct {
 	// explicit Format) rather than edited via buf.Apply. See the
 	// generation doc comment on openFile/getUpdates in editor.capnp.
 	generation uint64
+	// sinceByClient records, per connected clientID, the last buffer
+	// version that client is known to have caught up to (via GetUpdates or
+	// its own ApplyOp/ApplyOps). Used by recordClientProgress to compute a
+	// safe watermark for document.Buffer.TrimHistory — see that function's
+	// doc comment.
+	sinceByClient map[uint64]uint64
 }
 
 // clientEntry holds connection metadata for a connected client.
@@ -378,6 +384,7 @@ func (s *editorService) Disconnect(_ context.Context, call proto.EditorService_d
 	// Remove client from any open buffers.
 	for _, e := range s.buffers {
 		delete(e.clients, clientID)
+		delete(e.sinceByClient, clientID)
 	}
 	remaining := len(s.clientMap)
 	s.mu.Unlock()

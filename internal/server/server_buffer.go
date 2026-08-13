@@ -63,6 +63,10 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 				e.clients[clientID] = struct{}{}
 				ver := e.buf.Version()
 				gen := e.generation
+				if e.sinceByClient == nil {
+					e.sinceByClient = make(map[uint64]uint64)
+				}
+				e.sinceByClient[clientID] = ver
 				s.mu.Unlock()
 
 				res, err := call.AllocResults()
@@ -87,9 +91,10 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 		buf.MarkDirty()
 	}
 	s.buffers[bufID] = &bufferEntry{
-		buf:       buf,
-		clients:   map[uint64]struct{}{clientID: {}},
-		canonPath: canonicalPath(path),
+		buf:           buf,
+		clients:       map[uint64]struct{}{clientID: {}},
+		canonPath:     canonicalPath(path),
+		sinceByClient: map[uint64]uint64{clientID: buf.Version()},
 	}
 	ver := buf.Version()
 	s.mu.Unlock()
@@ -210,7 +215,7 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 
-	ops := entry.buf.OpsSince(since)
+	ops, ver := entry.buf.OpsSinceAndVersion(since)
 	// Filter out ops that originated from the caller.
 	filtered := ops[:0:0]
 	for _, op := range ops {
@@ -219,11 +224,13 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 		}
 	}
 
+	s.recordClientProgress(entry, callerID, ver)
+
 	res, err := call.AllocResults()
 	if err != nil {
 		return err
 	}
-	res.SetVersion(entry.buf.Version())
+	res.SetVersion(ver)
 	res.SetGeneration(entry.generation)
 	// Saved-content hash lets clients keep their dirty markers accurate when
 	// another client (e.g. an agent) saves the buffer.
@@ -261,6 +268,47 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 		}
 	}
 	return nil
+}
+
+// historyTrimThreshold bounds how many ops a buffer's history is allowed to
+// accumulate before recordClientProgress reclaims already-acknowledged
+// entries. Kept well above a normal burst of edits so trimming — which
+// reallocates the retained slice — stays rare rather than running on every
+// keystroke.
+const historyTrimThreshold = 500
+
+// recordClientProgress records that clientID has now caught up to version
+// ver of entry's buffer (via GetUpdates, ApplyOp, or ApplyOps), then — once
+// the buffer's retained op history has grown past historyTrimThreshold —
+// reclaims every op that all currently connected clients have already seen.
+//
+// Without this, document.Buffer.history grows for the entire life of a long
+// editing session even though old ops stop being useful the moment every
+// client has moved past them: a buffer only gets cleared out when its last
+// client closes it (see CloseBuffer), which can be hours away.
+func (s *editorService) recordClientProgress(entry *bufferEntry, clientID, ver uint64) {
+	s.mu.Lock()
+	if entry.sinceByClient == nil {
+		entry.sinceByClient = make(map[uint64]uint64)
+	}
+	entry.sinceByClient[clientID] = ver
+	needsTrim := entry.buf.HistoryLen() > historyTrimThreshold
+	min := ver
+	if needsTrim {
+		for id := range entry.clients {
+			v, ok := entry.sinceByClient[id]
+			if !ok {
+				v = 0
+			}
+			if v < min {
+				min = v
+			}
+		}
+	}
+	s.mu.Unlock()
+	if needsTrim {
+		entry.buf.TrimHistory(min)
+	}
 }
 
 // GetBufferSnapshot returns a buffer's current authoritative content by ID.
@@ -343,6 +391,7 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 
 	op := protoToOp(protoOp, clientID)
 	newVersion := entry.buf.Apply(op)
+	s.recordClientProgress(entry, clientID, newVersion)
 
 	res, err := call.AllocResults()
 	if err != nil {
@@ -423,6 +472,10 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 		if lineDelta != 0 {
 			go s.pluginMgr.DispatchEditEvent(context.Background(), bufID, path, atLine, lineDelta)
 		}
+	}
+
+	if protoOps.Len() > 0 {
+		s.recordClientProgress(entry, clientID, newVersion)
 	}
 
 	res, err := call.AllocResults()
@@ -631,6 +684,7 @@ func (s *editorService) CloseBuffer(_ context.Context, call proto.EditorService_
 	s.mu.Lock()
 	if entry, ok := s.buffers[bufID]; ok {
 		delete(entry.clients, clientID)
+		delete(entry.sinceByClient, clientID)
 		if len(entry.clients) == 0 {
 			removedPath = entry.buf.Path()
 			delete(s.buffers, bufID)

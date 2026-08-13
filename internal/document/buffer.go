@@ -49,9 +49,13 @@ type Buffer struct {
 	gapOffset int       // where in the rope the gap is inserted
 	version   uint64
 	history   []Op
-	path      string
-	dirty     bool
-	savedHash [32]byte // sha256 of content at last load or save
+	// historyBase is the version of the op immediately before history[0] —
+	// i.e. how many ops have been reclaimed by TrimHistory. 0 until the
+	// first trim, at which point history[0].Version == historyBase+1.
+	historyBase uint64
+	path        string
+	dirty       bool
+	savedHash   [32]byte // sha256 of content at last load or save
 }
 
 // New creates a Buffer from raw file content.
@@ -395,12 +399,58 @@ func (b *Buffer) Apply(op Op) uint64 {
 }
 
 func (b *Buffer) OpsSince(sinceVersion uint64) []Op {
+	ops, _ := b.OpsSinceAndVersion(sinceVersion)
+	return ops
+}
+
+// OpsSinceAndVersion returns the same ops OpsSince would, plus the buffer's
+// version, both read under one lock acquisition. Callers that report a
+// version alongside an ops list (like GetUpdates) must use this rather than
+// calling OpsSince and Version separately: a concurrent Apply landing
+// between the two calls would let the reported version race ahead of what
+// the ops list actually covers, and the caller believing itself caught up
+// to that version would never receive the op that got skipped.
+func (b *Buffer) OpsSinceAndVersion(sinceVersion uint64) ([]Op, uint64) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if sinceVersion >= b.version {
-		return nil
+		return nil, b.version
 	}
-	return b.history[sinceVersion:]
+	if sinceVersion < b.historyBase {
+		// Ops this old were already reclaimed by TrimHistory; a correctly
+		// behaving caller never asks for less than what TrimHistory left
+		// available (see recordClientProgress in server_buffer.go), so this
+		// is a defensive clamp rather than an expected path.
+		sinceVersion = b.historyBase
+	}
+	return b.history[sinceVersion-b.historyBase:], b.version
+}
+
+// HistoryLen reports how many ops are currently retained (post-trim).
+func (b *Buffer) HistoryLen() int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.history)
+}
+
+// TrimHistory discards retained ops at or before minVersion, keeping only
+// ops after it. Callers must only pass a minVersion that every consumer of
+// OpsSince has already caught up past (see recordClientProgress), since
+// trimmed ops are gone for good.
+func (b *Buffer) TrimHistory(minVersion uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if minVersion <= b.historyBase {
+		return
+	}
+	idx := minVersion - b.historyBase
+	if idx > uint64(len(b.history)) {
+		idx = uint64(len(b.history))
+	}
+	trimmed := make([]Op, len(b.history)-int(idx))
+	copy(trimmed, b.history[idx:])
+	b.history = trimmed
+	b.historyBase += idx
 }
 
 func (b *Buffer) RuneOffset(line, col int) int {

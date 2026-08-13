@@ -52,3 +52,27 @@ func TestDetectIndentSettingsWhitespaceOnlyLinesIgnored(t *testing.T) {
 		t.Errorf("DetectIndentSettings: got %+v, want nil", got)
 	}
 }
+
+// TestDetectIndentSettingsIgnoresJSDocCommentLines is a regression test: a
+// block comment's " * foo" continuation lines (and the closing " */") have
+// exactly 1 leading space regardless of the file's real indent width —
+// extremely common in TypeScript/JavaScript/Go/etc via JSDoc/TSDoc/Godoc
+// style comments. Without excluding them, minSpaceWidth latched onto 1,
+// making every downstream consumer (indent guides in particular) treat the
+// file as 1-space-indented instead of its real 2-space indent.
+func TestDetectIndentSettingsIgnoresJSDocCommentLines(t *testing.T) {
+	src := "/**\n" +
+		" * Does a thing.\n" +
+		" * @param foo - something\n" +
+		" */\n" +
+		"function bar(foo) {\n" +
+		"  return foo;\n" +
+		"}\n"
+	got := DetectIndentSettings(src)
+	if got == nil {
+		t.Fatal("DetectIndentSettings: got nil, want spaces width 2")
+	}
+	if got.Style != "spaces" || got.Width != 2 {
+		t.Errorf("got %+v, want {spaces 2} — a JSDoc comment's 1-space-aligned lines must not skew detection", got)
+	}
+}

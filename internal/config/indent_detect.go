@@ -39,6 +39,14 @@ func DetectIndentSettings(content string) *IndentSettings {
 			if n == len(line) {
 				continue // whitespace-only line: no real signal either way
 			}
+			// Block-comment continuation lines (" * foo", the closing
+			// " */") conventionally align on a single space before the
+			// "*" regardless of the file's real indent width — e.g. a
+			// JSDoc/TSDoc comment in an otherwise 2- or 4-space-indented
+			// file. Counting them would drag minSpaceWidth down to 1.
+			if line[n] == '*' && (n+1 == len(line) || line[n+1] == ' ' || line[n+1] == '/') {
+				continue
+			}
 			spaceLines++
 			if minSpaceWidth == 0 || n < minSpaceWidth {
 				minSpaceWidth = n

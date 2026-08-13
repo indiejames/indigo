@@ -104,3 +104,74 @@ func TestHistoryTrimBlockedByLaggingClient(t *testing.T) {
 		t.Fatalf("HistoryLen = %d after client 2 caught up, want 0", got)
 	}
 }
+
+// TestGetUpdatesVersionMatchesReturnedOps is GetUpdates' integration-level
+// counterpart to TestOpsSinceAndVersionAtomicUnderConcurrentApply
+// (internal/document): it drives a concurrent direct buf.Apply — the same
+// pattern plugin_bridge.go and server_move_to_file.go use, which bypasses
+// the capnp call queue entirely and so can genuinely interleave with a
+// GetUpdates RPC in flight — against repeated GetUpdates polls, and asserts
+// the response's reported version always matches the version of the last op
+// it actually returned. Before GetUpdates switched to the atomic
+// OpsSinceAndVersion, a concurrent Apply landing between the old separate
+// OpsSince/Version reads could report a version the returned ops didn't
+// cover, permanently desyncing the polling client.
+func TestGetUpdatesVersionMatchesReturnedOps(t *testing.T) {
+	entry := &bufferEntry{
+		buf:           document.New("/tmp/x.go", ""),
+		clients:       map[uint64]struct{}{1: {}, 2: {}},
+		sinceByClient: map[uint64]uint64{1: 0, 2: 0},
+	}
+	s := &editorService{
+		buffers: map[uint32]*bufferEntry{1: entry},
+	}
+	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
+
+	const n = 1500
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < n; i++ {
+			entry.buf.Apply(document.Op{
+				ClientID:   1,
+				Type:       document.OpInsert,
+				InsertLine: 0,
+				InsertCol:  0,
+				InsertText: "x",
+			})
+		}
+	}()
+
+	for i := 0; i < n; i++ {
+		fut, rel := client.GetUpdates(context.Background(), func(p proto.EditorService_getUpdates_Params) error {
+			p.SetClientId(2)
+			p.SetBufferId(1)
+			p.SetSinceVersion(0)
+			return nil
+		})
+		res, err := fut.Struct()
+		if err != nil {
+			rel()
+			t.Fatalf("GetUpdates errored: %v", err)
+		}
+		ops, opsErr := res.Ops()
+		ver := res.Version()
+		if opsErr != nil {
+			rel()
+			t.Fatalf("res.Ops(): %v", opsErr)
+		}
+		var lastOpVersion uint64
+		hasOps := ops.Len() > 0
+		if hasOps {
+			lastOpVersion = ops.At(ops.Len() - 1).Version()
+		}
+		rel()
+		if !hasOps {
+			continue // Apply goroutine hasn't landed its first op yet
+		}
+		if lastOpVersion != ver {
+			t.Fatalf("GetUpdates: last returned op version=%d, reported version=%d — must always match under a concurrent Apply", lastOpVersion, ver)
+		}
+	}
+	<-done
+}

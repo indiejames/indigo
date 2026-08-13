@@ -215,7 +215,7 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 
-	ops := entry.buf.OpsSince(since)
+	ops, ver := entry.buf.OpsSinceAndVersion(since)
 	// Filter out ops that originated from the caller.
 	filtered := ops[:0:0]
 	for _, op := range ops {
@@ -224,7 +224,6 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 		}
 	}
 
-	ver := entry.buf.Version()
 	s.recordClientProgress(entry, callerID, ver)
 
 	res, err := call.AllocResults()

@@ -208,6 +208,84 @@ func TestTrimHistory(t *testing.T) {
 	}
 }
 
+// TestTrimHistoryOverTrimThenReclaim is a regression test: TrimHistory(N)
+// for an N beyond the last retained op's version must set historyBase to
+// the actual number of ops removed, not the raw requested N. Setting it to
+// N directly left historyBase pointing past the buffer's real version;
+// OpsSince's defensive "sinceVersion < historyBase" clamp then silently
+// rewound any later sinceVersion down to that inflated historyBase,
+// re-returning ops the caller had already seen.
+func TestTrimHistoryOverTrimThenReclaim(t *testing.T) {
+	b := New("", "")
+	for i := 0; i < 3; i++ {
+		b.Apply(Op{Type: OpInsert, InsertLine: 0, InsertCol: i, InsertText: "x"})
+	}
+	// Over-trim: request far beyond the current version (3); this must
+	// clamp internally rather than adopting 1000 as the new historyBase.
+	b.TrimHistory(1000)
+	if got := b.HistoryLen(); got != 0 {
+		t.Fatalf("HistoryLen after over-trim: got %d, want 0", got)
+	}
+
+	for i := 0; i < 3; i++ {
+		b.Apply(Op{Type: OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "y"})
+	}
+	// Buffer is now at version 6 with 3 ops (versions 4,5,6) retained.
+	if got := b.HistoryLen(); got != 3 {
+		t.Fatalf("HistoryLen after post-overtrim edits: got %d, want 3", got)
+	}
+
+	// A caller already caught up to version 4 must get exactly the 2 ops
+	// after it, not the already-seen version-4 op re-included.
+	ops := b.OpsSince(4)
+	if len(ops) != 2 {
+		t.Fatalf("OpsSince(4) after over-trim: got %d ops, want 2", len(ops))
+	}
+	if ops[0].Version != 5 || ops[1].Version != 6 {
+		t.Fatalf("OpsSince(4) after over-trim: got versions %d,%d, want 5,6", ops[0].Version, ops[1].Version)
+	}
+
+	// A subsequent legitimate trim (once a caller catches up to 6) must
+	// still work correctly off the corrected historyBase.
+	b.TrimHistory(6)
+	if got := b.HistoryLen(); got != 0 {
+		t.Fatalf("HistoryLen after second trim: got %d, want 0", got)
+	}
+}
+
+// TestOpsSinceAndVersionAtomicUnderConcurrentApply is a regression test for
+// a race in the server's GetUpdates handler: it used to call OpsSince and
+// Version as two separate locked reads, so a concurrent Apply (as happens
+// when a plugin edits a buffer directly, bypassing the RPC call queue) could
+// land between them and make the reported version outrun the ops actually
+// returned. A polling client trusts the reported version as "I've now seen
+// everything up to here," so the skipped op would never be redelivered —
+// permanent, silent desync. OpsSinceAndVersion reads both under one lock so
+// this can't happen; this test hammers Apply concurrently with
+// OpsSinceAndVersion and asserts the invariant that must hold either way.
+func TestOpsSinceAndVersionAtomicUnderConcurrentApply(t *testing.T) {
+	b := New("", "")
+	const n = 3000
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < n; i++ {
+			b.Apply(Op{Type: OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "x"})
+		}
+	}()
+
+	for i := 0; i < n; i++ {
+		ops, ver := b.OpsSinceAndVersion(0)
+		if len(ops) == 0 {
+			continue // Apply goroutine hasn't landed its first op yet
+		}
+		if got := ops[len(ops)-1].Version; got != ver {
+			t.Fatalf("OpsSinceAndVersion: last returned op version=%d, reported version=%d — must always match under a concurrent Apply", got, ver)
+		}
+	}
+	<-done
+}
+
 func TestDirty(t *testing.T) {
 	b := New("", "hello")
 	if b.Dirty() {

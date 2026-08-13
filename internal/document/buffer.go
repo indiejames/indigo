@@ -399,10 +399,22 @@ func (b *Buffer) Apply(op Op) uint64 {
 }
 
 func (b *Buffer) OpsSince(sinceVersion uint64) []Op {
+	ops, _ := b.OpsSinceAndVersion(sinceVersion)
+	return ops
+}
+
+// OpsSinceAndVersion returns the same ops OpsSince would, plus the buffer's
+// version, both read under one lock acquisition. Callers that report a
+// version alongside an ops list (like GetUpdates) must use this rather than
+// calling OpsSince and Version separately: a concurrent Apply landing
+// between the two calls would let the reported version race ahead of what
+// the ops list actually covers, and the caller believing itself caught up
+// to that version would never receive the op that got skipped.
+func (b *Buffer) OpsSinceAndVersion(sinceVersion uint64) ([]Op, uint64) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if sinceVersion >= b.version {
-		return nil
+		return nil, b.version
 	}
 	if sinceVersion < b.historyBase {
 		// Ops this old were already reclaimed by TrimHistory; a correctly
@@ -411,7 +423,7 @@ func (b *Buffer) OpsSince(sinceVersion uint64) []Op {
 		// is a defensive clamp rather than an expected path.
 		sinceVersion = b.historyBase
 	}
-	return b.history[sinceVersion-b.historyBase:]
+	return b.history[sinceVersion-b.historyBase:], b.version
 }
 
 // HistoryLen reports how many ops are currently retained (post-trim).
@@ -438,7 +450,7 @@ func (b *Buffer) TrimHistory(minVersion uint64) {
 	trimmed := make([]Op, len(b.history)-int(idx))
 	copy(trimmed, b.history[idx:])
 	b.history = trimmed
-	b.historyBase = minVersion
+	b.historyBase += idx
 }
 
 func (b *Buffer) RuneOffset(line, col int) int {

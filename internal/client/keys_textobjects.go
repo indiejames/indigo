@@ -13,6 +13,7 @@ func executeGoToTop(m Model) (tea.Model, tea.Cmd) {
 	m.sel = nil
 	m.cursor = document.Pos{Line: 0, Col: 0}
 	m.topLine = 0
+	m.topChunk = 0
 	return m, nil
 }
 
@@ -21,6 +22,7 @@ func executeGoToEnd(m Model) (tea.Model, tea.Cmd) {
 	last := max(0, m.buf.LineCount()-1)
 	m.cursor = document.Pos{Line: last, Col: 0}
 	m.scrollToCursor()
+	m.scrollToShowLineTail(last)
 	return m, nil
 }
 

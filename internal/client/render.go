@@ -171,6 +171,7 @@ type layoutEntry struct {
 func (m Model) buildScreenLayout(vis, cw int) []layoutEntry {
 	layout := make([]layoutEntry, 0, vis)
 	bufLine := m.topLine
+	startChunk := m.topChunk
 	for len(layout) < vis {
 		if bufLine >= m.buf.LineCount() {
 			layout = append(layout, layoutEntry{bufLine: bufLine})
@@ -180,7 +181,12 @@ func (m Model) buildScreenLayout(vis, cw int) []layoutEntry {
 		runes := []rune(m.buf.Line(bufLine))
 		exp, _ := expandTabsRemap(runes)
 		chunks := visualChunks(len(exp), cw)
-		for chunk := 0; chunk < chunks && len(layout) < vis; chunk++ {
+		// For the first line (topLine), start from topChunk instead of 0
+		firstChunk := 0
+		if bufLine == m.topLine {
+			firstChunk = min(startChunk, max(0, chunks-1))
+		}
+		for chunk := firstChunk; chunk < chunks && len(layout) < vis; chunk++ {
 			layout = append(layout, layoutEntry{
 				bufLine:    bufLine,
 				chunk:      chunk,
@@ -207,14 +213,20 @@ func screenRowOf(layout []layoutEntry, bufLine, visCol, cw int) int {
 	return -1
 }
 
-// cursorVisualRowFromTop returns how many screen rows below topLine the
-// cursor currently sits (accounting for soft-wrap).
+// cursorVisualRowFromTop returns how many screen rows below topLine/topChunk
+// the cursor currently sits (accounting for soft-wrap).
 func (m Model) cursorVisualRowFromTop(cw int) int {
 	row := 0
 	for l := m.topLine; l < m.cursor.Line && l < m.buf.LineCount(); l++ {
 		runes := []rune(m.buf.Line(l))
 		exp, _ := expandTabsRemap(runes)
-		row += visualChunks(len(exp), cw)
+		chunks := visualChunks(len(exp), cw)
+		// For topLine, skip topChunk chunks since they're above the viewport
+		if l == m.topLine {
+			row += max(0, chunks-m.topChunk)
+		} else {
+			row += chunks
+		}
 	}
 	if m.cursor.Line < m.buf.LineCount() {
 		runes := []rune(m.buf.Line(m.cursor.Line))
@@ -223,51 +235,118 @@ func (m Model) cursorVisualRowFromTop(cw int) int {
 		if m.cursor.Col < len(colMap) {
 			curVisCol = colMap[m.cursor.Col]
 		}
+		curChunk := 0
 		if cw > 0 {
-			row += curVisCol / cw
+			curChunk = curVisCol / cw
+		}
+		// If cursor is on topLine, adjust for topChunk
+		if m.cursor.Line == m.topLine {
+			row += max(0, curChunk-m.topChunk)
+		} else {
+			row += curChunk
 		}
 	}
 	return row
 }
 
-// findTopLineForCursor returns the buffer line that should be at the top of
-// the viewport so the cursor falls within the last visible row.
-func (m Model) findTopLineForCursor(cw, vis int) int {
-	// Determine which wrap chunk of the cursor's line the cursor is on.
-	cursorChunk := 0
-	if m.cursor.Line < m.buf.LineCount() {
-		runes := []rune(m.buf.Line(m.cursor.Line))
-		_, colMap := expandTabsRemap(runes)
-		curVisCol := 0
-		if m.cursor.Col < len(colMap) {
-			curVisCol = colMap[m.cursor.Col]
-		}
-		if cw > 0 {
-			cursorChunk = curVisCol / cw
-		}
+// chunkOfCol returns the 0-based wrap chunk that column col falls in on the
+// given buffer line, at content width cw.
+func (m Model) chunkOfCol(line, col, cw int) int {
+	if line < 0 || line >= m.buf.LineCount() {
+		return 0
 	}
-	// Number of rows above the cursor's chunk that we can fill.
-	rowsAbove := vis - 1 - cursorChunk
+	runes := []rune(m.buf.Line(line))
+	_, colMap := expandTabsRemap(runes)
+	curVisCol := 0
+	if col < len(colMap) {
+		curVisCol = colMap[col]
+	}
+	if cw <= 0 {
+		return 0
+	}
+	return curVisCol / cw
+}
+
+// findTopLineForCursor returns the buffer line and chunk that should be at
+// the top of the viewport so the cursor falls within the last visible row.
+func (m Model) findTopLineForCursor(cw, vis int) (int, int) {
+	cursorChunk := m.chunkOfCol(m.cursor.Line, m.cursor.Col, cw)
+	return m.findTopLineForRow(m.cursor.Line, cursorChunk, cw, vis)
+}
+
+// findTopLineForRow returns the buffer line and chunk that should be at the
+// top of the viewport so that the given wrap chunk of the given buffer line
+// falls within the last visible row. findTopLineForCursor is the common case
+// (anchored on the cursor's own chunk); scrollToShowLineTail anchors on a
+// different chunk of the same line to bring a line's later wrap chunks into
+// view instead.
+func (m Model) findTopLineForRow(line, chunk, cw, vis int) (int, int) {
+	// Number of rows above the target chunk that we can fill.
+	rowsAbove := vis - 1 - chunk
 	if rowsAbove <= 0 {
-		return m.cursor.Line
+		// The target line's chunks alone need all visible rows or more.
+		// Start from the chunk that puts the target chunk at the bottom.
+		targetChunk := max(0, chunk-(vis-1))
+		return line, targetChunk
 	}
-	l := m.cursor.Line - 1
+	l := line - 1
 	for l >= 0 {
 		runes := []rune(m.buf.Line(l))
 		exp, _ := expandTabsRemap(runes)
 		chunks := visualChunks(len(exp), cw)
-		if chunks >= rowsAbove {
-			return l
+		if chunks == rowsAbove {
+			return l, 0
+		}
+		if chunks > rowsAbove {
+			// Line l alone has more wrap chunks than the remaining budget.
+			// We can now start from a specific chunk within line l to show
+			// exactly rowsAbove chunks above the target, filling the viewport.
+			startChunk := chunks - rowsAbove
+			return l, startChunk
 		}
 		rowsAbove -= chunks
 		l--
 	}
-	return max(0, l+1)
+	return max(0, l+1), 0
+}
+
+// scrollToShowLineTail scrolls so that as much of the given (possibly
+// soft-wrapped) line is visible as fits, anchored on its last visual chunk.
+// Used by "go to last line": landing cursor at column 0 of a long wrapped
+// final line otherwise leaves its tail permanently hidden below the
+// viewport — scrollToCursor only guarantees the cursor's own chunk (the
+// first) is visible, and unlike any other line there's no line below the
+// last one to move the cursor into that would trigger further scrolling.
+func (m *Model) scrollToShowLineTail(line int) {
+	if line < 0 || line >= m.buf.LineCount() {
+		return
+	}
+	cw := m.contentWidth()
+	vis := m.visibleLines()
+	runes := []rune(m.buf.Line(line))
+	exp, _ := expandTabsRemap(runes)
+	lastChunk := visualChunks(len(exp), cw) - 1
+	topLine, topChunk := m.findTopLineForRow(line, lastChunk, cw, vis)
+	// Showing the tail must never scroll the cursor's own chunk out of
+	// view: if the line has more chunks than fit in the viewport at all,
+	// anchoring on the tail and anchoring on the cursor can't both be
+	// satisfied, and cursor visibility wins. When the anchor line is the
+	// cursor's own line, cap topChunk at the cursor's chunk.
+	if topLine == m.cursor.Line {
+		if cursorChunk := m.chunkOfCol(m.cursor.Line, m.cursor.Col, cw); topChunk > cursorChunk {
+			topChunk = cursorChunk
+		}
+	}
+	if topLine > m.topLine || (topLine == m.topLine && topChunk > m.topChunk) {
+		m.topLine = topLine
+		m.topChunk = topChunk
+	}
 }
 
 func (m *Model) scrollToCursor() {
 	if m.cursor.Line < m.topLine {
 		m.topLine = m.cursor.Line
+		m.topChunk = 0
 		return
 	}
 	cw := m.contentWidth()
@@ -276,10 +355,9 @@ func (m *Model) scrollToCursor() {
 	if curVisRow < vis {
 		return
 	}
-	m.topLine = m.findTopLineForCursor(cw, vis)
-	if m.topLine < 0 {
-		m.topLine = 0
-	}
+	topLine, topChunk := m.findTopLineForCursor(cw, vis)
+	m.topLine = max(0, topLine)
+	m.topChunk = max(0, topChunk)
 }
 
 func (m Model) visibleLines() int {

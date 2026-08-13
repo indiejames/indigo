@@ -474,7 +474,7 @@ func applyBackspaceToAllCursors(m Model) (Model, tea.Cmd) {
 
 // applyToAllCursors calls fn on the primary cursor then on each extra cursor in
 // turn, swapping cursor/sel state before and after each call. The viewport
-// (topLine) follows only the primary cursor; extra cursors do not scroll.
+// (topLine, topChunk) follows only the primary cursor; extra cursors do not scroll.
 func (m *Model) applyToAllCursors(fn func(*Model)) {
 	fn(m) // primary cursor
 	saved := append([]ExtraCursor(nil), m.extraCursors...)
@@ -482,6 +482,7 @@ func (m *Model) applyToAllCursors(fn func(*Model)) {
 		savedCursor := m.cursor
 		savedSel := m.sel
 		savedTopLine := m.topLine
+		savedTopChunk := m.topChunk
 		m.cursor = ec.pos
 		m.sel = ec.sel
 		m.extraCursors = nil // prevent fn from seeing/modifying extra cursors
@@ -491,6 +492,7 @@ func (m *Model) applyToAllCursors(fn func(*Model)) {
 		m.cursor = savedCursor
 		m.sel = savedSel
 		m.topLine = savedTopLine
+		m.topChunk = savedTopChunk
 	}
 	m.extraCursors = saved
 }

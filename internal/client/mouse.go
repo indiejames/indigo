@@ -116,6 +116,7 @@ const wheelScrollLines = 3
 func (m *Model) scrollWheel(delta int) {
 	maxTop := max(0, m.displayLineCount()-1)
 	m.topLine = min(maxTop, max(0, m.topLine+delta))
+	m.topChunk = 0 // reset to chunk 0 when scrolling by whole lines
 
 	layout := m.buildScreenLayout(m.visibleLines(), m.contentWidth())
 	if len(layout) == 0 {

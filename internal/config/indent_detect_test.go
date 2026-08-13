@@ -76,3 +76,45 @@ func TestDetectIndentSettingsIgnoresJSDocCommentLines(t *testing.T) {
 		t.Errorf("got %+v, want {spaces 2} — a JSDoc comment's 1-space-aligned lines must not skew detection", got)
 	}
 }
+
+// TestDetectIndentSettingsCRLFBlockComments is a regression test ensuring
+// block comments with CRLF line endings (\r\n) are handled correctly. The
+// trailing \r must be stripped before evaluating lines, otherwise the
+// asterisk-prefix heuristic fails.
+func TestDetectIndentSettingsCRLFBlockComments(t *testing.T) {
+	src := "/**\r\n" +
+		" * Does a thing.\r\n" +
+		" * @param foo - something\r\n" +
+		" */\r\n" +
+		"function bar(foo) {\r\n" +
+		"  return foo;\r\n" +
+		"}\r\n"
+	got := DetectIndentSettings(src)
+	if got == nil {
+		t.Fatal("DetectIndentSettings: got nil, want spaces width 2")
+	}
+	if got.Style != "spaces" || got.Width != 2 {
+		t.Errorf("got %+v, want {spaces 2} — block comments with CRLF endings must work", got)
+	}
+}
+
+// TestDetectIndentSettingsGeneratorMethods is a regression test ensuring
+// JavaScript/TypeScript generator methods (which start with `*` in class
+// bodies) are NOT misidentified as block-comment continuation lines. Only
+// lines that are actually inside a `/* ... */` block comment should be
+// skipped by the asterisk heuristic.
+func TestDetectIndentSettingsGeneratorMethods(t *testing.T) {
+	src := "class Foo {\n" +
+		"  * generator() {\n" +
+		"    yield 1;\n" +
+		"    yield 2;\n" +
+		"  }\n" +
+		"}\n"
+	got := DetectIndentSettings(src)
+	if got == nil {
+		t.Fatal("DetectIndentSettings: got nil, want spaces width 2")
+	}
+	if got.Style != "spaces" || got.Width != 2 {
+		t.Errorf("got %+v, want {spaces 2} — generator methods must not be skipped as block comments", got)
+	}
+}

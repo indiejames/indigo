@@ -21,6 +21,7 @@ func executeGoToEnd(m Model) (tea.Model, tea.Cmd) {
 	last := max(0, m.buf.LineCount()-1)
 	m.cursor = document.Pos{Line: last, Col: 0}
 	m.scrollToCursor()
+	m.scrollToShowLineTail(last)
 	return m, nil
 }
 

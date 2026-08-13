@@ -395,6 +395,7 @@ func executeGoToLastLine(m Model) (tea.Model, tea.Cmd) {
 		m.sel = nil
 		m.cursor = document.Pos{Line: last, Col: 0}
 		m.scrollToCursor()
+		m.scrollToShowLineTail(last)
 	})
 	return m, nil
 }

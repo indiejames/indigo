@@ -330,6 +330,78 @@ func TestCursorVisualRowFromTop(t *testing.T) {
 	}
 }
 
+// TestGoToLastLineShowsWrappedTail is a regression test: jumping to the
+// last line (G) lands the cursor at column 0 (its first, topmost visual
+// chunk), which scrollToCursor alone considers already "visible" without
+// scrolling further — stranding the rest of a wrapped final line below the
+// viewport with no line after it to move the cursor into and trigger
+// further scrolling.
+func TestGoToLastLineShowsWrappedTail(t *testing.T) {
+	longLine := make([]byte, 100)
+	for i := range longLine {
+		longLine[i] = 'x'
+	}
+	// "a\nb\nc\n" + a 100-char final line with no trailing newline, so the
+	// long line is the true last buffer line (not a phantom empty one).
+	m := newTestModel("a\nb\nc\n" + string(longLine))
+	m.height = 5 // vis = 4
+	m.width = 40 // cw = 40 → the last line wraps into 3 chunks
+
+	mi, _ := executeGoToLastLine(m)
+	m2 := mi.(Model)
+
+	cw := m2.contentWidth()
+	vis := m2.visibleLines()
+	layout := m2.buildScreenLayout(vis, cw)
+
+	lastLine := m2.buf.LineCount() - 1
+	sawChunk := map[int]bool{}
+	for _, e := range layout {
+		if e.bufLine == lastLine {
+			sawChunk[e.chunk] = true
+		}
+	}
+	for _, c := range []int{0, 1, 2} {
+		if !sawChunk[c] {
+			t.Errorf("chunk %d of the wrapped last line is not visible; layout = %+v", c, layout)
+		}
+	}
+	if screenRowOf(layout, m2.cursor.Line, 0, cw) < 0 {
+		t.Error("cursor's own row is not visible after scrolling to show the wrapped tail")
+	}
+}
+
+// TestGoToEndCursorStaysVisibleWhenPrecedingLineOverflowsBudget is a
+// regression test for a pre-existing bug in findTopLineForRow: when the
+// line just above the target overflows the remaining row budget on its
+// own, using it as topLine renders ALL of its wrap chunks (topLine can only
+// start a line at its first chunk — there's no way to scroll to "line X,
+// chunk 3"), consuming more rows than intended and pushing the actual
+// target (here, the cursor on the final, empty phantom line after a long
+// wrapped line) out of the rendered layout entirely — the cursor just
+// disappears.
+func TestGoToEndCursorStaysVisibleWhenPrecedingLineOverflowsBudget(t *testing.T) {
+	longLine := make([]byte, 200)
+	for i := range longLine {
+		longLine[i] = 'x'
+	}
+	// Trailing \n makes the true last buffer line an empty phantom line,
+	// immediately preceded by a line that wraps into 5 chunks at cw=40.
+	m := newTestModel("a\nb\nc\n" + string(longLine) + "\n")
+	m.height = 5 // vis = 4; rowsAbove for the phantom line's chunk 0 is 3 < 5
+	m.width = 40
+
+	mi, _ := executeGoToEnd(m)
+	m2 := mi.(Model)
+
+	cw := m2.contentWidth()
+	vis := m2.visibleLines()
+	layout := m2.buildScreenLayout(vis, cw)
+	if row := screenRowOf(layout, m2.cursor.Line, 0, cw); row < 0 {
+		t.Fatalf("cursor not visible after go-to-end: topLine=%d cursor=%+v layout=%+v", m2.topLine, m2.cursor, layout)
+	}
+}
+
 func TestScreenRowOf(t *testing.T) {
 	longLine := make([]byte, 100)
 	for i := range longLine {

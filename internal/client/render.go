@@ -246,23 +246,64 @@ func (m Model) findTopLineForCursor(cw, vis int) int {
 			cursorChunk = curVisCol / cw
 		}
 	}
-	// Number of rows above the cursor's chunk that we can fill.
-	rowsAbove := vis - 1 - cursorChunk
+	return m.findTopLineForRow(m.cursor.Line, cursorChunk, cw, vis)
+}
+
+// findTopLineForRow returns the buffer line that should be at the top of the
+// viewport so that the given wrap chunk of the given buffer line falls
+// within the last visible row. findTopLineForCursor is the common case
+// (anchored on the cursor's own chunk); scrollToShowLineTail anchors on a
+// different chunk of the same line to bring a line's later wrap chunks into
+// view instead.
+func (m Model) findTopLineForRow(line, chunk, cw, vis int) int {
+	// Number of rows above the target chunk that we can fill.
+	rowsAbove := vis - 1 - chunk
 	if rowsAbove <= 0 {
-		return m.cursor.Line
+		return line
 	}
-	l := m.cursor.Line - 1
+	l := line - 1
 	for l >= 0 {
 		runes := []rune(m.buf.Line(l))
 		exp, _ := expandTabsRemap(runes)
 		chunks := visualChunks(len(exp), cw)
-		if chunks >= rowsAbove {
+		if chunks == rowsAbove {
 			return l
+		}
+		if chunks > rowsAbove {
+			// Line l alone has more wrap chunks than the remaining budget.
+			// topLine can only start a line at its own first chunk (there's
+			// no way to scroll to "line l, chunk 3"), so using l here would
+			// render all of its chunks and overflow past vis, pushing the
+			// target row (often the cursor) out of the visible layout
+			// entirely. Scroll to just after it instead — rowsAbove rows
+			// above the target go unfilled, but the target stays visible.
+			return l + 1
 		}
 		rowsAbove -= chunks
 		l--
 	}
 	return max(0, l+1)
+}
+
+// scrollToShowLineTail scrolls so that as much of the given (possibly
+// soft-wrapped) line is visible as fits, anchored on its last visual chunk.
+// Used by "go to last line": landing cursor at column 0 of a long wrapped
+// final line otherwise leaves its tail permanently hidden below the
+// viewport — scrollToCursor only guarantees the cursor's own chunk (the
+// first) is visible, and unlike any other line there's no line below the
+// last one to move the cursor into that would trigger further scrolling.
+func (m *Model) scrollToShowLineTail(line int) {
+	if line < 0 || line >= m.buf.LineCount() {
+		return
+	}
+	cw := m.contentWidth()
+	vis := m.visibleLines()
+	runes := []rune(m.buf.Line(line))
+	exp, _ := expandTabsRemap(runes)
+	lastChunk := visualChunks(len(exp), cw) - 1
+	if top := m.findTopLineForRow(line, lastChunk, cw, vis); top > m.topLine {
+		m.topLine = top
+	}
 }
 
 func (m *Model) scrollToCursor() {

@@ -402,11 +402,15 @@ func TestGoToEndCursorStaysVisibleWhenPrecedingLineOverflowsBudget(t *testing.T)
 	}
 }
 
-// TestGoToLastLineWithMoreChunksThanViewport is a regression test for the bug
-// where jumping to the end of a file (G command) with a final line that wraps
-// into more chunks than the visible height would incorrectly render starting
-// from chunk 0, hiding the tail chunks below the viewport. The fix uses topChunk
-// to start rendering from a later chunk, keeping the line's tail visible.
+// TestGoToLastLineWithMoreChunksThanViewport is a regression test for a final
+// line that wraps into more chunks than the viewport can ever show at once
+// (6 chunks at vis=3). executeGoToLastLine puts the cursor at column 0 of
+// that line (its first chunk), matching G's usual "start of line" semantics
+// (see executeGoToLineStart) — so cursor visibility and tail visibility are
+// mutually exclusive here: showing the tail (chunks 3-5) would scroll chunk
+// 0, where the cursor sits, off-screen. Cursor visibility wins: the view
+// shows chunks 0-2, and scrollToShowLineTail's clamp (in render.go) is a
+// no-op rather than stranding the cursor.
 func TestGoToLastLineWithMoreChunksThanViewport(t *testing.T) {
 	// Create a final line that wraps into 6 chunks at width 20
 	longLine := make([]byte, 120)
@@ -424,7 +428,6 @@ func TestGoToLastLineWithMoreChunksThanViewport(t *testing.T) {
 	vis := m2.visibleLines()
 	layout := m2.buildScreenLayout(vis, cw)
 
-	// The viewport should show the last 3 chunks (chunks 3, 4, 5)
 	lastLine := m2.buf.LineCount() - 1
 	sawChunk := map[int]bool{}
 	for _, e := range layout {
@@ -433,27 +436,26 @@ func TestGoToLastLineWithMoreChunksThanViewport(t *testing.T) {
 		}
 	}
 
-	// We expect to see chunks 3, 4, and 5 (the last 3 chunks)
-	expectedChunks := []int{3, 4, 5}
-	for _, chunk := range expectedChunks {
+	// The cursor's chunk (0, since Col is 0) must stay visible.
+	if row := screenRowOf(layout, m2.cursor.Line, 0, cw); row < 0 {
+		t.Fatalf("cursor not visible; topLine=%d topChunk=%d cursor=%+v layout=%+v", m2.topLine, m2.topChunk, m2.cursor, layout)
+	}
+
+	// With chunk 0 anchored, chunks 0-2 fill the 3-row viewport; the tail
+	// (chunks 3-5) is unreachable without hiding the cursor.
+	for _, chunk := range []int{0, 1, 2} {
 		if !sawChunk[chunk] {
 			t.Errorf("expected chunk %d of the last line to be visible; saw chunks %v, layout=%+v", chunk, sawChunk, layout)
 		}
 	}
-
-	// Chunk 0 should NOT be visible
-	if sawChunk[0] {
-		t.Errorf("chunk 0 should not be visible when showing the tail; saw chunks %v", sawChunk)
+	for _, chunk := range []int{3, 4, 5} {
+		if sawChunk[chunk] {
+			t.Errorf("chunk %d should not be visible — showing it would scroll the cursor's chunk 0 off-screen; saw chunks %v", chunk, sawChunk)
+		}
 	}
 
-	// The cursor should still be visible
-	if row := screenRowOf(layout, m2.cursor.Line, 0, cw); row < 0 {
-		t.Errorf("cursor not visible; topLine=%d topChunk=%d cursor=%+v layout=%+v", m2.topLine, m2.topChunk, m2.cursor, layout)
-	}
-
-	// Verify topChunk is set correctly (should be 3 to show chunks 3, 4, 5)
-	if m2.topChunk != 3 {
-		t.Errorf("topChunk = %d, want 3 (to show last 3 chunks)", m2.topChunk)
+	if m2.topChunk != 0 {
+		t.Errorf("topChunk = %d, want 0 (anchored on the cursor's own chunk)", m2.topChunk)
 	}
 }
 

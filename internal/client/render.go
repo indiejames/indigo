@@ -249,22 +249,28 @@ func (m Model) cursorVisualRowFromTop(cw int) int {
 	return row
 }
 
+// chunkOfCol returns the 0-based wrap chunk that column col falls in on the
+// given buffer line, at content width cw.
+func (m Model) chunkOfCol(line, col, cw int) int {
+	if line < 0 || line >= m.buf.LineCount() {
+		return 0
+	}
+	runes := []rune(m.buf.Line(line))
+	_, colMap := expandTabsRemap(runes)
+	curVisCol := 0
+	if col < len(colMap) {
+		curVisCol = colMap[col]
+	}
+	if cw <= 0 {
+		return 0
+	}
+	return curVisCol / cw
+}
+
 // findTopLineForCursor returns the buffer line and chunk that should be at
 // the top of the viewport so the cursor falls within the last visible row.
 func (m Model) findTopLineForCursor(cw, vis int) (int, int) {
-	// Determine which wrap chunk of the cursor's line the cursor is on.
-	cursorChunk := 0
-	if m.cursor.Line < m.buf.LineCount() {
-		runes := []rune(m.buf.Line(m.cursor.Line))
-		_, colMap := expandTabsRemap(runes)
-		curVisCol := 0
-		if m.cursor.Col < len(colMap) {
-			curVisCol = colMap[m.cursor.Col]
-		}
-		if cw > 0 {
-			cursorChunk = curVisCol / cw
-		}
-	}
+	cursorChunk := m.chunkOfCol(m.cursor.Line, m.cursor.Col, cw)
 	return m.findTopLineForRow(m.cursor.Line, cursorChunk, cw, vis)
 }
 
@@ -321,6 +327,16 @@ func (m *Model) scrollToShowLineTail(line int) {
 	exp, _ := expandTabsRemap(runes)
 	lastChunk := visualChunks(len(exp), cw) - 1
 	topLine, topChunk := m.findTopLineForRow(line, lastChunk, cw, vis)
+	// Showing the tail must never scroll the cursor's own chunk out of
+	// view: if the line has more chunks than fit in the viewport at all,
+	// anchoring on the tail and anchoring on the cursor can't both be
+	// satisfied, and cursor visibility wins. When the anchor line is the
+	// cursor's own line, cap topChunk at the cursor's chunk.
+	if topLine == m.cursor.Line {
+		if cursorChunk := m.chunkOfCol(m.cursor.Line, m.cursor.Col, cw); topChunk > cursorChunk {
+			topChunk = cursorChunk
+		}
+	}
 	if topLine > m.topLine || (topLine == m.topLine && topChunk > m.topChunk) {
 		m.topLine = topLine
 		m.topChunk = topChunk

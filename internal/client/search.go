@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
@@ -123,6 +124,9 @@ func findSubstituteMatches(buf *document.Buffer, pattern, replacement string, bo
 		if err != nil {
 			return nil, err
 		}
+		if err := validateReplacementGroups(re, replacement); err != nil {
+			return nil, err
+		}
 		var out []substituteMatch
 		for l := startLine; l <= endLine; l++ {
 			lineStr := buf.Line(l)
@@ -169,6 +173,95 @@ func findSubstituteMatches(buf *document.Buffer, pattern, replacement string, bo
 		}
 	}
 	return out, nil
+}
+
+// validateReplacementGroups checks every $name/$number backreference in
+// replacement against re's actual capture groups. Go's regexp.Expand (which
+// ExpandString wraps) silently substitutes an empty string for a reference
+// to a nonexistent group — e.g. $2 against a pattern with only one group —
+// which would otherwise show up as silent data loss on substitute rather
+// than a reported error. A malformed $ sequence (bare trailing $, no valid
+// name following it) is left alone here too, matching Expand's own
+// behavior of treating it as literal text.
+func validateReplacementGroups(re *regexp.Regexp, replacement string) error {
+	names := re.SubexpNames()
+	template := replacement
+	for {
+		before, after, found := strings.Cut(template, "$")
+		if !found {
+			return nil
+		}
+		_ = before
+		template = after
+		if strings.HasPrefix(template, "$") {
+			template = template[1:]
+			continue
+		}
+		name, num, rest, ok := extractGroupName(template)
+		if !ok {
+			continue
+		}
+		template = rest
+		if num >= 0 {
+			if num == 0 || num > re.NumSubexp() {
+				return fmt.Errorf("invalid backreference $%s: pattern has %d capture group(s)", name, re.NumSubexp())
+			}
+			continue
+		}
+		known := false
+		for _, n := range names {
+			if n == name {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return fmt.Errorf("invalid backreference $%s: no such named group in pattern", name)
+		}
+	}
+}
+
+// extractGroupName parses a $name/${name} reference at the start of str
+// (str already past the leading '$'), mirroring the unexported parsing
+// regexp.Regexp.Expand itself uses. num is >= 0 for a purely numeric name
+// (the submatch index), -1 for a named group. ok is false for a malformed
+// reference (empty name, or an unclosed brace), which Expand treats as
+// literal text rather than a reference.
+func extractGroupName(str string) (name string, num int, rest string, ok bool) {
+	brace := strings.HasPrefix(str, "{")
+	if brace {
+		str = str[1:]
+	}
+	i := 0
+	for i < len(str) {
+		r, size := utf8.DecodeRuneInString(str[i:])
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
+			break
+		}
+		i += size
+	}
+	if i == 0 {
+		return "", 0, "", false
+	}
+	name = str[:i]
+	if brace {
+		if i >= len(str) || str[i] != '}' {
+			return "", 0, "", false
+		}
+		i++
+	}
+	num = 0
+	for j := 0; j < len(name); j++ {
+		if name[j] < '0' || name[j] > '9' {
+			num = -1
+			break
+		}
+		num = num*10 + int(name[j]-'0')
+	}
+	if num >= 0 && name[0] == '0' && len(name) > 1 {
+		num = -1 // leading zero: not a valid submatch index, treat as a named group
+	}
+	return name, num, str[i:], true
 }
 
 // matchIdxAtOrAfter returns the index of the first match at or after (line, col),

@@ -270,6 +270,58 @@ func TestFindSubstituteMatchesInvalidRegex(t *testing.T) {
 	}
 }
 
+func TestFindSubstituteMatchesInvalidBackreferenceOutOfRange(t *testing.T) {
+	// Pattern has only 1 capture group; $2 is out of range and would
+	// silently expand to "" via regexp.Expand — must surface as an error
+	// instead of quietly discarding matched text.
+	buf := document.New("", "alice-bob\n")
+	_, err := findSubstituteMatches(buf, `\(\w+)-\w+`, "$1-$2", nil)
+	if err == nil {
+		t.Error("out-of-range backreference: expected error, got nil")
+	}
+}
+
+func TestFindSubstituteMatchesInvalidBackreferenceZero(t *testing.T) {
+	buf := document.New("", "alice-bob\n")
+	_, err := findSubstituteMatches(buf, `\(\w+)-(\w+)`, "$0", nil)
+	if err == nil {
+		t.Error("$0 backreference: expected error, got nil")
+	}
+}
+
+func TestFindSubstituteMatchesInvalidNamedBackreference(t *testing.T) {
+	buf := document.New("", "alice-bob\n")
+	_, err := findSubstituteMatches(buf, `\(?P<first>\w+)-(\w+)`, "${missing}", nil)
+	if err == nil {
+		t.Error("unknown named backreference: expected error, got nil")
+	}
+}
+
+func TestFindSubstituteMatchesValidNamedBackreference(t *testing.T) {
+	buf := document.New("", "alice-bob\n")
+	matches, err := findSubstituteMatches(buf, `\(?P<first>\w+)-(?P<second>\w+)`, "${second}-${first}", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].replacement != "bob-alice" {
+		t.Fatalf("expected 1 match with replacement bob-alice, got %+v", matches)
+	}
+}
+
+func TestFindSubstituteMatchesDollarDollarIsLiteral(t *testing.T) {
+	// $$ is a literal '$', not a backreference — must not be flagged even
+	// though the digit(s) following it (here, out-of-range $9) would be
+	// invalid as a real reference.
+	buf := document.New("", "foo\n")
+	matches, err := findSubstituteMatches(buf, `\foo`, "$$9", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].replacement != "$9" {
+		t.Fatalf("expected literal replacement $9, got %+v", matches)
+	}
+}
+
 func TestMatchIdxAtOrAfter(t *testing.T) {
 	matches := []substituteMatch{
 		{line: 0, col: 5},

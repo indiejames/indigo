@@ -256,6 +256,13 @@ func extractGroupName(str string) (name string, num int, rest string, ok bool) {
 			num = -1
 			break
 		}
+		if num >= 1e8 {
+			// Cutoff to prevent overflow: if the accumulated value would
+			// exceed 1e8 (mirroring Go's regexp.Expand internal behavior),
+			// treat it as a named group instead of a numeric submatch index.
+			num = -1
+			break
+		}
 		num = num*10 + int(name[j]-'0')
 	}
 	if num >= 0 && name[0] == '0' && len(name) > 1 {

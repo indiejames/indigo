@@ -465,3 +465,38 @@ func TestSearchNavigation(t *testing.T) {
 		t.Errorf("N: got %v, want {0,0}", got.cursor)
 	}
 }
+
+func TestExtractGroupNameLargeNumericName(t *testing.T) {
+	// Regression test: an all-digit name with 10+ digits should be treated
+	// as a named group (num == -1) rather than overflowing or being parsed
+	// as a huge numeric submatch index.
+	cases := []struct {
+		input       string
+		wantName    string
+		wantNum     int
+		wantRest    string
+		wantOK      bool
+		description string
+	}{
+		// 10-digit all-numeric name: should be treated as named group
+		{"1234567890", "1234567890", -1, "", true, "10-digit numeric name"},
+		// 15-digit all-numeric name: should be treated as named group
+		{"123456789012345", "123456789012345", -1, "", true, "15-digit numeric name"},
+		// Normal small numeric reference: should parse as submatch index
+		{"1", "1", 1, "", true, "single digit"},
+		{"12", "12", 12, "", true, "two digits"},
+		{"123", "123", 123, "", true, "three digits"},
+		// Braced 10-digit numeric name: should be treated as named group
+		{"{1234567890}", "1234567890", -1, "", true, "braced 10-digit numeric name"},
+		// Leading zero is already handled as named group
+		{"01", "01", -1, "", true, "leading zero"},
+	}
+
+	for _, c := range cases {
+		name, num, rest, ok := extractGroupName(c.input)
+		if name != c.wantName || num != c.wantNum || rest != c.wantRest || ok != c.wantOK {
+			t.Errorf("%s: extractGroupName(%q) = (%q, %d, %q, %v), want (%q, %d, %q, %v)",
+				c.description, c.input, name, num, rest, ok, c.wantName, c.wantNum, c.wantRest, c.wantOK)
+		}
+	}
+}

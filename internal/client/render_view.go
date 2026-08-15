@@ -72,14 +72,6 @@ func (m Model) View() string {
 			}
 		}
 	}
-	if rulerOverlays := m.buildRulerOverlays(layout, cw); rulerOverlays != nil {
-
-		for i := range vis {
-			if len(rulerOverlays[i]) > 0 {
-				rowOverlays[i] = mergeOverlays(rulerOverlays[i], rowOverlays[i])
-			}
-		}
-	}
 	if searchOverlays := m.buildSearchOverlays(layout, cw); searchOverlays != nil {
 		for i := range vis {
 			if len(searchOverlays[i]) > 0 {
@@ -105,6 +97,7 @@ func (m Model) View() string {
 	for i := range vis {
 		lines[i] = m.renderLineChunk(layout[i], cw, rowOverlays[i], matchLine, matchCol, matchOK)
 	}
+	m.applyRulerColumn(lines, layout, cw)
 
 	// Overlay prefix-command popup in the bottom-right corner.
 	if len(m.prefixSeq) > 0 {

@@ -785,36 +785,64 @@ func (m Model) buildIndentGuideOverlays(layout []layoutEntry, cw int) [][]lineOv
 	return rows
 }
 
-func (m Model) buildRulerOverlays(layout []layoutEntry, cw int) [][]lineOverlay {
+// applyRulerColumn splices the ruler into every visible row's already fully
+// rendered string, at a fixed terminal column — rather than competing for a
+// spot in the buffer-column bookkeeping renderLineRunes uses while building
+// each row (like indent guides, search highlights, etc. do). A ruler needs
+// to behave like most editors' column guides: a straight line pinned to a
+// fixed screen column, regardless of what's drawn on that particular row.
+// The lineOverlay-based approach that predates this got that wrong for rows
+// with inlay hints: an inlay hint is deliberately a w:0 overlay (it renders
+// real, visible glyphs but must never displace real content, so it doesn't
+// advance that bookkeeping) — so a later overlay computed from buffer
+// columns, like the ruler, silently rendered further right on the terminal
+// than intended, by exactly the hint's rendered width.
+func (m Model) applyRulerColumn(lines []string, layout []layoutEntry, cw int) {
 	if m.cfg == nil || m.cfg.RulerColumn <= 0 {
-		return nil
+		return
 	}
+	rulerCol := m.cfg.RulerColumn - 1
+	gutterW := m.gutterWidth()
 
-	vis := len(layout)
-	rows := make([][]lineOverlay, vis)
+	var curVisCol int
+	cursorOnScreen := m.cursor.Line < m.buf.LineCount()
+	if cursorOnScreen {
+		runes := []rune(m.buf.Line(m.cursor.Line))
+		_, colMap := expandTabsRemap(runes)
+		if m.cursor.Col < len(colMap) {
+			curVisCol = colMap[m.cursor.Col]
+		}
+	}
 
 	for row, entry := range layout {
 		if entry.bufLine >= m.buf.LineCount() ||
-			m.cfg.RulerColumn-1 < entry.chunkStart ||
-			m.cfg.RulerColumn-1 >= entry.chunkStart+cw {
+			rulerCol < entry.chunkStart || rulerCol >= entry.chunkStart+cw {
 			continue
 		}
-
-		expandRunes, _ := expandTabsRemap([]rune(m.buf.Line(entry.bufLine)))
-		glyph := " "
-		if m.cfg.RulerColumn < len(expandRunes) {
-			glyph = string(expandRunes[m.cfg.RulerColumn-1])
+		// Never draw over the cursor's own cell — it would otherwise vanish
+		// under the ruler's fixed background whenever they coincide.
+		if cursorOnScreen && entry.bufLine == m.cursor.Line && curVisCol == rulerCol {
+			continue
 		}
-
-		rows[row] = append(rows[row], lineOverlay{
-			col:   m.cfg.RulerColumn - 1 - entry.chunkStart,
-			text:  rulerStyle.Render(glyph),
-			w:     1,
-			plain: glyph,
-		})
+		lines[row] = overlayRulerColumn(lines[row], gutterW+rulerCol-entry.chunkStart)
 	}
+}
 
-	return rows
+// overlayRulerColumn tints a single ANSI-aware visual column of an
+// already-rendered row, replacing whatever glyph (real character, inlay
+// hint, decoration, ...) is actually there — or padding with the ruler's
+// blank glyph if the row's real content doesn't reach that far.
+func overlayRulerColumn(line string, col int) string {
+	before := ansi.Truncate(line, col, "")
+	if bw := lipgloss.Width(before); bw < col {
+		before += strings.Repeat(" ", col-bw)
+	}
+	glyph := ansi.Strip(ansi.Cut(line, col, col+1))
+	if glyph == "" {
+		glyph = " "
+	}
+	after := ansi.TruncateLeft(line, col+1, "")
+	return before + rulerStyle.Render(glyph) + after
 }
 
 // lineIndentStop returns the visual column of the first non-space rune on

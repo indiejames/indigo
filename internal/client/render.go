@@ -628,12 +628,14 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 
 	if hasCursor && curCol >= n {
 		sb.WriteString(cursorStyle.Render(" "))
+		i++ // keep i in sync with sb so the trailing overlay loop below doesn't misjudge padding
 	} else if n == 0 && hasSel && selA <= selB && oi >= len(overlays) {
 		// A blank selected line with no overlays left to draw still needs
 		// one highlighted cell so the selection is visible on this row; when
 		// overlays remain, the loop below draws the row (and its padding)
 		// instead so this placeholder doesn't add a spurious extra column.
 		sb.WriteString(selectionStyle.Render(" "))
+		i++
 	}
 	// Write overlays that fall at or past end of content, padding with spaces
 	// to reach each one's column. Past the end of real content there are no

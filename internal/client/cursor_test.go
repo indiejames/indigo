@@ -552,3 +552,139 @@ func TestDeleteOnLineBreakJoinsLines(t *testing.T) {
 		t.Errorf("cursor = %+v, want {Line:0 Col:3}", m2.cursor)
 	}
 }
+
+// --- sticky ("goal") column across Up/Down ---
+
+// TestMoveCursorStickyColumnThroughShortLine is a regression test: moving
+// down through a shorter line used to permanently lose the original column
+// instead of restoring it once a long-enough line was reached again.
+func TestMoveCursorStickyColumnThroughShortLine(t *testing.T) {
+	m := newTestModel("hello world\nhi\nsecond line\n")
+	m.cursor = document.Pos{Line: 0, Col: 8} // "hello wo|rld"
+
+	m.moveCursor(1, 0) // onto "hi" (len 2): clamps to the last character
+	if m.cursor != (document.Pos{Line: 1, Col: 2}) {
+		t.Errorf("cursor = %+v, want {Line:1 Col:2} (clamped to end of short line)", m.cursor)
+	}
+
+	m.moveCursor(1, 0) // onto "second line": long enough, should snap back to col 8
+	if m.cursor != (document.Pos{Line: 2, Col: 8}) {
+		t.Errorf("cursor = %+v, want {Line:2 Col:8} (restored goal column)", m.cursor)
+	}
+}
+
+// TestMoveCursorStickyColumnUpAndDown verifies the goal column is preserved
+// symmetrically moving back up through the same short line.
+func TestMoveCursorStickyColumnUpAndDown(t *testing.T) {
+	m := newTestModel("first long line\nhi\nsecond long line\n")
+	m.cursor = document.Pos{Line: 2, Col: 10}
+
+	m.moveCursor(-1, 0) // onto "hi": clamped
+	if m.cursor.Col != 2 {
+		t.Errorf("cursor.Col = %d, want 2 (clamped)", m.cursor.Col)
+	}
+	m.moveCursor(-1, 0) // back onto the first long line: goal column restored
+	if m.cursor != (document.Pos{Line: 0, Col: 10}) {
+		t.Errorf("cursor = %+v, want {Line:0 Col:10}", m.cursor)
+	}
+}
+
+// TestMoveCursorHorizontalResetsGoalColumn verifies that an explicit
+// horizontal move (dCol != 0) replaces the remembered goal column with the
+// new position, rather than keeping the older, now-stale one.
+func TestMoveCursorHorizontalResetsGoalColumn(t *testing.T) {
+	m := newTestModel("hello world\nhi\nsecond line\n")
+	m.cursor = document.Pos{Line: 0, Col: 8}
+	m.moveCursor(1, 0)  // establishes goal column 8, clamps to col 2 on "hi"
+	m.moveCursor(0, -1) // explicit left move: col 2 -> 1, and becomes the new goal
+	if m.cursor != (document.Pos{Line: 1, Col: 1}) {
+		t.Errorf("cursor = %+v, want {Line:1 Col:1}", m.cursor)
+	}
+	m.moveCursor(1, 0) // onto "second line": should land on the new goal (1), not 8
+	if m.cursor != (document.Pos{Line: 2, Col: 1}) {
+		t.Errorf("cursor = %+v, want {Line:2 Col:1} (goal column reset by horizontal move)", m.cursor)
+	}
+}
+
+// TestUpdateKeyMsgResetsGoalColumnOnNonVerticalKey drives movement through
+// Model.Update (the real dispatch path, not moveCursor directly) to verify
+// that a key which isn't a vertical move invalidates the remembered goal
+// column for the next Up/Down, per the goalColActive bookkeeping in the
+// tea.KeyMsg handler.
+func TestUpdateKeyMsgResetsGoalColumnOnNonVerticalKey(t *testing.T) {
+	m := newTestModel("hello world\nhi there\nsecond long line\n")
+	m.mode = ModeNormal
+	m.cursor = document.Pos{Line: 0, Col: 8}
+
+	newModel, _ := m.Update(fakeKey("j")) // down onto "hi there": no clamping needed, goal (8) fits
+	m = newModel.(Model)
+	if m.cursor != (document.Pos{Line: 1, Col: 8}) {
+		t.Fatalf("cursor = %+v, want {Line:1 Col:8}", m.cursor)
+	}
+
+	newModel, _ = m.Update(fakeKey("h")) // explicit left move: col 8 -> 7, becomes the new goal
+	m = newModel.(Model)
+	if m.cursor != (document.Pos{Line: 1, Col: 7}) {
+		t.Fatalf("cursor = %+v, want {Line:1 Col:7}", m.cursor)
+	}
+
+	newModel, _ = m.Update(fakeKey("j")) // onto "second long line": should use 7, not the stale 8
+	m = newModel.(Model)
+	if m.cursor != (document.Pos{Line: 2, Col: 7}) {
+		t.Errorf("cursor = %+v, want {Line:2 Col:7} (goal column reset by 'h')", m.cursor)
+	}
+}
+
+// TestApplyToAllCursorsIndependentGoalColumns verifies each cursor (primary
+// and extra) tracks its own sticky column rather than sharing one, so a
+// multi-cursor Down through lines of different lengths restores each
+// cursor's own original column independently.
+func TestApplyToAllCursorsIndependentGoalColumns(t *testing.T) {
+	m := newTestModel("aaaaaaaaaa\nbb\ncccccccccc\ndddddddddd\n")
+	m.cursor = document.Pos{Line: 0, Col: 9}
+	m.extraCursors = []ExtraCursor{{pos: document.Pos{Line: 0, Col: 3}, goalCol: -1}}
+
+	m.applyToAllCursors(func(m *Model) {
+		m.sel = nil
+		m.moveCursor(1, 0) // both land on "bb" (len 2), clamped
+	})
+	if m.cursor.Col != 2 {
+		t.Fatalf("primary cursor.Col = %d, want 2", m.cursor.Col)
+	}
+	if m.extraCursors[0].pos.Col != 2 {
+		t.Fatalf("extra cursor.Col = %d, want 2", m.extraCursors[0].pos.Col)
+	}
+
+	m.applyToAllCursors(func(m *Model) {
+		m.sel = nil
+		m.moveCursor(1, 0) // onto "cccccccccc": each restores its own goal column
+	})
+	if m.cursor != (document.Pos{Line: 2, Col: 9}) {
+		t.Errorf("primary cursor = %+v, want {Line:2 Col:9}", m.cursor)
+	}
+	if m.extraCursors[0].pos != (document.Pos{Line: 2, Col: 3}) {
+		t.Errorf("extra cursor = %+v, want {Line:2 Col:3}", m.extraCursors[0].pos)
+	}
+}
+
+// TestMoveCursorStickyColumnAcrossTabs is a regression test: the goal column
+// must be tracked in tab-expanded visual space, not raw rune-index space, or
+// moving down from a line with tabs before the cursor onto a line with a
+// different (or no) leading tab lands on the wrong visual column even though
+// the rune-index goal column was "preserved."
+func TestMoveCursorStickyColumnAcrossTabs(t *testing.T) {
+	// Line 0: '\t' (visual 0-4) + "foo bar" (runes 1-7, visual 4-11).
+	// Rune col 5 ('b') sits at visual col 8.
+	m := newTestModel("\tfoo bar\nabcdefghij\n")
+	m.cursor = document.Pos{Line: 0, Col: 5} // on 'b', visual col 8
+
+	m.moveCursor(1, 0) // no tabs on line 1: visual col == rune col
+	if m.cursor != (document.Pos{Line: 1, Col: 8}) {
+		t.Errorf("cursor = %+v, want {Line:1 Col:8} (aligned to visual col 8, not rune col 5)", m.cursor)
+	}
+
+	m.moveCursor(-1, 0) // back onto the tab line: should return to rune col 5
+	if m.cursor != (document.Pos{Line: 0, Col: 5}) {
+		t.Errorf("cursor = %+v, want {Line:0 Col:5} (restored through the tab)", m.cursor)
+	}
+}

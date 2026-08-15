@@ -89,7 +89,39 @@ func (m *Model) moveCursor(dLine, dCol int) {
 	if m.mode == ModeNormal {
 		maxCol = m.normalLineEnd(line)
 	}
-	col := max(0, min(m.cursor.Col+dCol, maxCol))
+
+	col := m.cursor.Col + dCol
+	if dLine != 0 && dCol == 0 {
+		// Vertical movement: stick to the desired ("goal") column across a
+		// run of consecutive Up/Down (or PageUp/PageDown) presses, so
+		// passing through a shorter line and clamping to its last character
+		// doesn't lose the original column — the next long-enough line
+		// snaps back to it. goalColActive tells Update()'s tea.KeyMsg
+		// dispatcher this was a legitimate vertical move, so it should keep
+		// goalCol instead of resetting it for the next keypress.
+		//
+		// goalCol is tracked in tab-expanded *visual* columns, not rune
+		// columns: cursor.Col is a rune index (the right addressing scheme
+		// for buffer edits), but a rune index means something different on
+		// every line that has a different number of tabs before it, so
+		// comparing raw rune columns across lines misaligns the cursor on
+		// any line pair whose tab layout differs before the cursor.
+		if m.goalCol < 0 {
+			curRunes := []rune(m.buf.Line(m.cursor.Line))
+			_, curColMap := expandTabsRemap(curRunes)
+			m.goalCol = curColMap[min(m.cursor.Col, len(curColMap)-1)]
+		}
+		targetRunes := []rune(m.buf.Line(line))
+		_, targetColMap := expandTabsRemap(targetRunes)
+		col = runeColForVisualCol(targetRunes, targetColMap, m.goalCol)
+		m.goalColActive = true
+	} else if dCol != 0 {
+		// Explicit horizontal movement: the new position becomes the goal
+		// for any following vertical move, discarding whatever was
+		// remembered before.
+		m.goalCol = -1
+	}
+	col = max(0, min(col, maxCol))
 	m.cursor.Line = line
 	m.cursor.Col = col
 	m.scrollToCursor()
@@ -493,6 +525,27 @@ func expandTabsRemap(runes []rune) (expanded []rune, colMap []int) {
 	}
 	colMap[len(runes)] = vcol
 	return
+}
+
+// runeColForVisualCol converts a tab-expanded visual column back to the
+// rightmost rune column (per runes/colMap, as returned by expandTabsRemap)
+// whose visual column doesn't exceed it — i.e. it rounds down to the
+// character containing that visual position, the same rule a mouse click
+// landing inside a tab's expanded width resolves to (see clickToPos). A
+// visual column past the end of the line resolves to the line's length.
+func runeColForVisualCol(runes []rune, colMap []int, visualCol int) int {
+	col := 0
+	for i := 0; i < len(runes); i++ {
+		if colMap[i] <= visualCol {
+			col = i
+		} else {
+			break
+		}
+	}
+	if len(colMap) > 0 && visualCol >= colMap[len(runes)] {
+		col = len(runes)
+	}
+	return col
 }
 
 // underlineRange is an underline decoration applied additively over syntax highlighting.

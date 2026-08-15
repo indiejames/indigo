@@ -40,19 +40,7 @@ func (m *Model) clickToPos(x, y int) (document.Pos, bool) {
 	// Map the visual column back to a buffer column via colMap.
 	lineRunes := []rune(m.buf.Line(lineNum))
 	_, colMap := expandTabsRemap(lineRunes)
-
-	col := 0
-	for i := 0; i < len(lineRunes); i++ {
-		if colMap[i] <= absVisCol {
-			col = i
-		} else {
-			break
-		}
-	}
-	// Click past the visual end of the line → end of line.
-	if len(colMap) > 0 && absVisCol >= colMap[len(lineRunes)] {
-		col = len(lineRunes)
-	}
+	col := runeColForVisualCol(lineRunes, colMap, absVisCol)
 
 	maxCol := m.buf.LineLen(lineNum)
 	if m.mode == ModeNormal {
@@ -68,6 +56,7 @@ func (m *Model) handleMousePress(x, y int) {
 	if !ok {
 		return
 	}
+	m.goalCol = -1 // clicking sets an explicit column; forget any remembered Up/Down goal
 	if m.snippetOn {
 		*m = m.exitSnippet()
 	}
@@ -100,6 +89,7 @@ func (m *Model) handleMouseDrag(x, y int) {
 	if !ok {
 		return
 	}
+	m.goalCol = -1
 	m.cursor = pos
 	if m.sel != nil {
 		m.sel.Head = pos

@@ -72,6 +72,14 @@ func (m Model) View() string {
 			}
 		}
 	}
+	if rulerOverlays := m.buildRulerOverlays(layout, cw); rulerOverlays != nil {
+
+		for i := range vis {
+			if len(rulerOverlays[i]) > 0 {
+				rowOverlays[i] = mergeOverlays(rulerOverlays[i], rowOverlays[i])
+			}
+		}
+	}
 	if searchOverlays := m.buildSearchOverlays(layout, cw); searchOverlays != nil {
 		for i := range vis {
 			if len(searchOverlays[i]) > 0 {

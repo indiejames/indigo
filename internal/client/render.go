@@ -15,6 +15,7 @@ const tabWidth = 4
 
 // diagUnderlineStyle is the underline style used for LSP diagnostics.
 // Set once at startup based on terminal capabilities.
+// TODO Add a better check for terminal capabilities
 var diagUnderlineStyle = func() ClientUnderlineStyle {
 	switch os.Getenv("TERM_PROGRAM") {
 	case "iTerm.app", "WezTerm", "kitty", "ghostty":

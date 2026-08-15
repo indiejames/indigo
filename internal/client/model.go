@@ -334,6 +334,7 @@ var (
 	gutterCurStyle   lipgloss.Style
 	flashGutterStyle lipgloss.Style
 	indentGuideStyle lipgloss.Style
+	rulerStyle       lipgloss.Style
 	flashPadStyle    lipgloss.Style
 
 	diagErrorStyle lipgloss.Style
@@ -398,6 +399,7 @@ func ApplyTheme(t *theme.Theme) {
 	flashGutterStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
 	flashPadStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8"))
 	indentGuideStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#404040"))
+	rulerStyle = lipgloss.NewStyle().Background(lipgloss.Color("#303030"))
 
 	diagErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.DiagErrorFg))
 	diagWarnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.DiagWarnFg))
@@ -456,6 +458,7 @@ func applyDefaultDark() {
 	flashGutterStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
 	flashPadStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8"))
 	indentGuideStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#404040"))
+	rulerStyle = lipgloss.NewStyle().Background(lipgloss.Color("#303030"))
 
 	diagErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555"))
 	diagWarnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFDD44"))

@@ -785,6 +785,38 @@ func (m Model) buildIndentGuideOverlays(layout []layoutEntry, cw int) [][]lineOv
 	return rows
 }
 
+func (m Model) buildRulerOverlays(layout []layoutEntry, cw int) [][]lineOverlay {
+	if m.cfg == nil || m.cfg.RulerColumn <= 0 {
+		return nil
+	}
+
+	vis := len(layout)
+	rows := make([][]lineOverlay, vis)
+
+	for row, entry := range layout {
+		if entry.bufLine >= m.buf.LineCount() ||
+			m.cfg.RulerColumn-1 < entry.chunkStart ||
+			m.cfg.RulerColumn-1 >= entry.chunkStart+cw {
+			continue
+		}
+
+		expandRunes, _ := expandTabsRemap([]rune(m.buf.Line(entry.bufLine)))
+		glyph := " "
+		if m.cfg.RulerColumn < len(expandRunes) {
+			glyph = string(expandRunes[m.cfg.RulerColumn-1])
+		}
+
+		rows[row] = append(rows[row], lineOverlay{
+			col:   m.cfg.RulerColumn - 1 - entry.chunkStart,
+			text:  rulerStyle.Render(glyph),
+			w:     1,
+			plain: glyph,
+		})
+	}
+
+	return rows
+}
+
 // lineIndentStop returns the visual column of the first non-space rune on
 // bufLine, or -1 if the line is empty or all whitespace.
 func (m Model) lineIndentStop(bufLine int) int {
@@ -858,7 +890,8 @@ var helpEntries = []helpEntry{
 	{key: "l / →", desc: "Move right"},
 	{key: "b", desc: "Move to previous word start"},
 	{key: "e", desc: "Move to word end"},
-	{key: "0 / ^ / Home", desc: "Line start"},
+	{key: "0 / Home", desc: "Line start"},
+	{key: "^", desc: "Firt non-blank character in line"},
 	{key: "$ / End", desc: "Line end"},
 	{key: "G", desc: "End of file"},
 	{key: "Ctrl+f / PgDn", desc: "Page down"},

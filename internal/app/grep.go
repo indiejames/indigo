@@ -268,31 +268,53 @@ func searchBuiltin(workDir, pattern, include, exclude string, caseSensitive, isR
 
 // matchGlob reports whether relPath matches the user-supplied file glob.
 // It handles:
-//   - "*.go"        → basename match (no / in glob)
-//   - "src/*.go"    → full relPath match
-//   - "**/foo.go"   → basename match (strips leading **/)
-//   - "src/"        → directory prefix match
+//   - "*.go"         → basename match (no / in glob)
+//   - "src/*.go"     → full relPath match
+//   - "**/foo.go"    → basename match at any depth, including top level
+//   - "src/**/*.go"  → *.go anywhere under src/, at any depth (including
+//     directly inside src/), ripgrep/gitignore-style globstar
+//   - "src/"         → directory prefix match
 func matchGlob(glob, relPath string) bool {
+	relPath = filepath.ToSlash(relPath)
+	glob = filepath.ToSlash(glob)
+
 	// Directory prefix: "src/" matches anything under src/.
 	if strings.HasSuffix(glob, "/") {
 		return strings.HasPrefix(relPath, glob) || strings.HasPrefix(relPath, strings.TrimSuffix(glob, "/"))
 	}
-	// "**/" prefix: match basename only.
-	if strings.HasPrefix(glob, "**/") {
-		sub := glob[3:]
-		if ok, _ := filepath.Match(sub, filepath.Base(relPath)); ok {
-			return true
-		}
-	}
 	// No path separator in glob: match against basename.
 	if !strings.Contains(glob, "/") {
-		if ok, _ := filepath.Match(glob, filepath.Base(relPath)); ok {
+		ok, _ := filepath.Match(glob, filepath.Base(relPath))
+		return ok
+	}
+	return matchGlobSegments(strings.Split(glob, "/"), strings.Split(relPath, "/"))
+}
+
+// matchGlobSegments matches "/"-split glob segments against "/"-split path
+// segments. A "**" segment matches zero or more path segments (ripgrep's
+// globstar); every other segment matches exactly one path segment via
+// filepath.Match, which already handles *, ?, and [...] correctly since
+// none of those cross a "/" boundary within a single segment.
+func matchGlobSegments(globSegs, pathSegs []string) bool {
+	if len(globSegs) == 0 {
+		return len(pathSegs) == 0
+	}
+	if globSegs[0] == "**" {
+		if matchGlobSegments(globSegs[1:], pathSegs) {
 			return true
 		}
+		if len(pathSegs) == 0 {
+			return false
+		}
+		return matchGlobSegments(globSegs, pathSegs[1:])
 	}
-	// Full path match.
-	ok, _ := filepath.Match(glob, relPath)
-	return ok
+	if len(pathSegs) == 0 {
+		return false
+	}
+	if ok, _ := filepath.Match(globSegs[0], pathSegs[0]); !ok {
+		return false
+	}
+	return matchGlobSegments(globSegs[1:], pathSegs[1:])
 }
 
 func grepFile(rel, absPath string, matchLine func(string) (int, int, bool), results *[]GrepResult) {

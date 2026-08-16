@@ -234,12 +234,71 @@ func TestMatchGlobs(t *testing.T) {
 		{nil, []string{"vendor/"}, "main.go", true},
 		{[]string{"*.go"}, []string{"*_test.go"}, "main_test.go", false},
 		{[]string{"*.go"}, []string{"*_test.go"}, "main.go", true},
+		// Recursive "**" globstar: matches zero or more path segments,
+		// including directly inside the prefix and arbitrarily deep.
+		{[]string{"src/**/*.ts"}, nil, "src/foo.ts", true},
+		{[]string{"src/**/*.ts"}, nil, "src/a/foo.ts", true},
+		{[]string{"src/**/*.ts"}, nil, "src/a/b/foo.ts", true},
+		{[]string{"src/**/*.ts"}, nil, "other/foo.ts", false},
+		{[]string{"**/foo.go"}, nil, "foo.go", true},
+		{[]string{"**/foo.go"}, nil, "a/b/foo.go", true},
+		{nil, []string{"**/vendor/**"}, "a/vendor/b/lib.go", false},
+		{nil, []string{"**/vendor/**"}, "a/other/lib.go", true},
 	}
 	for _, c := range cases {
 		got := matchGlobs(c.includes, c.excludes, c.path)
 		if got != c.want {
 			t.Errorf("matchGlobs(%v, %v, %q) = %v, want %v", c.includes, c.excludes, c.path, got, c.want)
 		}
+	}
+}
+
+// searchBuiltin is exercised directly (rather than through searchWorkspace)
+// so these tests cover matchGlob's globstar handling regardless of whether
+// rg is on PATH — the rg backend does its own glob matching, unrelated to
+// matchGlob.
+func TestSearchBuiltinRecursiveGlobInclude(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"src/foo.ts":     "hello\n",
+		"src/a/bar.ts":   "hello\n",
+		"src/a/b/baz.ts": "hello\n",
+		"src/other.go":   "hello\n",
+	})
+	results, err := searchBuiltin(dir, "hello", "src/**/*.ts", "", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, r := range results {
+		got[r.RelPath] = true
+	}
+	for _, want := range []string{"src/foo.ts", "src/a/bar.ts", "src/a/b/baz.ts"} {
+		if !got[want] {
+			t.Errorf("expected %s in results, got %+v", want, results)
+		}
+	}
+	if got["src/other.go"] {
+		t.Errorf("src/other.go should have been excluded by include glob, got %+v", results)
+	}
+}
+
+func TestSearchBuiltinRecursiveGlobExclude(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"main.go":            "hello\n",
+		"vendor/lib.go":      "hello\n",
+		"vendor/pkg/lib2.go": "hello\n",
+	})
+	results, err := searchBuiltin(dir, "hello", "", "**/vendor/**", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if r.RelPath != "main.go" {
+			t.Errorf("expected vendor files excluded, got %s", r.RelPath)
+		}
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result (main.go only), got %d: %+v", len(results), results)
 	}
 }
 

@@ -28,25 +28,28 @@ type Manager struct {
 	autoLints []config.LinterConfig
 	workDir   string
 
-	mu      sync.Mutex
-	cached  map[string][]lsp.Diagnostic // path -> most recently completed run
-	running map[string]bool             // path -> a run is currently in flight
-	pending map[string]bool             // path -> re-run once the in-flight one finishes
-	content map[string]string           // path -> content of the most recent (possibly still in-flight) request
-	lastErr map[string]error            // path -> error from the most recently completed run, nil once one succeeds
+	mu          sync.Mutex
+	cached      map[string][]lsp.Diagnostic // path -> most recently completed run
+	running     map[string]bool             // path -> a run is currently in flight
+	pending     map[string]bool             // path -> re-run once the in-flight one finishes
+	content     map[string]string           // path -> content of the most recent (possibly still in-flight) request
+	lastErr     map[string]error            // path -> error from the most recently completed run, nil once one succeeds
+	activeToken map[string]uint64           // path -> token of the run currently allowed to write results for it
+	tokenSeq    uint64                      // monotonically increasing source for activeToken values
 }
 
 // NewManager builds a Manager. autoLints are detected once at startup by
 // scanning PATH and <workDir>/node_modules/.bin/, mirroring format.Manager.
 func NewManager(cfg *config.Config, workDir string) *Manager {
 	m := &Manager{
-		userLints: cfg.Linters,
-		workDir:   workDir,
-		cached:    make(map[string][]lsp.Diagnostic),
-		running:   make(map[string]bool),
-		pending:   make(map[string]bool),
-		content:   make(map[string]string),
-		lastErr:   make(map[string]error),
+		userLints:   cfg.Linters,
+		workDir:     workDir,
+		cached:      make(map[string][]lsp.Diagnostic),
+		running:     make(map[string]bool),
+		pending:     make(map[string]bool),
+		content:     make(map[string]string),
+		lastErr:     make(map[string]error),
+		activeToken: make(map[string]uint64),
 	}
 	localBin := filepath.Join(workDir, "node_modules", ".bin")
 	for _, d := range config.DefaultLinters {
@@ -123,12 +126,21 @@ func (m *Manager) runAsync(path, content string, lc config.LinterConfig) {
 		return
 	}
 	m.running[path] = true
+	m.tokenSeq++
+	token := m.tokenSeq
+	m.activeToken[path] = token
 	m.mu.Unlock()
 
-	go m.run(path, lc)
+	go m.run(path, lc, token)
 }
 
-func (m *Manager) run(path string, lc config.LinterConfig) {
+// run executes lc against path and, if token is still the path's current
+// activeToken, records the result. token stops being current when Forget
+// invalidates it (file closed mid-run) or a newer run has since claimed the
+// path — in either case this run's result is discarded without touching
+// running/pending/content, since a run that owns neither of those maps'
+// entries anymore must not perturb whichever run (if any) does.
+func (m *Manager) run(path string, lc config.LinterConfig, token uint64) {
 	m.mu.Lock()
 	content := m.content[path]
 	m.mu.Unlock()
@@ -136,6 +148,10 @@ func (m *Manager) run(path string, lc config.LinterConfig) {
 	diags, err := runLinter(lc, path, content, m.workDir)
 
 	m.mu.Lock()
+	if cur, ok := m.activeToken[path]; !ok || cur != token {
+		m.mu.Unlock()
+		return
+	}
 	if err == nil {
 		m.cached[path] = diags
 		delete(m.lastErr, path)
@@ -187,10 +203,11 @@ func (m *Manager) LastError(path string) error {
 // (no clients have it open anymore) — otherwise every path ever linted in
 // the session accumulates an entry in these maps forever, even though the
 // values themselves (a `false` running/pending flag) are individually
-// small. Safe to call on a path with a run currently in flight: the
-// in-flight goroutine only touches these maps under m.mu and will simply
-// repopulate a fresh entry for path when it completes, same as if the file
-// were linted for the first time.
+// small. Safe to call on a path with a run currently in flight: deleting
+// activeToken[path] means that run's token no longer matches when it
+// eventually completes, so run() discards its result instead of
+// repopulating a fresh entry for path or, worse, clobbering a newer run's
+// result if path was reopened and relinted before the old run finished.
 func (m *Manager) Forget(path string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -199,6 +216,7 @@ func (m *Manager) Forget(path string) {
 	delete(m.pending, path)
 	delete(m.content, path)
 	delete(m.lastErr, path)
+	delete(m.activeToken, path)
 }
 
 // runLinter executes lc's command against filePath and parses its output.

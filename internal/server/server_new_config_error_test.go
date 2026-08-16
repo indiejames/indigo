@@ -39,4 +39,11 @@ func TestNewPropagatesConfigLoadError(t *testing.T) {
 	if IsRunning(SocketPath(workDir)) {
 		t.Error("socket is still accepting connections after New() failed on config load")
 	}
+
+	// IsRunning only proves nothing is listening anymore; it says nothing
+	// about whether the stale socket file itself was removed from disk (the
+	// os.Remove call on this failure path). Check that directly too.
+	if _, err := os.Lstat(SocketPath(workDir)); !os.IsNotExist(err) {
+		t.Errorf("socket file still exists on disk after New() failed on config load: Lstat err = %v", err)
+	}
 }

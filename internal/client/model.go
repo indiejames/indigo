@@ -178,6 +178,7 @@ type formatResultMsg struct {
 	changed     bool
 	thenSave    bool
 	noFormatter bool
+	err         error // non-nil on an RPC failure; every other field is zero when set
 }
 
 type CloseBufferMsg struct{}
@@ -1079,6 +1080,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case formatResultMsg:
 		if msg.bufID != m.bufID {
 			return m, nil // stale result from a previous buffer switch; discard
+		}
+		if msg.err != nil {
+			m = m.pushStatus("ERR: " + msg.err.Error())
+			return m, nil
 		}
 		var refreshCmd tea.Cmd
 		if msg.changed {

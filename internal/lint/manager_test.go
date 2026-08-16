@@ -10,13 +10,27 @@ import (
 
 func newTestManager(lints ...config.LinterConfig) *Manager {
 	return &Manager{
-		userLints: lints,
-		cached:    make(map[string][]lsp.Diagnostic),
-		running:   make(map[string]bool),
-		pending:   make(map[string]bool),
-		content:   make(map[string]string),
-		lastErr:   make(map[string]error),
+		userLints:   lints,
+		cached:      make(map[string][]lsp.Diagnostic),
+		running:     make(map[string]bool),
+		pending:     make(map[string]bool),
+		content:     make(map[string]string),
+		lastErr:     make(map[string]error),
+		activeToken: make(map[string]uint64),
 	}
+}
+
+// runSync performs the runAsync-style token bookkeeping (claim a fresh
+// token as the path's activeToken) and then calls run synchronously, for
+// tests that want deterministic, goroutine-free behavior identical to what
+// RunAsync would produce.
+func (m *Manager) runSync(path string, lc config.LinterConfig) {
+	m.mu.Lock()
+	m.tokenSeq++
+	token := m.tokenSeq
+	m.activeToken[path] = token
+	m.mu.Unlock()
+	m.run(path, lc, token)
 }
 
 // shJSON is a linter stand-in that needs no external tool installed: it
@@ -34,7 +48,7 @@ func TestManagerRunPopulatesCache(t *testing.T) {
 	lc := shJSON(`{"Issues":[{"FromLinter":"x","Text":"boom","Severity":"error","Pos":{"Line":1,"Column":1}}]}`)
 	m := newTestManager(lc)
 
-	m.run("foo.go", lc) // synchronous, bypassing the "go" in RunAsync
+	m.runSync("foo.go", lc) // synchronous, bypassing the "go" in RunAsync
 
 	diags := m.GetDiagnostics("foo.go")
 	if len(diags) != 1 {
@@ -90,7 +104,7 @@ func TestManagerRunUsesStdinContentForStdinLinter(t *testing.T) {
 	m := newTestManager(lc)
 	m.content["foo.go"] = "boom from stdin"
 
-	m.run("foo.go", lc) // synchronous, bypassing the "go" in RunAsync
+	m.runSync("foo.go", lc) // synchronous, bypassing the "go" in RunAsync
 
 	diags := m.GetDiagnostics("foo.go")
 	if len(diags) != 1 || diags[0].Message != "boom from stdin" {
@@ -136,7 +150,7 @@ func TestManagerRunOnEditCoalescesForStdinLinter(t *testing.T) {
 func TestManagerLastErrorSurfacesFailureWithoutClobberingCache(t *testing.T) {
 	goodLC := shJSON(`{"Issues":[{"FromLinter":"x","Text":"boom","Severity":"error","Pos":{"Line":1,"Column":1}}]}`)
 	m := newTestManager(goodLC)
-	m.run("foo.go", goodLC)
+	m.runSync("foo.go", goodLC)
 	if diags := m.GetDiagnostics("foo.go"); len(diags) != 1 {
 		t.Fatalf("setup: len(diags) = %d, want 1", len(diags))
 	}
@@ -149,7 +163,7 @@ func TestManagerLastErrorSurfacesFailureWithoutClobberingCache(t *testing.T) {
 		Command:    "indigo-lint-command-does-not-exist-xyz",
 		Format:     "golangci-lint-json",
 	}
-	m.run("foo.go", failingLC)
+	m.runSync("foo.go", failingLC)
 
 	if err := m.LastError("foo.go"); err == nil {
 		t.Error("LastError = nil after a failing run, want the run's error")
@@ -159,7 +173,7 @@ func TestManagerLastErrorSurfacesFailureWithoutClobberingCache(t *testing.T) {
 	}
 
 	// A subsequent successful run clears the error again.
-	m.run("foo.go", goodLC)
+	m.runSync("foo.go", goodLC)
 	if err := m.LastError("foo.go"); err != nil {
 		t.Errorf("LastError = %v, want nil after a follow-up successful run", err)
 	}
@@ -176,6 +190,7 @@ func TestManagerForgetPrunesAllState(t *testing.T) {
 	m.pending["foo.go"] = true
 	m.content["foo.go"] = "some content"
 	m.lastErr["foo.go"] = fmt.Errorf("boom")
+	m.activeToken["foo.go"] = 1
 
 	m.Forget("foo.go")
 
@@ -193,6 +208,55 @@ func TestManagerForgetPrunesAllState(t *testing.T) {
 	}
 	if _, ok := m.lastErr["foo.go"]; ok {
 		t.Error("lastErr still has an entry for foo.go after Forget")
+	}
+	if _, ok := m.activeToken["foo.go"]; ok {
+		t.Error("activeToken still has an entry for foo.go after Forget")
+	}
+}
+
+// TestManagerForgetInvalidatesBlockedRunThenNewRunWins is a regression
+// test: Forget used to only clear the maps, leaving a run that was already
+// in flight free to repopulate cached/lastErr when it eventually completed
+// — silently undoing the Forget, or worse, clobbering a newer run's result
+// if the path was reopened and relinted before the stale run finished.
+// activeToken must make a run's completion a no-op once Forget (or a newer
+// run claiming the path) has moved past its token.
+func TestManagerForgetInvalidatesBlockedRunThenNewRunWins(t *testing.T) {
+	staleLC := shJSON(`{"Issues":[{"FromLinter":"x","Text":"stale","Severity":"error","Pos":{"Line":1,"Column":1}}]}`)
+	freshLC := shJSON(`{"Issues":[{"FromLinter":"x","Text":"fresh","Severity":"error","Pos":{"Line":1,"Column":1}}]}`)
+	m := newTestManager()
+
+	// A run for foo.go is in flight (claimed a token via the same
+	// bookkeeping runAsync does) when the file is closed.
+	m.mu.Lock()
+	m.running["foo.go"] = true
+	m.tokenSeq++
+	staleToken := m.tokenSeq
+	m.activeToken["foo.go"] = staleToken
+	m.mu.Unlock()
+
+	m.Forget("foo.go")
+
+	// The file is reopened and relinted before the stale run had a chance
+	// to write back its result — this claims a new, higher token.
+	m.mu.Lock()
+	m.running["foo.go"] = true
+	m.tokenSeq++
+	freshToken := m.tokenSeq
+	m.activeToken["foo.go"] = freshToken
+	m.mu.Unlock()
+
+	// The new run finishes first...
+	m.run("foo.go", freshLC, freshToken)
+	// ...then the old, now-invalidated run finally completes.
+	m.run("foo.go", staleLC, staleToken)
+
+	diags := m.GetDiagnostics("foo.go")
+	if len(diags) != 1 || diags[0].Message != "fresh" {
+		t.Fatalf("diags = %+v, want the fresh run's single diagnostic — the stale in-flight run should have been discarded", diags)
+	}
+	if err := m.LastError("foo.go"); err != nil {
+		t.Errorf("LastError = %v, want nil (the fresh run succeeded and the stale run's completion should be a no-op)", err)
 	}
 }
 

@@ -3,10 +3,29 @@ package procutil
 import (
 	"fmt"
 	"os/exec"
-	"syscall"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
+
+// processIsGone reports whether pid no longer exists, or exists only as a
+// zombie. syscall.Kill(pid, 0) can't tell these apart from "genuinely still
+// running" — a zombie still occupies a process-table slot until its parent
+// reaps it, so kill(pid, 0) succeeds for it same as a live process. This
+// test isn't the grandchild's parent (it gets reparented once the shell
+// that forked it is killed), so it can't force a reap and shouldn't wait on
+// however long the new parent (the OS's subreaper) takes to get to it —
+// a zombie is, for this test's purposes, already gone.
+func processIsGone(pid int) bool {
+	out, err := exec.Command("ps", "-o", "state=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		// ps exits non-zero once the pid doesn't exist at all.
+		return true
+	}
+	state := strings.TrimSpace(string(out))
+	return state == "" || strings.HasPrefix(state, "Z")
+}
 
 // TestKillGroupKillsGrandchildren is a regression test: SetPgid+KillGroup
 // exist because a plain cmd.Process.Kill() only signals the direct child,
@@ -33,8 +52,8 @@ func TestKillGroupKillsGrandchildren(t *testing.T) {
 		t.Fatalf("failed to read grandchild pid: %v", err)
 	}
 
-	if err := syscall.Kill(childPID, 0); err != nil {
-		t.Fatalf("grandchild %d not running before KillGroup: %v", childPID, err)
+	if processIsGone(childPID) {
+		t.Fatalf("grandchild %d not running before KillGroup", childPID)
 	}
 
 	if err := KillGroup(cmd); err != nil {
@@ -44,7 +63,7 @@ func TestKillGroupKillsGrandchildren(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := syscall.Kill(childPID, 0); err != nil {
+		if processIsGone(childPID) {
 			return // grandchild is gone — success
 		}
 		time.Sleep(20 * time.Millisecond)

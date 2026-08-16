@@ -631,12 +631,16 @@ func executeIndent(m Model) (tea.Model, tea.Cmd) {
 		}
 		return p
 	}
+	// applyBatch snapshots the pre-edit cursor/selection for undo, so shift
+	// only the model it returns — shifting before the call would make undo
+	// restore the post-indent position instead of the real pre-edit one.
+	m, cmd := applyBatch(m, ops)
 	if m.sel != nil {
 		m.sel.Anchor = shift(m.sel.Anchor)
 		m.sel.Head = shift(m.sel.Head)
 	}
 	m.cursor = shift(m.cursor)
-	return applyBatch(m, ops)
+	return m, cmd
 }
 
 // executeUnindent removes one indent unit from the start of every selected
@@ -685,12 +689,15 @@ func executeUnindent(m Model) (tea.Model, tea.Cmd) {
 		}
 		return p
 	}
+	// See executeIndent: shift only after applyBatch has snapshotted the
+	// real pre-edit cursor/selection for undo.
+	m, cmd := applyBatch(m, ops)
 	if m.sel != nil {
 		m.sel.Anchor = shift(m.sel.Anchor)
 		m.sel.Head = shift(m.sel.Head)
 	}
 	m.cursor = shift(m.cursor)
-	return applyBatch(m, ops)
+	return m, cmd
 }
 
 // executeJoinLines joins the current line with the line below it (vim's J):

@@ -919,7 +919,7 @@ var helpEntries = []helpEntry{
 	{key: "b", desc: "Move to previous word start"},
 	{key: "e", desc: "Move to word end"},
 	{key: "0 / Home", desc: "Line start"},
-	{key: "^", desc: "Firt non-blank character in line"},
+	{key: "^", desc: "First non-blank character in line"},
 	{key: "$ / End", desc: "Line end"},
 	{key: "G", desc: "End of file"},
 	{key: "Ctrl+f / PgDn", desc: "Page down"},

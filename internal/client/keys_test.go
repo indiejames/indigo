@@ -530,6 +530,77 @@ func TestUnindentPreservesSelection(t *testing.T) {
 	}
 }
 
+// TestIndentUndoRestoresPreEditSelection is a regression test: executeIndent
+// used to shift m.sel/m.cursor before calling applyBatch, so applyBatch's
+// undo-entry snapshot (taken from m.cursor/m.sel at call time) captured the
+// already-shifted (post-indent) position instead of the true pre-edit one,
+// making undo restore to the wrong place.
+func TestIndentUndoRestoresPreEditSelection(t *testing.T) {
+	m := newTestModel("aa\nbb\n")
+	m.rpc = &RPC{} // zero-value RPC is safe: ClientID() just reads a field, no dial
+	origSel := Selection{
+		Anchor: document.Pos{Line: 0, Col: 0},
+		Head:   document.Pos{Line: 1, Col: 0},
+	}
+	m.sel = &origSel
+	m.cursor = origSel.Head
+	// executeIndent mutates *m.sel in place, which aliases origSel — snapshot
+	// the pre-edit values now, before that happens.
+	wantSel := origSel
+	wantCursor := origSel.Head
+	m2, _ := executeIndent(m)
+	indented := m2.(Model)
+
+	m3, _ := executeUndo(indented)
+	got := m3.(Model)
+	if got.buf.Line(0) != "aa" || got.buf.Line(1) != "bb" {
+		t.Fatalf("undo: buffer not restored, Line(0)=%q Line(1)=%q", got.buf.Line(0), got.buf.Line(1))
+	}
+	if got.sel == nil {
+		t.Fatal("undo: sel should be restored")
+	}
+	if *got.sel != wantSel {
+		t.Errorf("undo: sel = %v, want %v (pre-edit)", *got.sel, wantSel)
+	}
+	if got.cursor != wantCursor {
+		t.Errorf("undo: cursor = %v, want %v (pre-edit)", got.cursor, wantCursor)
+	}
+}
+
+// TestUnindentUndoRestoresPreEditSelection mirrors
+// TestIndentUndoRestoresPreEditSelection for executeUnindent.
+func TestUnindentUndoRestoresPreEditSelection(t *testing.T) {
+	m := newTestModel("\taa\n\tbb\n")
+	m.rpc = &RPC{} // zero-value RPC is safe: ClientID() just reads a field, no dial
+	origSel := Selection{
+		Anchor: document.Pos{Line: 0, Col: 2},
+		Head:   document.Pos{Line: 1, Col: 2},
+	}
+	m.sel = &origSel
+	m.cursor = origSel.Head
+	// executeUnindent mutates *m.sel in place, which aliases origSel —
+	// snapshot the pre-edit values now, before that happens.
+	wantSel := origSel
+	wantCursor := origSel.Head
+	m2, _ := executeUnindent(m)
+	unindented := m2.(Model)
+
+	m3, _ := executeUndo(unindented)
+	got := m3.(Model)
+	if got.buf.Line(0) != "\taa" || got.buf.Line(1) != "\tbb" {
+		t.Fatalf("undo: buffer not restored, Line(0)=%q Line(1)=%q", got.buf.Line(0), got.buf.Line(1))
+	}
+	if got.sel == nil {
+		t.Fatal("undo: sel should be restored")
+	}
+	if *got.sel != wantSel {
+		t.Errorf("undo: sel = %v, want %v (pre-edit)", *got.sel, wantSel)
+	}
+	if got.cursor != wantCursor {
+		t.Errorf("undo: cursor = %v, want %v (pre-edit)", got.cursor, wantCursor)
+	}
+}
+
 // --- Shift+Home / Shift+End select-to-line-start/end ---
 
 func TestExtendLineEndFromCursor(t *testing.T) {

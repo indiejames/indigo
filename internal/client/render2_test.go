@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
+	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/theme"
 )
@@ -377,6 +378,43 @@ func TestRenderStatusBarDirtyFlag(t *testing.T) {
 	stripped := ansiStrip(bar)
 	if !strings.Contains(stripped, "[+]") {
 		t.Errorf("dirty buffer bar should contain '[+]': %q", stripped)
+	}
+}
+
+func TestRenderStatusBarColumnDefaultsToViewColumn(t *testing.T) {
+	// A tab at col 0 occupies 4 visual columns by default, so the cursor
+	// sitting right after it is buffer-column 1 but view-column 5.
+	m := newTestModel("\tx\n")
+	m.filePath = "test.go"
+	m.cursor.Col = 1
+	bar := m.renderStatusBar()
+	stripped := ansiStrip(bar)
+	if !strings.Contains(stripped, "1:5") {
+		t.Errorf("nil-config bar should default to view column 1:5, got: %q", stripped)
+	}
+}
+
+func TestRenderStatusBarColumnBufferStyle(t *testing.T) {
+	m := newTestModel("\tx\n")
+	m.filePath = "test.go"
+	m.cfg = &config.Config{CursorColumnStyle: "buffer"}
+	m.cursor.Col = 1
+	bar := m.renderStatusBar()
+	stripped := ansiStrip(bar)
+	if !strings.Contains(stripped, "1:2") {
+		t.Errorf("buffer-style bar should show raw rune column 1:2, got: %q", stripped)
+	}
+}
+
+func TestRenderStatusBarColumnViewStyleExplicit(t *testing.T) {
+	m := newTestModel("\tx\n")
+	m.filePath = "test.go"
+	m.cfg = &config.Config{CursorColumnStyle: "view"}
+	m.cursor.Col = 1
+	bar := m.renderStatusBar()
+	stripped := ansiStrip(bar)
+	if !strings.Contains(stripped, "1:5") {
+		t.Errorf("view-style bar should show visual column 1:5, got: %q", stripped)
 	}
 }
 

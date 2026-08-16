@@ -608,11 +608,13 @@ func (m Model) selectionLineRange() (startLine, endLine int) {
 
 // executeIndent adds one indent unit (the buffer's detected/configured tab
 // or space width, via indentUnit) at the start of every selected line (or the
-// cursor line). The selection is preserved as a line range so the user can
-// press > repeatedly without re-selecting.
+// cursor line). The selection (and cursor) is preserved and shifted right by
+// the indent width — rather than cleared — so the user can press > repeatedly
+// to indent further without re-selecting each time.
 func executeIndent(m Model) (tea.Model, tea.Cmd) {
 	startLine, endLine := m.selectionLineRange()
 	unit := m.indentUnit()
+	unitLen := len([]rune(unit))
 	ops := make([]document.Op, 0, endLine-startLine+1)
 	for ln := startLine; ln <= endLine; ln++ {
 		ops = append(ops, document.Op{
@@ -623,21 +625,36 @@ func executeIndent(m Model) (tea.Model, tea.Cmd) {
 			InsertText: unit,
 		})
 	}
+	shift := func(p document.Pos) document.Pos {
+		if p.Line >= startLine && p.Line <= endLine {
+			p.Col += unitLen
+		}
+		return p
+	}
+	// applyBatch snapshots the pre-edit cursor/selection for undo, so shift
+	// only the model it returns — shifting before the call would make undo
+	// restore the post-indent position instead of the real pre-edit one.
 	m, cmd := applyBatch(m, ops)
-	m.sel = nil
+	if m.sel != nil {
+		m.sel.Anchor = shift(m.sel.Anchor)
+		m.sel.Head = shift(m.sel.Head)
+	}
+	m.cursor = shift(m.cursor)
 	return m, cmd
 }
 
 // executeUnindent removes one indent unit from the start of every selected
 // line (or the cursor line): one '\t', or up to the buffer's indent width in
-// leading spaces. The selection is preserved as a line range so repeated <
-// keeps working.
+// leading spaces. The selection (and cursor) is preserved and shifted left by
+// however much was actually removed from each line — rather than cleared —
+// so repeated < keeps working without re-selecting each time.
 func executeUnindent(m Model) (tea.Model, tea.Cmd) {
 	startLine, endLine := m.selectionLineRange()
 	width := m.effectiveIndentSettings().Width
 	if width <= 0 {
 		width = 4
 	}
+	removed := make(map[int]int, endLine-startLine+1)
 	ops := make([]document.Op, 0, endLine-startLine+1)
 	for ln := startLine; ln <= endLine; ln++ {
 		runes := []rune(m.buf.Line(ln))
@@ -655,6 +672,7 @@ func executeUnindent(m Model) (tea.Model, tea.Cmd) {
 		if remove == 0 {
 			continue
 		}
+		removed[ln] = remove
 		ops = append(ops, document.Op{
 			ClientID: m.clientID(),
 			Type:     document.OpDelete,
@@ -665,8 +683,20 @@ func executeUnindent(m Model) (tea.Model, tea.Cmd) {
 	if len(ops) == 0 {
 		return m, nil
 	}
+	shift := func(p document.Pos) document.Pos {
+		if r, ok := removed[p.Line]; ok {
+			p.Col = max(0, p.Col-r)
+		}
+		return p
+	}
+	// See executeIndent: shift only after applyBatch has snapshotted the
+	// real pre-edit cursor/selection for undo.
 	m, cmd := applyBatch(m, ops)
-	m.sel = nil
+	if m.sel != nil {
+		m.sel.Anchor = shift(m.sel.Anchor)
+		m.sel.Head = shift(m.sel.Head)
+	}
+	m.cursor = shift(m.cursor)
 	return m, cmd
 }
 

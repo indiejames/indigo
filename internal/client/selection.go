@@ -519,6 +519,42 @@ func (m *Model) extendWordBackward() {
 	}
 }
 
+// extendToLineEnd extends the selection head to the end of the current line
+// (the last character, inclusive — matching selectLine's convention). If
+// there is no selection, starts one at the cursor.
+func (m *Model) extendToLineEnd() {
+	head := m.cursor
+	if m.sel != nil {
+		head = m.sel.Head
+	}
+	lineLen := m.buf.LineLen(head.Line)
+	newHead := document.Pos{Line: head.Line, Col: max(0, lineLen-1)}
+	if m.sel == nil {
+		m.sel = &Selection{Anchor: m.cursor, Head: newHead}
+	} else {
+		m.sel.Head = newHead
+	}
+	m.cursor = newHead
+	m.scrollToCursor()
+}
+
+// extendToLineStart extends the selection head to the start of the current
+// line. If there is no selection, starts one at the cursor.
+func (m *Model) extendToLineStart() {
+	head := m.cursor
+	if m.sel != nil {
+		head = m.sel.Head
+	}
+	newHead := document.Pos{Line: head.Line, Col: 0}
+	if m.sel == nil {
+		m.sel = &Selection{Anchor: m.cursor, Head: newHead}
+	} else {
+		m.sel.Head = newHead
+	}
+	m.cursor = newHead
+	m.scrollToCursor()
+}
+
 // selectAll selects the entire buffer contents.
 func (m *Model) selectAll() {
 	lastLine := max(0, m.buf.LineCount()-1)

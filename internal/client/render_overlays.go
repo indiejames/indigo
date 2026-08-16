@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/indiejames/indigo/internal/document"
 )
 
 // renderFixPopup builds styled lines for the fix suggestion popup.
@@ -804,32 +805,23 @@ func (m Model) applyRulerColumn(lines []string, layout []layoutEntry, cw int) {
 	rulerCol := m.cfg.RulerColumn - 1
 	gutterW := m.gutterWidth()
 
-	// cursorCell reports whether (line, col) is currently occupied by a
-	// cursor — the primary one or any extra multi-cursor — and if so, its
-	// visual column, so the ruler never draws over any cursor's own cell
-	// (it would otherwise vanish under the ruler's fixed background
-	// whenever they coincide).
-	cursorVisCol := func(line, col int) (visCol int, onScreen bool) {
-		if line >= m.buf.LineCount() {
-			return 0, false
+	// Collect every cursor's visual column, keyed by buffer line, so the
+	// ruler skips an extra cursor's cell too — not just the primary
+	// cursor's — whenever one sits on the ruler column.
+	cursorVisCols := make(map[int][]int)
+	addCursor := func(pos document.Pos) {
+		if pos.Line >= m.buf.LineCount() {
+			return
 		}
-		runes := []rune(m.buf.Line(line))
+		runes := []rune(m.buf.Line(pos.Line))
 		_, colMap := expandTabsRemap(runes)
-		if col < len(colMap) {
-			visCol = colMap[col]
+		if pos.Col < len(colMap) {
+			cursorVisCols[pos.Line] = append(cursorVisCols[pos.Line], colMap[pos.Col])
 		}
-		return visCol, true
 	}
-
-	type cursorCell struct{ line, visCol int }
-	var cursorCells []cursorCell
-	if vc, ok := cursorVisCol(m.cursor.Line, m.cursor.Col); ok {
-		cursorCells = append(cursorCells, cursorCell{m.cursor.Line, vc})
-	}
+	addCursor(m.cursor)
 	for _, ec := range m.extraCursors {
-		if vc, ok := cursorVisCol(ec.pos.Line, ec.pos.Col); ok {
-			cursorCells = append(cursorCells, cursorCell{ec.pos.Line, vc})
-		}
+		addCursor(ec.pos)
 	}
 
 	for row, entry := range layout {
@@ -837,14 +829,16 @@ func (m Model) applyRulerColumn(lines []string, layout []layoutEntry, cw int) {
 			rulerCol < entry.chunkStart || rulerCol >= entry.chunkStart+cw {
 			continue
 		}
-		onCursor := false
-		for _, c := range cursorCells {
-			if c.line == entry.bufLine && c.visCol == rulerCol {
-				onCursor = true
+		// Never draw over a cursor's own cell — it would otherwise vanish
+		// under the ruler's fixed background whenever they coincide.
+		skip := false
+		for _, c := range cursorVisCols[entry.bufLine] {
+			if c == rulerCol {
+				skip = true
 				break
 			}
 		}
-		if onCursor {
+		if skip {
 			continue
 		}
 		lines[row] = overlayRulerColumn(lines[row], gutterW+rulerCol-entry.chunkStart)
@@ -979,20 +973,23 @@ var helpEntries = []helpEntry{
 	{key: "y", desc: "Yank (copy) selection"},
 	{key: "u", desc: "Undo"},
 	{key: "U", desc: "Redo"},
+	{key: ">", desc: "Indent selected line(s)"},
+	{key: "<", desc: "Unindent selected line(s)"},
 	{key: ""},
 	{key: "Selection"},
 	{key: "w", desc: "Next word start"},
 	{key: "W", desc: "Extend selection to next word start"},
 	{key: "x", desc: "Select line"},
 	{key: "X", desc: "Extend line backward"},
+	{key: "z", desc: "Set mark at cursor (Esc clears)"},
+	{key: "Z", desc: "Select from mark to cursor"},
+	{key: "ma", desc: "Select around matching object"},
+	{key: "mi", desc: "Select inside object / word"},
 	{key: "%", desc: "Select all"},
 	{key: ";", desc: "Clear selection"},
 	{key: "Alt+;", desc: "Flip selection (swap anchor/head)"},
-	{key: "mi / mw", desc: "Select inside object / word"},
-	{key: "z", desc: "Set mark at cursor (Esc clears)"},
-	{key: "Z", desc: "Select from mark to cursor"},
-	{key: ">", desc: "Indent selected lines"},
-	{key: "<", desc: "Unindent selected lines"},
+	{key: "shift+end", desc: "Select to end of line"},
+	{key: "shift+home", desc: "Select to beginning of line"},
 	{key: ""},
 	{key: "Search"},
 	{key: "/", desc: "Start search"},

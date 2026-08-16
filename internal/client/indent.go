@@ -38,6 +38,33 @@ func (m Model) indentUnit() string {
 	return "\t"
 }
 
+// tabInsertText returns what a literal Tab keypress should insert at
+// (line, col): a single tab character in "tabs" style (unambiguous — a tab
+// is its own stop), or, in "spaces" style, enough spaces to reach the next
+// tab stop measured in on-screen visual columns (VS Code-style) — anywhere
+// from 1 to width spaces, collapsing to a full indentUnit()-width only when
+// col already sits on a stop (e.g. line start). Unlike indentUnit(), which
+// builds a fresh indent string from column 0, this accounts for the
+// existing content (including any tabs) already on the line before col.
+func (m Model) tabInsertText(line, col int) string {
+	settings := m.effectiveIndentSettings()
+	if settings.Style != "spaces" {
+		return "\t"
+	}
+	width := settings.Width
+	if width <= 0 {
+		width = 4
+	}
+	runes := []rune(m.buf.Line(line))
+	_, colMap := expandTabsRemap(runes)
+	visualCol := colMap[len(colMap)-1]
+	if col < len(colMap) {
+		visualCol = colMap[col]
+	}
+	spaces := width - (visualCol % width)
+	return strings.Repeat(" ", spaces)
+}
+
 // indentOpeners are trailing (non-whitespace) characters before the cursor
 // that mean the next line should be indented one level deeper: an open
 // bracket with nothing closing it yet, or a trailing ':' (function/class

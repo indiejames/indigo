@@ -3,8 +3,103 @@ package client
 import (
 	"testing"
 
+	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
 )
+
+// TestExecuteInsertTabTabsStyleInsertsLiteralTab is a regression test:
+// "tabs" style keeps the original unconditional behavior — a tab is its own
+// stop, so there's no tabstop math to do regardless of cursor column.
+func TestExecuteInsertTabTabsStyleInsertsLiteralTab(t *testing.T) {
+	m := newAutoPairTestModel("ab\n")
+	m.cfg = &config.Config{IndentStyle: "tabs", IndentWidth: 4}
+	m.cursor.Col = 2
+
+	m2, _ := m.handleInsert(fakeKey("tab"))
+	got := m2.(Model)
+
+	if got.buf.Line(0) != "ab\t" {
+		t.Errorf("line = %q, want %q", got.buf.Line(0), "ab\t")
+	}
+	if got.cursor.Col != 3 {
+		t.Errorf("cursor.Col = %d, want 3", got.cursor.Col)
+	}
+}
+
+// TestExecuteInsertTabSpacesStyleAtLineStartUsesFullWidth verifies that at a
+// stop-aligned column (line start), spaces style still inserts a full
+// indentUnit()-width of spaces — same as before this change.
+func TestExecuteInsertTabSpacesStyleAtLineStartUsesFullWidth(t *testing.T) {
+	m := newAutoPairTestModel("\n")
+	m.cfg = &config.Config{IndentStyle: "spaces", IndentWidth: 4}
+
+	m2, _ := m.handleInsert(fakeKey("tab"))
+	got := m2.(Model)
+
+	if got.buf.Line(0) != "    " {
+		t.Errorf("line = %q, want 4 spaces", got.buf.Line(0))
+	}
+	if got.cursor.Col != 4 {
+		t.Errorf("cursor.Col = %d, want 4", got.cursor.Col)
+	}
+}
+
+// TestExecuteInsertTabSpacesStyleMidLinePadsToNextStop is the core
+// regression this change is about: pressing Tab mid-line in spaces mode
+// should pad only to the next tab stop (VS Code-style), not insert a fixed
+// indentUnit()-width every time.
+func TestExecuteInsertTabSpacesStyleMidLinePadsToNextStop(t *testing.T) {
+	m := newAutoPairTestModel("ab\n")
+	m.cfg = &config.Config{IndentStyle: "spaces", IndentWidth: 4}
+	m.cursor.Col = 2 // visual column 2, next stop at 4 -> 2 spaces
+
+	m2, _ := m.handleInsert(fakeKey("tab"))
+	got := m2.(Model)
+
+	if got.buf.Line(0) != "ab  " {
+		t.Errorf("line = %q, want %q", got.buf.Line(0), "ab  ")
+	}
+	if got.cursor.Col != 4 {
+		t.Errorf("cursor.Col = %d, want 4", got.cursor.Col)
+	}
+}
+
+// TestExecuteInsertTabSpacesStyleAccountsForExistingTabs verifies the
+// tabstop math uses on-screen visual column, not raw rune column, so a tab
+// already on the line before the cursor is accounted for correctly.
+func TestExecuteInsertTabSpacesStyleAccountsForExistingTabs(t *testing.T) {
+	m := newAutoPairTestModel("\ta\n") // "\t" expands to visual col 4, "a" -> col 5
+	m.cfg = &config.Config{IndentStyle: "spaces", IndentWidth: 4}
+	m.cursor.Col = 2 // rune col 2 (after "\ta"), visual col 5 -> next stop at 8 -> 3 spaces
+
+	m2, _ := m.handleInsert(fakeKey("tab"))
+	got := m2.(Model)
+
+	if got.buf.Line(0) != "\ta   " {
+		t.Errorf("line = %q, want %q", got.buf.Line(0), "\ta   ")
+	}
+}
+
+// TestExecuteInsertTabSpacesStyleMulticursorPadsIndependently verifies each
+// cursor gets its own tabstop-relative pad amount rather than all cursors
+// receiving identical text, since applyInsertToAllCursors previously applied
+// one fixed string everywhere.
+func TestExecuteInsertTabSpacesStyleMulticursorPadsIndependently(t *testing.T) {
+	m := newAutoPairTestModel("a\nbb\n")
+	m.cfg = &config.Config{IndentStyle: "spaces", IndentWidth: 4}
+	m.cursor = document.Pos{Line: 0, Col: 1}                                          // visual col 1 -> 3 spaces
+	m.extraCursors = []ExtraCursor{{pos: document.Pos{Line: 1, Col: 2}, goalCol: -1}} // visual col 2 -> 2 spaces
+
+	m2, _ := m.handleInsert(fakeKey("tab"))
+	got := m2.(Model)
+
+	if got.buf.Line(0) != "a   " {
+		t.Errorf("line 0 = %q, want %q", got.buf.Line(0), "a   ")
+	}
+	if got.buf.Line(1) != "bb  " {
+		t.Errorf("line 1 = %q, want %q", got.buf.Line(1), "bb  ")
+	}
+}
 
 // TestInsertPastedTextIndentsAfterOpenBrace is a regression test: a
 // multi-line paste landing right after an opener should have its

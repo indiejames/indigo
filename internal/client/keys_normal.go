@@ -191,6 +191,8 @@ func executeUndo(m Model) (tea.Model, tea.Cmd) {
 		inv := entry.ops[i]
 		inv.ClientID = m.rpc.ClientID()
 		reInv := inverseOp(m, inv) // compute re-inverse before applying
+		al, d := opLineDelta(inv)
+		m = m.shiftLSPOverlayLines(al, d)
 		m.buf.Apply(inv)
 		cmds = append(cmds, m.sendToServer(inv))
 		redoEntry.ops = append(redoEntry.ops, reInv)
@@ -223,6 +225,9 @@ func executeUndo(m Model) (tea.Model, tea.Cmd) {
 	undoCmd := func() tea.Msg {
 		return UndoMsg{FilePath: fp, NewDepth: newDepth, AtLine: atLine, LineDelta: lineDelta}
 	}
+	var refreshCmd tea.Cmd
+	m, refreshCmd = m.scheduleLSPOverlayRefresh()
+	cmds = append(cmds, refreshCmd)
 	return m, tea.Sequence(append(cmds, m.reparseHighlight(), undoCmd)...)
 }
 
@@ -239,6 +244,8 @@ func executeRedo(m Model) (tea.Model, tea.Cmd) {
 		op := entry.ops[i]
 		op.ClientID = m.rpc.ClientID()
 		inv := inverseOp(m, op) // compute inverse before applying
+		al, d := opLineDelta(op)
+		m = m.shiftLSPOverlayLines(al, d)
 		m.buf.Apply(op)
 		cmds = append(cmds, m.sendToServer(op))
 		newUndoEntry.ops = append(newUndoEntry.ops, inv)
@@ -252,6 +259,9 @@ func executeRedo(m Model) (tea.Model, tea.Cmd) {
 	if len(m.undoStack) == m.savedUndoDepth {
 		m.buf.SetClean()
 	}
+	var refreshCmd tea.Cmd
+	m, refreshCmd = m.scheduleLSPOverlayRefresh()
+	cmds = append(cmds, refreshCmd)
 	return m, tea.Sequence(append(cmds, m.reparseHighlight())...)
 }
 

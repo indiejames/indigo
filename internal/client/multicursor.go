@@ -297,11 +297,23 @@ func deleteAllCursorSelections(m Model) (Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// applyInsertToAllCursors inserts text at all cursor positions, processed
-// front-to-back so each insert's column delta is carried forward for subsequent
-// cursors on the same line.
+// applyInsertToAllCursors inserts the same fixed text at all cursor
+// positions, processed front-to-back so each insert's column delta is
+// carried forward for subsequent cursors on the same line.
 func applyInsertToAllCursors(m Model, text string) (Model, tea.Cmd) {
+	return applyInsertTextToAllCursors(m, func(int, int) string { return text })
+}
+
+// applyInsertTextToAllCursors is applyInsertToAllCursors generalized to
+// compute the inserted text per cursor via textFor(line, col) — needed for
+// tab-stop-aware Tab, where the number of spaces depends on each cursor's
+// own visual column. textFor is called with each cursor's line/col in the
+// buffer's current state at the point that cursor's insert is about to
+// apply (i.e. already reflecting any earlier cursors' inserts on that line),
+// so it sees the same content that cursor's own edit will land next to.
+func applyInsertTextToAllCursors(m Model, textFor func(line, col int) string) (Model, tea.Cmd) {
 	if len(m.extraCursors) == 0 {
+		text := textFor(m.cursor.Line, m.cursor.Col)
 		op := document.Op{
 			ClientID:   m.rpc.ClientID(),
 			Type:       document.OpInsert,
@@ -334,8 +346,6 @@ func applyInsertToAllCursors(m Model, text string) (Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	colAdj := map[int]int{} // origLine → cumulative column delta
 	lineAdj := 0
-	textRunes := []rune(text)
-	isNewline := text == "\n"
 
 	type newPos struct{ line, col int }
 	newPositions := make([]newPos, len(entries))
@@ -343,6 +353,10 @@ func applyInsertToAllCursors(m Model, text string) (Model, tea.Cmd) {
 	for i, e := range entries {
 		adjLine := e.origLine + lineAdj
 		adjCol := e.origCol + colAdj[e.origLine]
+
+		text := textFor(adjLine, adjCol)
+		textRunes := []rune(text)
+		isNewline := text == "\n"
 
 		op := document.Op{
 			ClientID:   m.rpc.ClientID(),

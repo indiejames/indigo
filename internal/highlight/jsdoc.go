@@ -48,14 +48,17 @@ func (h *Highlighter) FunctionSignatureAt(content []byte, line int) (JSDocSignat
 }
 
 // findFunctionOnRow searches node's subtree for the outermost tsFunctionTypes
-// node whose declaration starts exactly on row, pruning any subtree whose
-// span doesn't cover row.
+// node whose declaration starts exactly on row and sits in a declaration
+// context (see isJSDocDeclarationContext), pruning any subtree whose span
+// doesn't cover row. A rejected candidate (e.g. a callback argument) still
+// has its children searched, in case a genuine declaration is nested inside
+// it on the same row.
 func findFunctionOnRow(node sitter.Node, row uint) (sitter.Node, bool) {
 	sp, ep := node.StartPoint(), node.EndPoint()
 	if row < sp.Row || row > ep.Row {
 		return sitter.Node{}, false
 	}
-	if tsFunctionTypes[node.Type()] && sp.Row == row {
+	if node.IsNamed() && tsFunctionTypes[node.Type()] && sp.Row == row && isJSDocDeclarationContext(node) {
 		return node, true
 	}
 	for i := range node.ChildCount() {
@@ -64,6 +67,17 @@ func findFunctionOnRow(node sitter.Node, row uint) (sitter.Node, bool) {
 		}
 	}
 	return sitter.Node{}, false
+}
+
+// isJSDocDeclarationContext reports whether fn (a tsFunctionTypes node) is
+// something worth generating a JSDoc block for, rather than an inline
+// callback passed directly as a call argument — arr.map(x => ...),
+// setTimeout(function() {...}, 100) — which VS Code's own JSDoc generation
+// doesn't trigger on either. A callback first assigned to a variable (const
+// cb = () => {...}) is unaffected: its parent is variable_declarator, not
+// arguments.
+func isJSDocDeclarationContext(fn sitter.Node) bool {
+	return fn.Parent().Type() != "arguments"
 }
 
 // jsdocSignatureFor extracts params/return type from a tsFunctionTypes node
@@ -76,6 +90,13 @@ func jsdocSignatureFor(fn sitter.Node, content []byte) JSDocSignature {
 			if p, ok := jsdocParam(params.NamedChild(i), content); ok {
 				sig.Params = append(sig.Params, p)
 			}
+		}
+	} else if single := fn.ChildByFieldName("parameter"); !single.IsNull() {
+		// A parenless single-param arrow (x => x * 2) has no
+		// formal_parameters wrapper — the JS/TS grammars expose it directly
+		// as the "parameter" (singular) field instead.
+		if p, ok := jsdocParam(single, content); ok {
+			sig.Params = append(sig.Params, p)
 		}
 	}
 	if rt := fn.ChildByFieldName("return_type"); !rt.IsNull() {

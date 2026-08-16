@@ -96,3 +96,20 @@ func TestJSDocDoesNotExpandOnGoFiles(t *testing.T) {
 		t.Fatalf("content = %q, want %q (no JSDoc expansion on a .go file)", got.buf.Content(), want)
 	}
 }
+
+// TestJSDocDoesNotExpandAboveCallbackArgument is a regression test: a "/**"
+// line directly above a callback passed as a call argument (arr.map(x =>
+// ...)) must not expand — see the matching highlight-package test for why
+// (findFunctionOnRow's declaration-context check).
+func TestJSDocDoesNotExpandAboveCallbackArgument(t *testing.T) {
+	m := newJSDocTestModel(t, "/**\narr.map(x => x + 1);\n")
+	m.cursor = document.Pos{Line: 0, Col: 3}
+
+	m2, _ := m.handleEnter()
+	got := m2
+
+	want := "/**\n\narr.map(x => x + 1);\n"
+	if got.buf.Content() != want {
+		t.Fatalf("content = %q, want %q (plain newline, no expansion)", got.buf.Content(), want)
+	}
+}

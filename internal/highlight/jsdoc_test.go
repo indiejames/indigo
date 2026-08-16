@@ -147,3 +147,59 @@ func TestFunctionSignatureAtGoNotMatched(t *testing.T) {
 	}
 	_ = sig
 }
+
+// TestFunctionSignatureAtCallbackArgumentNotMatched is a regression test for
+// a code-review finding: an arrow/function expression passed directly as a
+// call argument (arr.map(x => ...), setTimeout(function() {...}, 100)) isn't
+// a declaration worth a JSDoc block, and previously matched anyway because
+// findFunctionOnRow only checked node type + row, not declaration context.
+func TestFunctionSignatureAtCallbackArgumentNotMatched(t *testing.T) {
+	h := New("test.ts")
+	if h == nil {
+		t.Skip("no typescript highlighter registered")
+	}
+	cases := []string{
+		"\narr.map(x => x + 1);\n",
+		"\nsetTimeout(function() {}, 100);\n",
+		"\narr.forEach((item: number) => {\n  console.log(item);\n});\n",
+	}
+	for _, content := range cases {
+		if _, ok := h.FunctionSignatureAt([]byte(content), 1); ok {
+			t.Errorf("FunctionSignatureAt(%q, 1) = true, want false (callback argument)", content)
+		}
+	}
+}
+
+// TestFunctionSignatureAtCallbackAssignedToVariableStillMatched confirms the
+// callback-argument exclusion doesn't overreach: a function first assigned
+// to a variable (even if that variable is later passed as a callback
+// somewhere else) is still a genuine declaration.
+func TestFunctionSignatureAtCallbackAssignedToVariableStillMatched(t *testing.T) {
+	h := New("test.ts")
+	if h == nil {
+		t.Skip("no typescript highlighter registered")
+	}
+	content := []byte("\nconst cb = (x: number) => x + 1;\n")
+	if _, ok := h.FunctionSignatureAt(content, 1); !ok {
+		t.Error("FunctionSignatureAt = false, want true for a variable-assigned function")
+	}
+}
+
+// TestFunctionSignatureAtParenlessSingleParamArrow is a regression test:
+// tree-sitter exposes a parenless single-param arrow's parameter under a
+// "parameter" (singular) field, not "parameters" — FunctionSignatureAt
+// previously only checked the plural field, silently returning zero params.
+func TestFunctionSignatureAtParenlessSingleParamArrow(t *testing.T) {
+	h := New("test.ts")
+	if h == nil {
+		t.Skip("no typescript highlighter registered")
+	}
+	content := []byte("\nconst double = x => x * 2;\n")
+	sig, ok := h.FunctionSignatureAt(content, 1)
+	if !ok {
+		t.Fatal("FunctionSignatureAt = false, want true")
+	}
+	if len(sig.Params) != 1 || sig.Params[0].Name != "x" {
+		t.Errorf("Params = %+v, want a single param named x", sig.Params)
+	}
+}

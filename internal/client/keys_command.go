@@ -218,16 +218,18 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		searchRest, doSearch = rest, true
 	}
 	if doSearch {
-		pattern, glob := parseGrepArgs(strings.TrimSpace(searchRest))
+		trimmed := strings.TrimSpace(searchRest)
+		pattern, include, exclude := parseGrepArgs(trimmed)
 		if pattern == "" {
 			if m.searchQuery != "" {
 				pattern, _, _ = splitSearchQuery(m.searchQuery)
 			} else {
-				// e.g. ":grep *.go" with no prior query — treat glob as literal pattern.
-				pattern, glob = glob, ""
+				// e.g. ":grep *.go" with no prior query — treat the whole
+				// argument as a literal pattern rather than a bare filter.
+				pattern, include, exclude = trimmed, "", ""
 			}
 		}
-		return m, func() tea.Msg { return GrepMsg{Pattern: pattern, Glob: glob} }
+		return m, func() tea.Msg { return GrepMsg{Pattern: pattern, Include: include, Exclude: exclude} }
 	}
 
 	// Bare number → go to line.
@@ -333,15 +335,36 @@ func (m Model) withClearedSearch() Model {
 	return m
 }
 
-// parseGrepArgs splits a grep command argument into a pattern and an optional
-// file glob. The trailing token is treated as a glob when it contains *, ?, [
-// or ends with / (directory filter). Everything else is the search pattern.
-func parseGrepArgs(s string) (pattern, glob string) {
-	if i := strings.LastIndexByte(s, ' '); i >= 0 {
-		last := s[i+1:]
-		if strings.ContainsAny(last, "*?[") || strings.HasSuffix(last, "/") {
-			return strings.TrimSpace(s[:i]), last
+// parseGrepArgs splits a grep command argument into a pattern and optional
+// include/exclude file globs. Trailing tokens are peeled off one at a time
+// while they look like a glob (contain *, ?, [ or end with / for a directory
+// filter); a token prefixed with ! is an exclude, otherwise an include.
+// Peeling stops at the first trailing token that doesn't look like a glob —
+// everything before that is the search pattern. Multiple include/exclude
+// tokens are joined with a space (see splitGlobs).
+func parseGrepArgs(s string) (pattern, include, exclude string) {
+	rest := s
+	var includes, excludes []string
+	for {
+		trimmed := strings.TrimRight(rest, " ")
+		i := strings.LastIndexByte(trimmed, ' ')
+		last := trimmed[i+1:]
+		if last == "" {
+			rest = trimmed
+			break
 		}
+		raw := strings.TrimPrefix(last, "!")
+		if !strings.ContainsAny(raw, "*?[") && !strings.HasSuffix(raw, "/") {
+			rest = trimmed
+			break
+		}
+		if strings.HasPrefix(last, "!") {
+			excludes = append([]string{raw}, excludes...)
+		} else {
+			includes = append([]string{last}, includes...)
+		}
+		rest = trimmed[:i+1]
 	}
-	return s, ""
+	pattern = strings.TrimSpace(rest)
+	return pattern, strings.Join(includes, " "), strings.Join(excludes, " ")
 }

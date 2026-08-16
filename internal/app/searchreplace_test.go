@@ -51,7 +51,7 @@ func TestFocusOrderExpandsWithReplaceAndResults(t *testing.T) {
 	d := newSearchReplaceDialog("/tmp", 100, 40)
 
 	order := d.focusOrder()
-	want := []sraFocus{sraFocusSearch, sraFocusCase, sraFocusRegex, sraFocusToggle}
+	want := []sraFocus{sraFocusSearch, sraFocusCase, sraFocusRegex, sraFocusFilterToggle, sraFocusToggle}
 	if len(order) != len(want) {
 		t.Fatalf("focusOrder() = %v, want %v", order, want)
 	}
@@ -59,7 +59,7 @@ func TestFocusOrderExpandsWithReplaceAndResults(t *testing.T) {
 	d.replaceOpen = true
 	d.results = []GrepResult{{RelPath: "a.go"}}
 	order = d.focusOrder()
-	wantOpen := []sraFocus{sraFocusSearch, sraFocusCase, sraFocusRegex, sraFocusToggle, sraFocusReplace, sraFocusAll, sraFocusResults}
+	wantOpen := []sraFocus{sraFocusSearch, sraFocusCase, sraFocusRegex, sraFocusFilterToggle, sraFocusToggle, sraFocusReplace, sraFocusAll, sraFocusResults}
 	if len(order) != len(wantOpen) {
 		t.Fatalf("focusOrder() with replace+results = %v, want %v", order, wantOpen)
 	}
@@ -278,5 +278,110 @@ func TestSraSingleResultAppliedValidIndex(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("expected a non-nil command on the happy path")
+	}
+}
+
+func TestFocusOrderExpandsWithFilter(t *testing.T) {
+	d := newSearchReplaceDialog("/tmp", 100, 40)
+	d.filterOpen = true
+
+	order := d.focusOrder()
+	want := []sraFocus{sraFocusSearch, sraFocusCase, sraFocusRegex, sraFocusFilterToggle, sraFocusInclude, sraFocusExclude, sraFocusToggle}
+	if len(order) != len(want) {
+		t.Fatalf("focusOrder() with filterOpen = %v, want %v", order, want)
+	}
+	for i, f := range want {
+		if order[i] != f {
+			t.Errorf("focusOrder()[%d] = %v, want %v", i, order[i], f)
+		}
+	}
+}
+
+func TestSetFocusManagesIncludeExcludeInputFocus(t *testing.T) {
+	d := newSearchReplaceDialog("/tmp", 100, 40)
+
+	d.setFocus(sraFocusInclude)
+	if !d.includeInput.Focused() {
+		t.Error("includeInput not focused after setFocus(Include)")
+	}
+	if d.excludeInput.Focused() {
+		t.Error("excludeInput should not be focused after setFocus(Include)")
+	}
+
+	d.setFocus(sraFocusExclude)
+	if d.includeInput.Focused() {
+		t.Error("includeInput still focused after setFocus(Exclude)")
+	}
+	if !d.excludeInput.Focused() {
+		t.Error("excludeInput not focused after setFocus(Exclude)")
+	}
+
+	d.setFocus(sraFocusSearch)
+	if d.includeInput.Focused() || d.excludeInput.Focused() {
+		t.Error("include/exclude inputs should be blurred after setFocus(Search)")
+	}
+}
+
+// TestSpaceTogglesFilterOpen is a regression test for the space-bar toggle
+// wiring in handleSearchReplaceKey: pressing space on the Filter toggle
+// should open the section and, when closing it again, blur both inputs so a
+// stray keystroke can't land in a hidden field.
+func TestSpaceTogglesFilterOpen(t *testing.T) {
+	d := newSearchReplaceDialog("/tmp", 100, 40)
+	d.setFocus(sraFocusFilterToggle)
+	a := App{searchReplace: d}
+
+	updated, _ := a.handleSearchReplaceKey(tea.KeyMsg{Type: tea.KeySpace})
+	a2 := updated.(App)
+	if !a2.searchReplace.filterOpen {
+		t.Fatal("filterOpen should be true after space on Filter toggle")
+	}
+
+	updated, _ = a2.handleSearchReplaceKey(tea.KeyMsg{Type: tea.KeySpace})
+	a3 := updated.(App)
+	if a3.searchReplace.filterOpen {
+		t.Fatal("filterOpen should be false after a second space on Filter toggle")
+	}
+	if a3.searchReplace.includeInput.Focused() || a3.searchReplace.excludeInput.Focused() {
+		t.Error("include/exclude inputs should be blurred once the filter section closes")
+	}
+}
+
+// TestStartSearchReplaceSearchUsesIncludeExclude confirms the include/exclude
+// input values actually reach searchWorkspaceExplicit, not just the pattern.
+func TestStartSearchReplaceSearchUsesIncludeExclude(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"main.go":      "hello\n",
+		"main_test.go": "hello\n",
+		"readme.md":    "hello\n",
+	})
+	d := newSearchReplaceDialog(dir, 100, 40)
+	d.searchInput.SetValue("hello")
+	d.includeInput.SetValue("*.go")
+	d.excludeInput.SetValue("*_test.go")
+
+	a := App{searchReplace: d}
+	cmd := a.startSearchReplaceSearch(d)
+	if cmd == nil {
+		t.Fatal("expected a non-nil search command")
+	}
+	msg := cmd()
+	batchMsgs, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected tea.BatchMsg, got %T", msg)
+	}
+	var results []GrepResult
+	var found bool
+	for _, sub := range batchMsgs {
+		if m, ok := sub().(sraResultsMsg); ok {
+			results = m.results
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no sraResultsMsg found in batch")
+	}
+	if len(results) != 1 || results[0].RelPath != "main.go" {
+		t.Errorf("results = %+v, want only main.go", results)
 	}
 }

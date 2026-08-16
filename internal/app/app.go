@@ -348,7 +348,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.grep = &grepPicker{
 			workDir:   a.workDir,
 			pattern:   msg.Pattern,
-			glob:      msg.Glob,
+			include:   msg.Include,
+			exclude:   msg.Exclude,
 			width:     a.width,
 			height:    a.height,
 			searching: true,
@@ -356,9 +357,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		workDir := a.workDir
 		pattern := msg.Pattern
-		glob := msg.Glob
+		include := msg.Include
+		exclude := msg.Exclude
 		return a, func() tea.Msg {
-			results, err := searchWorkspace(workDir, pattern, glob)
+			results, err := searchWorkspace(workDir, pattern, include, exclude)
 			return grepResultsMsg{seq: seq, results: results, err: err}
 		}
 

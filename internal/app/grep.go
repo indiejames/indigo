@@ -28,26 +28,56 @@ type GrepResult struct {
 
 // searchWorkspace searches the workspace for pattern. It delegates to ripgrep
 // when rg is available on PATH for best performance, and falls back to the
-// built-in Go walker otherwise. glob optionally restricts which files are
-// searched (e.g. "*.go", "src/", "**/*.ts"); empty string means all files.
-func searchWorkspace(workDir, pattern, glob string) ([]GrepResult, error) {
+// built-in Go walker otherwise. include/exclude optionally restrict which
+// files are searched — each is a comma- or whitespace-separated list of glob
+// patterns (e.g. "*.go, src/**/*.ts"); empty string means no filter.
+func searchWorkspace(workDir, pattern, include, exclude string) ([]GrepResult, error) {
 	expr, isRegex := grepRegexExpr(pattern)
 	if isRegex {
 		pattern = expr
 	}
 	caseSensitive := isRegex || grepSmartCase(pattern)
-	return searchWorkspaceExplicit(workDir, pattern, glob, caseSensitive, isRegex)
+	return searchWorkspaceExplicit(workDir, pattern, include, exclude, caseSensitive, isRegex)
 }
 
 // searchWorkspaceExplicit is searchWorkspace with regex-ness and
 // case-sensitivity passed explicitly rather than inferred from a \pattern\
 // prefix convention — used by the search/replace dialog's checkboxes, where
 // the user sets those independently of what they type.
-func searchWorkspaceExplicit(workDir, pattern, glob string, caseSensitive, isRegex bool) ([]GrepResult, error) {
+func searchWorkspaceExplicit(workDir, pattern, include, exclude string, caseSensitive, isRegex bool) ([]GrepResult, error) {
 	if rgAvailable() {
-		return searchWithRg(workDir, pattern, glob, caseSensitive, isRegex)
+		return searchWithRg(workDir, pattern, include, exclude, caseSensitive, isRegex)
 	}
-	return searchBuiltin(workDir, pattern, glob, caseSensitive, isRegex)
+	return searchBuiltin(workDir, pattern, include, exclude, caseSensitive, isRegex)
+}
+
+// splitGlobs splits a comma- and/or whitespace-separated list of glob
+// patterns into its individual, trimmed elements. Empty elements are
+// dropped, so both "*.go,*.ts" and "*.go *.ts" (and combinations) work.
+func splitGlobs(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return r == ',' || unicode.IsSpace(r)
+	})
+}
+
+// matchGlobs reports whether relPath passes the include/exclude filters: it
+// is rejected if it matches any exclude pattern, and otherwise accepted if
+// there are no include patterns or it matches at least one of them.
+func matchGlobs(includes, excludes []string, relPath string) bool {
+	for _, ex := range excludes {
+		if matchGlob(ex, relPath) {
+			return false
+		}
+	}
+	if len(includes) == 0 {
+		return true
+	}
+	for _, in := range includes {
+		if matchGlob(in, relPath) {
+			return true
+		}
+	}
+	return false
 }
 
 // rgAvailable reports whether rg is on the PATH.
@@ -82,7 +112,7 @@ type rgSubmatch struct {
 
 // searchWithRg runs rg --json and parses its output into GrepResults.
 // rg exit code 1 means "no matches" — not an error.
-func searchWithRg(workDir, pattern, glob string, caseSensitive, isRegex bool) ([]GrepResult, error) {
+func searchWithRg(workDir, pattern, include, exclude string, caseSensitive, isRegex bool) ([]GrepResult, error) {
 	if pattern == "" {
 		return nil, nil
 	}
@@ -90,8 +120,11 @@ func searchWithRg(workDir, pattern, glob string, caseSensitive, isRegex bool) ([
 	for dir := range ignoredDirs {
 		args = append(args, "--glob", "!"+dir)
 	}
-	if glob != "" {
-		args = append(args, "--glob", glob)
+	for _, g := range splitGlobs(include) {
+		args = append(args, "--glob", g)
+	}
+	for _, g := range splitGlobs(exclude) {
+		args = append(args, "--glob", "!"+g)
 	}
 	if caseSensitive {
 		args = append(args, "--case-sensitive")
@@ -151,10 +184,12 @@ func searchWithRg(workDir, pattern, glob string, caseSensitive, isRegex bool) ([
 // searchBuiltin searches all text files under workDir for pattern, using
 // caseSensitive/isRegex exactly as given. Only the first match per line is
 // reported.
-func searchBuiltin(workDir, pattern, glob string, caseSensitive, isRegex bool) ([]GrepResult, error) {
+func searchBuiltin(workDir, pattern, include, exclude string, caseSensitive, isRegex bool) ([]GrepResult, error) {
 	if pattern == "" {
 		return nil, nil
 	}
+	includes := splitGlobs(include)
+	excludes := splitGlobs(exclude)
 
 	// Build a per-line matcher function.
 	var matchLine func(line string) (col, length int, ok bool)
@@ -222,7 +257,7 @@ func searchBuiltin(workDir, pattern, glob string, caseSensitive, isRegex bool) (
 			return nil
 		}
 		rel, _ := filepath.Rel(workDir, path)
-		if glob != "" && !matchGlob(glob, rel) {
+		if !matchGlobs(includes, excludes, rel) {
 			return nil
 		}
 		grepFile(rel, path, matchLine, &results)
@@ -333,7 +368,8 @@ func grepRunesMatch(line, pat []rune) bool {
 type grepPicker struct {
 	workDir   string
 	pattern   string
-	glob      string // optional file filter (e.g. "*.go", "src/")
+	include   string // optional include glob filter (e.g. "*.go", "src/")
+	exclude   string // optional exclude glob filter (e.g. "vendor/")
 	results   []GrepResult
 	cursor    int
 	width     int
@@ -409,8 +445,15 @@ func (gp *grepPicker) View() string {
 
 	// Title
 	subject := gp.pattern
-	if gp.glob != "" {
-		subject = fmt.Sprintf("%s  in:%s", gp.pattern, gp.glob)
+	if gp.include != "" || gp.exclude != "" {
+		var parts []string
+		if gp.include != "" {
+			parts = append(parts, "in:"+gp.include)
+		}
+		if gp.exclude != "" {
+			parts = append(parts, "!"+gp.exclude)
+		}
+		subject = fmt.Sprintf("%s  %s", gp.pattern, strings.Join(parts, " "))
 	}
 	var title string
 	switch {

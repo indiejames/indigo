@@ -319,6 +319,14 @@ func (a App) handleSearchReplaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			d.useRegex = !d.useRegex
 			a.searchReplace = d
 			return a, nil
+		case sraFocusFilterToggle:
+			d.filterOpen = !d.filterOpen
+			if !d.filterOpen {
+				d.includeInput.Blur()
+				d.excludeInput.Blur()
+			}
+			a.searchReplace = d
+			return a, nil
 		case sraFocusToggle:
 			d.replaceOpen = !d.replaceOpen
 			if !d.replaceOpen {
@@ -329,10 +337,14 @@ func (a App) handleSearchReplaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		switch d.focus {
-		case sraFocusSearch:
+		case sraFocusSearch, sraFocusInclude, sraFocusExclude:
 			cmd := a.startSearchReplaceSearch(d)
 			a.searchReplace = d
 			return a, cmd
+		case sraFocusFilterToggle:
+			d.filterOpen = !d.filterOpen
+			a.searchReplace = d
+			return a, nil
 		case sraFocusToggle:
 			d.replaceOpen = !d.replaceOpen
 			a.searchReplace = d
@@ -355,6 +367,10 @@ func (a App) handleSearchReplaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case sraFocusReplace:
 		d.replaceInput, cmd = d.replaceInput.Update(msg)
 		d.refreshResultsView()
+	case sraFocusInclude:
+		d.includeInput, cmd = d.includeInput.Update(msg)
+	case sraFocusExclude:
+		d.excludeInput, cmd = d.excludeInput.Update(msg)
 	}
 	a.searchReplace = d
 	return a, cmd

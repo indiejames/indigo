@@ -25,6 +25,9 @@ const (
 	sraFocusSearch sraFocus = iota
 	sraFocusCase
 	sraFocusRegex
+	sraFocusFilterToggle
+	sraFocusInclude
+	sraFocusExclude
 	sraFocusToggle
 	sraFocusReplace
 	sraFocusAll
@@ -39,9 +42,12 @@ type searchReplaceDialog struct {
 
 	searchInput   textinput.Model
 	replaceInput  textinput.Model
+	includeInput  textinput.Model
+	excludeInput  textinput.Model
 	caseSensitive bool
 	useRegex      bool
 	replaceOpen   bool
+	filterOpen    bool
 	focus         sraFocus
 
 	searching bool
@@ -67,6 +73,14 @@ func newSearchReplaceDialog(workDir string, w, h int) *searchReplaceDialog {
 	ri.Placeholder = "Replace"
 	ri.Prompt = ""
 
+	ii := textinput.New()
+	ii.Placeholder = "Include (e.g. *.go, src/**)"
+	ii.Prompt = ""
+
+	ei := textinput.New()
+	ei.Placeholder = "Exclude (e.g. vendor/, *_test.go)"
+	ei.Prompt = ""
+
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	d := &searchReplaceDialog{
@@ -75,6 +89,8 @@ func newSearchReplaceDialog(workDir string, w, h int) *searchReplaceDialog {
 		height:       h,
 		searchInput:  si,
 		replaceInput: ri,
+		includeInput: ii,
+		excludeInput: ei,
 		spinner:      sp,
 		viewport:     viewport.New(dialogInnerW(w), 8),
 		focus:        sraFocusSearch,
@@ -119,7 +135,11 @@ type sraApplyAllDoneMsg struct {
 // ---- focus management ----
 
 func (d *searchReplaceDialog) focusOrder() []sraFocus {
-	order := []sraFocus{sraFocusSearch, sraFocusCase, sraFocusRegex, sraFocusToggle}
+	order := []sraFocus{sraFocusSearch, sraFocusCase, sraFocusRegex, sraFocusFilterToggle}
+	if d.filterOpen {
+		order = append(order, sraFocusInclude, sraFocusExclude)
+	}
+	order = append(order, sraFocusToggle)
 	if d.replaceOpen {
 		order = append(order, sraFocusReplace, sraFocusAll)
 	}
@@ -140,6 +160,16 @@ func (d *searchReplaceDialog) setFocus(f sraFocus) {
 		d.replaceInput.Focus()
 	} else {
 		d.replaceInput.Blur()
+	}
+	if f == sraFocusInclude {
+		d.includeInput.Focus()
+	} else {
+		d.includeInput.Blur()
+	}
+	if f == sraFocusExclude {
+		d.excludeInput.Focus()
+	} else {
+		d.excludeInput.Blur()
 	}
 }
 
@@ -171,8 +201,10 @@ func (a App) startSearchReplaceSearch(d *searchReplaceDialog) tea.Cmd {
 	workDir := d.workDir
 	caseSensitive := d.caseSensitive
 	useRegex := d.useRegex
+	include := d.includeInput.Value()
+	exclude := d.excludeInput.Value()
 	searchCmd := func() tea.Msg {
-		results, err := searchWorkspaceExplicit(workDir, pattern, "", caseSensitive, useRegex)
+		results, err := searchWorkspaceExplicit(workDir, pattern, include, exclude, caseSensitive, useRegex)
 		return sraResultsMsg{results: results, err: err}
 	}
 	return tea.Batch(searchCmd, d.spinner.Tick)
@@ -404,6 +436,16 @@ func (d *searchReplaceDialog) render() string {
 		searchRows[1] += "  " + checkbox(".*", d.useRegex, d.focus == sraFocusRegex)
 	}
 
+	filterMark := "▸"
+	if d.filterOpen {
+		filterMark = "▾"
+	}
+	filterStyle := sraLabelStyle
+	if d.focus == sraFocusFilterToggle {
+		filterStyle = sraLabelFocusStyle
+	}
+	filterLine := filterStyle.Render(filterMark + " Filter")
+
 	toggleMark := "▸"
 	if d.replaceOpen {
 		toggleMark = "▾"
@@ -416,6 +458,24 @@ func (d *searchReplaceDialog) render() string {
 
 	var sb strings.Builder
 	sb.WriteString(strings.Join(searchRows, "\n"))
+	sb.WriteByte('\n')
+	sb.WriteString(filterLine)
+
+	if d.filterOpen {
+		includeBorder := sraBorderStyle
+		if d.focus == sraFocusInclude {
+			includeBorder = sraBorderFocusStyle
+		}
+		excludeBorder := sraBorderStyle
+		if d.focus == sraFocusExclude {
+			excludeBorder = sraBorderFocusStyle
+		}
+		sb.WriteByte('\n')
+		sb.WriteString(includeBorder.Width(innerW).Render(d.includeInput.View()))
+		sb.WriteByte('\n')
+		sb.WriteString(excludeBorder.Width(innerW).Render(d.excludeInput.View()))
+	}
+
 	sb.WriteByte('\n')
 	sb.WriteString(toggleLine)
 

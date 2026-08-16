@@ -28,7 +28,7 @@ func TestSearchWorkspaceLiteral(t *testing.T) {
 		"a.go": "package main\nfunc hello() {}\n",
 		"b.go": "package main\nfunc world() {}\n",
 	})
-	results, err := searchWorkspace(dir, "hello", "")
+	results, err := searchWorkspace(dir, "hello", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestSearchWorkspaceCaseInsensitive(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"a.txt": "Hello World\nhello again\n",
 	})
-	results, err := searchWorkspace(dir, "hello", "")
+	results, err := searchWorkspace(dir, "hello", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestSearchWorkspaceCaseSensitive(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"a.txt": "Hello World\nhello again\n",
 	})
-	results, err := searchWorkspace(dir, "Hello", "")
+	results, err := searchWorkspace(dir, "Hello", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestSearchWorkspaceRegex(t *testing.T) {
 		"a.go": "func foo() {}\nfunc bar() {}\nvar x = 1\n",
 	})
 	// \func [a-z]+ → expr: func [a-z]+
-	results, err := searchWorkspace(dir, `\func [a-z]+`, "")
+	results, err := searchWorkspace(dir, `\func [a-z]+`, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestSearchWorkspaceInvalidRegex(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"a.txt": "hello\n",
 	})
-	_, err := searchWorkspace(dir, `\[unclosed`, "")
+	_, err := searchWorkspace(dir, `\[unclosed`, "", "")
 	if err == nil {
 		t.Error("expected error for invalid regex, got nil")
 	}
@@ -100,7 +100,7 @@ func TestSearchWorkspaceIgnoresDirs(t *testing.T) {
 		"vendor/lib/lib.go":   "func hello() {}\n",
 		"node_modules/x/x.js": "hello()\n",
 	})
-	results, err := searchWorkspace(dir, "hello", "")
+	results, err := searchWorkspace(dir, "hello", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestSearchWorkspaceMultipleFiles(t *testing.T) {
 		"x/b.go": "nothing here\n",
 		"y/c.go": "TODO: and this\n",
 	})
-	results, err := searchWorkspace(dir, "TODO", "")
+	results, err := searchWorkspace(dir, "TODO", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestSearchWorkspaceEmptyPattern(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"a.txt": "hello\n",
 	})
-	results, err := searchWorkspace(dir, "", "")
+	results, err := searchWorkspace(dir, "", "", "")
 	if err != nil || results != nil {
 		t.Errorf("empty pattern: expected nil,nil got %v,%v", results, err)
 	}
@@ -146,7 +146,7 @@ func TestSearchWorkspaceGlob(t *testing.T) {
 		"sub/a.go":  "// hello\n",
 	})
 	// Only .go files — should exclude readme.md.
-	results, err := searchWorkspace(dir, "hello", "*.go")
+	results, err := searchWorkspace(dir, "hello", "*.go", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,6 +157,148 @@ func TestSearchWorkspaceGlob(t *testing.T) {
 	}
 	if len(results) != 2 {
 		t.Errorf("expected 2 results (*.go), got %d", len(results))
+	}
+}
+
+func TestSearchWorkspaceExclude(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"main.go":      "func hello() {}\n",
+		"main_test.go": "func hello() {}\n",
+		"sub/a.go":     "// hello\n",
+	})
+	results, err := searchWorkspace(dir, "hello", "", "*_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if r.RelPath == "main_test.go" {
+			t.Errorf("exclude *_test.go still returned excluded file: %s", r.RelPath)
+		}
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 results (excluding main_test.go), got %d: %+v", len(results), results)
+	}
+}
+
+func TestSearchWorkspaceIncludeAndExclude(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"main.go":      "hello\n",
+		"main_test.go": "hello\n",
+		"readme.md":    "hello\n",
+	})
+	results, err := searchWorkspace(dir, "hello", "*.go", "*_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].RelPath != "main.go" {
+		t.Errorf("expected only main.go, got %+v", results)
+	}
+}
+
+func TestSplitGlobs(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{"*.go", []string{"*.go"}},
+		{"*.go,*.ts", []string{"*.go", "*.ts"}},
+		{"*.go *.ts", []string{"*.go", "*.ts"}},
+		{"*.go, *.ts , vendor/", []string{"*.go", "*.ts", "vendor/"}},
+	}
+	for _, c := range cases {
+		got := splitGlobs(c.in)
+		if len(got) != len(c.want) {
+			t.Errorf("splitGlobs(%q) = %v, want %v", c.in, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("splitGlobs(%q) = %v, want %v", c.in, got, c.want)
+				break
+			}
+		}
+	}
+}
+
+func TestMatchGlobs(t *testing.T) {
+	cases := []struct {
+		includes, excludes []string
+		path               string
+		want               bool
+	}{
+		{nil, nil, "main.go", true},
+		{[]string{"*.go"}, nil, "main.go", true},
+		{[]string{"*.go"}, nil, "readme.md", false},
+		{nil, []string{"vendor/"}, "vendor/lib.go", false},
+		{nil, []string{"vendor/"}, "main.go", true},
+		{[]string{"*.go"}, []string{"*_test.go"}, "main_test.go", false},
+		{[]string{"*.go"}, []string{"*_test.go"}, "main.go", true},
+		// Recursive "**" globstar: matches zero or more path segments,
+		// including directly inside the prefix and arbitrarily deep.
+		{[]string{"src/**/*.ts"}, nil, "src/foo.ts", true},
+		{[]string{"src/**/*.ts"}, nil, "src/a/foo.ts", true},
+		{[]string{"src/**/*.ts"}, nil, "src/a/b/foo.ts", true},
+		{[]string{"src/**/*.ts"}, nil, "other/foo.ts", false},
+		{[]string{"**/foo.go"}, nil, "foo.go", true},
+		{[]string{"**/foo.go"}, nil, "a/b/foo.go", true},
+		{nil, []string{"**/vendor/**"}, "a/vendor/b/lib.go", false},
+		{nil, []string{"**/vendor/**"}, "a/other/lib.go", true},
+	}
+	for _, c := range cases {
+		got := matchGlobs(c.includes, c.excludes, c.path)
+		if got != c.want {
+			t.Errorf("matchGlobs(%v, %v, %q) = %v, want %v", c.includes, c.excludes, c.path, got, c.want)
+		}
+	}
+}
+
+// searchBuiltin is exercised directly (rather than through searchWorkspace)
+// so these tests cover matchGlob's globstar handling regardless of whether
+// rg is on PATH — the rg backend does its own glob matching, unrelated to
+// matchGlob.
+func TestSearchBuiltinRecursiveGlobInclude(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"src/foo.ts":     "hello\n",
+		"src/a/bar.ts":   "hello\n",
+		"src/a/b/baz.ts": "hello\n",
+		"src/other.go":   "hello\n",
+	})
+	results, err := searchBuiltin(dir, "hello", "src/**/*.ts", "", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, r := range results {
+		got[r.RelPath] = true
+	}
+	for _, want := range []string{"src/foo.ts", "src/a/bar.ts", "src/a/b/baz.ts"} {
+		if !got[want] {
+			t.Errorf("expected %s in results, got %+v", want, results)
+		}
+	}
+	if got["src/other.go"] {
+		t.Errorf("src/other.go should have been excluded by include glob, got %+v", results)
+	}
+}
+
+func TestSearchBuiltinRecursiveGlobExclude(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"main.go":            "hello\n",
+		"vendor/lib.go":      "hello\n",
+		"vendor/pkg/lib2.go": "hello\n",
+	})
+	results, err := searchBuiltin(dir, "hello", "", "**/vendor/**", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if r.RelPath != "main.go" {
+			t.Errorf("expected vendor files excluded, got %s", r.RelPath)
+		}
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result (main.go only), got %d: %+v", len(results), results)
 	}
 }
 

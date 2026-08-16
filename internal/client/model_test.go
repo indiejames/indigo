@@ -36,6 +36,7 @@ func newTestModel(content string) Model {
 		metrics: &metricsData{},
 		height:  24,
 		width:   80,
+		goalCol: -1,
 	}
 }
 
@@ -217,7 +218,6 @@ func TestHandleCommandEsc(t *testing.T) {
 		t.Errorf("esc: cmdBuf = %q, want empty", got.cmdBuf)
 	}
 }
-
 
 // TestPushStatusLogsMessage verifies pushStatus records non-empty messages
 // in messageLog and classifies "E:"/"ERR:"-prefixed ones as errors.

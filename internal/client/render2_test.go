@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
 	"github.com/indiejames/indigo/internal/document"
@@ -56,6 +57,24 @@ func TestRenderLineRunesTrailingOverlaysAreSpacedByColumn(t *testing.T) {
 	}, nil)
 	if got, want := sb.String(), "| |"; got != want {
 		t.Errorf("trailing overlays = %q, want %q", got, want)
+	}
+}
+
+// TestRenderLineRunesTrailingOverlayColumnWithCursorOnEmptyLine is a
+// regression test: on an empty line, curCol >= n is always true (0 >= 0), so
+// the cursor's placeholder cell is written to sb before any trailing
+// overlays are processed. That write must advance i (the column bookkeeping
+// the trailing-overlay padding loop relies on) or every trailing overlay
+// after it — e.g. a ruler column past the end of the line — renders one
+// column to the right of where it belongs.
+func TestRenderLineRunesTrailingOverlayColumnWithCursorOnEmptyLine(t *testing.T) {
+	var sb strings.Builder
+	renderLineRunes(&sb, []rune{}, -1, -1, 0, nil, []lineOverlay{
+		{col: 2, text: "|", w: 1},
+	}, nil)
+	// cursor cell (col 0) + 1 col of padding (col 1) + the overlay at col 2.
+	if got, want := ansi.Strip(sb.String()), "  |"; got != want {
+		t.Errorf("trailing overlay with cursor on empty line = %q, want %q", got, want)
 	}
 }
 

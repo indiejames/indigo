@@ -274,7 +274,7 @@ func convertCaseAllCursors(m Model, join func([]string) string) (Model, tea.Cmd)
 		if r.isPrimary {
 			m.cursor = r.cursor
 		} else {
-			m.extraCursors = append(m.extraCursors, ExtraCursor{pos: r.cursor})
+			m.extraCursors = append(m.extraCursors, ExtraCursor{pos: r.cursor, goalCol: -1})
 		}
 	}
 	m.sel = nil

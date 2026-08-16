@@ -248,6 +248,8 @@ Type `:` in normal mode, then one of:
 | Command                    | Action                     |
 |----------------------------|----------------------------|
 | `:w` `:write` `:s` `:save` | Save                       |
+| `:w <path>`                | Save As — write to `<path>` and continue editing there |
+| `:wq <path>`               | Save As, then close the buffer |
 | `:q` `:quit`               | Quit (fails if unsaved)    |
 | `:q!` `:quit!`             | Quit discarding changes    |
 | `:wq` `:x`                 | Save and quit              |
@@ -259,6 +261,10 @@ Type `:` in normal mode, then one of:
 | `:grep [pattern] [glob]`   | Workspace search           |
 | `:find [pattern] [glob]`   | Workspace search (alias)   |
 | `:<n>`                     | Jump to line number        |
+
+`<path>` is resolved relative to indigo's working directory if not absolute. `:w`/`:wq` with no path save in place, as above; only a trailing path switches to Save As.
+
+**Save As dialog** — pressing `Ctrl+s` on a buffer with no file yet (a new, untitled buffer) opens a centered "Save As" prompt instead of saving directly. Type a path, `Enter` to save there, `Esc` to cancel, `Backspace` to edit. Same dialog and `:w <path>` command both end up writing via the same Save As path.
 
 ### Mouse
 
@@ -272,8 +278,7 @@ Type `:` in normal mode, then one of:
 
 **Local search** — Press `/` to search within the current buffer. Supports incremental literal search with smart-case and regex search (prefix with `\`). Match count displayed in the status bar; `n` / `N` navigates between matches. 
 
-**Local replace** - Use `:s/<search term>/<replace value>` to search and replace in the current buffer. Replaces across the entire buffer or the selected area. Supports regulare expressions with capture groups using `:s/\<regex>/<replace value>`
-Example: `:s/\foo\((.*?)\)/goo$1()` would replace `foo(4)` with `goo4()`.
+**Local replace** — Type `/pattern/replacement` (an unescaped `/` after the pattern) to switch `/` search into a live, incremental replace preview across the current buffer or the selected area. Supports regex with capture groups using `\pattern/replacement` — e.g. `/\foo\((.*?)\)/goo$1()` would replace `foo(4)` with `goo4()`. `Enter` commits every previewed match as one undo entry; `Esc` cancels with no changes. (There is no `:s` command — `:s` is an alias for Save, above.)
 
 **Global search**
 Use `:grep [pattern]` for workspace-wide search across all files.

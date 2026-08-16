@@ -164,6 +164,7 @@ type Config struct {
 	Theme                string            `toml:"theme"`
 	BracketColors        bool              `toml:"bracket_colors"`
 	IndentGuides         bool              `toml:"indent_guides"`
+	RulerColumn          int               `toml:"ruler_column"`
 	InlayHints           bool              `toml:"inlay_hints"`
 	SemanticTokens       bool              `toml:"semantic_tokens"`
 	// FileTypes maps file extensions or filenames to a syntax language key.
@@ -204,6 +205,7 @@ func defaults() *Config {
 		FuzzySearch:          true,
 		BracketColors:        true,
 		IndentGuides:         true,
+		RulerColumn:          0,
 		InlayHints:           true,
 		SemanticTokens:       false,
 	}

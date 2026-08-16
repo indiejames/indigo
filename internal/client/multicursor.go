@@ -99,8 +99,9 @@ func selectNextOccurrence(m *Model) bool {
 		Head:   document.Pos{Line: fLine, Col: fCol + n - 1},
 	}
 	m.extraCursors = append(m.extraCursors, ExtraCursor{
-		pos: newSel.Head,
-		sel: newSel,
+		pos:     newSel.Head,
+		sel:     newSel,
+		goalCol: -1,
 	})
 	return true
 }
@@ -174,7 +175,8 @@ func addCursorBelow(m *Model) {
 		newCol = 0
 	}
 	m.extraCursors = append(m.extraCursors, ExtraCursor{
-		pos: document.Pos{Line: nextLine, Col: newCol},
+		pos:     document.Pos{Line: nextLine, Col: newCol},
+		goalCol: -1,
 	})
 }
 
@@ -213,11 +215,13 @@ func splitSelectionIntoCursors(m *Model) {
 		}
 		if lineLen == 0 {
 			m.extraCursors = append(m.extraCursors, ExtraCursor{
-				pos: document.Pos{Line: l, Col: 0},
+				pos:     document.Pos{Line: l, Col: 0},
+				goalCol: -1,
 			})
 		} else {
 			m.extraCursors = append(m.extraCursors, ExtraCursor{
-				pos: document.Pos{Line: l, Col: endCol},
+				pos:     document.Pos{Line: l, Col: endCol},
+				goalCol: -1,
 				sel: &Selection{
 					Anchor: document.Pos{Line: l, Col: 0},
 					Head:   document.Pos{Line: l, Col: endCol},
@@ -284,7 +288,7 @@ func deleteAllCursorSelections(m Model) (Model, tea.Cmd) {
 		if r.isPrimary {
 			m.cursor = r.cursor
 		} else {
-			m.extraCursors = append(m.extraCursors, ExtraCursor{pos: r.cursor})
+			m.extraCursors = append(m.extraCursors, ExtraCursor{pos: r.cursor, goalCol: -1})
 		}
 	}
 	m.sel = nil
@@ -483,16 +487,20 @@ func (m *Model) applyToAllCursors(fn func(*Model)) {
 		savedSel := m.sel
 		savedTopLine := m.topLine
 		savedTopChunk := m.topChunk
+		savedGoalCol := m.goalCol
 		m.cursor = ec.pos
 		m.sel = ec.sel
-		m.extraCursors = nil // prevent fn from seeing/modifying extra cursors
+		m.goalCol = ec.goalCol // each extra cursor tracks its own sticky column
+		m.extraCursors = nil   // prevent fn from seeing/modifying extra cursors
 		fn(m)
 		saved[i].pos = m.cursor
 		saved[i].sel = m.sel
+		saved[i].goalCol = m.goalCol
 		m.cursor = savedCursor
 		m.sel = savedSel
 		m.topLine = savedTopLine
 		m.topChunk = savedTopChunk
+		m.goalCol = savedGoalCol
 	}
 	m.extraCursors = saved
 }

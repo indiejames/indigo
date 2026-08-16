@@ -97,6 +97,7 @@ func (m Model) View() string {
 	for i := range vis {
 		lines[i] = m.renderLineChunk(layout[i], cw, rowOverlays[i], matchLine, matchCol, matchOK)
 	}
+	m.applyRulerColumn(lines, layout, cw)
 
 	// Overlay prefix-command popup in the bottom-right corner.
 	if len(m.prefixSeq) > 0 {

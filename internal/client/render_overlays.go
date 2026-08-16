@@ -785,6 +785,89 @@ func (m Model) buildIndentGuideOverlays(layout []layoutEntry, cw int) [][]lineOv
 	return rows
 }
 
+// applyRulerColumn splices the ruler into every visible row's already fully
+// rendered string, at a fixed terminal column — rather than competing for a
+// spot in the buffer-column bookkeeping renderLineRunes uses while building
+// each row (like indent guides, search highlights, etc. do). A ruler needs
+// to behave like most editors' column guides: a straight line pinned to a
+// fixed screen column, regardless of what's drawn on that particular row.
+// The lineOverlay-based approach that predates this got that wrong for rows
+// with inlay hints: an inlay hint is deliberately a w:0 overlay (it renders
+// real, visible glyphs but must never displace real content, so it doesn't
+// advance that bookkeeping) — so a later overlay computed from buffer
+// columns, like the ruler, silently rendered further right on the terminal
+// than intended, by exactly the hint's rendered width.
+func (m Model) applyRulerColumn(lines []string, layout []layoutEntry, cw int) {
+	if m.cfg == nil || m.cfg.RulerColumn <= 0 {
+		return
+	}
+	rulerCol := m.cfg.RulerColumn - 1
+	gutterW := m.gutterWidth()
+
+	// cursorCell reports whether (line, col) is currently occupied by a
+	// cursor — the primary one or any extra multi-cursor — and if so, its
+	// visual column, so the ruler never draws over any cursor's own cell
+	// (it would otherwise vanish under the ruler's fixed background
+	// whenever they coincide).
+	cursorVisCol := func(line, col int) (visCol int, onScreen bool) {
+		if line >= m.buf.LineCount() {
+			return 0, false
+		}
+		runes := []rune(m.buf.Line(line))
+		_, colMap := expandTabsRemap(runes)
+		if col < len(colMap) {
+			visCol = colMap[col]
+		}
+		return visCol, true
+	}
+
+	type cursorCell struct{ line, visCol int }
+	var cursorCells []cursorCell
+	if vc, ok := cursorVisCol(m.cursor.Line, m.cursor.Col); ok {
+		cursorCells = append(cursorCells, cursorCell{m.cursor.Line, vc})
+	}
+	for _, ec := range m.extraCursors {
+		if vc, ok := cursorVisCol(ec.pos.Line, ec.pos.Col); ok {
+			cursorCells = append(cursorCells, cursorCell{ec.pos.Line, vc})
+		}
+	}
+
+	for row, entry := range layout {
+		if entry.bufLine >= m.buf.LineCount() ||
+			rulerCol < entry.chunkStart || rulerCol >= entry.chunkStart+cw {
+			continue
+		}
+		onCursor := false
+		for _, c := range cursorCells {
+			if c.line == entry.bufLine && c.visCol == rulerCol {
+				onCursor = true
+				break
+			}
+		}
+		if onCursor {
+			continue
+		}
+		lines[row] = overlayRulerColumn(lines[row], gutterW+rulerCol-entry.chunkStart)
+	}
+}
+
+// overlayRulerColumn tints a single ANSI-aware visual column of an
+// already-rendered row, replacing whatever glyph (real character, inlay
+// hint, decoration, ...) is actually there — or padding with the ruler's
+// blank glyph if the row's real content doesn't reach that far.
+func overlayRulerColumn(line string, col int) string {
+	before := ansi.Truncate(line, col, "")
+	if bw := lipgloss.Width(before); bw < col {
+		before += strings.Repeat(" ", col-bw)
+	}
+	glyph := ansi.Strip(ansi.Cut(line, col, col+1))
+	if glyph == "" {
+		glyph = " "
+	}
+	after := ansi.TruncateLeft(line, col+1, "")
+	return before + rulerStyle.Render(glyph) + after
+}
+
 // lineIndentStop returns the visual column of the first non-space rune on
 // bufLine, or -1 if the line is empty or all whitespace.
 func (m Model) lineIndentStop(bufLine int) int {
@@ -858,7 +941,8 @@ var helpEntries = []helpEntry{
 	{key: "l / →", desc: "Move right"},
 	{key: "b", desc: "Move to previous word start"},
 	{key: "e", desc: "Move to word end"},
-	{key: "0 / ^ / Home", desc: "Line start"},
+	{key: "0 / Home", desc: "Line start"},
+	{key: "^", desc: "First non-blank character in line"},
 	{key: "$ / End", desc: "Line end"},
 	{key: "G", desc: "End of file"},
 	{key: "Ctrl+f / PgDn", desc: "Page down"},

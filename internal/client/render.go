@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/indiejames/indigo/internal/highlight"
 )
@@ -15,6 +16,7 @@ const tabWidth = 4
 
 // diagUnderlineStyle is the underline style used for LSP diagnostics.
 // Set once at startup based on terminal capabilities.
+// TODO Add a better check for terminal capabilities
 var diagUnderlineStyle = func() ClientUnderlineStyle {
 	switch os.Getenv("TERM_PROGRAM") {
 	case "iTerm.app", "WezTerm", "kitty", "ghostty":
@@ -88,7 +90,39 @@ func (m *Model) moveCursor(dLine, dCol int) {
 	if m.mode == ModeNormal {
 		maxCol = m.normalLineEnd(line)
 	}
-	col := max(0, min(m.cursor.Col+dCol, maxCol))
+
+	col := m.cursor.Col + dCol
+	if dLine != 0 && dCol == 0 {
+		// Vertical movement: stick to the desired ("goal") column across a
+		// run of consecutive Up/Down (or PageUp/PageDown) presses, so
+		// passing through a shorter line and clamping to its last character
+		// doesn't lose the original column — the next long-enough line
+		// snaps back to it. goalColActive tells Update()'s tea.KeyMsg
+		// dispatcher this was a legitimate vertical move, so it should keep
+		// goalCol instead of resetting it for the next keypress.
+		//
+		// goalCol is tracked in tab-expanded *visual* columns, not rune
+		// columns: cursor.Col is a rune index (the right addressing scheme
+		// for buffer edits), but a rune index means something different on
+		// every line that has a different number of tabs before it, so
+		// comparing raw rune columns across lines misaligns the cursor on
+		// any line pair whose tab layout differs before the cursor.
+		if m.goalCol < 0 {
+			curRunes := []rune(m.buf.Line(m.cursor.Line))
+			_, curColMap := expandTabsRemap(curRunes)
+			m.goalCol = curColMap[min(m.cursor.Col, len(curColMap)-1)]
+		}
+		targetRunes := []rune(m.buf.Line(line))
+		_, targetColMap := expandTabsRemap(targetRunes)
+		col = runeColForVisualCol(targetRunes, targetColMap, m.goalCol)
+		m.goalColActive = true
+	} else if dCol != 0 {
+		// Explicit horizontal movement: the new position becomes the goal
+		// for any following vertical move, discarding whatever was
+		// remembered before.
+		m.goalCol = -1
+	}
+	col = max(0, min(col, maxCol))
 	m.cursor.Line = line
 	m.cursor.Col = col
 	m.scrollToCursor()
@@ -487,11 +521,35 @@ func expandTabsRemap(runes []rune) (expanded []rune, colMap []int) {
 			vcol += spaces
 		} else {
 			expanded = append(expanded, r)
-			vcol++
+			// Wide runes (CJK, emoji, ...) occupy two terminal cells;
+			// combining runes (accents stacked onto the previous rune)
+			// occupy zero, so they don't advance the visual column at all.
+			vcol += runewidth.RuneWidth(r)
 		}
 	}
 	colMap[len(runes)] = vcol
 	return
+}
+
+// runeColForVisualCol converts a tab-expanded visual column back to the
+// rightmost rune column (per runes/colMap, as returned by expandTabsRemap)
+// whose visual column doesn't exceed it — i.e. it rounds down to the
+// character containing that visual position, the same rule a mouse click
+// landing inside a tab's expanded width resolves to (see clickToPos). A
+// visual column past the end of the line resolves to the line's length.
+func runeColForVisualCol(runes []rune, colMap []int, visualCol int) int {
+	col := 0
+	for i := 0; i < len(runes); i++ {
+		if colMap[i] <= visualCol {
+			col = i
+		} else {
+			break
+		}
+	}
+	if len(colMap) > 0 && visualCol >= colMap[len(runes)] {
+		col = len(runes)
+	}
+	return col
 }
 
 // underlineRange is an underline decoration applied additively over syntax highlighting.
@@ -627,12 +685,14 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 
 	if hasCursor && curCol >= n {
 		sb.WriteString(cursorStyle.Render(" "))
+		i++ // keep i in sync with sb so the trailing overlay loop below doesn't misjudge padding
 	} else if n == 0 && hasSel && selA <= selB && oi >= len(overlays) {
 		// A blank selected line with no overlays left to draw still needs
 		// one highlighted cell so the selection is visible on this row; when
 		// overlays remain, the loop below draws the row (and its padding)
 		// instead so this placeholder doesn't add a spurious extra column.
 		sb.WriteString(selectionStyle.Render(" "))
+		i++
 	}
 	// Write overlays that fall at or past end of content, padding with spaces
 	// to reach each one's column. Past the end of real content there are no

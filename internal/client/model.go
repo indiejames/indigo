@@ -334,6 +334,7 @@ var (
 	gutterCurStyle   lipgloss.Style
 	flashGutterStyle lipgloss.Style
 	indentGuideStyle lipgloss.Style
+	rulerStyle       lipgloss.Style
 	flashPadStyle    lipgloss.Style
 
 	diagErrorStyle lipgloss.Style
@@ -398,6 +399,7 @@ func ApplyTheme(t *theme.Theme) {
 	flashGutterStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
 	flashPadStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8"))
 	indentGuideStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#404040"))
+	rulerStyle = lipgloss.NewStyle().Background(lipgloss.Color("#303030"))
 
 	diagErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.DiagErrorFg))
 	diagWarnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.UI.DiagWarnFg))
@@ -456,6 +458,7 @@ func applyDefaultDark() {
 	flashGutterStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
 	flashPadStyle = lipgloss.NewStyle().Background(lipgloss.Color("#097AC8"))
 	indentGuideStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#404040"))
+	rulerStyle = lipgloss.NewStyle().Background(lipgloss.Color("#303030"))
 
 	diagErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555"))
 	diagWarnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFDD44"))
@@ -491,8 +494,9 @@ type Selection struct {
 // Extra cursors are created by Ctrl+D (next occurrence), C (cursor below),
 // and Alt+s (split selection). Esc in Normal mode collapses all extra cursors.
 type ExtraCursor struct {
-	pos document.Pos
-	sel *Selection
+	pos     document.Pos
+	sel     *Selection
+	goalCol int // per-cursor sticky column, mirrors Model.goalCol; -1 when unset
 }
 
 // cursorSnapshot captures the full cursor state (primary + selection + extras)
@@ -521,8 +525,10 @@ type Model struct {
 	generationKnown     bool   // false until the first updatesMsg/bufferResyncMsg establishes a baseline
 	mode                Mode
 	cursor              document.Pos
-	topLine             int // first visible line
-	topChunk            int // first visible wrap chunk of topLine (0-based)
+	goalCol             int  // sticky column for consecutive Up/Down moves; -1 when unset
+	goalColActive       bool // set by moveCursor's vertical branch; tells the Update() dispatcher whether to keep goalCol
+	topLine             int  // first visible line
+	topChunk            int  // first visible wrap chunk of topLine (0-based)
 	width               int
 	height              int
 	filePath            string
@@ -681,6 +687,7 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 		reservePluginGutter: rpc != nil,
 		lastReportedLine:    -1,
 		lastReportedCol:     -1,
+		goalCol:             -1,
 	}
 }
 
@@ -745,6 +752,7 @@ func (m Model) BufID() uint32 { return m.bufID }
 func (m Model) AtLine(line int) Model {
 	line = max(0, min(line, m.buf.LineCount()-1))
 	m.cursor = document.Pos{Line: line, Col: 0}
+	m.goalCol = -1
 	m.scrollToCursor()
 	return m
 }
@@ -756,6 +764,7 @@ func (m Model) AtPos(line, col, bufHeight int) Model {
 	line = max(0, min(line, m.buf.LineCount()-1))
 	col = max(0, min(col, m.buf.LineLen(line)))
 	m.cursor = document.Pos{Line: line, Col: col}
+	m.goalCol = -1
 	quarter := max(1, bufHeight/4)
 	m.topLine = max(0, line-quarter)
 	m.topChunk = 0
@@ -770,6 +779,7 @@ func (m Model) AtMatch(line, col, matchLen, bufHeight int) Model {
 	lineLen := m.buf.LineLen(line)
 	col = max(0, min(col, lineLen))
 	m.cursor = document.Pos{Line: line, Col: col}
+	m.goalCol = -1
 	quarter := max(1, bufHeight/4)
 	m.topLine = max(0, line-quarter)
 	m.topChunk = 0
@@ -1253,10 +1263,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		prevLine := m.cursor.Line
 		prevTopLine := m.topLine
 		prevSel := copySel(m.sel)
+		m.goalColActive = false
 		newModel, cmd := m.handleKey(msg)
 		nm, ok := newModel.(Model)
 		if !ok {
 			return newModel, cmd
+		}
+		// Only a vertical move (moveCursor's dLine!=0/dCol==0 branch) sets
+		// goalColActive; any other key — horizontal movement, edits, jumps —
+		// should forget the remembered column so the next Up/Down starts
+		// fresh from wherever the cursor actually ended up.
+		if !nm.goalColActive {
+			nm.goalCol = -1
 		}
 		if nm.topLine != prevTopLine {
 			cmd = tea.Batch(cmd, nm.updateViewportCmd())

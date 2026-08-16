@@ -3,6 +3,7 @@ package sdk
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/indiejames/indigo/internal/proto/pluginproto"
@@ -60,15 +61,19 @@ func TestApplyEditMarshalsEditsCorrectly(t *testing.T) {
 	var gotFrom, gotTo Position
 	var gotText string
 
+	// The fake's callback runs on a capnp RPC-dispatch goroutine, not the
+	// test goroutine — t.Fatal there would violate testing.T's "FailNow
+	// must be called from the test goroutine" contract. Return errors
+	// instead; they surface through api.ApplyEdit's own returned err below.
 	fake := &fakeFullEditorApi{applyEdit: func(call pluginproto.EditorApi_applyEdit) error {
 		args := call.Args()
 		gotBufID = args.BufId()
 		edits, err := args.Edits()
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
 		if edits.Len() != 1 {
-			t.Fatalf("edits.Len() = %d, want 1", edits.Len())
+			return fmt.Errorf("edits.Len() = %d, want 1", edits.Len())
 		}
 		item := edits.At(0)
 		from, _ := item.From()

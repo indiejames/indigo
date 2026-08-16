@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -64,6 +63,9 @@ func TestManagerStartSpawnsRealPluginAndDispatchesKey(t *testing.T) {
 	if err := m.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+	// Ensure the spawned process is stopped even if an assertion below
+	// fails partway through (t.Fatal would otherwise skip teardown).
+	t.Cleanup(m.Shutdown)
 
 	m.mu.Lock()
 	n := len(m.plugins)
@@ -97,28 +99,20 @@ func TestManagerStartSpawnsRealPluginAndDispatchesKey(t *testing.T) {
 		t.Errorf("edits = %+v, want a single edit with NewText %q", edits, "miniplugin-was-here")
 	}
 
-	// Simulate a crash and verify the process actually exits/is reaped —
+	// Simulate a crash and verify the process actually gets reaped —
 	// reapOnDisconnect is wired into the real Start path this test just
 	// exercised above, so a genuine process crash should trigger it.
-	pid := reg.process.Pid
+	// Synchronize on reg.reapDone (closed once reapOnDisconnect's own
+	// Wait() completes) rather than polling the pid, since polling via
+	// Signal(0) can't portably distinguish "still alive" from "exited but
+	// not yet reaped" the way the completion channel does directly.
 	if err := reg.process.Kill(); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
-	exited := false
-	for time.Now().Before(deadline) {
-		p, _ := os.FindProcess(pid)
-		// Signal(0) does no actual signaling; on Unix it just probes
-		// whether the pid still refers to a live (or un-reaped zombie)
-		// process. Once reapOnDisconnect's Wait() reaps it, this errors.
-		if err := p.Signal(syscall.Signal(0)); err != nil {
-			exited = true
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !exited {
+	select {
+	case <-reg.reapDone:
+	case <-time.After(5 * time.Second):
 		t.Error("plugin process was not reaped within the timeout after crashing")
 	}
 }

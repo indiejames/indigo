@@ -322,8 +322,9 @@ func TestApplyToAllCursorsAppliesFnToEachCursorIndependently(t *testing.T) {
 
 // TestApplyToAllCursorsRestoresViewportBetweenCalls verifies only the
 // primary cursor's call is allowed to move the viewport permanently — an
-// extra cursor's fn-induced scroll change must be reverted once that call
-// returns, rather than compounding across cursors.
+// extra cursor's fn-induced scroll change (both topLine and topChunk) must
+// be reverted once that call returns, rather than compounding across
+// cursors.
 func TestApplyToAllCursorsRestoresViewportBetweenCalls(t *testing.T) {
 	m := newTestModel("a\nb\nc\n")
 	m.topLine = 0
@@ -333,13 +334,76 @@ func TestApplyToAllCursorsRestoresViewportBetweenCalls(t *testing.T) {
 
 	m.applyToAllCursors(func(mm *Model) {
 		mm.topLine++ // simulate a scroll side effect on every call
+		mm.topChunk++
 	})
 
 	// Primary call: 0 -> 1 (sticks). Extra-cursor call: 1 -> 2 during the
-	// call, then reverted back to the saved 1. Final topLine must be 1, not
+	// call, then reverted back to the saved 1. Final values must be 1, not
 	// 2 — if the extra cursor's bump had stuck, it would compound.
 	if m.topLine != 1 {
 		t.Errorf("topLine = %d, want 1 (only the primary call's viewport change should persist)", m.topLine)
+	}
+	if m.topChunk != 1 {
+		t.Errorf("topChunk = %d, want 1 (only the primary call's viewport change should persist)", m.topChunk)
+	}
+}
+
+// TestApplyToAllCursorsPreservesPerCursorSelAndGoalCol verifies that, in
+// addition to position, each extra cursor's own sel and goalCol survive a
+// round trip through applyToAllCursors — fn sees each cursor's own values
+// (not another cursor's leftovers) and any mutation is written back to the
+// right slot.
+func TestApplyToAllCursorsPreservesPerCursorSelAndGoalCol(t *testing.T) {
+	m := newTestModel("aaaa\nbbbb\ncccc\n")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m.extraCursors = []ExtraCursor{
+		{
+			pos:     document.Pos{Line: 1, Col: 1},
+			sel:     &Selection{Anchor: document.Pos{Line: 1, Col: 0}, Head: document.Pos{Line: 1, Col: 1}},
+			goalCol: 7,
+		},
+		{
+			pos:     document.Pos{Line: 2, Col: 2},
+			sel:     &Selection{Anchor: document.Pos{Line: 2, Col: 0}, Head: document.Pos{Line: 2, Col: 2}},
+			goalCol: 9,
+		},
+	}
+
+	var seenGoalCols []int
+	var seenSelHeads []document.Pos
+	m.applyToAllCursors(func(mm *Model) {
+		seenGoalCols = append(seenGoalCols, mm.goalCol)
+		if mm.sel != nil {
+			seenSelHeads = append(seenSelHeads, mm.sel.Head)
+			mm.sel.Head.Col++ // mutate — should be written back per-cursor
+		} else {
+			seenSelHeads = append(seenSelHeads, document.Pos{})
+		}
+		mm.goalCol++ // mutate — should be written back per-cursor
+	})
+
+	// First call is the primary cursor (goalCol -1, no sel — newTestModel's
+	// defaults); the next two are the extra cursors, in order.
+	if len(seenGoalCols) != 3 {
+		t.Fatalf("fn called %d times, want 3", len(seenGoalCols))
+	}
+	if seenGoalCols[1] != 7 || seenGoalCols[2] != 9 {
+		t.Errorf("seenGoalCols = %v, want [.. 7 9] (each extra cursor's own goalCol)", seenGoalCols)
+	}
+	if seenSelHeads[1] != (document.Pos{Line: 1, Col: 1}) || seenSelHeads[2] != (document.Pos{Line: 2, Col: 2}) {
+		t.Errorf("seenSelHeads = %v, want each extra cursor's own sel head", seenSelHeads)
+	}
+
+	if len(m.extraCursors) != 2 {
+		t.Fatalf("extraCursors = %+v, want 2", m.extraCursors)
+	}
+	if m.extraCursors[0].goalCol != 8 || m.extraCursors[1].goalCol != 10 {
+		t.Errorf("extraCursors goalCols = [%d %d], want [8 10] (mutated and written back per-cursor)",
+			m.extraCursors[0].goalCol, m.extraCursors[1].goalCol)
+	}
+	if m.extraCursors[0].sel.Head.Col != 2 || m.extraCursors[1].sel.Head.Col != 3 {
+		t.Errorf("extraCursors sel heads = %+v / %+v, want Col 2 / Col 3 (mutated and written back per-cursor)",
+			m.extraCursors[0].sel.Head, m.extraCursors[1].sel.Head)
 	}
 }
 

@@ -121,15 +121,34 @@ func TestLoadPrefersUserThemeOverBuiltin(t *testing.T) {
 }
 
 // TestLoadFallsBackToBuiltinWhenNoUserFile verifies a name with no matching
-// file under cfgDir still resolves to the embedded built-in.
+// file under cfgDir still resolves to the embedded built-in for that name.
+// Deliberately uses a non-default built-in ("dracula") rather than
+// "default-dark": Default() itself always returns a theme named
+// "default-dark", so testing with that name wouldn't distinguish Load()
+// actually reading the embedded dracula.toml from Load() silently taking
+// the unknown-name fallback path to Default() — both would produce a
+// theme, but only one would have dracula's actual colors.
 func TestLoadFallsBackToBuiltinWhenNoUserFile(t *testing.T) {
 	cfgDir := t.TempDir() // no themes dir at all
-	th, err := Load("default-dark", cfgDir)
+	th, err := Load("dracula", cfgDir)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if th.Name == "" {
-		t.Error("Load() returned an unnamed theme, want the embedded default-dark")
+
+	data, err := builtinFS.ReadFile("themes/dracula.toml")
+	if err != nil {
+		t.Fatalf("read embedded dracula.toml: %v", err)
+	}
+	want, err := parse(data)
+	if err != nil {
+		t.Fatalf("parse embedded dracula.toml: %v", err)
+	}
+
+	if th.Name != want.Name {
+		t.Errorf("Name = %q, want %q (the actual built-in dracula theme, not a Default() fallback)", th.Name, want.Name)
+	}
+	if th.UI != want.UI {
+		t.Errorf("UI = %+v, want %+v (loaded theme should match dracula.toml's own colors)", th.UI, want.UI)
 	}
 }
 

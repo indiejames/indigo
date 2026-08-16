@@ -44,7 +44,15 @@ func Import(spec, outDir string) (string, error) {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return "", fmt.Errorf("create themes dir: %w", err)
 	}
-	outPath := filepath.Join(outDir, t.Name+".toml")
+	// t.Name comes from the imported theme file's own "name" field (Helix
+	// TOML or VS Code JSON) — untrusted input. Reject anything that would
+	// let a crafted theme file escape outDir via a path separator or a
+	// ".."/".": filepath.Base of the generated filename must equal itself.
+	fileName := t.Name + ".toml"
+	if fileName != filepath.Base(fileName) {
+		return "", fmt.Errorf("theme name %q produces an unsafe file name", t.Name)
+	}
+	outPath := filepath.Join(outDir, fileName)
 	f, err := os.Create(outPath)
 	if err != nil {
 		return "", fmt.Errorf("write theme: %w", err)
@@ -110,7 +118,6 @@ func FromHelix(data []byte) (*Theme, error) {
 	t.UI = def.UI
 
 	helixUIMap := map[string]*string{
-		"ui.statusline":      &t.UI.BarBg,
 		"ui.linenr":          &t.UI.GutterFg,
 		"ui.linenr.selected": &t.UI.GutterCurFg,
 		"ui.selection":       &t.UI.SelectionBg,

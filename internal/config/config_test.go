@@ -347,6 +347,20 @@ func TestEffectiveLanguageServersPartialExtensionOverlapShadowsWholeDefaultEntry
 	if !found {
 		t.Fatal("sibling js/jsx language server default was incorrectly shadowed by a ts-only override")
 	}
+
+	userFound := false
+	for _, ls := range result {
+		if ls.Command == "custom-ts-server" {
+			for _, ext := range ls.Extensions {
+				if ext == "ts" {
+					userFound = true
+				}
+			}
+		}
+	}
+	if !userFound {
+		t.Fatal("user-defined custom-ts-server override for \"ts\" is missing from the result")
+	}
 }
 
 func TestDefaultLintersCoverExpectedExtensions(t *testing.T) {

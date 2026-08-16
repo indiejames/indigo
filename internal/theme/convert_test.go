@@ -65,6 +65,32 @@ sel = "#222222"
 	}
 }
 
+// TestFromHelixMapsStatuslineFgAndBg is a regression test: ui.statusline
+// used to also be listed in helixUIMap (mapped to BarBg only, from the
+// table's "fg" field), which meant the dedicated fg→BarFg/bg→BarBg handling
+// further down in FromHelix was dead code — the loop always took the
+// helixUIMap branch and `continue`d before reaching it. BarFg was never set
+// from a Helix theme, and BarBg silently got the fg color instead of bg.
+func TestFromHelixMapsStatuslineFgAndBg(t *testing.T) {
+	data := []byte(`
+"ui.statusline" = { fg = "barfg", bg = "barbg" }
+
+[palette]
+barfg = "#111111"
+barbg = "#222222"
+`)
+	th, err := FromHelix(data)
+	if err != nil {
+		t.Fatalf("FromHelix: %v", err)
+	}
+	if th.UI.BarFg != "#111111" {
+		t.Errorf("BarFg = %q, want #111111 (from ui.statusline.fg)", th.UI.BarFg)
+	}
+	if th.UI.BarBg != "#222222" {
+		t.Errorf("BarBg = %q, want #222222 (from ui.statusline.bg)", th.UI.BarBg)
+	}
+}
+
 func TestFromHelixInvalidTOMLErrors(t *testing.T) {
 	if _, err := FromHelix([]byte("not valid toml [[[")); err == nil {
 		t.Fatal("expected an error for malformed TOML, got nil")
@@ -183,6 +209,31 @@ func TestImportVSCodeWritesFile(t *testing.T) {
 	}
 	if filepath.Base(outPath) != "vs.toml" {
 		t.Errorf("outPath base = %q, want vs.toml", filepath.Base(outPath))
+	}
+}
+
+// TestImportRejectsPathTraversalName is a regression test: a theme's "name"
+// field is untrusted (it comes straight from the imported file), and used
+// unsanitized to build the output filename. A crafted name containing path
+// separators/".." must not let Import write outside outDir.
+func TestImportRejectsPathTraversalName(t *testing.T) {
+	srcDir := t.TempDir()
+	srcPath := filepath.Join(srcDir, "evil.json")
+	evilJSON := `{"name":"../../../../tmp/indigo-import-traversal-poc","colors":{},"tokenColors":[]}`
+	if err := os.WriteFile(srcPath, []byte(evilJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outDir := t.TempDir()
+
+	_, err := Import("vscode:"+srcPath, outDir)
+	if err == nil {
+		t.Fatal("expected Import to reject a traversal theme name, got nil error")
+	}
+
+	escaped := filepath.Join(outDir, "..", "..", "..", "..", "tmp", "indigo-import-traversal-poc.toml")
+	if _, statErr := os.Stat(escaped); statErr == nil {
+		os.Remove(escaped) //nolint:errcheck
+		t.Fatal("Import wrote a file outside outDir via a path-traversal theme name")
 	}
 }
 

@@ -688,3 +688,50 @@ func TestMoveCursorStickyColumnAcrossTabs(t *testing.T) {
 		t.Errorf("cursor = %+v, want {Line:0 Col:5} (restored through the tab)", m.cursor)
 	}
 }
+
+// TestMoveCursorStickyColumnAcrossWideRune is a regression test: wide runes
+// (CJK, emoji, ...) occupy two terminal cells, so a line with wide runes
+// before the cursor needs each such rune counted as width 2 when computing
+// the visual goal column, not width 1 like an ordinary rune — otherwise
+// vertical movement drifts left of the correct visual column by one cell
+// per wide rune passed through.
+func TestMoveCursorStickyColumnAcrossWideRune(t *testing.T) {
+	// Line 0: "中中foo" — runes 0,1 are wide (visual width 2 each), so rune
+	// col 2 ('f') sits at visual col 4.
+	m := newTestModel("中中foo\nabcdefghij\n")
+	m.cursor = document.Pos{Line: 0, Col: 2} // on 'f', visual col 4
+
+	m.moveCursor(1, 0) // no wide runes on line 1: visual col == rune col
+	if m.cursor != (document.Pos{Line: 1, Col: 4}) {
+		t.Errorf("cursor = %+v, want {Line:1 Col:4} (aligned to visual col 4, not rune col 2)", m.cursor)
+	}
+
+	m.moveCursor(-1, 0) // back onto the wide-rune line: should return to rune col 2
+	if m.cursor != (document.Pos{Line: 0, Col: 2}) {
+		t.Errorf("cursor = %+v, want {Line:0 Col:2} (restored through the wide runes)", m.cursor)
+	}
+}
+
+// TestMoveCursorStickyColumnAcrossCombiningRune is a regression test:
+// combining runes (e.g. a stacked accent) occupy zero terminal cells, so
+// they must not advance the visual column at all — otherwise text after a
+// combining rune reports a visual column one higher than where it actually
+// renders, throwing off vertical alignment against a line with no combining
+// runes.
+func TestMoveCursorStickyColumnAcrossCombiningRune(t *testing.T) {
+	// Line 0: "e" + combining acute accent (U+0301) + "x". The accent
+	// stacks onto 'e' rather than occupying its own cell, so 'x' (rune col
+	// 2) sits at visual col 1, not visual col 2.
+	m := newTestModel("éx\nabc\n")
+	m.cursor = document.Pos{Line: 0, Col: 2} // on 'x', visual col 1
+
+	m.moveCursor(1, 0) // no combining runes on line 1: visual col == rune col
+	if m.cursor != (document.Pos{Line: 1, Col: 1}) {
+		t.Errorf("cursor = %+v, want {Line:1 Col:1} (aligned to visual col 1, not rune col 2)", m.cursor)
+	}
+
+	m.moveCursor(-1, 0) // back onto the combining-rune line: should return to 'x'
+	if m.cursor != (document.Pos{Line: 0, Col: 2}) {
+		t.Errorf("cursor = %+v, want {Line:0 Col:2} (restored through the combining rune)", m.cursor)
+	}
+}

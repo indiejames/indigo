@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/indiejames/indigo/internal/highlight"
 )
@@ -520,7 +521,10 @@ func expandTabsRemap(runes []rune) (expanded []rune, colMap []int) {
 			vcol += spaces
 		} else {
 			expanded = append(expanded, r)
-			vcol++
+			// Wide runes (CJK, emoji, ...) occupy two terminal cells;
+			// combining runes (accents stacked onto the previous rune)
+			// occupy zero, so they don't advance the visual column at all.
+			vcol += runewidth.RuneWidth(r)
 		}
 	}
 	colMap[len(runes)] = vcol

@@ -5,8 +5,10 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"github.com/indiejames/indigo/internal/config"
+	"github.com/indiejames/indigo/internal/document"
 )
 
 // TestBuildSearchOverlaysSkipsStaleMatchPastEndOfLine is a regression test
@@ -158,3 +160,39 @@ func TestApplyRulerColumnSkipsCursorCell(t *testing.T) {
 	}
 }
 
+// TestApplyRulerColumnSkipsExtraCursorCell is a regression test: the ruler's
+// cursor-cell skip only ever checked the primary cursor, so a multi-cursor
+// extra cursor (Ctrl+D, C, Alt+s) sitting on the ruler column would vanish
+// under the ruler's fixed background even though the primary cursor
+// elsewhere was correctly protected.
+func TestApplyRulerColumnSkipsExtraCursorCell(t *testing.T) {
+	// overlayRulerColumn's styling is a no-op without a color profile (as in
+	// a normal `go test` run with no tty), which would make "the ruler drew
+	// here" and "it didn't" produce identical plain-text output. Force real
+	// ANSI output so the two are actually distinguishable.
+	orig := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(orig)
+
+	m := newTestModel("0123456789\nabcdefghij\n")
+	m.cfg = &config.Config{RulerColumn: 8} // 0-based col 7
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m.extraCursors = []ExtraCursor{{pos: document.Pos{Line: 1, Col: 7}, goalCol: -1}}
+	cw := 80
+	layout := m.buildScreenLayout(2, cw)
+	lines := []string{
+		m.renderLineChunk(layout[0], cw, nil, -1, -1, false),
+		m.renderLineChunk(layout[1], cw, nil, -1, -1, false),
+	}
+	beforeRow0, beforeRow1 := lines[0], lines[1]
+	m.applyRulerColumn(lines, layout, cw)
+	if lines[1] != beforeRow1 {
+		t.Errorf("ruler overwrote the extra cursor's cell: before = %q, after = %q", beforeRow1, lines[1])
+	}
+	// Sanity check: the ruler does still draw on the row without a cursor
+	// on its column, so the skip above is actually exercising the ruler
+	// rather than it having failed to draw anywhere.
+	if lines[0] == beforeRow0 {
+		t.Error("sanity check failed: ruler didn't render on the row with no cursor on its column")
+	}
+}

@@ -804,13 +804,31 @@ func (m Model) applyRulerColumn(lines []string, layout []layoutEntry, cw int) {
 	rulerCol := m.cfg.RulerColumn - 1
 	gutterW := m.gutterWidth()
 
-	var curVisCol int
-	cursorOnScreen := m.cursor.Line < m.buf.LineCount()
-	if cursorOnScreen {
-		runes := []rune(m.buf.Line(m.cursor.Line))
+	// cursorCell reports whether (line, col) is currently occupied by a
+	// cursor — the primary one or any extra multi-cursor — and if so, its
+	// visual column, so the ruler never draws over any cursor's own cell
+	// (it would otherwise vanish under the ruler's fixed background
+	// whenever they coincide).
+	cursorVisCol := func(line, col int) (visCol int, onScreen bool) {
+		if line >= m.buf.LineCount() {
+			return 0, false
+		}
+		runes := []rune(m.buf.Line(line))
 		_, colMap := expandTabsRemap(runes)
-		if m.cursor.Col < len(colMap) {
-			curVisCol = colMap[m.cursor.Col]
+		if col < len(colMap) {
+			visCol = colMap[col]
+		}
+		return visCol, true
+	}
+
+	type cursorCell struct{ line, visCol int }
+	var cursorCells []cursorCell
+	if vc, ok := cursorVisCol(m.cursor.Line, m.cursor.Col); ok {
+		cursorCells = append(cursorCells, cursorCell{m.cursor.Line, vc})
+	}
+	for _, ec := range m.extraCursors {
+		if vc, ok := cursorVisCol(ec.pos.Line, ec.pos.Col); ok {
+			cursorCells = append(cursorCells, cursorCell{ec.pos.Line, vc})
 		}
 	}
 
@@ -819,9 +837,14 @@ func (m Model) applyRulerColumn(lines []string, layout []layoutEntry, cw int) {
 			rulerCol < entry.chunkStart || rulerCol >= entry.chunkStart+cw {
 			continue
 		}
-		// Never draw over the cursor's own cell — it would otherwise vanish
-		// under the ruler's fixed background whenever they coincide.
-		if cursorOnScreen && entry.bufLine == m.cursor.Line && curVisCol == rulerCol {
+		onCursor := false
+		for _, c := range cursorCells {
+			if c.line == entry.bufLine && c.visCol == rulerCol {
+				onCursor = true
+				break
+			}
+		}
+		if onCursor {
 			continue
 		}
 		lines[row] = overlayRulerColumn(lines[row], gutterW+rulerCol-entry.chunkStart)
@@ -919,7 +942,7 @@ var helpEntries = []helpEntry{
 	{key: "b", desc: "Move to previous word start"},
 	{key: "e", desc: "Move to word end"},
 	{key: "0 / Home", desc: "Line start"},
-	{key: "^", desc: "Firt non-blank character in line"},
+	{key: "^", desc: "First non-blank character in line"},
 	{key: "$ / End", desc: "Line end"},
 	{key: "G", desc: "End of file"},
 	{key: "Ctrl+f / PgDn", desc: "Page down"},

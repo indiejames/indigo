@@ -123,3 +123,47 @@ func TestEffectiveIndentPartialUserOverrideInheritsOtherField(t *testing.T) {
 		t.Errorf("EffectiveIndent(py) = %+v, want %+v", got, want)
 	}
 }
+
+func TestCursorColumnStyleDefaultNoSetting(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	cfgDir := filepath.Join(dir, "indigo")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `line_numbers = false`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.CursorColumnStyle != "view" {
+		t.Error("loaded CursorColumnStyle should default to `view`")
+	}
+}
+
+func TestCursorColumnStyleBuffer(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	cfgDir := filepath.Join(dir, "indigo")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `cursor_column_style = "buffer"`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.CursorColumnStyle != "buffer" {
+		t.Error("loaded CursorColumnStyle should be `buffer`")
+	}
+}

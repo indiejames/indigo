@@ -279,6 +279,24 @@ func executeExtendWordForward(m Model) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// executeExtendLineEnd selects from the cursor (or the current selection's
+// head) to the end of the line, e.g. Shift+End.
+func executeExtendLineEnd(m Model) (tea.Model, tea.Cmd) {
+	m.applyToAllCursors(func(m *Model) {
+		m.extendToLineEnd()
+	})
+	return m, nil
+}
+
+// executeExtendLineStart selects from the cursor (or the current selection's
+// head) to the start of the line, e.g. Shift+Home.
+func executeExtendLineStart(m Model) (tea.Model, tea.Cmd) {
+	m.applyToAllCursors(func(m *Model) {
+		m.extendToLineStart()
+	})
+	return m, nil
+}
+
 func executeSelectLine(m Model) (tea.Model, tea.Cmd) {
 	m.applyToAllCursors(func(m *Model) {
 		m.selectLine()

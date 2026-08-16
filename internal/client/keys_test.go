@@ -460,8 +460,130 @@ func TestIndentMultipleLines(t *testing.T) {
 	if got.buf.Line(2) != "cc" {
 		t.Errorf("indent line 2 should be unchanged, got %q", got.buf.Line(2))
 	}
-	if got.sel != nil {
-		t.Error("indent: sel should be cleared after indent")
+	// Regression: indent used to clear the selection, making it impossible to
+	// press > repeatedly to indent further without re-selecting.
+	if got.sel == nil {
+		t.Fatal("indent: sel should be preserved (shifted), not cleared")
+	}
+	if got.sel.Anchor != (document.Pos{Line: 0, Col: 1}) {
+		t.Errorf("indent: sel.Anchor = %v, want {0,1}", got.sel.Anchor)
+	}
+	if got.sel.Head != (document.Pos{Line: 1, Col: 1}) {
+		t.Errorf("indent: sel.Head = %v, want {1,1}", got.sel.Head)
+	}
+}
+
+// TestIndentTwiceKeepsSelection is a regression test for the reported bug:
+// pressing > repeatedly on a selection should keep indenting further each
+// time, not require re-selecting after the first press.
+func TestIndentTwiceKeepsSelection(t *testing.T) {
+	m := newTestModel("aa\nbb\n")
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: 0, Col: 0},
+		Head:   document.Pos{Line: 1, Col: 0},
+	}
+	m2, _ := executeIndent(m)
+	m3, _ := executeIndent(m2.(Model))
+	got := m3.(Model)
+	if got.buf.Line(0) != "\t\taa" || got.buf.Line(1) != "\t\tbb" {
+		t.Errorf("double indent: Line(0)=%q Line(1)=%q, want \\t\\taa / \\t\\tbb", got.buf.Line(0), got.buf.Line(1))
+	}
+	if got.sel == nil {
+		t.Fatal("indent x2: sel should still be set")
+	}
+}
+
+// TestIndentNoSelectionShiftsCursor is a regression test: indenting with no
+// selection (just a cursor) should shift the cursor along with the inserted
+// text, so repeated > keeps the cursor tracking the same character.
+func TestIndentNoSelectionShiftsCursor(t *testing.T) {
+	m := newTestModel("hello\n")
+	m.cursor = document.Pos{Line: 0, Col: 3}
+	m2, _ := executeIndent(m)
+	got := m2.(Model)
+	if got.cursor.Col != 4 {
+		t.Errorf("indent: cursor.Col = %d, want 4", got.cursor.Col)
+	}
+}
+
+// TestUnindentPreservesSelection is a regression test mirroring
+// TestIndentMultipleLines: < used to clear the selection too.
+func TestUnindentPreservesSelection(t *testing.T) {
+	m := newTestModel("\taa\n\tbb\n")
+	m.sel = &Selection{
+		Anchor: document.Pos{Line: 0, Col: 2},
+		Head:   document.Pos{Line: 1, Col: 2},
+	}
+	m2, _ := executeUnindent(m)
+	got := m2.(Model)
+	if got.buf.Line(0) != "aa" || got.buf.Line(1) != "bb" {
+		t.Errorf("unindent: Line(0)=%q Line(1)=%q, want aa/bb", got.buf.Line(0), got.buf.Line(1))
+	}
+	if got.sel == nil {
+		t.Fatal("unindent: sel should be preserved (shifted), not cleared")
+	}
+	if got.sel.Anchor != (document.Pos{Line: 0, Col: 1}) {
+		t.Errorf("unindent: sel.Anchor = %v, want {0,1}", got.sel.Anchor)
+	}
+	if got.sel.Head != (document.Pos{Line: 1, Col: 1}) {
+		t.Errorf("unindent: sel.Head = %v, want {1,1}", got.sel.Head)
+	}
+}
+
+// --- Shift+Home / Shift+End select-to-line-start/end ---
+
+func TestExtendLineEndFromCursor(t *testing.T) {
+	m := newTestModel("hello world\n")
+	m.cursor = document.Pos{Line: 0, Col: 2}
+	m2, _ := m.handleNormal(fakeKey("shift+end"))
+	got := m2.(Model)
+	if got.sel == nil {
+		t.Fatal("shift+end: sel should be set")
+	}
+	if got.sel.Anchor != (document.Pos{Line: 0, Col: 2}) {
+		t.Errorf("shift+end: sel.Anchor = %v, want {0,2}", got.sel.Anchor)
+	}
+	if got.sel.Head != (document.Pos{Line: 0, Col: 10}) {
+		t.Errorf("shift+end: sel.Head = %v, want {0,10} (last char)", got.sel.Head)
+	}
+	if got.cursor != got.sel.Head {
+		t.Errorf("shift+end: cursor = %v, want %v (sel.Head)", got.cursor, got.sel.Head)
+	}
+}
+
+func TestExtendLineStartFromCursor(t *testing.T) {
+	m := newTestModel("hello world\n")
+	m.cursor = document.Pos{Line: 0, Col: 7}
+	m2, _ := m.handleNormal(fakeKey("shift+home"))
+	got := m2.(Model)
+	if got.sel == nil {
+		t.Fatal("shift+home: sel should be set")
+	}
+	if got.sel.Anchor != (document.Pos{Line: 0, Col: 7}) {
+		t.Errorf("shift+home: sel.Anchor = %v, want {0,7}", got.sel.Anchor)
+	}
+	if got.sel.Head != (document.Pos{Line: 0, Col: 0}) {
+		t.Errorf("shift+home: sel.Head = %v, want {0,0}", got.sel.Head)
+	}
+	if got.cursor != got.sel.Head {
+		t.Errorf("shift+home: cursor = %v, want %v (sel.Head)", got.cursor, got.sel.Head)
+	}
+}
+
+// TestExtendLineEndExtendsExistingSelection verifies shift+end moves the head
+// of an already-active selection rather than starting a fresh one from the
+// cursor, mirroring extendWordForward's behavior.
+func TestExtendLineEndExtendsExistingSelection(t *testing.T) {
+	m := newTestModel("hello world\n")
+	m.cursor = document.Pos{Line: 0, Col: 5}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 2}, Head: document.Pos{Line: 0, Col: 5}}
+	m2, _ := m.handleNormal(fakeKey("shift+end"))
+	got := m2.(Model)
+	if got.sel.Anchor != (document.Pos{Line: 0, Col: 2}) {
+		t.Errorf("shift+end: sel.Anchor = %v, want {0,2} (unchanged)", got.sel.Anchor)
+	}
+	if got.sel.Head != (document.Pos{Line: 0, Col: 10}) {
+		t.Errorf("shift+end: sel.Head = %v, want {0,10}", got.sel.Head)
 	}
 }
 

@@ -804,31 +804,13 @@ func (m Model) applyRulerColumn(lines []string, layout []layoutEntry, cw int) {
 	rulerCol := m.cfg.RulerColumn - 1
 	gutterW := m.gutterWidth()
 
-	// cursorCell reports whether (line, col) is currently occupied by a
-	// cursor — the primary one or any extra multi-cursor — and if so, its
-	// visual column, so the ruler never draws over any cursor's own cell
-	// (it would otherwise vanish under the ruler's fixed background
-	// whenever they coincide).
-	cursorVisCol := func(line, col int) (visCol int, onScreen bool) {
-		if line >= m.buf.LineCount() {
-			return 0, false
-		}
-		runes := []rune(m.buf.Line(line))
+	var curVisCol int
+	cursorOnScreen := m.cursor.Line < m.buf.LineCount()
+	if cursorOnScreen {
+		runes := []rune(m.buf.Line(m.cursor.Line))
 		_, colMap := expandTabsRemap(runes)
-		if col < len(colMap) {
-			visCol = colMap[col]
-		}
-		return visCol, true
-	}
-
-	type cursorCell struct{ line, visCol int }
-	var cursorCells []cursorCell
-	if vc, ok := cursorVisCol(m.cursor.Line, m.cursor.Col); ok {
-		cursorCells = append(cursorCells, cursorCell{m.cursor.Line, vc})
-	}
-	for _, ec := range m.extraCursors {
-		if vc, ok := cursorVisCol(ec.pos.Line, ec.pos.Col); ok {
-			cursorCells = append(cursorCells, cursorCell{ec.pos.Line, vc})
+		if m.cursor.Col < len(colMap) {
+			curVisCol = colMap[m.cursor.Col]
 		}
 	}
 
@@ -837,14 +819,9 @@ func (m Model) applyRulerColumn(lines []string, layout []layoutEntry, cw int) {
 			rulerCol < entry.chunkStart || rulerCol >= entry.chunkStart+cw {
 			continue
 		}
-		onCursor := false
-		for _, c := range cursorCells {
-			if c.line == entry.bufLine && c.visCol == rulerCol {
-				onCursor = true
-				break
-			}
-		}
-		if onCursor {
+		// Never draw over the cursor's own cell — it would otherwise vanish
+		// under the ruler's fixed background whenever they coincide.
+		if cursorOnScreen && entry.bufLine == m.cursor.Line && curVisCol == rulerCol {
 			continue
 		}
 		lines[row] = overlayRulerColumn(lines[row], gutterW+rulerCol-entry.chunkStart)
@@ -942,7 +919,7 @@ var helpEntries = []helpEntry{
 	{key: "b", desc: "Move to previous word start"},
 	{key: "e", desc: "Move to word end"},
 	{key: "0 / Home", desc: "Line start"},
-	{key: "^", desc: "First non-blank character in line"},
+	{key: "^", desc: "Firt non-blank character in line"},
 	{key: "$ / End", desc: "Line end"},
 	{key: "G", desc: "End of file"},
 	{key: "Ctrl+f / PgDn", desc: "Page down"},
@@ -979,20 +956,23 @@ var helpEntries = []helpEntry{
 	{key: "y", desc: "Yank (copy) selection"},
 	{key: "u", desc: "Undo"},
 	{key: "U", desc: "Redo"},
+	{key: ">", desc: "Indent selected line(s)"},
+	{key: "<", desc: "Unindent selected line(s)"},
 	{key: ""},
 	{key: "Selection"},
 	{key: "w", desc: "Next word start"},
 	{key: "W", desc: "Extend selection to next word start"},
 	{key: "x", desc: "Select line"},
 	{key: "X", desc: "Extend line backward"},
+	{key: "z", desc: "Set mark at cursor (Esc clears)"},
+	{key: "Z", desc: "Select from mark to cursor"},
+	{key: "ma", desc: "Select around matching object"},
+	{key: "mi", desc: "Select inside object / word"},
 	{key: "%", desc: "Select all"},
 	{key: ";", desc: "Clear selection"},
 	{key: "Alt+;", desc: "Flip selection (swap anchor/head)"},
-	{key: "mi / mw", desc: "Select inside object / word"},
-	{key: "z", desc: "Set mark at cursor (Esc clears)"},
-	{key: "Z", desc: "Select from mark to cursor"},
-	{key: ">", desc: "Indent selected lines"},
-	{key: "<", desc: "Unindent selected lines"},
+	{key: "shift+end", desc: "Select to end of line"},
+	{key: "shift+home", desc: "Select to beginning of line"},
 	{key: ""},
 	{key: "Search"},
 	{key: "/", desc: "Start search"},

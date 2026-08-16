@@ -95,9 +95,9 @@ func TestSearchWorkspaceInvalidRegex(t *testing.T) {
 
 func TestSearchWorkspaceIgnoresDirs(t *testing.T) {
 	dir := writeTree(t, map[string]string{
-		"main.go":              "func hello() {}\n",
-		".git/config":          "hello git\n",
-		"vendor/lib/lib.go":    "func hello() {}\n",
+		"main.go":             "func hello() {}\n",
+		".git/config":         "hello git\n",
+		"vendor/lib/lib.go":   "func hello() {}\n",
 		"node_modules/x/x.js": "hello()\n",
 	})
 	results, err := searchWorkspace(dir, "hello", "")
@@ -160,8 +160,40 @@ func TestSearchWorkspaceGlob(t *testing.T) {
 	}
 }
 
+// TestGrepResultsMsgDiscardsStaleSequence is a regression test: before
+// grepResultsMsg carried a sequence token, a slow older grep request's
+// results arriving after a newer one's would silently overwrite the fresher
+// results — e.g. searching "foo" then quickly retyping "bar" could still
+// leave "foo"'s matches showing if "foo"'s search happened to take longer.
+func TestGrepResultsMsgDiscardsStaleSequence(t *testing.T) {
+	a := App{grep: &grepPicker{searching: true, seq: 2}}
+
+	// A result for the superseded request (seq 1) must not be applied.
+	updated, _ := a.Update(grepResultsMsg{seq: 1, results: []GrepResult{{RelPath: "stale.go"}}})
+	a = updated.(App)
+	if len(a.grep.results) != 0 {
+		t.Fatalf("stale seq=1 result was applied: %+v, want no results applied", a.grep.results)
+	}
+	if !a.grep.searching {
+		t.Error("searching should still be true — the current request (seq 2) hasn't answered yet")
+	}
+
+	// The result for the current request (seq 2) must be applied.
+	updated, _ = a.Update(grepResultsMsg{seq: 2, results: []GrepResult{{RelPath: "current.go"}}})
+	a = updated.(App)
+	if len(a.grep.results) != 1 || a.grep.results[0].RelPath != "current.go" {
+		t.Errorf("results = %+v, want the current request's result applied", a.grep.results)
+	}
+	if a.grep.searching {
+		t.Error("searching should be false once the current request's result has landed")
+	}
+}
+
 func TestGrepRegexExpr(t *testing.T) {
-	cases := []struct{ in, expr string; ok bool }{
+	cases := []struct {
+		in, expr string
+		ok       bool
+	}{
 		{`\foo`, "foo", true},
 		{`\foo\`, "foo", true},
 		{`hello`, "", false},

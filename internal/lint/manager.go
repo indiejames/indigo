@@ -18,6 +18,7 @@ import (
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/lsp"
+	"github.com/indiejames/indigo/internal/procutil"
 )
 
 // Manager picks the right linter for a given file and runs it asynchronously,
@@ -32,6 +33,7 @@ type Manager struct {
 	running map[string]bool             // path -> a run is currently in flight
 	pending map[string]bool             // path -> re-run once the in-flight one finishes
 	content map[string]string           // path -> content of the most recent (possibly still in-flight) request
+	lastErr map[string]error            // path -> error from the most recently completed run, nil once one succeeds
 }
 
 // NewManager builds a Manager. autoLints are detected once at startup by
@@ -44,6 +46,7 @@ func NewManager(cfg *config.Config, workDir string) *Manager {
 		running:   make(map[string]bool),
 		pending:   make(map[string]bool),
 		content:   make(map[string]string),
+		lastErr:   make(map[string]error),
 	}
 	localBin := filepath.Join(workDir, "node_modules", ".bin")
 	for _, d := range config.DefaultLinters {
@@ -135,6 +138,9 @@ func (m *Manager) run(path string, lc config.LinterConfig) {
 	m.mu.Lock()
 	if err == nil {
 		m.cached[path] = diags
+		delete(m.lastErr, path)
+	} else {
+		m.lastErr[path] = err
 	}
 	m.running[path] = false
 	rerun := m.pending[path]
@@ -163,6 +169,38 @@ func (m *Manager) GetDiagnostics(path string) []lsp.Diagnostic {
 	return m.cached[path]
 }
 
+// LastError returns the error from path's most recently completed run, or
+// nil if that run succeeded (or none has completed yet). GetDiagnostics
+// alone can't distinguish "the linter found nothing" from "the linter has
+// been failing/timing out and cached is just whatever it last managed to
+// produce" — a linter that repeatedly fails otherwise leaves indefinitely
+// stale diagnostics with no visible sign anything is wrong.
+func (m *Manager) LastError(path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastErr[path]
+}
+
+// Forget discards all state Manager holds for path (cached diagnostics, the
+// error from its last run, and the running/pending/content in-flight
+// bookkeeping). Callers should invoke this once a file is closed for good
+// (no clients have it open anymore) — otherwise every path ever linted in
+// the session accumulates an entry in these maps forever, even though the
+// values themselves (a `false` running/pending flag) are individually
+// small. Safe to call on a path with a run currently in flight: the
+// in-flight goroutine only touches these maps under m.mu and will simply
+// repopulate a fresh entry for path when it completes, same as if the file
+// were linted for the first time.
+func (m *Manager) Forget(path string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.cached, path)
+	delete(m.running, path)
+	delete(m.pending, path)
+	delete(m.content, path)
+	delete(m.lastErr, path)
+}
+
 // runLinter executes lc's command against filePath and parses its output.
 // The process runs with workDir as its working directory — cargo clippy in
 // particular discovers Cargo.toml from the CWD rather than from a
@@ -186,6 +224,8 @@ func runLinter(lc config.LinterConfig, filePath, content, workDir string) ([]lsp
 	defer cancel()
 
 	proc := exec.CommandContext(ctx, cmd, args...)
+	procutil.SetPgid(proc)
+	proc.Cancel = func() error { return procutil.KillGroup(proc) }
 	proc.Dir = workDir
 	if lc.Stdin {
 		proc.Stdin = strings.NewReader(content)

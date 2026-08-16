@@ -299,6 +299,12 @@ func (c *Config) EffectiveIndent(ext string) IndentSettings {
 			result.Width = user.Width
 		}
 	}
+	if result.Style != "tabs" && result.Style != "spaces" {
+		result.Style = "tabs"
+	}
+	if result.Width <= 0 {
+		result.Width = 4
+	}
 	return result
 }
 
@@ -495,7 +501,12 @@ func Load() (*Config, error) {
 	defer f.Close() //nolint:errcheck
 
 	if _, err := toml.NewDecoder(f).Decode(cfg); err != nil {
-		return cfg, err
+		// Decode may have partially populated cfg before hitting the
+		// failing key — that partial mix is worse than either a full
+		// parse or full defaults, since it's an unpredictable subset
+		// depending on key order. Return clean defaults so a caller that
+		// discards the error still ends up in a fully-valid state.
+		return defaults(), err
 	}
 	return cfg, nil
 }

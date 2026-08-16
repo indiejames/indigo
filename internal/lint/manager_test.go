@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/indiejames/indigo/internal/config"
@@ -14,6 +15,7 @@ func newTestManager(lints ...config.LinterConfig) *Manager {
 		running:   make(map[string]bool),
 		pending:   make(map[string]bool),
 		content:   make(map[string]string),
+		lastErr:   make(map[string]error),
 	}
 }
 
@@ -122,6 +124,75 @@ func TestManagerRunOnEditCoalescesForStdinLinter(t *testing.T) {
 	}
 	if got := m.content["foo.go"]; got != "latest buffer text" {
 		t.Errorf(`content["foo.go"] = %q, want %q`, got, "latest buffer text")
+	}
+}
+
+// TestManagerLastErrorSurfacesFailureWithoutClobberingCache is a regression
+// test: a linter that fails (here, a nonexistent command) used to leave
+// cached[path] exactly as it was — correct for not blanking working
+// diagnostics, but with no way to tell the cache had gone stale. LastError
+// must report the failure even though GetDiagnostics keeps returning the
+// last good result.
+func TestManagerLastErrorSurfacesFailureWithoutClobberingCache(t *testing.T) {
+	goodLC := shJSON(`{"Issues":[{"FromLinter":"x","Text":"boom","Severity":"error","Pos":{"Line":1,"Column":1}}]}`)
+	m := newTestManager(goodLC)
+	m.run("foo.go", goodLC)
+	if diags := m.GetDiagnostics("foo.go"); len(diags) != 1 {
+		t.Fatalf("setup: len(diags) = %d, want 1", len(diags))
+	}
+	if err := m.LastError("foo.go"); err != nil {
+		t.Fatalf("setup: LastError = %v, want nil after a successful run", err)
+	}
+
+	failingLC := config.LinterConfig{
+		Extensions: []string{"go"},
+		Command:    "indigo-lint-command-does-not-exist-xyz",
+		Format:     "golangci-lint-json",
+	}
+	m.run("foo.go", failingLC)
+
+	if err := m.LastError("foo.go"); err == nil {
+		t.Error("LastError = nil after a failing run, want the run's error")
+	}
+	if diags := m.GetDiagnostics("foo.go"); len(diags) != 1 {
+		t.Errorf("GetDiagnostics after a failed run = %v, want the previous cache left untouched", diags)
+	}
+
+	// A subsequent successful run clears the error again.
+	m.run("foo.go", goodLC)
+	if err := m.LastError("foo.go"); err != nil {
+		t.Errorf("LastError = %v, want nil after a follow-up successful run", err)
+	}
+}
+
+// TestManagerForgetPrunesAllState is a regression test: cached/running/
+// pending/content/lastErr previously had no way to remove a path's entry at
+// all, so every file ever linted across a session accumulated an entry
+// forever even after being closed.
+func TestManagerForgetPrunesAllState(t *testing.T) {
+	m := newTestManager()
+	m.cached["foo.go"] = nil
+	m.running["foo.go"] = true
+	m.pending["foo.go"] = true
+	m.content["foo.go"] = "some content"
+	m.lastErr["foo.go"] = fmt.Errorf("boom")
+
+	m.Forget("foo.go")
+
+	if _, ok := m.cached["foo.go"]; ok {
+		t.Error("cached still has an entry for foo.go after Forget")
+	}
+	if _, ok := m.running["foo.go"]; ok {
+		t.Error("running still has an entry for foo.go after Forget")
+	}
+	if _, ok := m.pending["foo.go"]; ok {
+		t.Error("pending still has an entry for foo.go after Forget")
+	}
+	if _, ok := m.content["foo.go"]; ok {
+		t.Error("content still has an entry for foo.go after Forget")
+	}
+	if _, ok := m.lastErr["foo.go"]; ok {
+		t.Error("lastErr still has an entry for foo.go after Forget")
 	}
 }
 

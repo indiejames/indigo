@@ -104,6 +104,33 @@ func (c *jsonrpcConn) failPending() {
 	})
 }
 
+// failPendingForMalformed handles a body that failed to unmarshal into
+// jsonrpcMsg. The most common real-world cause is a syntactically broken
+// "result"/"params" payload inside an otherwise-intact envelope, so the "id"
+// field is often still independently recoverable; when it is, and it matches
+// a pending Call, that call is failed immediately with a parse error instead
+// of silently hanging until its own context deadline. If the id can't be
+// recovered (e.g. the body isn't valid JSON at all), the message is dropped
+// as before and any affected call falls back to its own timeout.
+func (c *jsonrpcConn) failPendingForMalformed(body []byte) {
+	var envelope struct {
+		ID json.RawMessage `json:"id"`
+	}
+	if json.Unmarshal(body, &envelope) != nil || len(envelope.ID) == 0 {
+		return
+	}
+	var id int64
+	if json.Unmarshal(envelope.ID, &id) != nil {
+		return
+	}
+	if ch, ok := c.pending.Load(id); ok {
+		select {
+		case ch.(chan *jsonrpcMsg) <- &jsonrpcMsg{Error: &jsonrpcError{Code: -32700, Message: "parse error: malformed response body"}}:
+		default:
+		}
+	}
+}
+
 // Notify sends a notification (no response expected).
 func (c *jsonrpcConn) Notify(method string, params any) error {
 	raw, err := json.Marshal(params)
@@ -156,6 +183,7 @@ func (c *jsonrpcConn) readLoop(r io.Reader) {
 		}
 		var msg jsonrpcMsg
 		if err := json.Unmarshal(body, &msg); err != nil {
+			c.failPendingForMalformed(body)
 			continue
 		}
 		if msg.ID != nil && msg.Method == "" {

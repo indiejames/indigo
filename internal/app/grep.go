@@ -340,10 +340,16 @@ type grepPicker struct {
 	height    int
 	searching bool
 	errMsg    string
+	seq       int // request sequence this picker is waiting on; see grepResultsMsg
 }
 
-// grepResultsMsg delivers async search results back to the App.
+// grepResultsMsg delivers async search results back to the App. seq is the
+// App's grepSeq counter value at the time the request was issued — a newer
+// grep bumps the counter, so a slower older request's results (which could
+// otherwise arrive after and overwrite a newer one's) are identifiable and
+// discarded instead of applied.
 type grepResultsMsg struct {
+	seq     int
 	results []GrepResult
 	err     error
 }

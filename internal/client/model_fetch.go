@@ -218,7 +218,7 @@ func (m Model) fetchFormat(thenSave bool) tea.Cmd {
 		if err != nil {
 			return errorMsg{err}
 		}
-		return formatResultMsg{content: content, changed: changed, thenSave: thenSave, noFormatter: noFormatter}
+		return formatResultMsg{bufID: bufID, content: content, changed: changed, thenSave: thenSave, noFormatter: noFormatter}
 	}
 }
 

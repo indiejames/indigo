@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/indiejames/indigo/internal/document"
 )
 
 // renderFixPopup builds styled lines for the fix suggestion popup.
@@ -804,14 +805,23 @@ func (m Model) applyRulerColumn(lines []string, layout []layoutEntry, cw int) {
 	rulerCol := m.cfg.RulerColumn - 1
 	gutterW := m.gutterWidth()
 
-	var curVisCol int
-	cursorOnScreen := m.cursor.Line < m.buf.LineCount()
-	if cursorOnScreen {
-		runes := []rune(m.buf.Line(m.cursor.Line))
-		_, colMap := expandTabsRemap(runes)
-		if m.cursor.Col < len(colMap) {
-			curVisCol = colMap[m.cursor.Col]
+	// Collect every cursor's visual column, keyed by buffer line, so the
+	// ruler skips an extra cursor's cell too — not just the primary
+	// cursor's — whenever one sits on the ruler column.
+	cursorVisCols := make(map[int][]int)
+	addCursor := func(pos document.Pos) {
+		if pos.Line >= m.buf.LineCount() {
+			return
 		}
+		runes := []rune(m.buf.Line(pos.Line))
+		_, colMap := expandTabsRemap(runes)
+		if pos.Col < len(colMap) {
+			cursorVisCols[pos.Line] = append(cursorVisCols[pos.Line], colMap[pos.Col])
+		}
+	}
+	addCursor(m.cursor)
+	for _, ec := range m.extraCursors {
+		addCursor(ec.pos)
 	}
 
 	for row, entry := range layout {
@@ -819,9 +829,16 @@ func (m Model) applyRulerColumn(lines []string, layout []layoutEntry, cw int) {
 			rulerCol < entry.chunkStart || rulerCol >= entry.chunkStart+cw {
 			continue
 		}
-		// Never draw over the cursor's own cell — it would otherwise vanish
+		// Never draw over a cursor's own cell — it would otherwise vanish
 		// under the ruler's fixed background whenever they coincide.
-		if cursorOnScreen && entry.bufLine == m.cursor.Line && curVisCol == rulerCol {
+		skip := false
+		for _, c := range cursorVisCols[entry.bufLine] {
+			if c == rulerCol {
+				skip = true
+				break
+			}
+		}
+		if skip {
 			continue
 		}
 		lines[row] = overlayRulerColumn(lines[row], gutterW+rulerCol-entry.chunkStart)

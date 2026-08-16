@@ -184,6 +184,9 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 	if _, ok := m.bracketPairAtCursor(); ok {
 		return m.splitInsideBracketPair()
 	}
+	if m2, cmd, ok := m.tryExpandJSDoc(); ok {
+		return m2, cmd
+	}
 
 	indent := m.contextIndent(m.buf.Line(m.cursor.Line), m.cursor.Line, m.cursor.Col)
 

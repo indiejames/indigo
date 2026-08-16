@@ -120,6 +120,37 @@ func TestPosFromOffset(t *testing.T) {
 	}
 }
 
+// TestPosFromOffsetTrailingNewlinePhantomLine covers the documented
+// off-by-one hotspot: a trailing "\n" produces a phantom empty final line
+// (LineCount counts it), and an offset at or past end-of-content must land
+// on that phantom line rather than the last real line of text.
+func TestPosFromOffsetTrailingNewlinePhantomLine(t *testing.T) {
+	b := New("", "hello\nworld\n")
+	if got := b.LineCount(); got != 3 {
+		t.Fatalf("LineCount()=%d, want 3 (phantom trailing line)", got)
+	}
+
+	// Offset at/past total length must resolve to the phantom line {2, 0},
+	// not to column-past-end of the "world" line.
+	total := len("hello\nworld\n")
+	p := b.PosFromOffset(total)
+	if p.Line != 2 || p.Col != 0 {
+		t.Fatalf("PosFromOffset(total=%d)=%v, want {2,0} (phantom line)", total, p)
+	}
+	p = b.PosFromOffset(total + 5) // past end entirely — should clamp, not overshoot the phantom line
+	if p.Line != 2 || p.Col != 0 {
+		t.Fatalf("PosFromOffset(past end)=%v, want {2,0} (phantom line)", p)
+	}
+
+	// Offset immediately before the trailing newline still resolves within
+	// the "world" line, confirming the phantom line only kicks in once the
+	// trailing newline itself has been consumed.
+	p = b.PosFromOffset(total - 1)
+	if p.Line != 1 || p.Col != 5 {
+		t.Fatalf("PosFromOffset(total-1)=%v, want {1,5} (end of \"world\")", p)
+	}
+}
+
 func TestLargeFile(t *testing.T) {
 	var sb strings.Builder
 	for range 1000 {

@@ -3,6 +3,7 @@ package format
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/lsp"
@@ -123,6 +124,28 @@ func TestRunExternalNonZeroExit(t *testing.T) {
 	_, _, err := runExternal(makeFC("false"), "/tmp/test.go", "content")
 	if err == nil {
 		t.Error("expected error from formatter with non-zero exit, got nil")
+	}
+}
+
+// TestRunExternalHangingProcessTimesOut is a regression test: an external
+// formatter that hangs past its timeout must be killed and surfaced as an
+// error rather than blocking runExternal (and its caller) forever.
+// externalFormatTimeout is temporarily lowered so the test doesn't have to
+// wait out the real 10s production timeout.
+func TestRunExternalHangingProcessTimesOut(t *testing.T) {
+	orig := externalFormatTimeout
+	externalFormatTimeout = 100 * time.Millisecond
+	defer func() { externalFormatTimeout = orig }()
+
+	start := time.Now()
+	_, _, err := runExternal(makeFC("sh", "-c", "sleep 30"), "/tmp/test.go", "content")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected an error from a formatter that hangs past its timeout, got nil")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("runExternal took %v to return, want well under the 30s the process would otherwise sleep for", elapsed)
 	}
 }
 

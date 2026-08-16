@@ -213,7 +213,7 @@ func defaults() *Config {
 		BracketColors:        true,
 		IndentGuides:         true,
 		RulerColumn:          0,
-		InlayHints:           true,
+		InlayHints:           false,
 		SemanticTokens:       false,
 		CursorColumnStyle:    "view",
 	}

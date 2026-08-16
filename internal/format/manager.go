@@ -112,11 +112,16 @@ func (m *Manager) lspFormattingOptions(ext, content string) lsp.FormattingOption
 	return lsp.FormattingOptions{TabSize: width, InsertSpaces: settings.Style == "spaces"}
 }
 
+// externalFormatTimeout bounds how long an external formatter process may
+// run before it's killed. Overridable in tests so a hang-past-timeout
+// regression test doesn't have to wait out the real production duration.
+var externalFormatTimeout = 10 * time.Second
+
 func runExternal(fc config.FormatterConfig, filePath, content string) (string, bool, error) {
 	cmd := expandPath(fc.Command)
 	args := expandArgs(fc.Args, filePath)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), externalFormatTimeout)
 	defer cancel()
 
 	proc := exec.CommandContext(ctx, cmd, args...)

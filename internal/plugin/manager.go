@@ -161,6 +161,11 @@ type registeredPlugin struct {
 	keyDescription string // from manifest key_description field; empty = use description
 	process        *os.Process
 	rpcConn        *rpc.Conn
+	// reapDone closes once reapOnDisconnect has Wait()-ed on process,
+	// following its RPC connection closing (crash or Shutdown teardown).
+	// Production code never reads it; it exists so tests can synchronize on
+	// reaping completing instead of polling for the process to disappear.
+	reapDone <-chan struct{}
 
 	mu             sync.RWMutex
 	keyBindings    map[string]pluginproto.KeyHandler
@@ -407,7 +412,7 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 	// mid-session crash (no dispatch path otherwise ever calls Wait, so the
 	// process would sit as a zombie until the whole server exits) or from
 	// Shutdown closing rpcConn as part of ordinary teardown.
-	reapOnDisconnect(proc, rpcConn)
+	reg.reapDone = reapOnDisconnect(proc, rpcConn)
 
 	return nil
 }

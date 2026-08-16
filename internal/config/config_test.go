@@ -229,3 +229,163 @@ func TestCursorColumnStyleBuffer(t *testing.T) {
 		t.Error("loaded CursorColumnStyle should be `buffer`")
 	}
 }
+
+func TestEffectiveFormattersUserOverridesDefaultForExtension(t *testing.T) {
+	cfg := defaults()
+	cfg.Formatters = []FormatterConfig{
+		{Extensions: []string{"go"}, Command: "custom-gofmt"},
+	}
+	result := cfg.EffectiveFormatters()
+
+	var goFormatters []FormatterConfig
+	for _, f := range result {
+		for _, ext := range f.Extensions {
+			if ext == "go" {
+				goFormatters = append(goFormatters, f)
+			}
+		}
+	}
+	if len(goFormatters) != 1 || goFormatters[0].Command != "custom-gofmt" {
+		t.Fatalf("go formatters = %v, want exactly the user override", goFormatters)
+	}
+}
+
+func TestEffectiveFormattersIncludesUnshadowedDefaults(t *testing.T) {
+	cfg := defaults()
+	cfg.Formatters = []FormatterConfig{
+		{Extensions: []string{"go"}, Command: "custom-gofmt"},
+	}
+	result := cfg.EffectiveFormatters()
+
+	found := false
+	for _, f := range result {
+		if f.Command == "rustfmt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("EffectiveFormatters() dropped the untouched rustfmt default alongside an unrelated user override")
+	}
+}
+
+func TestEffectiveFormattersNoUserConfigReturnsDefaults(t *testing.T) {
+	cfg := defaults()
+	result := cfg.EffectiveFormatters()
+	if !reflect.DeepEqual(result, DefaultFormatters) {
+		t.Fatalf("EffectiveFormatters() with no user config = %v, want DefaultFormatters unchanged", result)
+	}
+}
+
+func TestEffectiveLanguageServersUserOverridesDefaultForExtension(t *testing.T) {
+	cfg := defaults()
+	cfg.LanguageServers = []LanguageServer{
+		{Extensions: []string{"go"}, Command: "custom-gopls"},
+	}
+	result := cfg.EffectiveLanguageServers()
+
+	var goServers []LanguageServer
+	for _, ls := range result {
+		for _, ext := range ls.Extensions {
+			if ext == "go" {
+				goServers = append(goServers, ls)
+			}
+		}
+	}
+	if len(goServers) != 1 || goServers[0].Command != "custom-gopls" {
+		t.Fatalf("go language servers = %v, want exactly the user override", goServers)
+	}
+}
+
+func TestEffectiveLanguageServersIncludesUnshadowedDefaults(t *testing.T) {
+	cfg := defaults()
+	cfg.LanguageServers = []LanguageServer{
+		{Extensions: []string{"go"}, Command: "custom-gopls"},
+	}
+	result := cfg.EffectiveLanguageServers()
+
+	found := false
+	for _, ls := range result {
+		if ls.Command == "rust-analyzer" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("EffectiveLanguageServers() dropped the untouched rust-analyzer default alongside an unrelated user override")
+	}
+}
+
+func TestEffectiveLanguageServersPartialExtensionOverlapShadowsWholeDefaultEntry(t *testing.T) {
+	// The default ts/tsx entry and the js/jsx entry are separate slice
+	// entries in defaultLanguageServers; a user override for just "ts"
+	// should shadow only the entry that lists "ts" among its extensions,
+	// not the sibling js/jsx entry.
+	cfg := defaults()
+	cfg.LanguageServers = []LanguageServer{
+		{Extensions: []string{"ts"}, Command: "custom-ts-server"},
+	}
+	result := cfg.EffectiveLanguageServers()
+
+	for _, ls := range result {
+		if ls.Command == "typescript-language-server" {
+			for _, ext := range ls.Extensions {
+				if ext == "ts" || ext == "tsx" {
+					t.Fatalf("default ts/tsx language server entry should have been fully shadowed, got %v", ls)
+				}
+			}
+		}
+	}
+	found := false
+	for _, ls := range result {
+		if ls.Command == "typescript-language-server" {
+			for _, ext := range ls.Extensions {
+				if ext == "js" || ext == "jsx" {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("sibling js/jsx language server default was incorrectly shadowed by a ts-only override")
+	}
+
+	userFound := false
+	for _, ls := range result {
+		if ls.Command == "custom-ts-server" {
+			for _, ext := range ls.Extensions {
+				if ext == "ts" {
+					userFound = true
+				}
+			}
+		}
+	}
+	if !userFound {
+		t.Fatal("user-defined custom-ts-server override for \"ts\" is missing from the result")
+	}
+}
+
+func TestDefaultLintersCoverExpectedExtensions(t *testing.T) {
+	// DefaultLinters is package-level data consumed by internal/lint; this
+	// guards against an extension silently losing its default linter entry.
+	covered := make(map[string]bool)
+	for _, l := range DefaultLinters {
+		for _, ext := range l.Extensions {
+			covered[ext] = true
+		}
+	}
+	for _, ext := range []string{"go", "js", "ts", "py", "rs"} {
+		if !covered[ext] {
+			t.Errorf("DefaultLinters has no entry covering extension %q", ext)
+		}
+	}
+}
+
+func TestDefaultLintersEntriesHaveFormatAndCommand(t *testing.T) {
+	for _, l := range DefaultLinters {
+		if l.Command == "" {
+			t.Errorf("DefaultLinters entry %+v has empty Command", l)
+		}
+		if l.Format == "" {
+			t.Errorf("DefaultLinters entry %+v has empty Format", l)
+		}
+	}
+}

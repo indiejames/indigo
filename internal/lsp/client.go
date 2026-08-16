@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/indiejames/indigo/internal/procutil"
 )
 
 // Client manages a single language server process.
@@ -55,6 +57,7 @@ func NewClient(command string, args []string, rootDir string) (*Client, error) {
 	}
 
 	cmd := exec.Command(resolved, args...)
+	procutil.SetPgid(cmd)
 	if logFile != nil {
 		cmd.Stderr = logFile
 	}
@@ -827,8 +830,8 @@ func (c *Client) Shutdown() {
 // call on an already-exited process.
 func (c *Client) terminate() {
 	if c.cmd != nil && c.cmd.Process != nil {
-		c.cmd.Process.Kill() //nolint:errcheck
-		c.cmd.Wait()         //nolint:errcheck
+		procutil.KillGroup(c.cmd) //nolint:errcheck
+		c.cmd.Wait()              //nolint:errcheck
 	}
 	if c.logFile != nil {
 		c.logFile.Close() //nolint:errcheck

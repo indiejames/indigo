@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -57,6 +58,38 @@ func TestLoadInvalidToml(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Error("Load() with invalid TOML should return error")
+	}
+}
+
+// TestLoadPartialDecodeFailureReturnsCleanDefaults is a regression test:
+// toml.Decode can populate some fields before hitting a later key that
+// fails to parse, so the pre-fix Load() returned that partial mix alongside
+// the error — a caller that (incorrectly, but this happens in practice —
+// see internal/server/server.go) discards the error ends up silently
+// running with an inconsistent config instead of either a full parse or
+// full defaults. line_numbers decodes fine before ruler_column (a string
+// where an int is expected) fails, so a pre-fix Load() would return
+// LineNumbers=false — the fix must return untouched defaults() instead.
+func TestLoadPartialDecodeFailureReturnsCleanDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	cfgDir := filepath.Join(dir, "indigo")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "line_numbers = false\nruler_column = \"not-a-number\"\n"
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err == nil {
+		t.Fatal("Load() with a type-mismatched key should return an error")
+	}
+	want := defaults()
+	if !reflect.DeepEqual(cfg, want) {
+		t.Errorf("Load() on decode failure = %+v, want clean defaults %+v (not a partial decode)", cfg, want)
 	}
 }
 
@@ -121,6 +154,35 @@ func TestEffectiveIndentPartialUserOverrideInheritsOtherField(t *testing.T) {
 	want := IndentSettings{Style: "spaces", Width: 2} // style inherited from built-in default
 	if got != want {
 		t.Errorf("EffectiveIndent(py) = %+v, want %+v", got, want)
+	}
+}
+
+func TestEffectiveIndentRejectsBogusGlobalStyle(t *testing.T) {
+	cfg := &Config{IndentStyle: "banana"}
+	got := cfg.EffectiveIndent("elm") // no built-in default, so global style is what's under test
+	want := IndentSettings{Style: "tabs", Width: 4}
+	if got != want {
+		t.Errorf("EffectiveIndent with IndentStyle=banana = %+v, want %+v (fall back to tabs)", got, want)
+	}
+}
+
+func TestEffectiveIndentRejectsNegativeGlobalWidth(t *testing.T) {
+	cfg := &Config{IndentWidth: -5}
+	got := cfg.EffectiveIndent("elm")
+	want := IndentSettings{Style: "tabs", Width: 4}
+	if got != want {
+		t.Errorf("EffectiveIndent with IndentWidth=-5 = %+v, want %+v (fall back to width 4)", got, want)
+	}
+}
+
+func TestEffectiveIndentRejectsBogusPerLanguageOverride(t *testing.T) {
+	cfg := &Config{
+		IndentOverrides: map[string]IndentSettings{"go": {Style: "banana", Width: -1}},
+	}
+	got := cfg.EffectiveIndent("go")
+	want := IndentSettings{Style: "tabs", Width: 4}
+	if got != want {
+		t.Errorf("EffectiveIndent with a bogus per-language override = %+v, want %+v", got, want)
 	}
 }
 

@@ -458,7 +458,12 @@ func New(dir string) (*Server, error) {
 		return nil, fmt.Errorf("recovery dir: %w", err)
 	}
 
-	cfg, _ := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		ln.Close()          //nolint:errcheck
+		os.Remove(sockPath) //nolint:errcheck
+		return nil, fmt.Errorf("load config: %w", err)
+	}
 
 	srv := &Server{
 		socketPath: sockPath,

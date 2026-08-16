@@ -79,6 +79,7 @@ type App struct {
 
 	picker        *filePicker          // non-nil when file picker is open
 	grep          *grepPicker          // non-nil when workspace search picker is open
+	grepSeq       int                  // bumped on every new grep request; see grepResultsMsg
 	bufPicker     *bufPicker           // non-nil when buffer picker popup is open
 	searchReplace *searchReplaceDialog // non-nil when the global search & replace dialog is open
 
@@ -342,6 +343,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Pattern == "" {
 			return a, nil
 		}
+		a.grepSeq++
+		seq := a.grepSeq
 		a.grep = &grepPicker{
 			workDir:   a.workDir,
 			pattern:   msg.Pattern,
@@ -349,17 +352,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			width:     a.width,
 			height:    a.height,
 			searching: true,
+			seq:       seq,
 		}
 		workDir := a.workDir
 		pattern := msg.Pattern
 		glob := msg.Glob
 		return a, func() tea.Msg {
 			results, err := searchWorkspace(workDir, pattern, glob)
-			return grepResultsMsg{results: results, err: err}
+			return grepResultsMsg{seq: seq, results: results, err: err}
 		}
 
 	case grepResultsMsg:
-		if a.grep != nil {
+		if a.grep != nil && msg.seq == a.grep.seq {
 			a.grep.searching = false
 			if msg.err != nil {
 				a.grep.errMsg = msg.err.Error()

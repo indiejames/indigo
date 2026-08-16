@@ -13,6 +13,7 @@ import (
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/lsp"
+	"github.com/indiejames/indigo/internal/procutil"
 )
 
 // ErrNoFormatter is returned by Format when no formatter is configured or
@@ -119,6 +120,8 @@ func runExternal(fc config.FormatterConfig, filePath, content string) (string, b
 	defer cancel()
 
 	proc := exec.CommandContext(ctx, cmd, args...)
+	procutil.SetPgid(proc)
+	proc.Cancel = func() error { return procutil.KillGroup(proc) }
 	proc.Stdin = strings.NewReader(content)
 	var out, errBuf bytes.Buffer
 	proc.Stdout = &out

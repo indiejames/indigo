@@ -216,9 +216,9 @@ func (m Model) fetchFormat(thenSave bool) tea.Cmd {
 		defer cancel()
 		content, changed, noFormatter, err := m.rpc.Format(ctx, bufID)
 		if err != nil {
-			return errorMsg{err}
+			return formatResultMsg{bufID: bufID, thenSave: thenSave, err: err}
 		}
-		return formatResultMsg{content: content, changed: changed, thenSave: thenSave, noFormatter: noFormatter}
+		return formatResultMsg{bufID: bufID, content: content, changed: changed, thenSave: thenSave, noFormatter: noFormatter}
 	}
 }
 

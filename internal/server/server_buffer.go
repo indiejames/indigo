@@ -698,6 +698,7 @@ func (s *editorService) CloseBuffer(_ context.Context, call proto.EditorService_
 	if removedPath != "" {
 		s.removePathWatch(removedPath)
 		go s.lspMgr.DidClose(removedPath)
+		s.lintMgr.Forget(removedPath)
 		go s.pluginMgr.DispatchBufferClose(context.Background(), bufID, removedPath)
 	}
 

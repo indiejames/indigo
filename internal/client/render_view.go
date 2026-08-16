@@ -452,6 +452,22 @@ func (m Model) lspServerName() string {
 	return ""
 }
 
+// statusBarColumn returns the 1-based column shown in the status bar, per
+// Config.CursorColumnStyle: "buffer" is the raw rune offset (m.cursor.Col),
+// matching Helix; anything else (including a nil config, e.g. in tests) is
+// the tab-expanded visual column, matching VS Code.
+func (m Model) statusBarColumn() int {
+	if m.cfg != nil && m.cfg.CursorColumnStyle == "buffer" {
+		return m.cursor.Col + 1
+	}
+	runes := []rune(m.buf.Line(m.cursor.Line))
+	_, colMap := expandTabsRemap(runes)
+	if m.cursor.Col < len(colMap) {
+		return colMap[m.cursor.Col] + 1
+	}
+	return m.cursor.Col + 1
+}
+
 func (m Model) renderStatusBar() string {
 	if m.width == 0 {
 		return ""
@@ -509,7 +525,7 @@ func (m Model) renderStatusBar() string {
 	leftW := lipgloss.Width(left)
 
 	// Right side: [diag counts] [lsp] [file type] [line:col]
-	posStr := fmt.Sprintf("  %d:%d  ", m.cursor.Line+1, m.cursor.Col+1)
+	posStr := fmt.Sprintf("  %d:%d  ", m.cursor.Line+1, m.statusBarColumn())
 	right := barStyle.Render(posStr)
 
 	ftName := fileTypeName(m.filePath)

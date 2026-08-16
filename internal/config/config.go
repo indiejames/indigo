@@ -167,6 +167,13 @@ type Config struct {
 	RulerColumn          int               `toml:"ruler_column"`
 	InlayHints           bool              `toml:"inlay_hints"`
 	SemanticTokens       bool              `toml:"semantic_tokens"`
+	// CursorColumnStyle selects what the status bar's column number means:
+	// "view" (default) shows the on-screen visual column, counting a tab as
+	// however many columns it visually occupies (VS Code-style); "buffer"
+	// shows the raw rune offset into the line, counting a tab as one column
+	// regardless of its visual width (Helix-style). Any value other than
+	// "buffer" is treated as "view".
+	CursorColumnStyle string `toml:"cursor_column_style"`
 	// FileTypes maps file extensions or filenames to a syntax language key.
 	// Keys are extensions (with or without leading dot) or bare filenames.
 	// Values are a registered language key such as "sh", "go", ".md", etc.
@@ -208,6 +215,7 @@ func defaults() *Config {
 		RulerColumn:          0,
 		InlayHints:           true,
 		SemanticTokens:       false,
+		CursorColumnStyle:    "view",
 	}
 }
 
@@ -343,6 +351,12 @@ const defaultConfigTemplate = `# Indigo editor configuration
 
 # Draw indent guide lines at each tab-stop in the leading whitespace of lines.
 # indent_guides = true
+
+# What the status bar's column number means: "view" shows the on-screen
+# visual column (a tab counts as however many columns it occupies, VS
+# Code-style); "buffer" shows the raw rune offset into the line (a tab
+# counts as one column, Helix-style).
+# cursor_column_style = "view"
 
 # Default indent style/width for languages with no built-in or per-language
 # setting below. style is "tabs" or "spaces". Indigo also auto-detects the

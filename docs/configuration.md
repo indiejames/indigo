@@ -12,7 +12,7 @@ Config file location: `~/.config/indigo/config.toml` (created automatically on f
 | `format_on_save` | bool | `false` | Run the file's formatter automatically on `:w` |
 | `bracket_colors` | bool | `true` | Colorize matching bracket pairs with cycling colors based on nesting depth |
 | `indent_guides` | bool | `true` | Draw indent-guide lines at each tab-stop in leading whitespace |
-| `inlay_hints` | bool | `true` | Show LSP inlay hints (parameter names, e.g. `foo(count: 5)`) as dim virtual text |
+| `inlay_hints` | bool | `false` | Show LSP inlay hints (parameter names, e.g. `foo(count: 5)`) as dim virtual text |
 | `semantic_tokens` | bool | `false` | Recolor identifiers (variables, parameters, types, etc.) using LSP semantic tokens instead of syntax-only guesses |
 | `recovery_interval_secs` | int | `5` | How often (in seconds) unsaved content is written to the recovery directory |
 | `recovery_max_bytes` | int | `104857600` | Maximum file size (bytes) eligible for crash recovery (default 100 MB); `0` disables recovery |

@@ -126,4 +126,7 @@ func TestTSTemplateLiteralBraceStillExpandsInsideInterpolation(t *testing.T) {
 	if h.IsInString(content, 0, col) {
 		t.Errorf("IsInString(col=%d) = true, want false (position is inside the ${...} expression, not string content)", col)
 	}
+	if !h.ShouldExpandBraceBlock(content, 0, col) {
+		t.Errorf("ShouldExpandBraceBlock(col=%d) = false, want true (an arrow function body inside ${...} should still expand into a block)", col)
+	}
 }

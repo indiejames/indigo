@@ -113,3 +113,24 @@ func TestJSDocDoesNotExpandAboveCallbackArgument(t *testing.T) {
 		t.Fatalf("content = %q, want %q (plain newline, no expansion)", got.buf.Content(), want)
 	}
 }
+
+// TestJSDocExpandsWithLaterJSDocBlockInFile is a regression test: the "/**"
+// line being expanded is itself an unclosed block comment as far as the
+// parser is concerned, so a naive parse of the whole buffer treats it as
+// open and swallows everything up to the next "*/" found anywhere later in
+// the file — including a legitimate, already-closed JSDoc block on a
+// different function further down — hiding the function declaration right
+// below the cursor. tryExpandJSDoc must blank the trigger line out before
+// parsing so this can't happen.
+func TestJSDocExpandsWithLaterJSDocBlockInFile(t *testing.T) {
+	m := newJSDocTestModel(t, "/**\nfunction greet(name: string) {\n  console.log(name);\n}\n\n/**\n * \n */\nfunction coco() {\n}\n")
+	m.cursor = document.Pos{Line: 0, Col: 3} // end of "/**"
+
+	m2, _ := m.handleEnter()
+	got := m2
+
+	want := "/**\n * \n * @param {string} name\n */\nfunction greet(name: string) {\n  console.log(name);\n}\n\n/**\n * \n */\nfunction coco() {\n}\n"
+	if got.buf.Content() != want {
+		t.Fatalf("content after JSDoc expansion:\n%s\nwant:\n%s", got.buf.Content(), want)
+	}
+}

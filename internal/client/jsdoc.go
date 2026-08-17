@@ -33,7 +33,13 @@ func (m Model) tryExpandJSDoc() (Model, tea.Cmd, bool) {
 	if strings.TrimSpace(line) != "/**" || m.cursor.Col != len([]rune(line)) {
 		return m, nil, false
 	}
-	sig, ok := m.hlr.FunctionSignatureAt([]byte(m.buf.Content()), m.cursor.Line+1)
+	// The "/**" line itself is an unclosed block comment as far as the
+	// parser is concerned — left in place, tree-sitter treats it as open and
+	// swallows everything up to the next "*/" anywhere later in the file
+	// (e.g. an existing JSDoc block on a function further down), hiding the
+	// function declaration we're actually looking for. Blank it out (keeping
+	// the line break, so later rows don't shift) before parsing.
+	sig, ok := m.hlr.FunctionSignatureAt(blankLine(m.buf.Content(), m.cursor.Line), m.cursor.Line+1)
 	if !ok {
 		return m, nil, false
 	}
@@ -53,6 +59,18 @@ func (m Model) tryExpandJSDoc() (Model, tea.Cmd, bool) {
 	m.cursor = document.Pos{Line: m.cursor.Line + 1, Col: len([]rune(indent)) + 3} // past " * "
 	m2, cmd := applyOp(m, op)
 	return m2, cmd, true
+}
+
+// blankLine returns content with the given 0-based line's text replaced by
+// an equal-width blank, preserving every line break so line numbers for the
+// rest of the file are unaffected.
+func blankLine(content string, line int) []byte {
+	lines := strings.Split(content, "\n")
+	if line < 0 || line >= len(lines) {
+		return []byte(content)
+	}
+	lines[line] = strings.Repeat(" ", len([]rune(lines[line])))
+	return []byte(strings.Join(lines, "\n"))
 }
 
 // buildJSDocTemplate renders a JSDoc comment block for sig, each line

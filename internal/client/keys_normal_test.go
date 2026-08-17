@@ -60,8 +60,16 @@ func TestExecuteUndoShiftsLSPOverlays(t *testing.T) {
 // single character under the cursor, matching how `d`/`c` already act on the
 // character under the cursor when nothing is selected.
 func TestExecuteYankNoSelectionCopiesCharUnderCursor(t *testing.T) {
+	prev, prevErr := readClipboard()
 	if err := writeClipboard("sentinel"); err != nil {
 		t.Skipf("no clipboard tool available: %v", err)
+	}
+	if prevErr == nil {
+		t.Cleanup(func() {
+			if err := writeClipboard(prev); err != nil {
+				t.Logf("failed to restore clipboard: %v", err)
+			}
+		})
 	}
 
 	m := newTestModel("hello\nworld\n")

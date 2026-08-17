@@ -755,6 +755,15 @@ func TestExtendCharForwardCrossesLineBreak(t *testing.T) {
 	if got.cursor != got.sel.Head {
 		t.Errorf("shift+right x2: cursor = %v, want %v (sel.Head)", got.cursor, got.sel.Head)
 	}
+	// The selected text includes 'c': Head rests at (1,0), the position of
+	// 'c', and per this codebase's inclusive-Head convention (see
+	// extendToLineEnd/extendWordForward) whatever character the cursor lands
+	// on is part of the selection — same rule that makes the very first
+	// shift+right select 2 characters instead of 1. This is intentional, not
+	// a VS-Code-style "select only what was crossed" model.
+	if want := "b\nc"; got.selectedText() != want {
+		t.Errorf("shift+right x2: selectedText() = %q, want %q", got.selectedText(), want)
+	}
 }
 
 func TestUnindentTab(t *testing.T) {

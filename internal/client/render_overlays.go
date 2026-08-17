@@ -970,7 +970,7 @@ var helpEntries = []helpEntry{
 	{key: "d", desc: "Delete selection"},
 	{key: "c", desc: "Change selection (delete + insert)"},
 	{key: "J", desc: "Join line with the line below"},
-	{key: "y", desc: "Yank (copy) selection"},
+	{key: "y", desc: "Yank (copy) selection, or character under cursor if none"},
 	{key: "u", desc: "Undo"},
 	{key: "U", desc: "Redo"},
 	{key: ">", desc: "Indent selected line(s)"},

@@ -2,7 +2,10 @@
 
 package highlight
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestRustFormatMacroInterpolationHighlightsAsVariable guards Rust's
 // captured-identifier format-string syntax (`println!("{name}")`,
@@ -93,7 +96,10 @@ func TestRustFormatMacroInterpolationEdgeCases(t *testing.T) {
 		"    my_macro!(\"custom {name}\");\n" +
 		"}\n")
 	spans := h.Highlight(src)
-	variableANSI, _, _ := captureANSI("variable")
+	variableANSI, _, ok := captureANSI("variable")
+	if !ok {
+		t.Fatal("captureANSI(variable) not found")
+	}
 
 	first := func(line []Span, col int) (Span, bool) {
 		for _, s := range line {
@@ -106,13 +112,13 @@ func TestRustFormatMacroInterpolationEdgeCases(t *testing.T) {
 
 	line1 := spans[1]
 	l1 := `    println!("literal braces {{}} and {{name}} then {name} pos {} idx {0}");`
-	realNameCol := indexInLine(l1, "then {name}") + len("then {")
+	realNameCol := mustIndex(t, l1, "then {name}") + len("then {")
 	got, ok := first(line1, realNameCol)
 	if !ok || got.ANSI != variableANSI {
 		t.Errorf("real {name} interpolation should be variable-colored, got ok=%v %+v", ok, got)
 	}
 
-	escapedNameCol := indexInLine(l1, "{{name}}") + 2
+	escapedNameCol := mustIndex(t, l1, "{{name}}") + 2
 	gotEsc, okEsc := first(line1, escapedNameCol)
 	if okEsc && gotEsc.ANSI == variableANSI {
 		t.Errorf("escaped {{name}} must not be variable-colored, got %+v", gotEsc)
@@ -120,24 +126,95 @@ func TestRustFormatMacroInterpolationEdgeCases(t *testing.T) {
 
 	line2 := spans[2]
 	l2 := `    let s = "not a format macro {name}";`
-	gotNonMacro, okNonMacro := first(line2, indexInLine(l2, "name"))
+	gotNonMacro, okNonMacro := first(line2, mustIndex(t, l2, "name"))
 	if okNonMacro && gotNonMacro.ANSI == variableANSI {
 		t.Errorf("string outside a recognized format macro must not be variable-colored, got %+v", gotNonMacro)
 	}
 
 	line3 := spans[3]
 	l3 := `    my_macro!("custom {name}");`
-	gotUnknownMacro, okUnknownMacro := first(line3, indexInLine(l3, "name"))
+	gotUnknownMacro, okUnknownMacro := first(line3, mustIndex(t, l3, "name"))
 	if okUnknownMacro && gotUnknownMacro.ANSI == variableANSI {
 		t.Errorf("unrecognized macro must not be variable-colored, got %+v", gotUnknownMacro)
 	}
 }
 
-func indexInLine(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
+// TestRustFormatMacroArgumentPosition guards rustFormatMacroArgPos: only
+// the argument that's actually the format string should be scanned for
+// `{...}` interpolations, not every string-literal argument a macro call
+// happens to contain. Regression test for a false positive found in code
+// review: println!("{}", "literal {key}")'s second (value) argument was
+// being scanned too, wrongly coloring "key" as a variable.
+func TestRustFormatMacroArgumentPosition(t *testing.T) {
+	h := New("main.rs")
+	if h == nil {
+		t.Fatal("New(main.rs) = nil")
 	}
-	return -1
+	variableANSI, _, ok := captureANSI("variable")
+	if !ok {
+		t.Fatal("captureANSI(variable) not found")
+	}
+
+	first := func(line []Span, col int) (Span, bool) {
+		for _, s := range line {
+			if col >= s.StartCol && col < s.EndCol {
+				return s, true
+			}
+		}
+		return Span{}, false
+	}
+
+	t.Run("later value argument is not scanned", func(t *testing.T) {
+		src := []byte("fn main() {\n" +
+			"    println!(\"{}\", \"literal {key}\");\n" +
+			"}\n")
+		spans := h.Highlight(src)
+		line := spans[1]
+		l := `    println!("{}", "literal {key}");`
+		got, ok := first(line, mustIndex(t, l, "key"))
+		if ok && got.ANSI == variableANSI {
+			t.Errorf("second (value) argument's {key} must not be variable-colored, got %+v", got)
+		}
+	})
+
+	t.Run("write! skips the writer argument", func(t *testing.T) {
+		src := []byte("fn main() {\n" +
+			"    write!(f, \"{name}\").unwrap();\n" +
+			"}\n")
+		spans := h.Highlight(src)
+		line := spans[1]
+		l := `    write!(f, "{name}").unwrap();`
+		got, ok := first(line, mustIndex(t, l, "name"))
+		if !ok || got.ANSI != variableANSI {
+			t.Errorf("write!'s format string {name} should be variable-colored, got ok=%v %+v", ok, got)
+		}
+	})
+
+	t.Run("assert! condition string is not scanned but the message is", func(t *testing.T) {
+		src := []byte("fn main() {\n" +
+			"    assert!(name == \"foo\", \"mismatch {name}\");\n" +
+			"}\n")
+		spans := h.Highlight(src)
+		line := spans[1]
+		l := `    assert!(name == "foo", "mismatch {name}");`
+
+		gotCond, okCond := first(line, mustIndex(t, l, "foo"))
+		if okCond && gotCond.ANSI == variableANSI {
+			t.Errorf("assert!'s condition string \"foo\" must not be variable-colored, got %+v", gotCond)
+		}
+
+		gotMsg, okMsg := first(line, mustIndex(t, l, "mismatch {name}")+len("mismatch {"))
+		if !okMsg || gotMsg.ANSI != variableANSI {
+			t.Errorf("assert!'s message {name} should be variable-colored, got ok=%v %+v", okMsg, gotMsg)
+		}
+	})
+}
+
+func mustIndex(t *testing.T, s, sub string) int {
+	t.Helper()
+	i := strings.Index(s, sub)
+	if i < 0 {
+		t.Fatalf("substring %q not found in %q", sub, s)
+	}
+	return i
 }

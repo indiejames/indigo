@@ -570,6 +570,31 @@ func (m *Model) extendToLineStart() {
 	m.scrollToCursor()
 }
 
+// extendCharForward extends the selection head one character forward,
+// crossing line breaks the same way moveCursorChar does (including resting
+// on the line break itself). If there is no selection, starts one at the
+// cursor so the character under it becomes selected before advancing.
+func (m *Model) extendCharForward() {
+	if m.sel == nil {
+		m.sel = &Selection{Anchor: m.cursor, Head: m.cursor}
+	}
+	m.cursor = m.sel.Head
+	m.moveCursorChar(1)
+	m.sel.Head = m.cursor
+}
+
+// extendCharBackward extends the selection head one character backward,
+// mirroring extendCharForward. If there is no selection, starts one at the
+// cursor.
+func (m *Model) extendCharBackward() {
+	if m.sel == nil {
+		m.sel = &Selection{Anchor: m.cursor, Head: m.cursor}
+	}
+	m.cursor = m.sel.Head
+	m.moveCursorChar(-1)
+	m.sel.Head = m.cursor
+}
+
 // selectAll selects the entire buffer contents.
 func (m *Model) selectAll() {
 	lastLine := max(0, m.buf.LineCount()-1)

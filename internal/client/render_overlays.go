@@ -990,6 +990,8 @@ var helpEntries = []helpEntry{
 	{key: "Alt+;", desc: "Flip selection (swap anchor/head)"},
 	{key: "shift+end", desc: "Select to end of line"},
 	{key: "shift+home", desc: "Select to beginning of line"},
+	{key: "shift+right", desc: "Extend selection right one character"},
+	{key: "shift+left", desc: "Extend selection left one character"},
 	{key: ""},
 	{key: "Search"},
 	{key: "/", desc: "Start search"},

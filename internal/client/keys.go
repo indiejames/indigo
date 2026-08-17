@@ -101,6 +101,8 @@ var prefixCmds = []command{
 	{key: "end", name: "go-to-line-end", label: "Go to line end", execute: executeGoToLineEnd},
 	{key: "shift+home", name: "extend-line-start", label: "Select to line start", execute: executeExtendLineStart},
 	{key: "shift+end", name: "extend-line-end", label: "Select to line end", execute: executeExtendLineEnd},
+	{key: "shift+right", name: "extend-char-forward", label: "Extend selection right", execute: executeExtendCharForward},
+	{key: "shift+left", name: "extend-char-backward", label: "Extend selection left", execute: executeExtendCharBackward},
 	{key: "w", name: "next-word-start", label: "Next word start", execute: executeNextWordStart},
 	{key: "b", name: "previous-word-start", label: "Previous word start", execute: executePrevWordStart},
 	{key: "e", name: "word-end", label: "Word end", execute: executeWordEnd},

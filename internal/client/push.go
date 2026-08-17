@@ -65,21 +65,40 @@ type callbackServer struct {
 	mu   sync.RWMutex
 	send func(tea.Msg)
 	rpc  *RPC // set after RPC is created; used for direct state updates
+
+	// pendingServerDisconnected latches a ServerDisconnectedMsg that arrived
+	// before send was set (the connection-monitor goroutine in Dial starts
+	// racing the server as soon as Dial connects, but send isn't wired up
+	// until SetPushSender runs later in main.go, after tea.NewProgram
+	// exists). Dropping it silently would defeat the whole point of that
+	// message: the client would sit on a dead connection forever instead of
+	// quitting. setSend replays it the moment a sender becomes available.
+	pendingServerDisconnected bool
 }
 
 func (s *callbackServer) setSend(fn func(tea.Msg)) {
 	s.mu.Lock()
 	s.send = fn
+	pending := s.pendingServerDisconnected
+	s.pendingServerDisconnected = false
 	s.mu.Unlock()
+	if pending && fn != nil {
+		fn(ServerDisconnectedMsg{})
+	}
 }
 
 func (s *callbackServer) dispatch(msg tea.Msg) {
-	s.mu.RLock()
+	s.mu.Lock()
 	fn := s.send
-	s.mu.RUnlock()
-	if fn != nil {
-		fn(msg)
+	if fn == nil {
+		if _, ok := msg.(ServerDisconnectedMsg); ok {
+			s.pendingServerDisconnected = true
+		}
+		s.mu.Unlock()
+		return
 	}
+	s.mu.Unlock()
+	fn(msg)
 }
 
 func (s *callbackServer) ShowMessage(_ context.Context, call proto.ClientCallback_showMessage) error {

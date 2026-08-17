@@ -193,6 +193,15 @@ var prefixCmds = []command{
 		},
 	},
 	{
+		key:       "s",
+		label:     "Sort",
+		menuTitle: "Sort",
+		children: []command{
+			{key: "a", label: "Sort lines ascending", execute: executeSortLinesAscending},
+			{key: "d", label: "Sort lines descending", execute: executeSortLinesDescending},
+		},
+	},
+	{
 		key:       "m",
 		label:     "Match",
 		menuTitle: "Match",

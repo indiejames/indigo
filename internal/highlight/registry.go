@@ -21,6 +21,12 @@ var extraLangRegistry = map[string]func() (*sitter.Language, []byte){}
 // registering them would silently do nothing.
 var indentQueryRegistry = map[string]func() []byte{}
 
+// postProcessRegistry holds each language's optional Highlighter.postProcess
+// hook — see that field's doc comment for why this exists (constructs no
+// grammar exposes as a syntax node, e.g. Rust format-macro string
+// interpolation).
+var postProcessRegistry = map[string]func([]byte) LineSpans{}
+
 func registerLang(fn func() (*sitter.Language, []byte), keys ...string) {
 	for _, k := range keys {
 		langRegistry[k] = fn
@@ -32,6 +38,15 @@ func registerLang(fn func() (*sitter.Language, []byte), keys ...string) {
 func registerIndentQuery(fn func() []byte, keys ...string) {
 	for _, k := range keys {
 		indentQueryRegistry[k] = fn
+	}
+}
+
+// registerPostProcess attaches a Highlighter.postProcess hook to the given
+// extensions. It must be called after the primary parser is already
+// registered.
+func registerPostProcess(fn func([]byte) LineSpans, keys ...string) {
+	for _, k := range keys {
+		postProcessRegistry[k] = fn
 	}
 }
 
@@ -54,6 +69,9 @@ func RegisterAlias(from, to string) bool {
 	}
 	if indentFn, ok2 := indentQueryRegistry[to]; ok2 {
 		indentQueryRegistry[from] = indentFn
+	}
+	if pfn, ok2 := postProcessRegistry[to]; ok2 {
+		postProcessRegistry[from] = pfn
 	}
 	if comment, ok2 := lineCommentByKey[to]; ok2 {
 		lineCommentByKey[from] = comment
@@ -95,6 +113,9 @@ func NewForKey(key string) *Highlighter {
 				h.indentQuery = iq
 			}
 		}
+	}
+	if pfn, ok2 := postProcessRegistry[key]; ok2 {
+		h.postProcess = pfn
 	}
 	return h
 }
@@ -186,4 +207,16 @@ func indentQueryForPath(filePath string) []byte {
 		return nil
 	}
 	return fn()
+}
+
+func postProcessForPath(filePath string) func([]byte) LineSpans {
+	k := lookupKey(filePath)
+	if k == "" {
+		return nil
+	}
+	fn, ok := postProcessRegistry[k]
+	if !ok {
+		return nil
+	}
+	return fn
 }

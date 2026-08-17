@@ -7,6 +7,11 @@ import (
 	"strings"
 )
 
+// clipboardWriter is the seam production code uses to write the system
+// clipboard; tests override it (see TestMain) so running the suite never
+// mutates the developer's real clipboard.
+var clipboardWriter = writeClipboard
+
 // readClipboard returns the current system clipboard contents.
 func readClipboard() (string, error) {
 	var cmd *exec.Cmd

@@ -248,6 +248,33 @@ func deleteAllCursorSelections(m Model) (Model, tea.Cmd) {
 		entries = append(entries, entry{ec.pos, ec.sel, false})
 	}
 
+	// Collect every cursor's cut text in document order and write it to the
+	// clipboard as one combined cut before any deletion happens. Each
+	// deleteSelectionRaw call below only removes its own cursor's text from
+	// the buffer — if it also wrote the clipboard individually (as plain
+	// deleteSelection does), every write but the last processed would be
+	// clobbered, silently losing all but one cursor's cut text.
+	docOrder := append([]entry(nil), entries...)
+	sort.Slice(docOrder, func(i, j int) bool {
+		ci, cj := docOrder[i].cursor, docOrder[j].cursor
+		if ci.Line != cj.Line {
+			return ci.Line < cj.Line
+		}
+		return ci.Col < cj.Col
+	})
+	var cutParts []string
+	for _, e := range docOrder {
+		cm := m
+		cm.cursor = e.cursor
+		cm.sel = e.sel
+		if text, ok := cm.cutText(); ok {
+			cutParts = append(cutParts, text)
+		}
+	}
+	if len(cutParts) > 0 {
+		_ = clipboardWriter(strings.Join(cutParts, "\n")) // cut semantics; a failed copy must not block the delete
+	}
+
 	sort.Slice(entries, func(i, j int) bool {
 		ci, cj := entries[i].cursor, entries[j].cursor
 		if ci.Line != cj.Line {
@@ -273,7 +300,7 @@ func deleteAllCursorSelections(m Model) (Model, tea.Cmd) {
 		m.cursor = e.cursor
 		m.sel = e.sel
 		var cmd tea.Cmd
-		m, cmd = m.deleteSelection()
+		m, cmd = m.deleteSelectionRaw()
 		cmds = append(cmds, cmd)
 		results[i] = result{m.cursor, e.isPrimary}
 	}

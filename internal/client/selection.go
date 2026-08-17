@@ -194,9 +194,34 @@ func (m *Model) extendLineBackward() {
 	m.scrollToCursor()
 }
 
-// deleteSelection deletes the selected text and returns the updated model + cmd.
-// If there is no selection the model is returned unchanged.
+// deleteSelection deletes the selected text (copying it to the clipboard
+// first, cut-style) and returns the updated model + cmd. If there is no
+// selection the model is returned unchanged.
 func (m Model) deleteSelection() (Model, tea.Cmd) {
+	if text, ok := m.cutText(); ok {
+		_ = clipboardWriter(text) // cut semantics; a failed copy must not block the delete
+	}
+	return m.deleteSelectionRaw()
+}
+
+// cutText returns the text that deleteSelectionRaw would remove for the
+// current cursor/selection state, without mutating anything. Shared by
+// deleteSelection (single-cursor cut, one clipboard write) and
+// deleteAllCursorSelections (which must combine every cursor's text into one
+// clipboard write before any of them delete, since each deleteSelectionRaw
+// call changes the buffer other cursors' text would otherwise still need).
+func (m Model) cutText() (string, bool) {
+	if m.sel == nil {
+		text := m.charUnderCursor()
+		return text, text != ""
+	}
+	return m.textForSelection(m.sel), true
+}
+
+// deleteSelectionRaw performs the deletion cutText describes, without
+// touching the clipboard — callers are responsible for that (see
+// deleteSelection and deleteAllCursorSelections).
+func (m Model) deleteSelectionRaw() (Model, tea.Cmd) {
 	if m.sel == nil {
 		lineLen := m.buf.LineLen(m.cursor.Line)
 		if m.cursor.Col >= lineLen {

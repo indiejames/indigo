@@ -284,6 +284,70 @@ func TestDeleteAllCursorSelectionsOpensOwnUndoGroupWhenNoneActive(t *testing.T) 
 	}
 }
 
+// TestDeleteAllCursorSelectionsCombinesClipboardText is a regression test:
+// deleteAllCursorSelections used to call plain deleteSelection per cursor,
+// and each call independently overwrote the clipboard with just its own
+// selection's text — since cursors are processed back-to-front, only the
+// first (topmost) cursor's text survived, silently dropping every other
+// cursor's cut text. The clipboard must instead hold every cursor's text,
+// combined in document order.
+func TestDeleteAllCursorSelectionsCombinesClipboardText(t *testing.T) {
+	fakeClipboardContent = ""
+	m := newTestModel("aXXXb\nc\ndYYYe\n")
+	m.rpc = &RPC{}
+	m.cursor = document.Pos{Line: 0, Col: 1}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 3}}
+	m.extraCursors = []ExtraCursor{{
+		pos: document.Pos{Line: 2, Col: 1},
+		sel: &Selection{Anchor: document.Pos{Line: 2, Col: 1}, Head: document.Pos{Line: 2, Col: 3}},
+	}}
+
+	deleteAllCursorSelections(m)
+
+	if fakeClipboardContent != "XXX\nYYY" {
+		t.Errorf("clipboard = %q, want %q (both cursors' text, in document order)", fakeClipboardContent, "XXX\nYYY")
+	}
+}
+
+// TestDeleteAllCursorSelectionsNoSelectionCombinesCharsUnderCursor verifies
+// the no-selection case (each cursor cuts the single character under it)
+// also combines across cursors rather than losing all but one.
+func TestDeleteAllCursorSelectionsNoSelectionCombinesCharsUnderCursor(t *testing.T) {
+	fakeClipboardContent = ""
+	m := newTestModel("abc\ndef\n")
+	m.rpc = &RPC{}
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	m.extraCursors = []ExtraCursor{{pos: document.Pos{Line: 1, Col: 0}}}
+
+	deleteAllCursorSelections(m)
+
+	if fakeClipboardContent != "a\nd" {
+		t.Errorf("clipboard = %q, want %q (char under each cursor, in document order)", fakeClipboardContent, "a\nd")
+	}
+}
+
+// TestExecuteChangeSelectionMultiCursorCombinesClipboardText verifies the
+// `c` (change) command shares the same fix as `d`: it also routes multi-cursor
+// cuts through deleteAllCursorSelections, so it must combine every cursor's
+// text into the clipboard rather than losing all but one.
+func TestExecuteChangeSelectionMultiCursorCombinesClipboardText(t *testing.T) {
+	fakeClipboardContent = ""
+	m := newTestModel("aXXXb\nc\ndYYYe\n")
+	m.rpc = &RPC{}
+	m.cursor = document.Pos{Line: 0, Col: 1}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 3}}
+	m.extraCursors = []ExtraCursor{{
+		pos: document.Pos{Line: 2, Col: 1},
+		sel: &Selection{Anchor: document.Pos{Line: 2, Col: 1}, Head: document.Pos{Line: 2, Col: 3}},
+	}}
+
+	executeChangeSelection(m)
+
+	if fakeClipboardContent != "XXX\nYYY" {
+		t.Errorf("clipboard = %q, want %q (both cursors' text, in document order)", fakeClipboardContent, "XXX\nYYY")
+	}
+}
+
 // TestApplyToAllCursorsAppliesFnToEachCursorIndependently verifies fn runs
 // once for the primary cursor (which still sees the real extraCursors slice)
 // and once per extra cursor (with extraCursors nulled out so fn can't see

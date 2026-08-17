@@ -379,7 +379,7 @@ func executeYank(m Model) (tea.Model, tea.Cmd) {
 		text = m.charUnderCursor()
 	}
 	if text != "" {
-		if err := writeClipboard(text); err != nil {
+		if err := clipboardWriter(text); err != nil {
 			m = m.pushStatus("clipboard: " + err.Error())
 		} else {
 			m = m.pushStatus("copied")

@@ -1,11 +1,29 @@
 package client
 
 import (
+	"os"
 	"testing"
 
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/highlight"
 )
+
+// fakeClipboardContent backs fakeClipboardWrite, the default clipboardWriter
+// for this package's tests (installed by TestMain) so the suite never
+// touches the real OS clipboard. Tests that need the real thing (e.g.
+// TestExecuteYankNoSelectionCopiesCharUnderCursor) swap clipboardWriter back
+// to writeClipboard for their duration.
+var fakeClipboardContent string
+
+func fakeClipboardWrite(text string) error {
+	fakeClipboardContent = text
+	return nil
+}
+
+func TestMain(m *testing.M) {
+	clipboardWriter = fakeClipboardWrite
+	os.Exit(m.Run())
+}
 
 // TestExecuteUndoShiftsLSPOverlays is a regression test: executeUndo used to
 // call only m.reparseHighlight() (tree-sitter syntax highlighting) after
@@ -64,6 +82,11 @@ func TestExecuteYankNoSelectionCopiesCharUnderCursor(t *testing.T) {
 	if err := writeClipboard("sentinel"); err != nil {
 		t.Skipf("no clipboard tool available: %v", err)
 	}
+	// This test verifies real OS clipboard integration, unlike the rest of
+	// the package (see TestMain), so it needs the real writeClipboard.
+	origWriter := clipboardWriter
+	clipboardWriter = writeClipboard
+	t.Cleanup(func() { clipboardWriter = origWriter })
 	if prevErr == nil {
 		t.Cleanup(func() {
 			if err := writeClipboard(prev); err != nil {
@@ -88,6 +111,67 @@ func TestExecuteYankNoSelectionCopiesCharUnderCursor(t *testing.T) {
 	}
 	if got.sel != nil {
 		t.Error("executeYank should leave sel nil when there was no selection")
+	}
+}
+
+// TestExecuteDeleteSelectionCopiesToClipboard is a regression test: d used to
+// just delete the selection with no way to recover the text. It now cuts —
+// copying to the clipboard before deleting, matching Vim/Kakoune's default
+// register behavior.
+func TestExecuteDeleteSelectionCopiesToClipboard(t *testing.T) {
+	fakeClipboardContent = ""
+	m := newTestModel("hello world\n")
+	m.rpc = &RPC{} // zero-value RPC is safe: ClientID() just reads a field, no dial
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 4}}
+
+	m2, _ := executeDeleteSelection(m)
+	got := m2.(Model)
+
+	if fakeClipboardContent != "hello" {
+		t.Errorf("clipboard = %q, want %q", fakeClipboardContent, "hello")
+	}
+	if got.buf.Line(0) != " world" {
+		t.Errorf("Line(0) = %q, want %q", got.buf.Line(0), " world")
+	}
+}
+
+// TestExecuteDeleteSelectionNoSelectionCopiesCharUnderCursor mirrors
+// TestExecuteYankNoSelectionCopiesCharUnderCursor for d's cut fallback.
+func TestExecuteDeleteSelectionNoSelectionCopiesCharUnderCursor(t *testing.T) {
+	fakeClipboardContent = ""
+	m := newTestModel("hello\n")
+	m.rpc = &RPC{}
+	m.cursor = document.Pos{Line: 0, Col: 1}
+	m.sel = nil
+
+	m2, _ := executeDeleteSelection(m)
+	got := m2.(Model)
+
+	if fakeClipboardContent != "e" {
+		t.Errorf("clipboard = %q, want %q", fakeClipboardContent, "e")
+	}
+	if got.buf.Line(0) != "hllo" {
+		t.Errorf("Line(0) = %q, want %q", got.buf.Line(0), "hllo")
+	}
+}
+
+// TestExecuteChangeSelectionCopiesToClipboard mirrors
+// TestExecuteDeleteSelectionCopiesToClipboard for c, which also deletes the
+// selection (before entering Insert mode) via the same deleteSelection path.
+func TestExecuteChangeSelectionCopiesToClipboard(t *testing.T) {
+	fakeClipboardContent = ""
+	m := newTestModel("hello world\n")
+	m.rpc = &RPC{}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 4}}
+
+	m2, _ := executeChangeSelection(m)
+	got := m2.(Model)
+
+	if fakeClipboardContent != "hello" {
+		t.Errorf("clipboard = %q, want %q", fakeClipboardContent, "hello")
+	}
+	if got.mode != ModeInsert {
+		t.Errorf("mode = %v, want ModeInsert", got.mode)
 	}
 }
 

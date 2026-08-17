@@ -34,12 +34,20 @@ func executeSortLinesDescending(m Model) (tea.Model, tea.Cmd) {
 // selection is left covering the same [startLine, endLine] span afterward
 // (normalized to a whole-line selection, mirroring selectLine's shape)
 // rather than cleared — the user can chain another sort direction, or
-// immediately act on the now-sorted block without reselecting it.
+// immediately act on the now-sorted block without reselecting it. The
+// original Anchor/Head direction is preserved (an upward selection stays
+// anchored at the bottom), matching how moveLines/executeIndent shift an
+// existing selection rather than re-deriving a fixed direction.
 func sortLines(m Model, desc bool) (Model, tea.Cmd) {
 	startLine, endLine := m.selectionLineRange()
 	if startLine == endLine {
 		return m, nil
 	}
+	// selectionLineRange only returns startLine != endLine when m.sel is a
+	// real multi-line selection (a nil sel or single-line sel both collapse
+	// startLine == endLine above), so m.sel is guaranteed non-nil here.
+	anchorAtStart := m.sel.Anchor.Line < m.sel.Head.Line ||
+		(m.sel.Anchor.Line == m.sel.Head.Line && m.sel.Anchor.Col <= m.sel.Head.Col)
 
 	lines := make([]string, 0, endLine-startLine+1)
 	for ln := startLine; ln <= endLine; ln++ {
@@ -70,10 +78,12 @@ func sortLines(m Model, desc bool) (Model, tea.Cmd) {
 	}
 
 	m, cmd := applyBatch(m, []document.Op{delOp, insOp})
-	m.sel = &Selection{
-		Anchor: document.Pos{Line: startLine, Col: 0},
-		Head:   document.Pos{Line: endLine, Col: max(0, m.buf.LineLen(endLine)-1)},
-		IsLine: true,
+	startPos := document.Pos{Line: startLine, Col: 0}
+	endPos := document.Pos{Line: endLine, Col: max(0, m.buf.LineLen(endLine)-1)}
+	if anchorAtStart {
+		m.sel = &Selection{Anchor: startPos, Head: endPos, IsLine: true}
+	} else {
+		m.sel = &Selection{Anchor: endPos, Head: startPos, IsLine: true}
 	}
 	m.cursor = m.sel.Head
 	return m, cmd

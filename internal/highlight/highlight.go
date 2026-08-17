@@ -334,6 +334,7 @@ func (h *Highlighter) IsInString(content []byte, line, col int) bool {
 	pt := sitter.Point{Row: uint(line), Column: uint(byteCol)}
 	qc := sitter.NewQueryCursor()
 	matches := qc.Matches(h.query, tree.RootNode(), content)
+	var spans []sitter.Range
 	for {
 		m := matches.Next()
 		if m == nil {
@@ -344,12 +345,59 @@ func (h *Highlighter) IsInString(content []byte, line, col int) bool {
 			if name != "string" && !strings.HasPrefix(name, "string.") {
 				continue
 			}
-			if pointWithin(pt, cap.Node.StartPoint(), cap.Node.EndPoint()) {
-				return true
-			}
+			spans = append(spans, sitter.Range{StartPoint: cap.Node.StartPoint(), EndPoint: cap.Node.EndPoint()})
+		}
+	}
+	for _, r := range mergeAdjacentRanges(spans) {
+		if pointWithin(pt, r.StartPoint, r.EndPoint) {
+			return true
 		}
 	}
 	return false
+}
+
+// mergeAdjacentRanges coalesces touching or overlapping ranges (sorted by
+// start point) into their union. Some languages' highlight queries capture
+// a single string/template literal as several sibling sub-spans rather than
+// one contiguous node — e.g. query_ecma.go's template_string pattern
+// captures each backtick delimiter and string_fragment separately (not the
+// whole node) so a ${...} interpolation's contents can outrank the string
+// color. IsInString's pointWithin check is deliberately exclusive of both
+// endpoints so a cursor just outside a string's outer delimiters reads as
+// "outside" — but applied to the unmerged sub-spans, that same exclusivity
+// turns the seam between two adjacent sub-spans (e.g. the boundary between
+// a string_fragment and the backtick right after it) into a false gap: a
+// cursor sitting exactly on that seam is still inside the literal, but
+// belongs to neither sub-span's interior. Merging first restores one
+// contiguous range per literal, so only its true outer boundary excludes.
+func mergeAdjacentRanges(ranges []sitter.Range) []sitter.Range {
+	if len(ranges) == 0 {
+		return nil
+	}
+	sort.Slice(ranges, func(i, j int) bool {
+		return pointLess(ranges[i].StartPoint, ranges[j].StartPoint)
+	})
+	merged := []sitter.Range{ranges[0]}
+	for _, r := range ranges[1:] {
+		last := &merged[len(merged)-1]
+		if pointLess(r.StartPoint, last.EndPoint) || r.StartPoint == last.EndPoint {
+			if pointLess(last.EndPoint, r.EndPoint) {
+				last.EndPoint = r.EndPoint
+			}
+			continue
+		}
+		merged = append(merged, r)
+	}
+	return merged
+}
+
+// pointLess reports whether a comes strictly before b in (row, column)
+// order.
+func pointLess(a, b sitter.Point) bool {
+	if a.Row != b.Row {
+		return a.Row < b.Row
+	}
+	return a.Column < b.Column
 }
 
 // pointWithin reports whether pt (a cursor position — the insertion point

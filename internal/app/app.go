@@ -77,6 +77,13 @@ type App struct {
 	active  int
 	status  string // app-level transient message (e.g. ":qa" error)
 
+	// serverGone is set when the RPC connection to the server closes
+	// unexpectedly (server crashed or was killed) rather than via a normal
+	// quit. main.go checks ServerDisconnected() on the final model after
+	// p.Run() returns so it can report this to the user on stderr — the alt
+	// screen is already torn down by then, so there's no in-TUI message to show.
+	serverGone bool
+
 	picker        *filePicker          // non-nil when file picker is open
 	grep          *grepPicker          // non-nil when workspace search picker is open
 	grepSeq       int                  // bumped on every new grep request; see grepResultsMsg
@@ -532,6 +539,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case client.CloseBufferMsg:
 		return a.handleCloseBuffer()
 
+	// ---- server connection lost ----
+	case client.ServerDisconnectedMsg:
+		a.serverGone = true
+		return a, tea.Quit
+
 	// ---- quit all ----
 	case client.QuitAllMsg:
 		return a.handleQuitAll(msg)
@@ -837,6 +849,14 @@ func (a App) handleCloseBuffer() (tea.Model, tea.Cmd) {
 }
 
 // handleQuitAll implements :qa, :qa!, :wqa.
+// ServerDisconnected reports whether this model's final Update was caused by
+// the server connection dying rather than a normal quit. Checked by main.go
+// on the model p.Run() returns, since by that point the alt screen is torn
+// down and there's nowhere left in the TUI to show the error.
+func (a App) ServerDisconnected() bool {
+	return a.serverGone
+}
+
 func (a App) handleQuitAll(msg client.QuitAllMsg) (tea.Model, tea.Cmd) {
 	if msg.SaveAll {
 		return a, a.doSaveAllAndQuit()

@@ -188,10 +188,17 @@ func Dial(socketPath string) (*RPC, error) {
 	cb.mu.Unlock()
 	clientLog("Dial: connected, clientID=%d", r.clientID)
 
-	// Monitor connection lifecycle.
+	// Monitor connection lifecycle. Firing on r.conn.Done() covers both a
+	// clean server Shutdown and the server process dying/crashing out from
+	// under us: either way the transport's read fails and the capnp rpc
+	// layer closes Done() (see rpc.Conn.shutdown), so this doesn't need to
+	// distinguish the two. Dispatching ServerDisconnectedMsg lets app.App
+	// quit instead of the client process sitting on a dead connection
+	// indefinitely.
 	go func() {
 		<-r.conn.Done()
 		clientLog("server connection closed")
+		cb.dispatch(ServerDisconnectedMsg{})
 	}()
 
 	// Fetch plugin keys, insert characters, bindings, and menu items in one

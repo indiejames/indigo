@@ -12,6 +12,15 @@ import (
 // PluginShowMsgMsg is sent by the server when a plugin calls showMessage.
 type PluginShowMsgMsg struct{ Text string }
 
+// ServerDisconnectedMsg is dispatched locally (not sent by the server — by
+// definition the server is gone) when the Cap'n Proto connection to it
+// closes, whether from a clean Shutdown or the server process dying/crashing.
+// The transport detects this the same way either way: a closed/broken
+// connection makes rpc.Conn.Done() fire. app.App quits the program on this
+// rather than leaving the client sitting on a dead connection where every
+// further RPC would just hang or fail one at a time.
+type ServerDisconnectedMsg struct{}
+
 // PluginMoveCursorMsg is sent by the server when a plugin calls moveCursor.
 type PluginMoveCursorMsg struct {
 	BufID uint32

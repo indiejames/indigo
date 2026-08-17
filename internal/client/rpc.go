@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	capnp "capnproto.org/go/capnp/v3"
 	"capnproto.org/go/capnp/v3/rpc"
@@ -126,6 +127,13 @@ type RPC struct {
 	insertHookChars map[string]bool
 	pluginBindings  []ClientPluginBinding
 	menuItems       []ClientMenuItem
+
+	// disconnecting is set at the start of Disconnect(), before it closes
+	// conn. The connection-monitor goroutine checks it when conn.Done()
+	// fires so a normal, user-initiated quit (:q, :qa, ...) isn't reported
+	// as the server having crashed — only a close we didn't initiate is a
+	// genuine disconnect worth telling app.App about.
+	disconnecting atomic.Bool
 }
 
 // ClientPluginBinding is a key binding contributed by a plugin, for the help popup.
@@ -188,10 +196,15 @@ func Dial(socketPath string) (*RPC, error) {
 	cb.mu.Unlock()
 	clientLog("Dial: connected, clientID=%d", r.clientID)
 
-	// Monitor connection lifecycle.
+	// Monitor connection lifecycle. r.conn.Done() fires both when we close
+	// it ourselves (Disconnect, a normal quit) and when the server process
+	// dies/crashes out from under us — the transport's read fails either way
+	// and the capnp rpc layer closes Done() (see rpc.Conn.shutdown) — so
+	// handleConnClosed is what tells the two apart.
 	go func() {
 		<-r.conn.Done()
 		clientLog("server connection closed")
+		r.handleConnClosed()
 	}()
 
 	// Fetch plugin keys, insert characters, bindings, and menu items in one
@@ -333,8 +346,25 @@ func (r *RPC) PluginBindings() []ClientPluginBinding {
 	return r.pluginBindings
 }
 
+// handleConnClosed runs once r.conn.Done() fires, from the monitor goroutine
+// started in Dial. It suppresses ServerDisconnectedMsg when the close was
+// caused by our own Disconnect() — a normal quit — and dispatches it
+// otherwise (the server process died or was killed out from under us).
+func (r *RPC) handleConnClosed() {
+	if r.disconnecting.Load() {
+		clientLog("server connection closed: expected (local Disconnect)")
+		return
+	}
+	r.cb.dispatch(ServerDisconnectedMsg{})
+}
+
 // Disconnect unregisters this client from the server.
 func (r *RPC) Disconnect(ctx context.Context) error {
+	// Set before doing anything else: conn.Done() firing as a result of the
+	// r.conn.Close() below must see this already true, so the monitor
+	// goroutine in Dial doesn't mistake this intentional close for the
+	// server crashing.
+	r.disconnecting.Store(true)
 	fut, rel := r.svc.Disconnect(ctx, func(p proto.EditorService_disconnect_Params) error {
 		p.SetClientId(r.clientID)
 		return nil

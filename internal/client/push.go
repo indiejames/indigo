@@ -12,6 +12,15 @@ import (
 // PluginShowMsgMsg is sent by the server when a plugin calls showMessage.
 type PluginShowMsgMsg struct{ Text string }
 
+// ServerDisconnectedMsg is dispatched locally (not sent by the server — by
+// definition the server is gone) when the Cap'n Proto connection to it
+// closes, whether from a clean Shutdown or the server process dying/crashing.
+// The transport detects this the same way either way: a closed/broken
+// connection makes rpc.Conn.Done() fire. app.App quits the program on this
+// rather than leaving the client sitting on a dead connection where every
+// further RPC would just hang or fail one at a time.
+type ServerDisconnectedMsg struct{}
+
 // PluginMoveCursorMsg is sent by the server when a plugin calls moveCursor.
 type PluginMoveCursorMsg struct {
 	BufID uint32
@@ -56,21 +65,40 @@ type callbackServer struct {
 	mu   sync.RWMutex
 	send func(tea.Msg)
 	rpc  *RPC // set after RPC is created; used for direct state updates
+
+	// pendingServerDisconnected latches a ServerDisconnectedMsg that arrived
+	// before send was set (the connection-monitor goroutine in Dial starts
+	// racing the server as soon as Dial connects, but send isn't wired up
+	// until SetPushSender runs later in main.go, after tea.NewProgram
+	// exists). Dropping it silently would defeat the whole point of that
+	// message: the client would sit on a dead connection forever instead of
+	// quitting. setSend replays it the moment a sender becomes available.
+	pendingServerDisconnected bool
 }
 
 func (s *callbackServer) setSend(fn func(tea.Msg)) {
 	s.mu.Lock()
 	s.send = fn
+	pending := s.pendingServerDisconnected
+	s.pendingServerDisconnected = false
 	s.mu.Unlock()
+	if pending && fn != nil {
+		fn(ServerDisconnectedMsg{})
+	}
 }
 
 func (s *callbackServer) dispatch(msg tea.Msg) {
-	s.mu.RLock()
+	s.mu.Lock()
 	fn := s.send
-	s.mu.RUnlock()
-	if fn != nil {
-		fn(msg)
+	if fn == nil {
+		if _, ok := msg.(ServerDisconnectedMsg); ok {
+			s.pendingServerDisconnected = true
+		}
+		s.mu.Unlock()
+		return
 	}
+	s.mu.Unlock()
+	fn(msg)
 }
 
 func (s *callbackServer) ShowMessage(_ context.Context, call proto.ClientCallback_showMessage) error {

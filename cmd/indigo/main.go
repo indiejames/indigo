@@ -129,9 +129,11 @@ func main() {
 
 	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus(), tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		fatalf("run: %v", err)
 	}
+	reportIfServerDisconnected(finalModel)
 }
 
 func startServer(workDir string) {
@@ -238,9 +240,11 @@ func openUntitled(startLine int) {
 	a := app.New(rpc, bufID, content, version, "", cfg, false, workDir, startLine, generation)
 	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus(), tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		fatalf("run: %v", err)
 	}
+	reportIfServerDisconnected(finalModel)
 }
 
 // loadAndApplyTheme resolves the theme named in cfg, applies it to the client
@@ -271,6 +275,23 @@ func loadAndApplyTheme(cfg *config.Config) {
 func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "indigo: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// serverDisconnectedReporter is satisfied by app.App (value or pointer
+// receiver — Go promotes value-receiver methods to the pointer type too).
+type serverDisconnectedReporter interface {
+	ServerDisconnected() bool
+}
+
+// reportIfServerDisconnected prints a message and exits non-zero if the TUI
+// quit because the server connection died rather than a normal user quit.
+// It must run after p.Run() returns, since the alt screen is torn down by
+// then and there's no in-TUI status bar left to show this in.
+func reportIfServerDisconnected(finalModel tea.Model) {
+	if r, ok := finalModel.(serverDisconnectedReporter); ok && r.ServerDisconnected() {
+		fmt.Fprintln(os.Stderr, "indigo: connection to server lost; exiting")
+		os.Exit(1)
+	}
 }
 
 func init() {

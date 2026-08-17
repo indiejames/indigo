@@ -17,6 +17,21 @@ func (m *Model) selectedText() string {
 	return m.textForSelection(m.sel)
 }
 
+// charUnderCursor returns the single character at the cursor position. When
+// the cursor rests on the line break itself (see moveCursorChar/normalLineEnd),
+// it returns "\n"; at the very end of the buffer it returns "".
+func (m *Model) charUnderCursor() string {
+	lineLen := m.buf.LineLen(m.cursor.Line)
+	if m.cursor.Col >= lineLen {
+		if m.cursor.Line >= m.buf.LineCount()-1 {
+			return ""
+		}
+		return "\n"
+	}
+	runes := []rune(m.buf.Line(m.cursor.Line))
+	return string(runes[m.cursor.Col])
+}
+
 // textForSelection returns the text covered by sel, which need not be m.sel.
 func (m *Model) textForSelection(sel *Selection) string {
 	start, end := sel.ordered()

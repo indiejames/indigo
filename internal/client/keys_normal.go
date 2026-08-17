@@ -356,7 +356,11 @@ func executeChangeSelection(m Model) (tea.Model, tea.Cmd) {
 }
 
 func executeYank(m Model) (tea.Model, tea.Cmd) {
-	if text := m.selectedText(); text != "" {
+	text := m.selectedText()
+	if m.sel == nil {
+		text = m.charUnderCursor()
+	}
+	if text != "" {
 		if err := writeClipboard(text); err != nil {
 			m = m.pushStatus("clipboard: " + err.Error())
 		} else {

@@ -304,3 +304,33 @@ func TestDeleteSelectionNilSelEmptyLineAtEOF(t *testing.T) {
 	}
 	_ = m2
 }
+
+// --- charUnderCursor ---
+
+func TestCharUnderCursorMidLine(t *testing.T) {
+	m := newTestModel("hello\nworld\n")
+	m.cursor = document.Pos{Line: 0, Col: 1}
+	if got := m.charUnderCursor(); got != "e" {
+		t.Errorf("charUnderCursor() = %q, want %q", got, "e")
+	}
+}
+
+func TestCharUnderCursorOnLineBreak(t *testing.T) {
+	// Cursor resting one column past the last character, on the line break
+	// itself, should yield the line break as a "character" (same convention
+	// deleteSelection uses when joining lines).
+	m := newTestModel("hi\nworld\n")
+	m.cursor = document.Pos{Line: 0, Col: 2}
+	if got := m.charUnderCursor(); got != "\n" {
+		t.Errorf("charUnderCursor() on line break = %q, want %q", got, "\n")
+	}
+}
+
+func TestCharUnderCursorAtTrueEOF(t *testing.T) {
+	// The truly-final empty line has no line break and no character.
+	m := newTestModel("")
+	m.cursor = document.Pos{Line: 0, Col: 0}
+	if got := m.charUnderCursor(); got != "" {
+		t.Errorf("charUnderCursor() at EOF = %q, want empty", got)
+	}
+}

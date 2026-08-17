@@ -33,6 +33,16 @@ type Highlighter struct {
 	query       *sitter.Query
 	extra       *Highlighter // optional secondary parser (e.g. markdown_inline)
 	indentQuery *sitter.Query
+	// postProcess computes additional spans by inspecting content directly
+	// rather than through h.query — for constructs a language's grammar
+	// doesn't expose as a syntax node at all (e.g. Rust's `{name}` captured
+	// identifiers inside println!/format!-family macro strings, which
+	// tree-sitter-rust parses as opaque string_content with no substructure;
+	// see lang_rust.go). Its spans are prepended, not appended, ahead of
+	// h.query's own spans on the same line, so they win over an enclosing
+	// capture (e.g. @string) at any column they cover regardless of that
+	// capture's table priority — see captureANSI.
+	postProcess func([]byte) LineSpans
 }
 
 // New returns a Highlighter for filePath, or nil if the language is unsupported.
@@ -56,6 +66,7 @@ func New(filePath string) *Highlighter {
 			h.indentQuery = iq
 		}
 	}
+	h.postProcess = postProcessForPath(filePath)
 	return h
 }
 
@@ -76,6 +87,11 @@ func (h *Highlighter) Highlight(content []byte) LineSpans {
 	if h.extra != nil {
 		for line, spans := range h.extra.Highlight(content) {
 			result[line] = append(result[line], spans...)
+		}
+	}
+	if h.postProcess != nil {
+		for line, spans := range h.postProcess(content) {
+			result[line] = append(spans, result[line]...)
 		}
 	}
 	return result

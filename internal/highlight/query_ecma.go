@@ -245,10 +245,16 @@ const ecmaHighlightQuery = `
 
 (comment) @comment
 
-[
-  (string)
-  (template_string)
-] @string
+(string) @string
+
+; template_string is only partially captured here (its backtick delimiters
+; and literal text fragments), not the whole node -- capturing the whole
+; node would outrank (at priority 90, see captureANSI) the lower-priority
+; captures (@variable, @punctuation.special, etc.) that highlight.go assigns
+; to identifiers/expressions inside a ${...} interpolation, since spans are
+; resolved by flat priority rather than tree nesting.
+(template_string
+  ["` + "`" + `" (string_fragment)] @string)
 
 (escape_sequence) @constant.character.escape
 

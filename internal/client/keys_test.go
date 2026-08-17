@@ -658,6 +658,114 @@ func TestExtendLineEndExtendsExistingSelection(t *testing.T) {
 	}
 }
 
+// --- Shift+Right / Shift+Left extend-by-character ---
+
+func TestExtendCharForwardFromCursor(t *testing.T) {
+	m := newTestModel("hello world\n")
+	m.cursor = document.Pos{Line: 0, Col: 2}
+	m2, _ := m.handleNormal(fakeKey("shift+right"))
+	got := m2.(Model)
+	if got.sel == nil {
+		t.Fatal("shift+right: sel should be set")
+	}
+	if got.sel.Anchor != (document.Pos{Line: 0, Col: 2}) {
+		t.Errorf("shift+right: sel.Anchor = %v, want {0,2}", got.sel.Anchor)
+	}
+	if got.sel.Head != (document.Pos{Line: 0, Col: 3}) {
+		t.Errorf("shift+right: sel.Head = %v, want {0,3}", got.sel.Head)
+	}
+	if got.cursor != got.sel.Head {
+		t.Errorf("shift+right: cursor = %v, want %v (sel.Head)", got.cursor, got.sel.Head)
+	}
+}
+
+func TestExtendCharBackwardFromCursor(t *testing.T) {
+	m := newTestModel("hello world\n")
+	m.cursor = document.Pos{Line: 0, Col: 5}
+	m2, _ := m.handleNormal(fakeKey("shift+left"))
+	got := m2.(Model)
+	if got.sel == nil {
+		t.Fatal("shift+left: sel should be set")
+	}
+	if got.sel.Anchor != (document.Pos{Line: 0, Col: 5}) {
+		t.Errorf("shift+left: sel.Anchor = %v, want {0,5}", got.sel.Anchor)
+	}
+	if got.sel.Head != (document.Pos{Line: 0, Col: 4}) {
+		t.Errorf("shift+left: sel.Head = %v, want {0,4}", got.sel.Head)
+	}
+	if got.cursor != got.sel.Head {
+		t.Errorf("shift+left: cursor = %v, want %v (sel.Head)", got.cursor, got.sel.Head)
+	}
+}
+
+// TestExtendCharBackwardShrinksExistingSelection verifies shift+left moves
+// the head of an already-active selection back by one character rather than
+// starting fresh, so it shrinks a selection built up by shift+right.
+func TestExtendCharBackwardShrinksExistingSelection(t *testing.T) {
+	m := newTestModel("hello world\n")
+	m.cursor = document.Pos{Line: 0, Col: 4}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 2}, Head: document.Pos{Line: 0, Col: 4}}
+	m2, _ := m.handleNormal(fakeKey("shift+left"))
+	got := m2.(Model)
+	if got.sel.Anchor != (document.Pos{Line: 0, Col: 2}) {
+		t.Errorf("shift+left: sel.Anchor = %v, want {0,2} (unchanged)", got.sel.Anchor)
+	}
+	if got.sel.Head != (document.Pos{Line: 0, Col: 3}) {
+		t.Errorf("shift+left: sel.Head = %v, want {0,3}", got.sel.Head)
+	}
+}
+
+// TestExtendCharBackwardPastAnchorFlips verifies repeatedly shrinking a
+// selection past its anchor flips direction and extends backward, matching
+// the other extend-* commands' behavior.
+func TestExtendCharBackwardPastAnchorFlips(t *testing.T) {
+	m := newTestModel("hello world\n")
+	m.cursor = document.Pos{Line: 0, Col: 4}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 2}, Head: document.Pos{Line: 0, Col: 4}}
+	m2, _ := m.handleNormal(fakeKey("shift+left"))
+	m3, _ := m2.(Model).handleNormal(fakeKey("shift+left"))
+	m4, _ := m3.(Model).handleNormal(fakeKey("shift+left"))
+	got := m4.(Model)
+	if got.sel.Anchor != (document.Pos{Line: 0, Col: 2}) {
+		t.Errorf("shift+left x3: sel.Anchor = %v, want {0,2} (unchanged)", got.sel.Anchor)
+	}
+	if got.sel.Head != (document.Pos{Line: 0, Col: 1}) {
+		t.Errorf("shift+left x3: sel.Head = %v, want {0,1}", got.sel.Head)
+	}
+	if start, end := got.sel.ordered(); start != (document.Pos{Line: 0, Col: 1}) || end != (document.Pos{Line: 0, Col: 2}) {
+		t.Errorf("shift+left x3: ordered() = (%v,%v), want ({0,1},{0,2})", start, end)
+	}
+}
+
+// TestExtendCharForwardCrossesLineBreak verifies shift+right can extend the
+// selection across a line break, resting on the break itself first (like
+// moveCursorChar) before landing on the next line.
+func TestExtendCharForwardCrossesLineBreak(t *testing.T) {
+	m := newTestModel("ab\ncd\n")
+	m.cursor = document.Pos{Line: 0, Col: 1}
+	m2, _ := m.handleNormal(fakeKey("shift+right"))
+	m3, _ := m2.(Model).handleNormal(fakeKey("shift+right"))
+	got := m3.(Model)
+	if got.sel.Anchor != (document.Pos{Line: 0, Col: 1}) {
+		t.Errorf("shift+right x2: sel.Anchor = %v, want {0,1}", got.sel.Anchor)
+	}
+	if got.sel.Head != (document.Pos{Line: 1, Col: 0}) {
+		t.Errorf("shift+right x2: sel.Head = %v, want {1,0}", got.sel.Head)
+	}
+	if got.cursor != got.sel.Head {
+		t.Errorf("shift+right x2: cursor = %v, want %v (sel.Head)", got.cursor, got.sel.Head)
+	}
+	// The selected text includes 'c': Head rests at (1,0), the position of
+	// 'c', and per this codebase's inclusive-Head convention (see
+	// extendToLineEnd/extendWordForward) whatever character the cursor lands
+	// on is part of the selection — same rule that makes the very first
+	// shift+right select 2 characters instead of 1. This is intentional, not
+	// a VS-Code-style "select only what was crossed" model.
+	if want := "b\nc"; got.selectedText() != want {
+		t.Errorf("shift+right x2: selectedText() = %q, want %q", got.selectedText(), want)
+	}
+}
+
 func TestUnindentTab(t *testing.T) {
 	m := newTestModel("\thello\n")
 	m.cursor = document.Pos{Line: 0, Col: 0}

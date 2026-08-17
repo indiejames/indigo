@@ -17,6 +17,21 @@ func (m *Model) selectedText() string {
 	return m.textForSelection(m.sel)
 }
 
+// charUnderCursor returns the single character at the cursor position. When
+// the cursor rests on the line break itself (see moveCursorChar/normalLineEnd),
+// it returns "\n"; at the very end of the buffer it returns "".
+func (m *Model) charUnderCursor() string {
+	lineLen := m.buf.LineLen(m.cursor.Line)
+	if m.cursor.Col >= lineLen {
+		if m.cursor.Line >= m.buf.LineCount()-1 {
+			return ""
+		}
+		return "\n"
+	}
+	runes := []rune(m.buf.Line(m.cursor.Line))
+	return string(runes[m.cursor.Col])
+}
+
 // textForSelection returns the text covered by sel, which need not be m.sel.
 func (m *Model) textForSelection(sel *Selection) string {
 	start, end := sel.ordered()
@@ -553,6 +568,31 @@ func (m *Model) extendToLineStart() {
 	}
 	m.cursor = newHead
 	m.scrollToCursor()
+}
+
+// extendCharForward extends the selection head one character forward,
+// crossing line breaks the same way moveCursorChar does (including resting
+// on the line break itself). If there is no selection, starts one at the
+// cursor so the character under it becomes selected before advancing.
+func (m *Model) extendCharForward() {
+	if m.sel == nil {
+		m.sel = &Selection{Anchor: m.cursor, Head: m.cursor}
+	}
+	m.cursor = m.sel.Head
+	m.moveCursorChar(1)
+	m.sel.Head = m.cursor
+}
+
+// extendCharBackward extends the selection head one character backward,
+// mirroring extendCharForward. If there is no selection, starts one at the
+// cursor.
+func (m *Model) extendCharBackward() {
+	if m.sel == nil {
+		m.sel = &Selection{Anchor: m.cursor, Head: m.cursor}
+	}
+	m.cursor = m.sel.Head
+	m.moveCursorChar(-1)
+	m.sel.Head = m.cursor
 }
 
 // selectAll selects the entire buffer contents.

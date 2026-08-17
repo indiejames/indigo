@@ -54,6 +54,43 @@ func TestExecuteUndoShiftsLSPOverlays(t *testing.T) {
 	}
 }
 
+// TestExecuteYankNoSelectionCopiesCharUnderCursor is a regression test:
+// executeYank used to be a no-op when m.sel was nil, requiring an explicit
+// selection before `y` did anything. It should fall back to yanking the
+// single character under the cursor, matching how `d`/`c` already act on the
+// character under the cursor when nothing is selected.
+func TestExecuteYankNoSelectionCopiesCharUnderCursor(t *testing.T) {
+	prev, prevErr := readClipboard()
+	if err := writeClipboard("sentinel"); err != nil {
+		t.Skipf("no clipboard tool available: %v", err)
+	}
+	if prevErr == nil {
+		t.Cleanup(func() {
+			if err := writeClipboard(prev); err != nil {
+				t.Logf("failed to restore clipboard: %v", err)
+			}
+		})
+	}
+
+	m := newTestModel("hello\nworld\n")
+	m.cursor = document.Pos{Line: 0, Col: 1}
+	m.sel = nil
+
+	m2, _ := executeYank(m)
+	got := m2.(Model)
+
+	text, err := readClipboard()
+	if err != nil {
+		t.Fatalf("readClipboard: %v", err)
+	}
+	if text != "e" {
+		t.Errorf("clipboard = %q, want %q", text, "e")
+	}
+	if got.sel != nil {
+		t.Error("executeYank should leave sel nil when there was no selection")
+	}
+}
+
 // TestExecuteRedoShiftsLSPOverlays is the redo counterpart of
 // TestExecuteUndoShiftsLSPOverlays.
 func TestExecuteRedoShiftsLSPOverlays(t *testing.T) {

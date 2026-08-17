@@ -297,6 +297,24 @@ func executeExtendLineStart(m Model) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// executeExtendCharForward extends the selection one character forward,
+// e.g. Shift+Right.
+func executeExtendCharForward(m Model) (tea.Model, tea.Cmd) {
+	m.applyToAllCursors(func(m *Model) {
+		m.extendCharForward()
+	})
+	return m, nil
+}
+
+// executeExtendCharBackward extends the selection one character backward,
+// e.g. Shift+Left.
+func executeExtendCharBackward(m Model) (tea.Model, tea.Cmd) {
+	m.applyToAllCursors(func(m *Model) {
+		m.extendCharBackward()
+	})
+	return m, nil
+}
+
 func executeSelectLine(m Model) (tea.Model, tea.Cmd) {
 	m.applyToAllCursors(func(m *Model) {
 		m.selectLine()
@@ -356,7 +374,11 @@ func executeChangeSelection(m Model) (tea.Model, tea.Cmd) {
 }
 
 func executeYank(m Model) (tea.Model, tea.Cmd) {
-	if text := m.selectedText(); text != "" {
+	text := m.selectedText()
+	if m.sel == nil {
+		text = m.charUnderCursor()
+	}
+	if text != "" {
 		if err := writeClipboard(text); err != nil {
 			m = m.pushStatus("clipboard: " + err.Error())
 		} else {

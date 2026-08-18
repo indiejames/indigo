@@ -2,6 +2,8 @@ package client
 
 import (
 	"testing"
+
+	"github.com/indiejames/indigo/internal/document"
 )
 
 // TestOrganizeImportsAppliesEdits verifies a successful organizeImportsMsg
@@ -66,6 +68,37 @@ func TestOrganizeImportsErrShowsStatus(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Error("expected a nil cmd for an error result")
+	}
+}
+
+// TestOrganizeImportsDiscardsStaleBufVersion verifies a result whose edits
+// were computed against the buffer's content at request time is discarded
+// (not applied at now-wrong positions) if the buffer was edited — locally
+// or via a remote op — before the response arrived, even though bufID
+// still matches (same buffer, just changed underneath the in-flight
+// request).
+func TestOrganizeImportsDiscardsStaleBufVersion(t *testing.T) {
+	m := newTestModel("package main\n")
+	m.bufID = 1
+	staleVersion := m.buf.Version()
+
+	// Simulate an edit landing on the same buffer while the request was
+	// in flight.
+	m.buf.Apply(document.Op{Type: document.OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "// edited\n"})
+
+	edits := []ClientLspEdit{{FromLine: 0, FromCol: 0, ToLine: 0, ToCol: 7, NewText: "changed"}}
+	m2, cmd := m.Update(organizeImportsMsg{bufID: 1, bufVersion: staleVersion, edits: edits})
+	got := m2.(Model)
+
+	want := "// edited\npackage main\n"
+	if got.buf.Content() != want {
+		t.Errorf("buf.Content() = %q, want %q (stale-position edits must not be applied)", got.buf.Content(), want)
+	}
+	if got.status == "" {
+		t.Error("expected a non-empty status explaining the result was discarded")
+	}
+	if cmd != nil {
+		t.Error("expected a nil cmd for a discarded stale-version result")
 	}
 }
 

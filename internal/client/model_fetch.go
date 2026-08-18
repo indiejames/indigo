@@ -324,11 +324,12 @@ func (m Model) doRenameSymbol(newName string) tea.Cmd {
 func (m Model) doOrganizeImports() tea.Cmd {
 	rpc := m.rpc
 	bufID := m.bufID
+	bufVersion := m.buf.Version()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		edits, err := rpc.LspOrganizeImports(ctx, bufID)
-		return organizeImportsMsg{bufID: bufID, edits: edits, err: err}
+		return organizeImportsMsg{bufID: bufID, bufVersion: bufVersion, edits: edits, err: err}
 	}
 }
 

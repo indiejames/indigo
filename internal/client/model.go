@@ -137,11 +137,18 @@ type moveFunctionDoneMsg struct {
 // organizeImportsMsg carries the result of an LSP "source.organizeImports"
 // request. bufID is checked against the current buffer before applying, so
 // a result that arrives after the user switched tabs/buffers is discarded
-// instead of mutating whatever buffer is now active.
+// instead of mutating whatever buffer is now active. bufVersion is checked
+// too: the edit positions were computed by the language server against the
+// buffer's content at request time, so even a same-buffer edit (local, or a
+// remote one arriving via updatesMsg) that lands before the response does
+// invalidates those coordinates just as much as switching buffers would —
+// document.Buffer.Version() increments on every Apply, local or remote, so
+// comparing it catches both.
 type organizeImportsMsg struct {
-	bufID uint32
-	edits []ClientLspEdit
-	err   error
+	bufID      uint32
+	bufVersion uint64
+	edits      []ClientLspEdit
+	err        error
 }
 
 // triggerCompletionMsg fires after the auto-trigger debounce delay. seq is the
@@ -1086,6 +1093,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case organizeImportsMsg:
 		if msg.bufID != m.bufID {
 			return m, nil // stale result from a previous buffer switch; discard
+		}
+		if msg.err == nil && len(msg.edits) > 0 && msg.bufVersion != m.buf.Version() {
+			// The buffer changed (locally or via a remote op) since the
+			// request was sent — the edits' positions no longer describe
+			// the current content and must not be applied blindly.
+			m = m.pushStatus("Organize Imports: buffer changed while waiting, discarded (try again)")
+			return m, nil
 		}
 		switch {
 		case msg.err != nil:

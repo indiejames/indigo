@@ -135,10 +135,15 @@ func TestExecuteDeleteSelectionCopiesToClipboard(t *testing.T) {
 	}
 }
 
-// TestExecuteDeleteSelectionNoSelectionCopiesCharUnderCursor mirrors
-// TestExecuteYankNoSelectionCopiesCharUnderCursor for d's cut fallback.
-func TestExecuteDeleteSelectionNoSelectionCopiesCharUnderCursor(t *testing.T) {
-	fakeClipboardContent = ""
+// TestExecuteDeleteSelectionNoSelectionDoesNotTouchClipboard is a regression
+// test: d/c with no explicit selection still deletes the character under the
+// cursor, but must no longer copy it to the clipboard. It used to (mirroring
+// executeYank's no-selection fallback), which meant a run of bare `d`
+// presses to delete several characters flooded the clipboard with one
+// single-character entry per keypress. Copying a single character on
+// purpose is still available via `y` (see TestExecuteYankNoSelectionCopiesCharUnderCursor).
+func TestExecuteDeleteSelectionNoSelectionDoesNotTouchClipboard(t *testing.T) {
+	fakeClipboardContent = "unchanged"
 	m := newTestModel("hello\n")
 	m.rpc = &RPC{}
 	m.cursor = document.Pos{Line: 0, Col: 1}
@@ -147,8 +152,8 @@ func TestExecuteDeleteSelectionNoSelectionCopiesCharUnderCursor(t *testing.T) {
 	m2, _ := executeDeleteSelection(m)
 	got := m2.(Model)
 
-	if fakeClipboardContent != "e" {
-		t.Errorf("clipboard = %q, want %q", fakeClipboardContent, "e")
+	if fakeClipboardContent != "unchanged" {
+		t.Errorf("clipboard = %q, want unchanged", fakeClipboardContent)
 	}
 	if got.buf.Line(0) != "hllo" {
 		t.Errorf("Line(0) = %q, want %q", got.buf.Line(0), "hllo")

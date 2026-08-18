@@ -204,16 +204,23 @@ func (m Model) deleteSelection() (Model, tea.Cmd) {
 	return m.deleteSelectionRaw()
 }
 
-// cutText returns the text that deleteSelectionRaw would remove for the
-// current cursor/selection state, without mutating anything. Shared by
-// deleteSelection (single-cursor cut, one clipboard write) and
-// deleteAllCursorSelections (which must combine every cursor's text into one
-// clipboard write before any of them delete, since each deleteSelectionRaw
-// call changes the buffer other cursors' text would otherwise still need).
+// cutText returns the text that should be copied to the clipboard for the
+// current cursor/selection state, without mutating anything. Deliberately
+// returns ok=false when there is no explicit selection (m.sel == nil): d/c
+// with no selection still deletes the character under the cursor (see
+// deleteSelectionRaw), but repeatedly doing so — e.g. a run of bare `d`
+// presses to delete several characters — used to also flood the clipboard
+// with one single-character entry per keypress. Copying the character under
+// the cursor is still available on request via `y` (executeYank), which
+// keeps its own no-selection fallback since selecting a single character to
+// yank it is comparatively awkward. Shared by deleteSelection (single-cursor
+// cut, one clipboard write) and deleteAllCursorSelections (which must
+// combine every cursor's text into one clipboard write before any of them
+// delete, since each deleteSelectionRaw call changes the buffer other
+// cursors' text would otherwise still need).
 func (m Model) cutText() (string, bool) {
 	if m.sel == nil {
-		text := m.charUnderCursor()
-		return text, text != ""
+		return "", false
 	}
 	return m.textForSelection(m.sel), true
 }

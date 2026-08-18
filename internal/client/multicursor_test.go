@@ -309,20 +309,27 @@ func TestDeleteAllCursorSelectionsCombinesClipboardText(t *testing.T) {
 	}
 }
 
-// TestDeleteAllCursorSelectionsNoSelectionCombinesCharsUnderCursor verifies
-// the no-selection case (each cursor cuts the single character under it)
-// also combines across cursors rather than losing all but one.
-func TestDeleteAllCursorSelectionsNoSelectionCombinesCharsUnderCursor(t *testing.T) {
-	fakeClipboardContent = ""
+// TestDeleteAllCursorSelectionsNoSelectionDoesNotTouchClipboard is a
+// regression test mirroring TestExecuteDeleteSelectionNoSelectionDoesNotTouchClipboard
+// for the multi-cursor path: when no cursor has an explicit selection, each
+// cursor still deletes the character under it, but none of that text should
+// reach the clipboard (it used to combine and write it, flooding the
+// clipboard on a run of bare multi-cursor deletes just like the
+// single-cursor case did).
+func TestDeleteAllCursorSelectionsNoSelectionDoesNotTouchClipboard(t *testing.T) {
+	fakeClipboardContent = "unchanged"
 	m := newTestModel("abc\ndef\n")
 	m.rpc = &RPC{}
 	m.cursor = document.Pos{Line: 0, Col: 0}
 	m.extraCursors = []ExtraCursor{{pos: document.Pos{Line: 1, Col: 0}}}
 
-	deleteAllCursorSelections(m)
+	m2, _ := deleteAllCursorSelections(m)
 
-	if fakeClipboardContent != "a\nd" {
-		t.Errorf("clipboard = %q, want %q (char under each cursor, in document order)", fakeClipboardContent, "a\nd")
+	if fakeClipboardContent != "unchanged" {
+		t.Errorf("clipboard = %q, want unchanged", fakeClipboardContent)
+	}
+	if m2.buf.Line(0) != "bc" || m2.buf.Line(1) != "ef" {
+		t.Errorf("Line(0)=%q Line(1)=%q, want %q and %q (char under each cursor still deleted)", m2.buf.Line(0), m2.buf.Line(1), "bc", "ef")
 	}
 }
 

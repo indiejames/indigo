@@ -19,6 +19,7 @@ Syntax highlighting is provided via Tree-sitter grammars and is available for th
 | `.ex` `.exs` | Elixir |
 | `.elm` | Elm |
 | `.erl` `.hrl` | Erlang |
+| `.fish` | Fish |
 | `.gd` | GDScript |
 | `.gleam` | Gleam |
 | `.go` | Go |

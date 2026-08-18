@@ -56,6 +56,51 @@ func TestFindCommandEmpty(t *testing.T) {
 	}
 }
 
+// --- Save As ---
+
+func TestSpaceMenuSaveAsPrefillsCurrentPath(t *testing.T) {
+	m := newTestModel("hello\n")
+	m.filePath = "/tmp/existing.go"
+
+	cmd, ok := findCommand([]string{" ", "S"})
+	if !ok {
+		t.Fatal("findCommand(' ','S') should return ok=true")
+	}
+	if cmd.label != "Save As" {
+		t.Errorf("cmd.label = %q, want %q", cmd.label, "Save As")
+	}
+
+	m2, tcmd := cmd.execute(m)
+	if tcmd == nil {
+		t.Fatal("Save As execute should return a command")
+	}
+	msg := tcmd()
+	m3, _ := m2.Update(msg)
+	got := m3.(Model)
+
+	if got.saveAsInput == nil {
+		t.Fatal("saveAsInput should be set after saveAsPromptMsg")
+	}
+	if *got.saveAsInput != "/tmp/existing.go" {
+		t.Errorf("saveAsInput = %q, want %q", *got.saveAsInput, "/tmp/existing.go")
+	}
+}
+
+func TestSaveAsPromptEmptyForUntitledBuffer(t *testing.T) {
+	m := newTestModel("hello\n")
+	m.filePath = ""
+
+	m2, _ := m.Update(saveAsPromptMsg{})
+	got := m2.(Model)
+
+	if got.saveAsInput == nil {
+		t.Fatal("saveAsInput should be set after saveAsPromptMsg")
+	}
+	if *got.saveAsInput != "" {
+		t.Errorf("saveAsInput = %q, want empty for untitled buffer", *got.saveAsInput)
+	}
+}
+
 // --- handleNormal movement ---
 
 func TestHandleNormalMoveDown(t *testing.T) {

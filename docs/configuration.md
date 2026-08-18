@@ -253,6 +253,69 @@ Multi-key sequences (the `g`, `m`, `M`, `s`, `~`, `[`, `]`, and Space menus, plu
 others added later) aren't individually overridable — only the single-key
 actions listed above and in the table below.
 
+### Multi-key menus
+
+Press the first key, then the second, to run one of these. Unlike the single-key actions
+above, these aren't config-rebindable.
+
+`g` — Go:
+
+| Key | Action | Key | Action |
+| --- | --- | --- | --- |
+| `g` | Go to top of file | `e` | Go to end of file |
+| `d` | Go to definition | `h` | Go to line start |
+| `l` | Go to line end | `s` | Go to symbol in project |
+| `S` | Go to symbol in file | `r` | Find references |
+| `b` | Open buffer picker | | |
+
+`]` — Next: `b` Next buffer. `[` — Prev: `b` Previous buffer.
+
+`~` — Case conversion (acts on the current selection):
+
+| Key | Action | Key | Action |
+| --- | --- | --- | --- |
+| `s` | snake_case | `S` | SCREAMING_SNAKE_CASE |
+| `c` | camelCase | `p` | PascalCase |
+| `k` | kebab-case | `d` | dot.case |
+
+`M` — Move: `j` Move line(s) down, `k` Move line(s) up.
+
+`s` — Sort: `a` Sort lines ascending, `d` Sort lines descending.
+
+`m` — Match:
+
+| Key | Action |
+| --- | --- |
+| `m` | Go to matching bracket |
+| `i` | Select inside object (submenu, see below) |
+| `a` | Select around object (submenu, see below) |
+
+`mi`/`ma` submenus (select inside/around):
+
+| Key | Object | Key | Object |
+| --- | --- | --- | --- |
+| `w` | Word | `s` | Whitespace |
+| `m` | Closest surrounding pair | `.` | Quote/delimiter pair |
+| `f` | Function | `t` | Type definition |
+| `a` | Argument/parameter | `c` | Comment |
+
+Space — Command menu:
+
+| Key | Action | Key | Action |
+| --- | --- | --- | --- |
+| `s` | Search & Replace | `S` | Save As |
+| `p` | Symbol picker | `f` | File picker |
+| `l` | Message Log | `n` | New file |
+| `a` | Code Actions (fixes & refactors) | `r` | Refactor: Rename Symbol |
+| `m` | Refactor: Move Function to File | | |
+
+`S` opens a dialog pre-filled with the buffer's current path (blank for an unsaved
+buffer) — edit it and press Enter to write the buffer to that path and switch the
+buffer to it, or Esc to cancel. `:w <path>` / `:wq <path>` do the same from command mode.
+
+Plugins can contribute their own entries (and submenus) to the Command menu via
+`plugin.toml`'s `menu_item`; these are merged in at runtime and aren't listed here.
+
 ### Insert-mode actions (default key)
 
 | Action | Default key | Action | Default key |

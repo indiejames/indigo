@@ -255,6 +255,9 @@ var commandMenuRoot = command{
 		{key: "s", label: "Search & Replace", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return OpenSearchReplaceMsg{} }
 		}},
+		{key: "S", label: "Save As", execute: func(m Model) (tea.Model, tea.Cmd) {
+			return m, func() tea.Msg { return saveAsPromptMsg{} }
+		}},
 		{key: "p", label: "Symbol picker", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return OpenSymbolPickerMsg{BufID: m.bufID} }
 		}},

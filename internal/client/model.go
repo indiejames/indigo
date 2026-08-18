@@ -134,6 +134,16 @@ type moveFunctionDoneMsg struct {
 	err      error
 }
 
+// organizeImportsMsg carries the result of an LSP "source.organizeImports"
+// request. bufID is checked against the current buffer before applying, so
+// a result that arrives after the user switched tabs/buffers is discarded
+// instead of mutating whatever buffer is now active.
+type organizeImportsMsg struct {
+	bufID uint32
+	edits []ClientLspEdit
+	err   error
+}
+
 // triggerCompletionMsg fires after the auto-trigger debounce delay. seq is the
 // completionSeq captured when it was scheduled; a stale seq (a newer keystroke
 // has since been typed) is ignored so a burst of typing causes one fetch.
@@ -1072,6 +1082,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.pushStatus(fmt.Sprintf("Moved function to %s", msg.destPath))
 		}
 		return m, nil
+
+	case organizeImportsMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
+		switch {
+		case msg.err != nil:
+			m = m.pushStatus(fmt.Sprintf("E: organize imports failed: %v", msg.err))
+			return m, nil
+		case len(msg.edits) == 0:
+			m = m.pushStatus("Organize Imports: nothing to change (no language server for this file, or not supported)")
+			return m, nil
+		default:
+			m, cmd := applyLspEdits(m, msg.edits)
+			return m.pushStatus("Organized imports"), cmd
+		}
 
 	case triggerCompletionMsg:
 		if msg.seq != m.completionSeq {

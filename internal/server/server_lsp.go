@@ -875,6 +875,64 @@ func (s *editorService) LspCodeActions(_ context.Context, call proto.EditorServi
 	return nil
 }
 
+// LspOrganizeImports requests "source.organizeImports" from bufId's
+// language server over the whole file and returns the resulting edits (if
+// any) for the client to apply itself — mirrors LspCodeActions' edit
+// extraction/conversion rather than applying server-side, so the change
+// goes through the client's normal undo-aware batch path like every other
+// LSP-edit-producing command.
+func (s *editorService) LspOrganizeImports(_ context.Context, call proto.EditorService_lspOrganizeImports) error {
+	bufID := call.Args().BufId()
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	path := entry.buf.Path()
+	lineCount := entry.buf.LineCount()
+	s.mu.Unlock()
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+
+	actions, err := s.lspMgr.OrganizeImports(path, lineCount)
+	if err != nil || len(actions) == 0 {
+		return err
+	}
+
+	uri := "file://" + path
+	var edits []lsp.TextEdit
+	for _, a := range actions {
+		if e := lspEditsForURI(a.Edit, uri); len(e) > 0 {
+			edits = e
+			break
+		}
+	}
+	if len(edits) == 0 {
+		return nil
+	}
+
+	el, err := res.NewEdits(int32(len(edits)))
+	if err != nil {
+		return err
+	}
+	for j, e := range edits {
+		ev := el.At(j)
+		ev.SetFromLine(uint32(e.Range.Start.Line))
+		ev.SetFromCol(uint32(e.Range.Start.Character))
+		ev.SetToLine(uint32(e.Range.End.Line))
+		ev.SetToCol(uint32(e.Range.End.Character))
+		if err := ev.SetNewText(e.NewText); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // lspEditsByURI groups edit's per-file TextEdits by URI, preferring
 // documentChanges (used by gopls) over the legacy changes map — mirrors
 // lspEditsForURI but collects every file touched, not just one.

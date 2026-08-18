@@ -499,6 +499,35 @@ func (c *Client) CodeActions(path string, startLine, startCol, endLine, endCol i
 	return actions, nil
 }
 
+// OrganizeImports requests "source.organizeImports" code actions for path
+// over its full range (0,0)-(lineCount,0). Unlike CodeActions this sends no
+// diagnostics and instead restricts the response via Only, since organize-
+// imports is a source action most servers only return when explicitly
+// requested that way, not incidentally alongside diagnostic-driven fixes.
+func (c *Client) OrganizeImports(path string, lineCount int) ([]CodeAction, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rng := Range{
+		Start: Position{Line: 0, Character: 0},
+		End:   Position{Line: lineCount, Character: 0},
+	}
+	raw, err := c.conn.Call(ctx, "textDocument/codeAction", CodeActionParams{
+		TextDocument: TextDocumentIdentifier{URI: pathToURI(path)},
+		Range:        rng,
+		Context:      CodeActionContext{Only: []string{"source.organizeImports"}},
+	})
+	if err != nil || string(raw) == "null" {
+		return nil, err
+	}
+	var actions []CodeAction
+	if err := json.Unmarshal(raw, &actions); err != nil {
+		return nil, err
+	}
+	c.resolveCodeActions(actions)
+	return actions, nil
+}
+
 // resolveCodeActions fills in the Edit for any action that came back without
 // one, via codeAction/resolve. Many servers (gopls included) return
 // "expensive" actions like Extract Function/Extract Variable with no edit

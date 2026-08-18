@@ -307,7 +307,7 @@ Space — Command menu:
 | `p` | Symbol picker | `f` | File picker |
 | `l` | Message Log | `n` | New file |
 | `a` | Code Actions (fixes & refactors) | `r` | Refactor: Rename Symbol |
-| `m` | Refactor: Move Function to File | | |
+| `m` | Refactor: Move Function to File | `i` | Organize Imports |
 
 `S` opens a dialog pre-filled with the buffer's current path (blank for an unsaved
 buffer) — edit it and press Enter to write the buffer to that path and switch the

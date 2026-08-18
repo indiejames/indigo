@@ -167,15 +167,16 @@ type registeredPlugin struct {
 	// reaping completing instead of polling for the process to disappear.
 	reapDone <-chan struct{}
 
-	mu             sync.RWMutex
-	keyBindings    map[string]pluginproto.KeyHandler
-	insertHooks    map[string]pluginproto.KeyHandler
-	commands       map[string]pluginproto.CommandHandler
-	menuActions    map[string]pluginproto.KeyHandler
-	bufHandler     pluginproto.BufferEventHandler
-	decorProvider  pluginproto.DecorationProvider
-	actionProvider pluginproto.ActionProvider
-	editHandler    pluginproto.EditEventHandler
+	mu                 sync.RWMutex
+	keyBindings        map[string]pluginproto.KeyHandler
+	insertHooks        map[string]pluginproto.KeyHandler
+	commands           map[string]pluginproto.CommandHandler
+	menuActions        map[string]pluginproto.KeyHandler
+	bufHandler         pluginproto.BufferEventHandler
+	decorProvider      pluginproto.DecorationProvider
+	actionProvider     pluginproto.ActionProvider
+	completionProvider pluginproto.CompletionProvider
+	editHandler        pluginproto.EditEventHandler
 
 	// menuItems is this plugin's declared Command-menu tree, read once from
 	// the manifest at startup (static — not affected by RegisterMenuAction).
@@ -200,6 +201,7 @@ func (p *registeredPlugin) release() {
 	p.bufHandler.Release()
 	p.decorProvider.Release()
 	p.actionProvider.Release()
+	p.completionProvider.Release()
 	p.editHandler.Release()
 }
 
@@ -818,6 +820,197 @@ func (m *Manager) ApplyAction(ctx context.Context, pluginName string, bufID, lin
 	defer rel()
 	_, err := fut.Struct()
 	return err
+}
+
+// PluginCompletion is one completion candidate returned by a plugin's
+// CompletionProvider, merged into the editor's LSP-sourced completion list.
+type PluginCompletion struct {
+	Label      string
+	Kind       uint8
+	Detail     string
+	InsertText string
+	SortText   string
+	FilterText string
+	// TextEdit, when non-nil, is the authoritative replace range for accepting
+	// this item. Preferred over InsertText.
+	TextEdit *TextEdit
+	// Data is an opaque token round-tripped to ResolveCompletion unchanged.
+	Data string
+	// PluginName is which plugin supplied this item, needed to route
+	// ResolveCompletion back to the right provider.
+	PluginName string
+}
+
+// completionFromPluginProto decodes a pluginproto.CompletionItem into a
+// PluginCompletion, tagging it with the owning plugin's name.
+func completionFromPluginProto(it pluginproto.CompletionItem, pluginName string) PluginCompletion {
+	label, _ := it.Label()
+	detail, _ := it.Detail()
+	insert, _ := it.InsertText()
+	sortText, _ := it.SortText()
+	filterText, _ := it.FilterText()
+	data, _ := it.Data()
+	c := PluginCompletion{
+		Label: label, Kind: it.Kind(), Detail: detail, InsertText: insert,
+		SortText: sortText, FilterText: filterText, Data: data,
+		PluginName: pluginName,
+	}
+	if it.HasTextEdit() {
+		if te, err := it.TextEdit(); err == nil {
+			from, _ := te.From()
+			to, _ := te.To()
+			newText, _ := te.NewText()
+			c.TextEdit = &TextEdit{
+				FromLine: from.Line(), FromCol: from.Col(),
+				ToLine: to.Line(), ToCol: to.Col(),
+				NewText: newText,
+			}
+		}
+	}
+	return c
+}
+
+// GetCompletions calls every registered CompletionProvider for (bufID, line,
+// col) and aggregates the results. Each provider gets a bounded timeout since
+// this runs synchronously on the completion-popup request path — a provider
+// backed by something slow (a registry lookup, a network call) should serve
+// from a local cache and refresh it in the background, blocking only briefly
+// (well under this timeout) for an in-flight refresh so the very first
+// request for a given key has a real chance of returning actual data instead
+// of always coming back empty. resolveCompletion's per-item deferral doesn't
+// help here — it only ever runs for the one item the user has already
+// accepted, not for producing the candidate list itself.
+func (m *Manager) GetCompletions(ctx context.Context, bufID, line, col uint32) []PluginCompletion {
+	m.mu.Lock()
+	providers := make([]struct {
+		name     string
+		provider pluginproto.CompletionProvider
+	}, 0, len(m.plugins))
+	for _, p := range m.plugins {
+		p.mu.RLock()
+		if p.completionProvider.IsValid() {
+			providers = append(providers, struct {
+				name     string
+				provider pluginproto.CompletionProvider
+			}{name: p.name, provider: p.completionProvider.AddRef()})
+		}
+		p.mu.RUnlock()
+	}
+	m.mu.Unlock()
+
+	var all []PluginCompletion
+	for _, entry := range providers {
+		tctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		fut, rel := entry.provider.GetCompletions(tctx, func(ps pluginproto.CompletionProvider_getCompletions_Params) error {
+			ps.SetBufId(bufID)
+			ps.SetLine(line)
+			ps.SetCol(col)
+			return nil
+		})
+		res, err := fut.Struct()
+		cancel()
+		if err == nil {
+			if rawList, lerr := res.Items(); lerr == nil {
+				for i := range rawList.Len() {
+					all = append(all, completionFromPluginProto(rawList.At(i), entry.name))
+				}
+			}
+		}
+		rel()
+		entry.provider.Release()
+	}
+	return all
+}
+
+// ResolveCompletion calls the named plugin's CompletionProvider.resolveCompletion
+// for item, returning item unchanged if the plugin has no provider registered
+// (e.g. it was unloaded between GetCompletions and the user accepting) or the
+// call fails.
+func (m *Manager) ResolveCompletion(ctx context.Context, pluginName string, item PluginCompletion) PluginCompletion {
+	m.mu.Lock()
+	var provider pluginproto.CompletionProvider
+	for _, p := range m.plugins {
+		if p.name == pluginName {
+			p.mu.RLock()
+			if p.completionProvider.IsValid() {
+				provider = p.completionProvider.AddRef()
+			}
+			p.mu.RUnlock()
+			break
+		}
+	}
+	m.mu.Unlock()
+
+	if !provider.IsValid() {
+		return item
+	}
+	defer provider.Release()
+
+	tctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	fut, rel := provider.ResolveCompletion(tctx, func(ps pluginproto.CompletionProvider_resolveCompletion_Params) error {
+		ci, err := ps.NewItem()
+		if err != nil {
+			return err
+		}
+		return writePluginCompletionItem(ci, item)
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return item
+	}
+	out, err := res.Item()
+	if err != nil {
+		return item
+	}
+	return completionFromPluginProto(out, pluginName)
+}
+
+// writePluginCompletionItem serializes a PluginCompletion into its capnp form
+// for the outbound resolveCompletion call.
+func writePluginCompletionItem(dst pluginproto.CompletionItem, src PluginCompletion) error {
+	if err := dst.SetLabel(src.Label); err != nil {
+		return err
+	}
+	dst.SetKind(src.Kind)
+	if err := dst.SetDetail(src.Detail); err != nil {
+		return err
+	}
+	if err := dst.SetInsertText(src.InsertText); err != nil {
+		return err
+	}
+	if err := dst.SetSortText(src.SortText); err != nil {
+		return err
+	}
+	if err := dst.SetFilterText(src.FilterText); err != nil {
+		return err
+	}
+	if err := dst.SetData(src.Data); err != nil {
+		return err
+	}
+	if src.TextEdit != nil {
+		te, err := dst.NewTextEdit()
+		if err != nil {
+			return err
+		}
+		from, err := te.NewFrom()
+		if err != nil {
+			return err
+		}
+		from.SetLine(src.TextEdit.FromLine)
+		from.SetCol(src.TextEdit.FromCol)
+		to, err := te.NewTo()
+		if err != nil {
+			return err
+		}
+		to.SetLine(src.TextEdit.ToLine)
+		to.SetCol(src.TextEdit.ToCol)
+		if err := te.SetNewText(src.TextEdit.NewText); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DispatchEditEvent fires linesChanged on all plugins that registered an edit handler.

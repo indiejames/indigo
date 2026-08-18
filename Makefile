@@ -126,7 +126,23 @@ install-bookmarks: build-bookmarks
 uninstall-bookmarks:
 	rm -rf $(BOOKMARKS_INSTALL)
 
-build-plugins: build-jumpy build-spell build-git build-bookmarks
+NPM_VERSIONS_DIR     := $(PLUGINS_DIR)/npm-versions
+NPM_VERSIONS_OUT     := $(NPM_VERSIONS_DIR)/npm-versions-$(GOOS)-$(GOARCH)
+NPM_VERSIONS_INSTALL := $(HOME)/.config/indigo/plugins/npm-versions
+
+build-npm-versions:
+	go build -o $(NPM_VERSIONS_OUT) ./$(NPM_VERSIONS_DIR)
+
+install-npm-versions: build-npm-versions
+	mkdir -p $(NPM_VERSIONS_INSTALL)
+	mv $(NPM_VERSIONS_OUT) $(NPM_VERSIONS_INSTALL)/
+	cp $(NPM_VERSIONS_DIR)/plugin.toml $(NPM_VERSIONS_INSTALL)/
+	$(NPM_VERSIONS_INSTALL)/npm-versions-$(GOOS)-$(GOARCH) --warm
+
+uninstall-npm-versions:
+	rm -rf $(NPM_VERSIONS_INSTALL)
+
+build-plugins: build-jumpy build-spell build-git build-bookmarks build-npm-versions
 
 CLAUDE_DIR := $(PLUGINS_DIR)/indigo-claude
 CLAUDE_OUT := $(CLAUDE_DIR)/indigo-claude
@@ -145,5 +161,6 @@ uninstall-claude:
         build-spell install-spell uninstall-spell \
         build-git install-git uninstall-git \
         build-bookmarks install-bookmarks uninstall-bookmarks \
+        build-npm-versions install-npm-versions uninstall-npm-versions \
         build-plugins \
         build-claude install-claude uninstall-claude

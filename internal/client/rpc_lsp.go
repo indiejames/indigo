@@ -53,6 +53,10 @@ type ClientCompletion struct {
 	// AdditionalEdits are edits to apply elsewhere when this item is accepted
 	// (the auto-import line). Empty until ResolveCompletion fills them in.
 	AdditionalEdits []ClientLspEdit
+	// Source is empty for a language-server-provided item, or the name of the
+	// plugin that supplied it. Round-tripped through ResolveCompletion so the
+	// server knows whether to resolve via the language server or the plugin.
+	Source string
 }
 
 // DiagnosticsResult bundles diagnostics with the server's lspReady flag.
@@ -192,9 +196,10 @@ func completionFromProto(it proto.CompletionItem) ClientCompletion {
 	insert, _ := it.InsertText()
 	sortText, _ := it.SortText()
 	filterText, _ := it.FilterText()
+	source, _ := it.Source()
 	c := ClientCompletion{
 		Label: label, Detail: detail, InsertText: insert, Kind: it.Kind(),
-		SortText: sortText, FilterText: filterText,
+		SortText: sortText, FilterText: filterText, Source: source,
 	}
 	if data, err := it.Data(); err == nil && len(data) > 0 {
 		c.Data = append([]byte(nil), data...)
@@ -245,6 +250,9 @@ func (r *RPC) ResolveCompletion(ctx context.Context, bufID uint32, item ClientCo
 			return err
 		}
 		if err := ci.SetInsertText(item.InsertText); err != nil {
+			return err
+		}
+		if err := ci.SetSource(item.Source); err != nil {
 			return err
 		}
 		if len(item.Data) > 0 {

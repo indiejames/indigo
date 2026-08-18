@@ -176,6 +176,19 @@ func (s *editorApiServer) RegisterActionProvider(_ context.Context, call pluginp
 	return err
 }
 
+func (s *editorApiServer) RegisterCompletionProvider(_ context.Context, call pluginproto.EditorApi_registerCompletionProvider) error {
+	provider := call.Args().Provider()
+	if !provider.IsValid() {
+		return fmt.Errorf("invalid completion provider")
+	}
+	s.reg.mu.Lock()
+	s.reg.completionProvider.Release()
+	s.reg.completionProvider = provider.AddRef()
+	s.reg.mu.Unlock()
+	_, err := call.AllocResults()
+	return err
+}
+
 // -- Editor effect methods --
 
 func (s *editorApiServer) ApplyEdit(_ context.Context, call pluginproto.EditorApi_applyEdit) error {

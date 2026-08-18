@@ -98,6 +98,8 @@ Decoration updates (gutter annotations, overlays, status bar items) are polled b
 
 Overlay decorations are rendered in a single pass through each visible line's runes — labels are injected directly at their target column during the normal character-rendering loop, with no ANSI post-processing. Rendering cost is O(visible_lines × line_width) regardless of how many overlay decorations the plugin returns, so a plugin returning 500 overlays costs no more than one returning 5.
 
+`getCompletions` runs synchronously on every completion-popup request (the editor's own LSP-driven completions go through the identical `Complete` RPC, so a plugin's items are merged into that same list, each tagged with the plugin's name via the item's `source` field), under a bounded per-provider timeout (500ms) — a provider backed by something slow (a registry lookup, a network call) should cache results and refresh them in the background, but block *briefly* for an in-flight refresh rather than always returning empty on a cold cache: the `npm-versions` example plugin (`plugins/npm-versions`) does this — a cache miss kicks off a background fetch to `registry.npmjs.org` and waits up to ~400ms for it before falling back to "nothing yet", so the common case (a fast registry response) already has real versions to show on the very first request, not just once a second keystroke lands after the fetch quietly finished. `resolveCompletion` is a different, narrower deferral: it only ever runs once, for the single item the user has already chosen to accept, to fill in something too expensive to compute for every candidate up front (e.g. full documentation text) — it round-trips the item's opaque `data` token so the plugin can identify which candidate is being resolved, and the editor routes a `resolveCompletion` request to the language server or the right plugin based on the item's `source` field. It doesn't help with producing the candidate list itself, which is what `getCompletions` alone is responsible for.
+
 ## What plugins can do
 
 ### UI contributions
@@ -126,6 +128,7 @@ Overlay decorations are rendered in a single pass through each visible line's ru
 | Register insert hook | Receive asynchronous notification when a specific character is typed in insert mode |
 | Register menu action | Contribute an item to the space Command menu (invoked by selection, never bound to a physical key) |
 | Register action provider | Contribute context-sensitive actions to the Shift+F popup |
+| Register completion provider | Contribute candidates to the completion popup, merged with the buffer's language-server completions |
 
 ### Workspace access
 
@@ -176,6 +179,7 @@ interface EditorApi {
     registerBufferHandler  @3  (handler: BufferEventHandler) -> ();
     registerDecorations    @4  (provider: DecorationProvider) -> ();
     registerActionProvider @16 (provider: ActionProvider) -> ();
+    registerCompletionProvider @22 (provider: CompletionProvider) -> ();
     registerMenuAction     @20 (id: Text, handler: KeyHandler) -> ();
     registerEditHandler    @18 (handler: EditEventHandler) -> ();
 
@@ -223,6 +227,10 @@ interface DecorationProvider {
 interface ActionProvider {
     getActions  @0 (bufId: UInt32, line: UInt32, col: UInt32) -> (items: List(ActionItem));
     applyAction @1 (bufId: UInt32, line: UInt32, col: UInt32, index: UInt32) -> ();
+}
+interface CompletionProvider {
+    getCompletions    @0 (bufId: UInt32, line: UInt32, col: UInt32) -> (items: List(CompletionItem));
+    resolveCompletion @1 (item: CompletionItem) -> (item: CompletionItem);
 }
 interface PopupHandler {
     selected  @0 (data: Text) -> ();

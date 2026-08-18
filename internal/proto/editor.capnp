@@ -328,6 +328,10 @@ struct CompletionItem {
   # accepting this item (its range may cover more than the typed prefix, e.g.
   # the whole identifier when completing mid-word). Preferred over insertText.
   textEdit @8 :PluginEdit;
+  # source is empty for a language-server-provided item, or the name of the
+  # plugin that supplied it (see CompletionProvider in pluginproto/plugin.capnp).
+  # resolveCompletion uses this to route the resolve call to the right place.
+  source @9 :Text;
 }
 
 struct SemanticToken {

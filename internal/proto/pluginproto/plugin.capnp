@@ -28,6 +28,11 @@ interface EditorApi {
   # menu_item entries. The handler receives the same KeyContext/KeyResponse
   # shape as a normal-mode key handler (mode is always "normal").
   registerMenuAction @20 (id :Text, handler :KeyHandler)                   -> ();
+  # registerCompletionProvider registers a source of completion candidates for
+  # this plugin, merged into the same list the editor's LSP-driven completions
+  # populate (see docs/plugin-architecture.md). At most one provider per plugin;
+  # a later call replaces an earlier one.
+  registerCompletionProvider @22 (provider :CompletionProvider)           -> ();
 
   # -- Plugin-driven UI --
   # showPopup displays an interactive list; the handler is called when the user
@@ -107,6 +112,41 @@ struct ActionItem {
   fromCol  @3 :UInt32;
   toLine   @4 :UInt32;
   toCol    @5 :UInt32;
+}
+
+# CompletionProvider supplies completion candidates for a cursor position,
+# merged with the buffer's language-server completions into one list.
+interface CompletionProvider {
+  # getCompletions returns candidates for (bufId, line, col). Called on every
+  # completion request while the popup is open, so it should return quickly;
+  # anything slow (a registry lookup, a network call) belongs behind
+  # resolveCompletion instead, triggered only for the item the user is about
+  # to accept.
+  getCompletions    @0 (bufId :UInt32, line :UInt32, col :UInt32) -> (items :List(CompletionItem));
+  # resolveCompletion is called with the exact item returned by getCompletions
+  # (including its opaque data token) when the user is about to accept it,
+  # to fill in anything left out for speed (e.g. detail/documentation).
+  # Return the item unchanged if there's nothing to add.
+  resolveCompletion @1 (item :CompletionItem)                     -> (item :CompletionItem);
+}
+
+# CompletionItem is one candidate from a CompletionProvider.
+struct CompletionItem {
+  label      @0 :Text;
+  kind       @1 :UInt8;  # same LSP CompletionItemKind values the editor's own items use
+  detail     @2 :Text;
+  insertText @3 :Text;   # plain-text insert at the cursor; ignored when textEdit is set
+  # sortText/filterText drive client-side ranking/filtering; filterText falls
+  # back to label when empty.
+  sortText   @4 :Text;
+  filterText @5 :Text;
+  # textEdit, when present, is the authoritative replace range for accepting
+  # this item (e.g. replacing an entire partially-typed version string, not
+  # just inserting at the cursor). Preferred over insertText.
+  textEdit   @6 :TextEdit;
+  # data is an opaque token round-tripped to resolveCompletion unchanged, for
+  # the plugin to identify which candidate is being resolved.
+  data       @7 :Text;
 }
 
 # -- Supporting structs --

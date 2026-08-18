@@ -378,6 +378,62 @@ func (a *Api) RefreshDecorations(bufID uint32) {
 	}()
 }
 
+// CompletionItem is one completion candidate contributed to the editor's
+// completion popup, merged with any language-server-provided items.
+type CompletionItem struct {
+	Label      string
+	Kind       uint8 // LSP CompletionItemKind values, e.g. 1 = Text, 6 = Variable, 22 = Struct
+	Detail     string
+	InsertText string // plain-text insert at the cursor; ignored when TextEdit is set
+	// SortText/FilterText drive client-side ranking/filtering; FilterText
+	// falls back to Label when empty.
+	SortText   string
+	FilterText string
+	// TextEdit, when non-nil, is the authoritative replace range for accepting
+	// this item — e.g. replacing an entire partially-typed token rather than
+	// just inserting at the cursor. Preferred over InsertText.
+	TextEdit *TextEdit
+	// Data is an opaque token round-tripped to ResolveCompletion unchanged,
+	// letting you identify which candidate is being resolved. A non-empty Data
+	// with no ResolveCompletion handler is applied as-is; set Data only when
+	// you provide ResolveCompletion.
+	Data string
+}
+
+// CompletionHandlers groups the callbacks for a completion provider.
+// GetCompletions is required. ResolveCompletion is optional (nil = items from
+// GetCompletions are applied as-is, with no deferred fill-in step).
+type CompletionHandlers struct {
+	// GetCompletions returns candidates for the given cursor position. Called
+	// on every completion request while the popup is open, so it should
+	// return quickly; anything slow (a registry lookup, a network call)
+	// belongs behind ResolveCompletion instead.
+	GetCompletions func(bufID, line, col uint32) []CompletionItem
+	// ResolveCompletion is called with the exact item the user is about to
+	// accept (including its Data token) to fill in anything left out for
+	// speed. Return the item unchanged if there's nothing to add.
+	ResolveCompletion func(item CompletionItem) CompletionItem
+}
+
+// Completions registers fn as a simple completion provider with no resolve step.
+func (a *Api) Completions(fn func(bufID, line, col uint32) []CompletionItem) error {
+	return a.CompletionsFull(CompletionHandlers{GetCompletions: fn})
+}
+
+// CompletionsFull registers a completion provider that contributes candidates
+// to the editor's completion popup, merged with the buffer's language-server
+// completions. Plugins that don't need a deferred resolve step can leave
+// ResolveCompletion nil.
+func (a *Api) CompletionsFull(h CompletionHandlers) error {
+	srv := pluginproto.CompletionProvider_ServerToClient(&completionProviderServer{h: h})
+	fut, rel := a.api.RegisterCompletionProvider(context.Background(), func(p pluginproto.EditorApi_registerCompletionProvider_Params) error {
+		return p.SetProvider(srv)
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}
+
 // -- Editor effects --
 
 // ApplyEdit applies a sequence of text edits to a buffer.
@@ -928,6 +984,154 @@ func (s *actionProviderServer) ApplyAction(_ context.Context, call pluginproto.A
 	}
 	_, err := call.AllocResults()
 	return err
+}
+
+type completionProviderServer struct {
+	h CompletionHandlers
+}
+
+func (s *completionProviderServer) GetCompletions(_ context.Context, call pluginproto.CompletionProvider_getCompletions) error {
+	args := call.Args()
+	items := s.h.GetCompletions(args.BufId(), args.Line(), args.Col())
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	list, err := res.NewItems(int32(len(items)))
+	if err != nil {
+		return err
+	}
+	for i, it := range items {
+		if err := writeSDKCompletionItem(list.At(i), it); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *completionProviderServer) ResolveCompletion(_ context.Context, call pluginproto.CompletionProvider_resolveCompletion) error {
+	protoItem, err := call.Args().Item()
+	if err != nil {
+		return err
+	}
+	item, err := readSDKCompletionItem(protoItem)
+	if err != nil {
+		return err
+	}
+	if s.h.ResolveCompletion != nil {
+		item = s.h.ResolveCompletion(item)
+	}
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	out, err := res.NewItem()
+	if err != nil {
+		return err
+	}
+	return writeSDKCompletionItem(out, item)
+}
+
+// writeSDKCompletionItem serializes a CompletionItem into its capnp form.
+func writeSDKCompletionItem(dst pluginproto.CompletionItem, src CompletionItem) error {
+	if err := dst.SetLabel(src.Label); err != nil {
+		return err
+	}
+	dst.SetKind(src.Kind)
+	if err := dst.SetDetail(src.Detail); err != nil {
+		return err
+	}
+	if err := dst.SetInsertText(src.InsertText); err != nil {
+		return err
+	}
+	if err := dst.SetSortText(src.SortText); err != nil {
+		return err
+	}
+	if err := dst.SetFilterText(src.FilterText); err != nil {
+		return err
+	}
+	if err := dst.SetData(src.Data); err != nil {
+		return err
+	}
+	if src.TextEdit != nil {
+		te, err := dst.NewTextEdit()
+		if err != nil {
+			return err
+		}
+		from, err := te.NewFrom()
+		if err != nil {
+			return err
+		}
+		from.SetLine(src.TextEdit.From.Line)
+		from.SetCol(src.TextEdit.From.Col)
+		to, err := te.NewTo()
+		if err != nil {
+			return err
+		}
+		to.SetLine(src.TextEdit.To.Line)
+		to.SetCol(src.TextEdit.To.Col)
+		if err := te.SetNewText(src.TextEdit.NewText); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// readSDKCompletionItem reconstructs a CompletionItem from its capnp form, for
+// the inbound ResolveCompletion call.
+func readSDKCompletionItem(src pluginproto.CompletionItem) (CompletionItem, error) {
+	label, err := src.Label()
+	if err != nil {
+		return CompletionItem{}, err
+	}
+	detail, err := src.Detail()
+	if err != nil {
+		return CompletionItem{}, err
+	}
+	insert, err := src.InsertText()
+	if err != nil {
+		return CompletionItem{}, err
+	}
+	sortText, err := src.SortText()
+	if err != nil {
+		return CompletionItem{}, err
+	}
+	filterText, err := src.FilterText()
+	if err != nil {
+		return CompletionItem{}, err
+	}
+	data, err := src.Data()
+	if err != nil {
+		return CompletionItem{}, err
+	}
+	item := CompletionItem{
+		Label: label, Kind: src.Kind(), Detail: detail, InsertText: insert,
+		SortText: sortText, FilterText: filterText, Data: data,
+	}
+	if src.HasTextEdit() {
+		te, err := src.TextEdit()
+		if err != nil {
+			return CompletionItem{}, err
+		}
+		from, err := te.From()
+		if err != nil {
+			return CompletionItem{}, err
+		}
+		to, err := te.To()
+		if err != nil {
+			return CompletionItem{}, err
+		}
+		newText, err := te.NewText()
+		if err != nil {
+			return CompletionItem{}, err
+		}
+		item.TextEdit = &TextEdit{
+			From:    Position{Line: from.Line(), Col: from.Col()},
+			To:      Position{Line: to.Line(), Col: to.Col()},
+			NewText: newText,
+		}
+	}
+	return item, nil
 }
 
 func (s *decorProviderServer) ApplyFix(_ context.Context, call pluginproto.DecorationProvider_applyFix) error {

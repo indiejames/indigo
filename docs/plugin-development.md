@@ -177,6 +177,13 @@ are recomputed on every scroll/viewport change, so this runs often. `ReadLines` 
 way to do that; `ReadBuffer` (used in `jumpToNext`) reads the whole file and is fine for an
 occasional keypress but wasteful to call from a decoration provider.
 
+> Contributing to the completion popup (`api.Completions`/`api.CompletionsFull`) follows the
+> same shape as `Decorations` above — a fast callback the editor calls on every request,
+> plus an optional `ResolveCompletion` callback for anything too slow to run on every
+> keystroke (e.g. an npm registry lookup for package.json version completions). See
+> [plugin-architecture.md](plugin-architecture.md#what-plugins-can-do) and the `CompletionHandlers`
+> doc comment in `sdk/sdk.go` for the full shape.
+
 ## 6. Write `plugin.toml`
 
 ```toml

@@ -12,6 +12,7 @@ import (
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/format"
 	"github.com/indiejames/indigo/internal/lsp"
+	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
 
@@ -145,7 +146,7 @@ func (s *editorService) SignatureHelp(_ context.Context, call proto.EditorServic
 	return nil
 }
 
-func (s *editorService) Complete(_ context.Context, call proto.EditorService_complete) error {
+func (s *editorService) Complete(ctx context.Context, call proto.EditorService_complete) error {
 	args := call.Args()
 	bufID := args.BufId()
 	line := int(args.Line())
@@ -161,19 +162,29 @@ func (s *editorService) Complete(_ context.Context, call proto.EditorService_com
 	s.mu.Unlock()
 
 	items, err := s.lspMgr.Complete(path, line, col)
+	if err != nil {
+		items = nil
+	}
+	pluginItems := s.pluginMgr.GetCompletions(ctx, bufID, uint32(line), uint32(col))
+
 	res, rerr := call.AllocResults()
 	if rerr != nil {
 		return rerr
 	}
-	if err != nil || len(items) == 0 {
+	if len(items) == 0 && len(pluginItems) == 0 {
 		return nil
 	}
-	list, err := res.NewItems(int32(len(items)))
+	list, err := res.NewItems(int32(len(items) + len(pluginItems)))
 	if err != nil {
 		return err
 	}
 	for i, it := range items {
 		if err := writeCompletionItem(list.At(i), it); err != nil {
+			return err
+		}
+	}
+	for i, it := range pluginItems {
+		if err := writePluginCompletionItem(list.At(len(items)+i), it); err != nil {
 			return err
 		}
 	}
@@ -186,7 +197,7 @@ func (s *editorService) Complete(_ context.Context, call proto.EditorService_com
 // from the earlier Complete response, tells the language server which candidate
 // to resolve. On failure the item is returned unchanged so the client can still
 // apply the primary insert.
-func (s *editorService) ResolveCompletion(_ context.Context, call proto.EditorService_resolveCompletion) error {
+func (s *editorService) ResolveCompletion(ctx context.Context, call proto.EditorService_resolveCompletion) error {
 	args := call.Args()
 	bufID := args.BufId()
 
@@ -194,6 +205,27 @@ func (s *editorService) ResolveCompletion(_ context.Context, call proto.EditorSe
 	if err != nil {
 		return err
 	}
+
+	source, err := protoItem.Source()
+	if err != nil {
+		return err
+	}
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	out, err := res.NewItem()
+	if err != nil {
+		return err
+	}
+
+	if source != "" {
+		item := pluginCompletionFromProto(protoItem, source)
+		resolved := s.pluginMgr.ResolveCompletion(ctx, source, item)
+		return writePluginCompletionItem(out, resolved)
+	}
+
 	item, err := readCompletionItem(protoItem)
 	if err != nil {
 		return err
@@ -213,14 +245,6 @@ func (s *editorService) ResolveCompletion(_ context.Context, call proto.EditorSe
 		resolved = item
 	}
 
-	res, err := call.AllocResults()
-	if err != nil {
-		return err
-	}
-	out, err := res.NewItem()
-	if err != nil {
-		return err
-	}
 	return writeCompletionItem(out, resolved)
 }
 
@@ -312,6 +336,79 @@ func readCompletionItem(src proto.CompletionItem) (lsp.CompletionItem, error) {
 		item.Data = append(json.RawMessage(nil), data...)
 	}
 	return item, nil
+}
+
+// writePluginCompletionItem serializes a plugin.PluginCompletion (from a
+// plugin's CompletionProvider) into its proto form, tagging Source with the
+// owning plugin's name so a later resolveCompletion call knows to route to
+// the plugin manager instead of the language server.
+func writePluginCompletionItem(dst proto.CompletionItem, src plugin.PluginCompletion) error {
+	if err := dst.SetLabel(src.Label); err != nil {
+		return err
+	}
+	dst.SetKind(src.Kind)
+	if err := dst.SetDetail(src.Detail); err != nil {
+		return err
+	}
+	if err := dst.SetInsertText(src.InsertText); err != nil {
+		return err
+	}
+	if err := dst.SetSortText(src.SortText); err != nil {
+		return err
+	}
+	if err := dst.SetFilterText(src.FilterText); err != nil {
+		return err
+	}
+	if err := dst.SetSource(src.PluginName); err != nil {
+		return err
+	}
+	if src.Data != "" {
+		if err := dst.SetData([]byte(src.Data)); err != nil {
+			return err
+		}
+	}
+	if src.TextEdit != nil {
+		te, err := dst.NewTextEdit()
+		if err != nil {
+			return err
+		}
+		te.SetFromLine(src.TextEdit.FromLine)
+		te.SetFromCol(src.TextEdit.FromCol)
+		te.SetToLine(src.TextEdit.ToLine)
+		te.SetToCol(src.TextEdit.ToCol)
+		if err := te.SetNewText(src.TextEdit.NewText); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pluginCompletionFromProto reconstructs a plugin.PluginCompletion from a proto
+// CompletionItem known to have come from (or be destined for) the named plugin,
+// for the resolveCompletion round trip.
+func pluginCompletionFromProto(src proto.CompletionItem, pluginName string) plugin.PluginCompletion {
+	label, _ := src.Label()
+	detail, _ := src.Detail()
+	insert, _ := src.InsertText()
+	sortText, _ := src.SortText()
+	filterText, _ := src.FilterText()
+	data, _ := src.Data()
+	c := plugin.PluginCompletion{
+		Label: label, Kind: src.Kind(), Detail: detail, InsertText: insert,
+		SortText: sortText, FilterText: filterText, Data: string(data),
+		PluginName: pluginName,
+	}
+	if src.HasTextEdit() {
+		if te, err := src.TextEdit(); err == nil {
+			newText, _ := te.NewText()
+			c.TextEdit = &plugin.TextEdit{
+				FromLine: te.FromLine(), FromCol: te.FromCol(),
+				ToLine: te.ToLine(), ToCol: te.ToCol(),
+				NewText: newText,
+			}
+		}
+	}
+	return c
 }
 
 // InlayHints returns inlay hints (inferred types, parameter names) for

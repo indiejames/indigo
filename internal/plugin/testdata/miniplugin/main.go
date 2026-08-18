@@ -21,6 +21,19 @@ func (miniPlugin) Init(api *sdk.Api) sdk.Info {
 			}},
 		}
 	})
+	api.CompletionsFull(sdk.CompletionHandlers{ //nolint:errcheck
+		GetCompletions: func(bufID, line, col uint32) []sdk.CompletionItem {
+			return []sdk.CompletionItem{{
+				Label:      "mini-item",
+				InsertText: "mini-item",
+				Data:       "resolve-me",
+			}}
+		},
+		ResolveCompletion: func(item sdk.CompletionItem) sdk.CompletionItem {
+			item.Detail = "resolved:" + item.Data
+			return item
+		},
+	})
 	return sdk.Info{Name: "miniplugin", Version: "0.0.1"}
 }
 

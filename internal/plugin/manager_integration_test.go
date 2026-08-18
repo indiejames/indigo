@@ -116,3 +116,41 @@ func TestManagerStartSpawnsRealPluginAndDispatchesKey(t *testing.T) {
 		t.Error("plugin process was not reaped within the timeout after crashing")
 	}
 }
+
+// TestManagerCompletionProviderRealPlugin exercises RegisterCompletionProvider
+// end-to-end against the real miniplugin process: GetCompletions fans out to
+// the plugin and returns its item tagged with the plugin's name, and
+// ResolveCompletion round-trips the item's Data token back for a deferred
+// fill-in, mirroring how a real provider (e.g. an npm-registry lookup) would
+// defer slow work out of the synchronous GetCompletions path.
+func TestManagerCompletionProviderRealPlugin(t *testing.T) {
+	setUpMiniPluginInstall(t)
+
+	m := NewManager(t.TempDir(), nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(m.Shutdown)
+
+	items := m.GetCompletions(context.Background(), 1, 0, 0)
+	if len(items) != 1 {
+		t.Fatalf("GetCompletions returned %d items, want 1", len(items))
+	}
+	item := items[0]
+	if item.Label != "mini-item" || item.InsertText != "mini-item" {
+		t.Errorf("item = %+v, want Label/InsertText %q", item, "mini-item")
+	}
+	if item.PluginName != "miniplugin" {
+		t.Errorf("item.PluginName = %q, want %q", item.PluginName, "miniplugin")
+	}
+	if item.Data != "resolve-me" {
+		t.Errorf("item.Data = %q, want %q", item.Data, "resolve-me")
+	}
+
+	resolved := m.ResolveCompletion(context.Background(), item.PluginName, item)
+	if resolved.Detail != "resolved:resolve-me" {
+		t.Errorf("resolved.Detail = %q, want %q", resolved.Detail, "resolved:resolve-me")
+	}
+}

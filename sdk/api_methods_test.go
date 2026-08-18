@@ -15,12 +15,13 @@ import (
 type fakeFullEditorApi struct {
 	pluginproto.EditorApi_Server
 
-	applyEdit       func(call pluginproto.EditorApi_applyEdit) error
-	readBuffer      func(call pluginproto.EditorApi_readBuffer) error
-	readRange       func(call pluginproto.EditorApi_readRange) error
-	wordAt          func(call pluginproto.EditorApi_wordAt) error
-	showPopup       func(call pluginproto.EditorApi_showPopup) error
-	showInputPrompt func(call pluginproto.EditorApi_showInputPrompt) error
+	applyEdit                  func(call pluginproto.EditorApi_applyEdit) error
+	readBuffer                 func(call pluginproto.EditorApi_readBuffer) error
+	readRange                  func(call pluginproto.EditorApi_readRange) error
+	wordAt                     func(call pluginproto.EditorApi_wordAt) error
+	showPopup                  func(call pluginproto.EditorApi_showPopup) error
+	showInputPrompt            func(call pluginproto.EditorApi_showInputPrompt) error
+	registerCompletionProvider func(call pluginproto.EditorApi_registerCompletionProvider) error
 }
 
 func (f *fakeFullEditorApi) ApplyEdit(_ context.Context, call pluginproto.EditorApi_applyEdit) error {
@@ -45,6 +46,10 @@ func (f *fakeFullEditorApi) ShowPopup(_ context.Context, call pluginproto.Editor
 
 func (f *fakeFullEditorApi) ShowInputPrompt(_ context.Context, call pluginproto.EditorApi_showInputPrompt) error {
 	return f.showInputPrompt(call)
+}
+
+func (f *fakeFullEditorApi) RegisterCompletionProvider(_ context.Context, call pluginproto.EditorApi_registerCompletionProvider) error {
+	return f.registerCompletionProvider(call)
 }
 
 func newTestApi(t *testing.T, fake *fakeFullEditorApi) *Api {

@@ -1,0 +1,10 @@
+name        = "npm-versions"
+version     = "0.1.0"
+sdk_version = "0.1.0"
+description = "Autocomplete npm package versions in package.json dependency blocks"
+
+[binaries]
+"darwin/arm64" = "npm-versions-darwin-arm64"
+"darwin/amd64" = "npm-versions-darwin-amd64"
+"linux/amd64"  = "npm-versions-linux-amd64"
+"linux/arm64"  = "npm-versions-linux-arm64"

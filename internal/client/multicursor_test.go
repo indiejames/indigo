@@ -323,10 +323,13 @@ func TestDeleteAllCursorSelectionsNoSelectionDoesNotTouchClipboard(t *testing.T)
 	m.cursor = document.Pos{Line: 0, Col: 0}
 	m.extraCursors = []ExtraCursor{{pos: document.Pos{Line: 1, Col: 0}}}
 
-	deleteAllCursorSelections(m)
+	m2, _ := deleteAllCursorSelections(m)
 
 	if fakeClipboardContent != "unchanged" {
 		t.Errorf("clipboard = %q, want unchanged", fakeClipboardContent)
+	}
+	if m2.buf.Line(0) != "bc" || m2.buf.Line(1) != "ef" {
+		t.Errorf("Line(0)=%q Line(1)=%q, want %q and %q (char under each cursor still deleted)", m2.buf.Line(0), m2.buf.Line(1), "bc", "ef")
 	}
 }
 

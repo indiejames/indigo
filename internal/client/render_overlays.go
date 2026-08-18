@@ -1028,10 +1028,43 @@ var helpEntries = []helpEntry{
 
 const helpKeyW = 18 // fixed left-column width for key strings
 
+// helpKeyColW is the total width (in columns) consumed by the left key
+// column, including its padding — shared by the top-level entries
+// ("  %-18s  ") and the indented plugin-binding entries ("    %-16s  "),
+// which pad to the same total so their description columns line up.
+const helpKeyColW = helpKeyW + 4
+
+// helpPopupInnerWidth returns the content width (excluding borders) for the
+// help popup at the given terminal width. Shared by renderHelpPopup (for
+// display), helpPopupLines (so description wrapping matches the box the
+// lines are drawn into), and keys.go (for scroll-clamping) so all three
+// agree on the same line count.
+func helpPopupInnerWidth(width int) int {
+	innerW := min(width-4, 64) // cap at 64 so it doesn't sprawl on huge terminals
+	if innerW < 30 {
+		innerW = max(30, width-4)
+	}
+	return innerW
+}
+
+// wrapToWidth word-wraps s to fit within width visual columns, returning at
+// least one line.
+func wrapToWidth(s string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	return strings.Split(lipgloss.NewStyle().Width(width).Render(s), "\n")
+}
+
 // helpPopupLines returns the pre-rendered text lines of the help popup body
-// (without the border). Called from both handleKey (for scroll-clamping) and
-// renderHelpPopup (for display).
-func helpPopupLines(pluginBindings []ClientPluginBinding) []string {
+// (without the border), word-wrapping each entry's description to fit
+// innerW so no row overflows the popup's right border. Called from both
+// handleKey (for scroll-clamping) and renderHelpPopup (for display); both
+// must pass the same innerW (via helpPopupInnerWidth) so their line counts
+// agree.
+func helpPopupLines(pluginBindings []ClientPluginBinding, innerW int) []string {
+	descAvail := innerW - helpKeyColW
+	blank := strings.Repeat(" ", helpKeyColW)
 	lines := make([]string, 0, len(helpEntries)+len(pluginBindings)+4)
 	for _, e := range helpEntries {
 		if e.desc == "" {
@@ -1046,7 +1079,13 @@ func helpPopupLines(pluginBindings []ClientPluginBinding) []string {
 				key = string([]rune(key)[:helpKeyW])
 			}
 			padded := fmt.Sprintf("  %-*s  ", helpKeyW, key)
-			lines = append(lines, popupTextStyle.Render(padded)+popupTextStyle.Render(e.desc))
+			for i, dl := range wrapToWidth(e.desc, descAvail) {
+				prefix := padded
+				if i > 0 {
+					prefix = blank
+				}
+				lines = append(lines, popupTextStyle.Render(prefix)+popupTextStyle.Render(dl))
+			}
 		}
 	}
 
@@ -1082,7 +1121,13 @@ func helpPopupLines(pluginBindings []ClientPluginBinding) []string {
 					key = string([]rune(key)[:helpKeyW-2])
 				}
 				padded := fmt.Sprintf("    %-*s  ", helpKeyW-2, key)
-				lines = append(lines, popupTextStyle.Render(padded)+popupTextStyle.Render(b.Description))
+				for i, dl := range wrapToWidth(b.Description, descAvail) {
+					prefix := padded
+					if i > 0 {
+						prefix = blank
+					}
+					lines = append(lines, popupTextStyle.Render(prefix)+popupTextStyle.Render(dl))
+				}
 			}
 		}
 	}
@@ -1093,12 +1138,9 @@ func helpPopupLines(pluginBindings []ClientPluginBinding) []string {
 // renderHelpPopup renders the help popup as a slice of styled, full-width lines.
 // innerW is the content width (excluding borders).
 func renderHelpPopup(width, scroll, maxH int, pluginBindings []ClientPluginBinding) []string {
-	innerW := min(width-4, 64) // cap at 64 so it doesn't sprawl on huge terminals
-	if innerW < 30 {
-		innerW = max(30, width-4)
-	}
+	innerW := helpPopupInnerWidth(width)
 
-	bodyLines := helpPopupLines(pluginBindings)
+	bodyLines := helpPopupLines(pluginBindings, innerW)
 	total := len(bodyLines)
 	contentH := maxH - 2
 	if contentH < 1 {

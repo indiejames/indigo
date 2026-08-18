@@ -18,6 +18,7 @@ require (
 	github.com/alexaandru/go-sitter-forest/elixir v1.9.5
 	github.com/alexaandru/go-sitter-forest/elm v1.9.1
 	github.com/alexaandru/go-sitter-forest/erlang v1.9.7
+	github.com/alexaandru/go-sitter-forest/fish v1.9.2
 	github.com/alexaandru/go-sitter-forest/gdscript v1.9.6
 	github.com/alexaandru/go-sitter-forest/gitcommit v1.9.4
 	github.com/alexaandru/go-sitter-forest/gleam v1.9.9

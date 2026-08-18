@@ -34,6 +34,8 @@ github.com/alexaandru/go-sitter-forest/elm v1.9.1 h1:2JNTMY4VwoudSqhGDVGSjnZgwPG
 github.com/alexaandru/go-sitter-forest/elm v1.9.1/go.mod h1:nqEGl7ZrlC6McSs5p6N/1IPEKhetnIoZtiYgvs4DRN4=
 github.com/alexaandru/go-sitter-forest/erlang v1.9.7 h1:NwCErr9f/X9OW1HXYQzi/83fGKyPmz+ow9NXneUr94A=
 github.com/alexaandru/go-sitter-forest/erlang v1.9.7/go.mod h1:w44gyZikbQBpzX7/RJqNxsLzMrLqn4Tvh9r649ml9xI=
+github.com/alexaandru/go-sitter-forest/fish v1.9.2 h1:TmlzrIQgtJh0mLDviGYFB/namZOofm/cPkftQoMOh9A=
+github.com/alexaandru/go-sitter-forest/fish v1.9.2/go.mod h1:GPTSS+k7af3yOKfo7WH6ubXkqc4/spBs8xl4/2ojqq0=
 github.com/alexaandru/go-sitter-forest/gdscript v1.9.6 h1:9TOQ7lvbv/Y/R40gQisUfIN455PR+zLWuy1evsTo7q0=
 github.com/alexaandru/go-sitter-forest/gdscript v1.9.6/go.mod h1:bePnpjBZbV3SRQOIZDuMAtDOuv7jj4zAOBQoQNddjmw=
 github.com/alexaandru/go-sitter-forest/gitcommit v1.9.4 h1:h4C8PRGxa2OfauFJZ7Ou4k7QFqxBJk0IfNBgMoVVJXk=

@@ -1035,16 +1035,15 @@ const helpKeyW = 18 // fixed left-column width for key strings
 const helpKeyColW = helpKeyW + 4
 
 // helpPopupInnerWidth returns the content width (excluding borders) for the
-// help popup at the given terminal width. Shared by renderHelpPopup (for
-// display), helpPopupLines (so description wrapping matches the box the
-// lines are drawn into), and keys.go (for scroll-clamping) so all three
-// agree on the same line count.
+// help popup at the given terminal width, capped at 64 so it doesn't sprawl
+// on huge terminals. Never exceeds width-4: render_view.go centers the popup
+// by column offset alone with no clipping, so a wider value here would make
+// the box itself overflow the terminal on a narrow one. Shared by
+// renderHelpPopup (for display), helpPopupLines (so description wrapping
+// matches the box the lines are drawn into), and keys.go (for
+// scroll-clamping) so all three agree on the same line count.
 func helpPopupInnerWidth(width int) int {
-	innerW := min(width-4, 64) // cap at 64 so it doesn't sprawl on huge terminals
-	if innerW < 30 {
-		innerW = max(30, width-4)
-	}
-	return innerW
+	return max(1, min(width-4, 64))
 }
 
 // wrapToWidth word-wraps s to fit within width visual columns, returning at
@@ -1157,18 +1156,25 @@ func renderHelpPopup(width, scroll, maxH int, pluginBindings []ClientPluginBindi
 		visible = append(visible, "")
 	}
 
-	// Pad each line to innerW visual columns.
+	// Pad (or, on a very narrow terminal, clip) each line to innerW visual
+	// columns so no row can ever push the box wider than innerW+2.
 	padded := make([]string, len(visible))
 	for i, line := range visible {
 		lw := lipgloss.Width(line)
-		if lw < innerW {
+		switch {
+		case lw < innerW:
 			line += popupTextStyle.Render(strings.Repeat(" ", innerW-lw))
+		case lw > innerW:
+			line = ansi.Truncate(line, innerW, "")
 		}
 		padded[i] = line
 	}
 
 	title := "Help — ? to close"
 	titleRunes := []rune(title)
+	if len(titleRunes) > innerW {
+		titleRunes = titleRunes[:innerW]
+	}
 	dashes := max(0, innerW-len(titleRunes))
 	top := popupBorderStyle.Render(bdrTL+string(titleRunes)) +
 		popupBorderStyle.Render(strings.Repeat(bdrH, dashes)+bdrTR)
@@ -1184,8 +1190,11 @@ func renderHelpPopup(width, scroll, maxH int, pluginBindings []ClientPluginBindi
 		shown := min(scroll+contentH, total)
 		indicator := fmt.Sprintf(" j/k scroll   %d/%d ", shown, total)
 		indicatorRunes := []rune(indicator)
+		if len(indicatorRunes) > innerW {
+			indicatorRunes = indicatorRunes[:innerW]
+		}
 		remainDashes := max(0, innerW-len(indicatorRunes))
-		bottom = popupBorderStyle.Render(bdrBL + indicator + strings.Repeat(bdrH, remainDashes) + bdrBR)
+		bottom = popupBorderStyle.Render(bdrBL + string(indicatorRunes) + strings.Repeat(bdrH, remainDashes) + bdrBR)
 	} else {
 		bottom = popupBorderStyle.Render(bdrBL + strings.Repeat(bdrH, innerW) + bdrBR)
 	}

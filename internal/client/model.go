@@ -890,7 +890,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.reparseHighlight(), refreshCmd)
 
 	case saveAsPromptMsg:
-		s := ""
+		s := m.filePath
 		m.saveAsInput = &s
 		m.saveAsThenClose = msg.thenClose
 		return m, nil

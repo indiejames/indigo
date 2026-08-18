@@ -410,7 +410,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Scroll keys navigate the help popup; q/esc/? dismiss it.
 	if m.helpVisible {
-		helpLines := helpPopupLines(m.pluginBindings)
+		helpLines := helpPopupLines(m.pluginBindings, helpPopupInnerWidth(m.width))
 		maxPopH := max(6, m.height-5) // matches vis-4 in View() where vis = m.height-1
 		contentH := maxPopH - 2
 		maxScroll := max(0, len(helpLines)-contentH)

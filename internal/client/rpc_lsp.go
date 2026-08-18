@@ -675,3 +675,38 @@ func (r *RPC) LspCodeActions(ctx context.Context, bufID uint32, startLine, start
 	}
 	return out, nil
 }
+
+// LspOrganizeImports requests "source.organizeImports" from bufId's
+// language server over the whole file and returns the resulting edits (if
+// any), for the caller to apply through the normal undo-aware batch path
+// like any other LSP edit. Empty means no language server, no
+// organize-imports support, or nothing to change.
+func (r *RPC) LspOrganizeImports(ctx context.Context, bufID uint32) ([]ClientLspEdit, error) {
+	fut, rel := r.svc.LspOrganizeImports(ctx, func(p proto.EditorService_lspOrganizeImports_Params) error {
+		p.SetBufId(bufID)
+		return nil
+	})
+	defer rel()
+
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, err
+	}
+	edits, err := res.Edits()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ClientLspEdit, edits.Len())
+	for i := range out {
+		e := edits.At(i)
+		nt, _ := e.NewText()
+		out[i] = ClientLspEdit{
+			FromLine: int(e.FromLine()),
+			FromCol:  int(e.FromCol()),
+			ToLine:   int(e.ToLine()),
+			ToCol:    int(e.ToCol()),
+			NewText:  nt,
+		}
+	}
+	return out, nil
+}

@@ -715,6 +715,11 @@ type RenameParams struct {
 
 type CodeActionContext struct {
 	Diagnostics []Diagnostic `json:"diagnostics"`
+	// Only restricts the response to actions whose kind is (a prefix of) one
+	// of these — e.g. ["source.organizeImports"]. Omitted for the normal
+	// diagnostic-driven quick-fix/refactor request, since most servers only
+	// advertise source actions when a client explicitly opts in via Only.
+	Only []string `json:"only,omitempty"`
 }
 
 type CodeActionParams struct {

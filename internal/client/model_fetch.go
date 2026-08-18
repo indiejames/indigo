@@ -315,6 +315,24 @@ func (m Model) doRenameSymbol(newName string) tea.Cmd {
 	}
 }
 
+// doOrganizeImports requests "source.organizeImports" from the language
+// server for the current buffer and, if it returns any edits, applies them
+// through the normal undo-aware batch path (see applyLspEdits) — unlike the
+// F-popup Code Actions flow, this applies directly rather than showing a
+// picker, since a server normally returns at most one organize-imports
+// result.
+func (m Model) doOrganizeImports() tea.Cmd {
+	rpc := m.rpc
+	bufID := m.bufID
+	bufVersion := m.buf.Version()
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		edits, err := rpc.LspOrganizeImports(ctx, bufID)
+		return organizeImportsMsg{bufID: bufID, bufVersion: bufVersion, edits: edits, err: err}
+	}
+}
+
 // codeActionRange returns the request range for LSP code actions: the active
 // selection's ordered bounds if one exists (letting the server offer
 // range-only actions like Extract Function/Extract Variable), or a

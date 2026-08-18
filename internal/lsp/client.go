@@ -467,26 +467,18 @@ func (c *Client) References(path string, line, col int) ([]Location, error) {
 	return locs, nil
 }
 
-// CodeActions returns quick-fix and refactor actions for the given range.
-// startLine/startCol and endLine/endCol may be equal (a plain cursor
-// position) or span a selection, which lets the server offer range-only
-// actions like Extract Function/Extract Variable alongside point-based
-// quick-fixes. The server's cached diagnostics for the file are included in
-// the request context so that diagnostic-driven fixes (e.g. "remove unused
-// import") are surfaced too.
-func (c *Client) CodeActions(path string, startLine, startCol, endLine, endCol int) ([]CodeAction, error) {
+// codeActionRequest is the shared implementation behind CodeActions and
+// OrganizeImports: send textDocument/codeAction with the given range and
+// context, decode the response (nil on a null result, not an error), and
+// resolve any actions the server returned without a populated edit.
+func (c *Client) codeActionRequest(path string, rng Range, actionCtx CodeActionContext) ([]CodeAction, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	rng := Range{
-		Start: Position{Line: startLine, Character: startCol},
-		End:   Position{Line: endLine, Character: endCol},
-	}
-	diags := c.GetDiagnostics(path)
 	raw, err := c.conn.Call(ctx, "textDocument/codeAction", CodeActionParams{
 		TextDocument: TextDocumentIdentifier{URI: pathToURI(path)},
 		Range:        rng,
-		Context:      CodeActionContext{Diagnostics: diags},
+		Context:      actionCtx,
 	})
 	if err != nil || string(raw) == "null" {
 		return nil, err
@@ -497,6 +489,34 @@ func (c *Client) CodeActions(path string, startLine, startCol, endLine, endCol i
 	}
 	c.resolveCodeActions(actions)
 	return actions, nil
+}
+
+// CodeActions returns quick-fix and refactor actions for the given range.
+// startLine/startCol and endLine/endCol may be equal (a plain cursor
+// position) or span a selection, which lets the server offer range-only
+// actions like Extract Function/Extract Variable alongside point-based
+// quick-fixes. The server's cached diagnostics for the file are included in
+// the request context so that diagnostic-driven fixes (e.g. "remove unused
+// import") are surfaced too.
+func (c *Client) CodeActions(path string, startLine, startCol, endLine, endCol int) ([]CodeAction, error) {
+	rng := Range{
+		Start: Position{Line: startLine, Character: startCol},
+		End:   Position{Line: endLine, Character: endCol},
+	}
+	return c.codeActionRequest(path, rng, CodeActionContext{Diagnostics: c.GetDiagnostics(path)})
+}
+
+// OrganizeImports requests "source.organizeImports" code actions for path
+// over its full range (0,0)-(lineCount,0). Unlike CodeActions this sends no
+// diagnostics and instead restricts the response via Only, since organize-
+// imports is a source action most servers only return when explicitly
+// requested that way, not incidentally alongside diagnostic-driven fixes.
+func (c *Client) OrganizeImports(path string, lineCount int) ([]CodeAction, error) {
+	rng := Range{
+		Start: Position{Line: 0, Character: 0},
+		End:   Position{Line: lineCount, Character: 0},
+	}
+	return c.codeActionRequest(path, rng, CodeActionContext{Only: []string{"source.organizeImports"}})
 }
 
 // resolveCodeActions fills in the Edit for any action that came back without

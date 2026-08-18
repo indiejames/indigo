@@ -147,6 +147,14 @@ interface EditorService {
   # connect time — mirrors getPluginKeys. See insertHookRegistered for the
   # live-update counterpart covering hooks registered after connect.
   getPluginInsertChars @48 () -> (chars :List(Text));
+  # Requests "source.organizeImports" from bufId's language server over the
+  # whole file (sorts/dedupes/adds-missing/removes-unused imports, per that
+  # server's own rules — e.g. gopls, typescript-language-server,
+  # rust-analyzer all implement it). Returns the edits for the client to
+  # apply through the normal undo-aware batch path, same as lspCodeActions;
+  # empty means no language server, no organize-imports support, or nothing
+  # to change.
+  lspOrganizeImports @50 (bufId :UInt32) -> (edits :List(PluginEdit));
 }
 
 # MenuItemInfo is one node in the Command-menu tree contributed by a plugin.

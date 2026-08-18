@@ -278,6 +278,12 @@ var commandMenuRoot = command{
 			// offered alongside point-based quick-fixes.
 			return m, m.fetchFixes()
 		}},
+		{key: "i", label: "Organize Imports", execute: func(m Model) (tea.Model, tea.Cmd) {
+			// Applies the language server's source.organizeImports action
+			// directly (no picker) unlike "a" Code Actions — see
+			// doOrganizeImports / EditorService.lspOrganizeImports.
+			return m, m.doOrganizeImports()
+		}},
 		{key: "r", label: "Refactor: Rename Symbol", execute: func(m Model) (tea.Model, tea.Cmd) {
 			// Uses the language server if one is running for this buffer;
 			// see doRenameSymbol / EditorService.lspRename.

@@ -307,6 +307,16 @@ func (m *Manager) CodeActions(path string, startLine, startCol, endLine, endCol 
 	return nil, nil
 }
 
+// OrganizeImports requests "source.organizeImports" code actions for path
+// from its language server.
+func (m *Manager) OrganizeImports(path string, lineCount int) ([]CodeAction, error) {
+	if c := m.clientForPath(path); c != nil {
+		m.ensureOpened(c, path)
+		return c.OrganizeImports(path, lineCount)
+	}
+	return nil, nil
+}
+
 // InlayHints returns inlay hints for path within the given range (normally the
 // client's visible viewport).
 func (m *Manager) InlayHints(path string, startLine, startCol, endLine, endCol int) ([]InlayHint, error) {

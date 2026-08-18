@@ -152,6 +152,44 @@ func TestDepValueAtOperatorOnlyValueYieldsEmptyRangeAfterIt(t *testing.T) {
 	}
 }
 
+// TestDepValueAtDeclinesComplexRangeSyntax is a regression test: npm
+// supports comparator sets (">=1.2.3 <2.0.0"), OR sets ("1.2.3 || 2.0.0"),
+// and X-ranges ("1.2.x") that this plugin doesn't parse. Rather than
+// replacing the whole value with a bare version (destroying everything else
+// in the range), depValueAt must decline to match these forms at all.
+func TestDepValueAtDeclinesComplexRangeSyntax(t *testing.T) {
+	cases := []string{
+		">=1.2.3 <2.0.0",
+		"1.2.3 || 2.0.0",
+		"1.2.x",
+		"1.x",
+		"*",
+		"1.2.3 - 2.3.4",
+	}
+	for _, value := range cases {
+		content := "{\n  \"dependencies\": {\n    \"lodash\": \"" + value + "\"\n  }\n}\n"
+		line := 2
+		col := len(`    "lodash": "`) + len(value)/2
+		if _, _, _, ok := depValueAt(content, line, col); ok {
+			t.Errorf("depValueAt(%q) = ok, want declined (unsupported range syntax)", value)
+		}
+	}
+}
+
+// TestDepValueAtAllowsPrereleaseHyphen ensures the complex-range rejection
+// doesn't over-reach: a bare hyphen inside a prerelease tag is ordinary
+// version syntax, not an npm hyphen range (which always has surrounding
+// whitespace), and must still be completable.
+func TestDepValueAtAllowsPrereleaseHyphen(t *testing.T) {
+	content := "{\n  \"dependencies\": {\n    \"lodash\": \"1.2.3-beta.1\"\n  }\n}\n"
+	line := 2
+	col := len(`    "lodash": "1.2.3-beta.1`)
+	dep, _, _, ok := depValueAt(content, line, col)
+	if !ok || dep != "lodash" {
+		t.Errorf("depValueAt = (%q, ok=%v), want (\"lodash\", true)", dep, ok)
+	}
+}
+
 func TestDepValueAtRejectsOutOfRangeLine(t *testing.T) {
 	if _, _, _, ok := depValueAt(samplePackageJSON, -1, 0); ok {
 		t.Error("depValueAt: ok = true for negative line, want false")

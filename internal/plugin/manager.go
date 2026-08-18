@@ -898,26 +898,53 @@ func (m *Manager) GetCompletions(ctx context.Context, bufID, line, col uint32) [
 	}
 	m.mu.Unlock()
 
-	var all []PluginCompletion
-	for _, entry := range providers {
-		tctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-		fut, rel := entry.provider.GetCompletions(tctx, func(ps pluginproto.CompletionProvider_getCompletions_Params) error {
-			ps.SetBufId(bufID)
-			ps.SetLine(line)
-			ps.SetCol(col)
-			return nil
-		})
-		res, err := fut.Struct()
-		cancel()
-		if err == nil {
-			if rawList, lerr := res.Items(); lerr == nil {
-				for i := range rawList.Len() {
-					all = append(all, completionFromPluginProto(rawList.At(i), entry.name))
-				}
+	// One shared deadline for the whole fan-out, not one per provider: with
+	// providers queried sequentially, N slow (or bounded-wait-for-cache,
+	// like the npm-versions example plugin) providers would each burn their
+	// own timeout back-to-back, so a completion popup with just two such
+	// providers installed could take up to 2x as long as one. Querying them
+	// concurrently under one budget keeps total latency bounded by the
+	// slowest single provider instead of their sum.
+	tctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+
+	// results is indexed by each provider's position in providers, so the
+	// final flatten below preserves that order deterministically regardless
+	// of which goroutine finishes first.
+	results := make([][]PluginCompletion, len(providers))
+	var wg sync.WaitGroup
+	for i, entry := range providers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer entry.provider.Release()
+			fut, rel := entry.provider.GetCompletions(tctx, func(ps pluginproto.CompletionProvider_getCompletions_Params) error {
+				ps.SetBufId(bufID)
+				ps.SetLine(line)
+				ps.SetCol(col)
+				return nil
+			})
+			defer rel()
+			res, err := fut.Struct()
+			if err != nil {
+				return
 			}
-		}
-		rel()
-		entry.provider.Release()
+			rawList, err := res.Items()
+			if err != nil {
+				return
+			}
+			items := make([]PluginCompletion, 0, rawList.Len())
+			for j := range rawList.Len() {
+				items = append(items, completionFromPluginProto(rawList.At(j), entry.name))
+			}
+			results[i] = items
+		}()
+	}
+	wg.Wait()
+
+	var all []PluginCompletion
+	for _, items := range results {
+		all = append(all, items...)
 	}
 	return all
 }

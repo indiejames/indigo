@@ -154,6 +154,8 @@ func (m Model) fetchCompletions() tea.Cmd {
 // completionResolvedMsg. at and prefix are captured at accept time so the apply
 // lands correctly regardless of later cursor movement. On error the item is
 // applied unresolved, so the primary insert still happens without the import.
+// RPC.ResolveCompletion itself retains the pre-resolve TextEdit when the
+// resolved item doesn't supply its own (see its doc comment).
 func (m Model) resolveCompletionCmd(item ClientCompletion, at document.Pos, prefix string) tea.Cmd {
 	bufID := m.bufID
 	rpc := m.rpc

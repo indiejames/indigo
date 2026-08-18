@@ -233,8 +233,17 @@ func completionFromProto(it proto.CompletionItem) ClientCompletion {
 
 // ResolveCompletion resolves item (as returned by Complete) for bufID, filling
 // in AdditionalEdits — the auto-import line for a symbol from another module.
-// The item's Data token is sent back unchanged so the language server can
-// identify which candidate to resolve. Returns the item unchanged on error.
+// The item's Data token is sent back unchanged so the language server (or, for
+// a plugin-sourced item, the plugin) can identify which candidate to resolve.
+// The outbound request does not carry item's TextEdit (only the fields set
+// below), so if the resolved response doesn't supply its own — a plugin
+// resolver has no way to reconstruct one it was never given, unlike a
+// language server, which can often derive it from its own cached state — the
+// pre-resolve TextEdit is retained rather than silently dropped; applying the
+// accepted item with no TextEdit at all falls back to replacing only the
+// typed-prefix range, which under-replaces anything a TextEdit covered beyond
+// that (e.g. a semver range operator prefix). Returns the item unchanged on
+// error.
 func (r *RPC) ResolveCompletion(ctx context.Context, bufID uint32, item ClientCompletion) (ClientCompletion, error) {
 	fut, rel := r.svc.ResolveCompletion(ctx, func(p proto.EditorService_resolveCompletion_Params) error {
 		p.SetBufId(bufID)
@@ -272,7 +281,11 @@ func (r *RPC) ResolveCompletion(ctx context.Context, bufID uint32, item ClientCo
 	if err != nil {
 		return item, err
 	}
-	return completionFromProto(out), nil
+	resolved := completionFromProto(out)
+	if resolved.TextEdit == nil && item.TextEdit != nil {
+		resolved.TextEdit = item.TextEdit
+	}
+	return resolved, nil
 }
 
 // ClientLocation is a resolved definition location.

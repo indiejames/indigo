@@ -150,6 +150,57 @@ func TestCompletionsFullResolveCompletionInvokesCallback(t *testing.T) {
 	}
 }
 
+// TestCompletionsFullRejectsNilGetCompletions is a regression test: a nil
+// GetCompletions would panic the plugin process the first time the editor
+// actually called it (there'd be nothing else to serve), so CompletionsFull
+// must reject registration up front instead of silently accepting it.
+func TestCompletionsFullRejectsNilGetCompletions(t *testing.T) {
+	registerCalled := false
+	fake := &fakeFullEditorApi{registerCompletionProvider: func(call pluginproto.EditorApi_registerCompletionProvider) error {
+		registerCalled = true
+		_, err := call.AllocResults()
+		return err
+	}}
+	api := newTestApi(t, fake)
+
+	err := api.CompletionsFull(CompletionHandlers{
+		ResolveCompletion: func(item CompletionItem) CompletionItem { return item },
+	})
+	if err == nil {
+		t.Fatal("CompletionsFull with a nil GetCompletions: err = nil, want an error")
+	}
+	if registerCalled {
+		t.Error("RegisterCompletionProvider was called despite the nil GetCompletions, want registration rejected up front")
+	}
+}
+
+// TestCompletionProviderServerGetCompletionsNilGuard verifies the defense-in-
+// -depth guard on the server side: even if a completionProviderServer were
+// constructed with a nil GetCompletions directly (bypassing CompletionsFull's
+// own check), invoking GetCompletions must not panic.
+func TestCompletionProviderServerGetCompletionsNilGuard(t *testing.T) {
+	srv := &completionProviderServer{h: CompletionHandlers{}}
+	provider := pluginproto.CompletionProvider_ServerToClient(srv)
+	defer provider.Release()
+
+	fut, rel := provider.GetCompletions(context.Background(), func(p pluginproto.CompletionProvider_getCompletions_Params) error {
+		p.SetBufId(1)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		t.Fatalf("GetCompletions with nil handler panicked or errored: %v", err)
+	}
+	items, err := res.Items()
+	if err != nil {
+		t.Fatalf("Items: %v", err)
+	}
+	if items.Len() != 0 {
+		t.Errorf("Items.Len() = %d, want 0", items.Len())
+	}
+}
+
 // TestCompletionsRegistersSimpleProvider verifies the Completions shorthand
 // (no resolve step) wires GetCompletions through without requiring
 // ResolveCompletion to be set.

@@ -423,8 +423,13 @@ func (a *Api) Completions(fn func(bufID, line, col uint32) []CompletionItem) err
 // CompletionsFull registers a completion provider that contributes candidates
 // to the editor's completion popup, merged with the buffer's language-server
 // completions. Plugins that don't need a deferred resolve step can leave
-// ResolveCompletion nil.
+// ResolveCompletion nil. GetCompletions is required; a nil GetCompletions
+// would panic the plugin process the moment the editor called it (there'd be
+// nothing else to serve), so this rejects registration up front instead.
 func (a *Api) CompletionsFull(h CompletionHandlers) error {
+	if h.GetCompletions == nil {
+		return fmt.Errorf("sdk: CompletionsFull requires a non-nil GetCompletions")
+	}
 	srv := pluginproto.CompletionProvider_ServerToClient(&completionProviderServer{h: h})
 	fut, rel := a.api.RegisterCompletionProvider(context.Background(), func(p pluginproto.EditorApi_registerCompletionProvider_Params) error {
 		return p.SetProvider(srv)
@@ -991,6 +996,14 @@ type completionProviderServer struct {
 }
 
 func (s *completionProviderServer) GetCompletions(_ context.Context, call pluginproto.CompletionProvider_getCompletions) error {
+	if s.h.GetCompletions == nil {
+		// Belt-and-braces: CompletionsFull already rejects a nil
+		// GetCompletions at registration time, but this capability could in
+		// principle be constructed directly (bypassing CompletionsFull), so
+		// don't rely solely on that guard to avoid a nil-func-call panic here.
+		_, err := call.AllocResults()
+		return err
+	}
 	args := call.Args()
 	items := s.h.GetCompletions(args.BufId(), args.Line(), args.Col())
 	res, err := call.AllocResults()

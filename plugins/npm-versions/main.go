@@ -197,6 +197,15 @@ func (p *npmVersionsPlugin) refresh(dep string, done chan struct{}) {
 // intended "^4.17.21"). The operator, if present, is left untouched and the
 // version is inserted right after it.
 //
+// npm also supports richer range syntax this plugin doesn't understand:
+// comparator sets (">=1.2.3 <2.0.0"), OR sets ("1.2.3 || 2.0.0"), and
+// X-ranges ("1.2.x"). Correctly completing "the version token under the
+// cursor" within one of those would mean actually parsing the range — rather
+// than risk corrupting a range it doesn't understand (replacing the whole
+// thing with a bare version, destroying the other comparators), depValueAt
+// declines to match at all when the value isn't one of the simple forms
+// above (see isSimpleVersionValue).
+//
 // This is a line-oriented heuristic tuned for package.json's near-universal
 // one-key-per-line pretty-printed style, not a general JSON parser: it won't
 // find matches in a minified/single-line package.json. That's an acceptable
@@ -216,6 +225,9 @@ func depValueAt(content string, line, col int) (dep string, valStart, valEnd int
 	}
 	keyStart, keyEnd := idx[2], idx[3]
 	valStart, valEnd = idx[4], idx[5]
+	if !isSimpleVersionValue(raw[valStart:valEnd]) {
+		return "", 0, 0, false
+	}
 	if valStart < valEnd && (raw[valStart] == '^' || raw[valStart] == '~') {
 		valStart++
 	}
@@ -223,6 +235,23 @@ func depValueAt(content string, line, col int) (dep string, valStart, valEnd int
 		return "", 0, 0, false
 	}
 	return raw[keyStart:keyEnd], valStart, valEnd, true
+}
+
+// complexRangeCharsRe matches characters that only show up in npm range
+// syntax this plugin doesn't attempt to parse: whitespace and '||'
+// (comparator/OR sets), '<'/'>'/'=' (comparators), and 'x'/'X'/'*'
+// (X-ranges/wildcards). Deliberately excludes '-': a bare hyphen is also used
+// in ordinary prerelease tags ("1.2.3-beta.1"), and npm's hyphen ranges
+// ("1.2.3 - 2.3.4") always include surrounding whitespace this already
+// catches, so excluding it avoids rejecting valid plain versions.
+var complexRangeCharsRe = regexp.MustCompile(`[\s|<>=xX*]`)
+
+// isSimpleVersionValue reports whether value is a form this plugin knows how
+// to safely replace: empty, a bare version, or a single leading '^'/'~' plus
+// a bare version.
+func isSimpleVersionValue(value string) bool {
+	v := strings.TrimPrefix(strings.TrimPrefix(value, "^"), "~")
+	return !complexRangeCharsRe.MatchString(v)
 }
 
 var (

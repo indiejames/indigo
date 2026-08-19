@@ -524,7 +524,7 @@ func (m Model) renderStatusBar() string {
 	// per severity so an error/warning appearing or clearing never changes
 	// this group's total width either.
 	posText := fmt.Sprintf("%d:%d", m.cursor.Line+1, m.statusBarColumn())
-	posStr := fmt.Sprintf("  %10s  ", posText)
+	posStr := fmt.Sprintf("  %10s  ", truncateCenter(posText, 10))
 	right := barStyle.Render(posStr)
 
 	var errCnt, warnCnt, infoCnt int

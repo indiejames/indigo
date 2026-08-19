@@ -363,7 +363,7 @@ Plugins access buffer content through the Cap'n Proto document query API — the
 | `readLines(bufId, start, end)` | Text of a line range (efficient for large files)             |
 | `readRange(bufId, from, to)`   | Text of an arbitrary (line, col) → (line, col) range         |
 | `wordAt(bufId, pos)`           | Start and end position of the word at a cursor position      |
-| `bufferInfo(bufId)`            | Path, language ID, line count, dirty flag                    |
+| `bufferInfo(bufId)`            | Path, language ID, line count, dirty flag, buffer version    |
 | `visibleRange(clientId)`       | First and last visible line in a connected client's viewport |
 
 `wordAt` and `readRange` require two small additions to `internal/document/buffer.go` (`TextRange` and `WordAt` methods). The internal machinery (`logicalSlice`, `logicalOffset`) is already present; these are thin wrappers over it.

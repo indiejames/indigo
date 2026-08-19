@@ -39,7 +39,7 @@ func TestPluginPublishDiagnosticsStoresUnderCurrentVersion(t *testing.T) {
 	}
 
 	s.mu.Lock()
-	got := s.buffers[1].pluginDiags["myplugin"]
+	got := s.buffers[1].pluginDiags["myplugin"].diags
 	s.mu.Unlock()
 	if len(got) != 1 || got[0].Message != "issue" || got[0].Source != "myplugin" {
 		t.Errorf("pluginDiags[myplugin] = %+v, want one diagnostic with Message=issue Source=myplugin", got)
@@ -72,10 +72,47 @@ func TestPluginPublishDiagnosticsRejectsStaleVersion(t *testing.T) {
 	}
 
 	s.mu.Lock()
-	got := s.buffers[1].pluginDiags["myplugin"]
+	got := s.buffers[1].pluginDiags["myplugin"].diags
 	s.mu.Unlock()
 	if len(got) != 1 || got[0].Message != "fresh" {
 		t.Errorf("pluginDiags[myplugin] = %+v, want the original 'fresh' diagnostic unchanged (stale publish must be discarded)", got)
+	}
+}
+
+// TestGetDiagnosticsExcludesDiagnosticsInvalidatedByLaterEdit is a
+// regression test: the publish-time staleness check alone only stops an old
+// publish from overwriting a newer one — it does nothing once accepted
+// diagnostics are left behind by edits that land *after* the publish, with
+// no guarantee the plugin will ever republish (e.g. it crashed, or only
+// recomputes on save). Left unchecked, GetDiagnostics would keep returning
+// diagnostics pointing at text that no longer matches their line/col range.
+func TestGetDiagnosticsExcludesDiagnosticsInvalidatedByLaterEdit(t *testing.T) {
+	buf := document.New("test.go", "hello\n")
+	s := newDiagTestService(1, buf)
+
+	if err := s.PluginPublishDiagnostics(1, "myplugin", buf.Version(), []plugin.PluginDiagnostic{testPluginDiag(0, 0, "issue")}); err != nil {
+		t.Fatalf("PluginPublishDiagnostics errored: %v", err)
+	}
+
+	// The buffer moves on without the plugin ever republishing.
+	buf.Apply(document.Op{Type: document.OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "x"})
+
+	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
+	fut, rel := client.GetDiagnostics(context.Background(), func(p proto.EditorService_getDiagnostics_Params) error {
+		p.SetBufId(1)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		t.Fatalf("GetDiagnostics errored: %v", err)
+	}
+	items, err := res.Items()
+	if err != nil {
+		t.Fatalf("Items() errored: %v", err)
+	}
+	if items.Len() != 0 {
+		t.Errorf("Items().Len() = %d, want 0 — the diagnostic was computed against an older version and should be excluded, not shown pointing at stale text", items.Len())
 	}
 }
 

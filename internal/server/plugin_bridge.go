@@ -181,9 +181,9 @@ func (s *editorService) PluginPublishDiagnostics(bufID uint32, pluginName string
 		}
 	}
 	if entry.pluginDiags == nil {
-		entry.pluginDiags = make(map[string][]lsp.Diagnostic)
+		entry.pluginDiags = make(map[string]pluginDiagEntry)
 	}
-	entry.pluginDiags[pluginName] = converted
+	entry.pluginDiags[pluginName] = pluginDiagEntry{version: version, diags: converted}
 	return nil
 }
 

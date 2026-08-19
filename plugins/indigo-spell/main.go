@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	_ "embed"
 
@@ -352,18 +353,20 @@ func (s *Spell) loadExtraWordLists(dir string) {
 
 // checkBuffer reads a buffer and returns its decoration list alongside the
 // same misspellings as diagnostics (for the status bar/diagnostics popup),
-// plus the buffer version content was read at — see publishDiagnostics.
-func (s *Spell) checkBuffer(bufID uint32) (decors []sdk.Decoration, diags []sdk.Diagnostic, version uint64) {
+// plus the buffer version content was read at — see publishDiagnostics. ok
+// is false only on an actual read failure; distinct from version, since a
+// freshly opened, not-yet-edited buffer legitimately has version 0.
+func (s *Spell) checkBuffer(bufID uint32) (decors []sdk.Decoration, diags []sdk.Diagnostic, version uint64, ok bool) {
 	// Fetched before ReadBuffer so it's never newer than the content below;
 	// worst case it's slightly stale, and PublishDiagnostics's own
 	// version check on the server discards the result if so.
 	_, _, _, _, version, err := s.api.BufferInfo(bufID)
 	if err != nil {
-		return nil, nil, 0
+		return nil, nil, 0, false
 	}
 	content, err := s.api.ReadBuffer(bufID)
 	if err != nil {
-		return nil, nil, 0
+		return nil, nil, 0, false
 	}
 
 	s.mu.Lock()
@@ -372,7 +375,7 @@ func (s *Spell) checkBuffer(bufID uint32) (decors []sdk.Decoration, diags []sdk.
 
 	kind := fileKindForPath(path)
 	if kind == kindSkip {
-		return nil, nil, version
+		return nil, nil, version, true
 	}
 
 	lines := strings.Split(content, "\n")
@@ -381,9 +384,14 @@ func (s *Spell) checkBuffer(bufID uint32) (decors []sdk.Decoration, diags []sdk.
 		if text == "" {
 			continue
 		}
+		// colOff is a byte offset into line (from len()/strings.Index); w.col
+		// below is a rune offset into text. Convert before combining them, or
+		// any multi-byte rune earlier on the line throws every column after
+		// it off for both the decoration and the diagnostic built from it.
+		colOffRunes := utf8.RuneCountInString(line[:colOff])
 		words := splitIdentifiers(text)
 		for _, w := range words {
-			col := w.col + colOff
+			col := w.col + colOffRunes
 			if s.spell(w.text) {
 				continue
 			}
@@ -413,7 +421,7 @@ func (s *Spell) checkBuffer(bufID uint32) (decors []sdk.Decoration, diags []sdk.
 			})
 		}
 	}
-	return decors, diags, version
+	return decors, diags, version, true
 }
 
 // scheduleCheck debounces re-checking a buffer by 500ms after a change.
@@ -423,12 +431,12 @@ func (s *Spell) scheduleCheck(bufID uint32) {
 		t.Stop()
 	}
 	s.pending[bufID] = time.AfterFunc(500*time.Millisecond, func() {
-		decors, diags, version := s.checkBuffer(bufID)
+		decors, diags, version, ok := s.checkBuffer(bufID)
 		s.mu.Lock()
 		s.cache[bufID] = decors
 		delete(s.pending, bufID)
 		s.mu.Unlock()
-		if version != 0 {
+		if ok {
 			s.api.PublishDiagnostics(bufID, version, diags)
 		}
 	})

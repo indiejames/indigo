@@ -111,11 +111,23 @@ type bufferEntry struct {
 	// doc comment.
 	sinceByClient map[uint64]uint64
 	// pluginDiags holds each plugin's most recently published diagnostics
-	// for this buffer, keyed by plugin name (see PluginPublishDiagnostics).
+	// for this buffer, keyed by plugin name (see PluginPublishDiagnostics),
+	// alongside the buffer version they were computed against. GetDiagnostics
+	// excludes an entry once buf's version moves past that — the publish-time
+	// check in PluginPublishDiagnostics only stops an old publish from
+	// overwriting a newer one; it does nothing once accepted diagnostics are
+	// left behind by further edits and start pointing at the wrong text.
 	// Lives on bufferEntry rather than a separate map so it's cleaned up
 	// automatically when the entry itself is removed in CloseBuffer/Save's
 	// wholesale-swap paths — no separate forget-on-close call needed.
-	pluginDiags map[string][]lsp.Diagnostic
+	pluginDiags map[string]pluginDiagEntry
+}
+
+// pluginDiagEntry is one plugin's cached diagnostics for a buffer, tagged
+// with the buffer version they were computed against — see pluginDiags.
+type pluginDiagEntry struct {
+	version uint64
+	diags   []lsp.Diagnostic
 }
 
 // clientEntry holds connection metadata for a connected client.

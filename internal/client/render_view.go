@@ -511,22 +511,45 @@ func (m Model) renderStatusBar() string {
 		modeLabel = "INSERT"
 		ms = insertModeStyle
 	}
-	left := ms.Render("  " + modeLabel + "  ")
+	modeSeg := ms.Render("  " + modeLabel + "  ")
+	modeW := lipgloss.Width(modeSeg)
 
-	// Plugin status bar decorations (e.g. git branch, claude indicator) go on
-	// the left, after the mode label, so the right side stays fixed-width and
-	// the centered file path does not shift when decorations appear/disappear.
-	for _, d := range m.decorations {
-		if d.Kind == ClientDecorationStatusBar && d.Text != "" {
-			left += barStyle.Render(d.Text)
+	// Right side: [lsp] [file type] [diag counts] [line:col], all fixed
+	// width in normal use, so this whole group anchors solidly to the
+	// terminal's right edge and nothing to its left ever has to react to it:
+	// LSP name is set once on attach, file type never changes for an open
+	// file, line:col is a contiguous "line:col" string right-aligned inside
+	// a fixed-width field (digits shift within their own reserved space
+	// rather than resizing it), and diag counts below use fixed-width slots
+	// per severity so an error/warning appearing or clearing never changes
+	// this group's total width either.
+	posText := fmt.Sprintf("%d:%d", m.cursor.Line+1, m.statusBarColumn())
+	posStr := fmt.Sprintf("  %10s  ", posText)
+	right := barStyle.Render(posStr)
+
+	var errCnt, warnCnt, infoCnt int
+	for _, d := range m.diagnostics {
+		switch d.Severity {
+		case 1:
+			errCnt++
+		case 2:
+			warnCnt++
+		default:
+			infoCnt++
 		}
 	}
-
-	leftW := lipgloss.Width(left)
-
-	// Right side: [diag counts] [lsp] [file type] [line:col]
-	posStr := fmt.Sprintf("  %d:%d  ", m.cursor.Line+1, m.statusBarColumn())
-	right := barStyle.Render(posStr)
+	diagSlot := func(cnt int, letter string, style lipgloss.Style) string {
+		if cnt <= 0 {
+			return barStyle.Render("    ")
+		}
+		return style.Render(fmt.Sprintf("%2d%s ", min(cnt, 99), letter))
+	}
+	diagSeg := barStyle.Render(" ") +
+		diagSlot(errCnt, "E", barDiagErrorStyle) +
+		diagSlot(warnCnt, "W", barDiagWarnStyle) +
+		diagSlot(infoCnt, "I", barDiagInfoStyle) +
+		barStyle.Render(" ")
+	right = diagSeg + right
 
 	ftName := fileTypeName(m.filePath)
 	right = fileTypeStyle.Render("  "+ftName+"  ") + right
@@ -541,55 +564,63 @@ func (m Model) renderStatusBar() string {
 		right = lspSeg + right
 	}
 
-	// Diagnostic counts for the whole file, prepended before the LSP segment.
-	var errCnt, warnCnt, infoCnt int
-	for _, d := range m.diagnostics {
-		switch d.Severity {
-		case 1:
-			errCnt++
-		case 2:
-			warnCnt++
-		default:
-			infoCnt++
-		}
-	}
-	if infoCnt > 0 {
-		right = barDiagInfoStyle.Render(fmt.Sprintf(" %dI ", infoCnt)) + right
-	}
-	if warnCnt > 0 {
-		right = barDiagWarnStyle.Render(fmt.Sprintf(" %dW ", warnCnt)) + right
-	}
-	if errCnt > 0 {
-		right = barDiagErrorStyle.Render(fmt.Sprintf(" %dE ", errCnt)) + right
-	}
-
 	rightW := lipgloss.Width(right)
 
+	// Plugin-contributed segments (git branch, claude indicator, ...) get
+	// their own right-justified zone ahead of the lsp/file-type/diag/pos
+	// group. Budgeted as a third of whatever's left after mode+right and
+	// computed before the file path claims its space, so a chatty plugin can
+	// degrade gracefully instead of crowding the path out entirely on a
+	// narrow terminal; overflow is ellipsized rather than pushed onto other
+	// segments.
+	avail := max(0, m.width-modeW-rightW)
+	var pluginParts []string
+	for _, d := range m.decorations {
+		if d.Kind == ClientDecorationStatusBar && d.Text != "" {
+			pluginParts = append(pluginParts, d.Text)
+		}
+	}
+	var pluginSeg string
+	if len(pluginParts) > 0 {
+		joined := truncateCenter(strings.Join(pluginParts, "  "), avail/3)
+		pluginSeg = barStyle.Render("  " + joined + "  ")
+	}
+	pluginW := lipgloss.Width(pluginSeg)
+
+	// Left side: mode, then file path, anchored so neither one moves when
+	// the right side or the plugin zone changes width — only the flexible
+	// center zone between them absorbs that.
 	dp := displayPath(m.workDir, m.filePath)
 	dirtyMark := ""
 	if m.buf.Dirty() {
 		dirtyMark = " [+]"
 	}
+	pathBudget := max(0, avail-pluginW-1)
+	pathSeg := barStyle.Render(" " + truncateCenter(dp+dirtyMark, pathBudget))
+	left := modeSeg + pathSeg
+	leftW := lipgloss.Width(left)
 
 	var centerContent string
 	switch {
 	case m.recoveryPrompt:
 		centerContent = "Recovery file found!   Use it [y]   Ignore and delete [n]"
 	case m.status != "":
-		centerContent = dp + dirtyMark + "   " + m.status
+		centerContent = m.status
 	default:
-		centerContent = dp + dirtyMark
 		if len(m.searchMatches) > 0 {
-			centerContent += fmt.Sprintf("   [%d/%d]", m.searchIdx+1, len(m.searchMatches))
+			centerContent = fmt.Sprintf("[%d/%d]", m.searchIdx+1, len(m.searchMatches))
 		}
 		if len(m.extraCursors) > 0 {
-			centerContent += fmt.Sprintf("   %d cursors", 1+len(m.extraCursors))
+			if centerContent != "" {
+				centerContent += "   "
+			}
+			centerContent += fmt.Sprintf("%d cursors", 1+len(m.extraCursors))
 		}
 	}
 
-	centerW := max(0, m.width-leftW-rightW)
+	centerW := max(0, m.width-leftW-pluginW-rightW)
 	centerContent = truncateCenter(centerContent, centerW)
 	center := barStyle.Width(centerW).Align(lipgloss.Center).Render(centerContent)
 
-	return left + center + right
+	return left + center + pluginSeg + right
 }

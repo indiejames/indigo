@@ -58,7 +58,7 @@ interface EditorApi {
   readLines    @11 (bufId :UInt32, startLine :UInt32, endLine :UInt32)    -> (lines :List(Text));
   readRange    @12 (bufId :UInt32, from :PluginPosition, to :PluginPosition) -> (text :Text);
   wordAt       @13 (bufId :UInt32, pos :PluginPosition)                   -> (start :PluginPosition, end :PluginPosition, found :Bool);
-  bufferInfo   @14 (bufId :UInt32)                                        -> (path :Text, languageId :Text, lineCount :UInt32, isDirty :Bool);
+  bufferInfo   @14 (bufId :UInt32)                                        -> (path :Text, languageId :Text, lineCount :UInt32, isDirty :Bool, version :UInt64);
   visibleRange @15 (clientId :UInt64)                                     -> (startLine :UInt32, endLine :UInt32);
   # refreshDecorations tells any client currently viewing bufId to refetch
   # decorations now, instead of waiting for its next poll tick. Call this
@@ -66,6 +66,18 @@ interface EditorApi {
   # and would change what DecorationProvider.getDecorations returns —
   # fire-and-forget, does not itself carry the new decorations.
   refreshDecorations @21 (bufId :UInt32)                                  -> ();
+  # publishDiagnostics reports this plugin's diagnostics for bufId, computed
+  # against version (the buffer's version at the time the plugin computed
+  # them — see bufferInfo). The server discards the call if version doesn't
+  # match the buffer's current version, rather than overwriting live
+  # diagnostics with stale ones computed against old content; the plugin
+  # should just recompute and call again. An empty diagnostics list clears
+  # this plugin's previously published diagnostics for bufId. Diagnostics
+  # are cached server-side and merged into the same list LSP/lint
+  # diagnostics populate (status bar counts, the diagnostics popup, gutter
+  # markers) — unlike DecorationProvider, there is no pull/poll counterpart,
+  # this call is the only way plugin diagnostics reach the editor.
+  publishDiagnostics @23 (bufId :UInt32, version :UInt64, diagnostics :List(PluginDiagnostic)) -> ();
 }
 
 # Handler interfaces — implemented by the plugin, called by the server.
@@ -164,6 +176,23 @@ struct PluginPosition {
 struct PluginRange {
   start @0 :PluginPosition;
   end   @1 :PluginPosition;
+}
+
+enum PluginDiagnosticSeverity {
+  error   @0;
+  warning @1;
+  info    @2;
+  hint    @3;
+}
+
+# PluginDiagnostic is one diagnostic reported via publishDiagnostics. The
+# server stamps the publishing plugin's name onto it as the diagnostic's
+# Source before merging with LSP/lint diagnostics, so there is no source
+# field here for the plugin to set itself.
+struct PluginDiagnostic {
+  range    @0 :PluginRange;
+  severity @1 :PluginDiagnosticSeverity;
+  message  @2 :Text;
 }
 
 struct TextEdit {

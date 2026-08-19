@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	_ "embed"
 
@@ -350,11 +351,22 @@ func (s *Spell) loadExtraWordLists(dir string) {
 	}
 }
 
-// checkBuffer reads a buffer and returns its decoration list.
-func (s *Spell) checkBuffer(bufID uint32) []sdk.Decoration {
+// checkBuffer reads a buffer and returns its decoration list alongside the
+// same misspellings as diagnostics (for the status bar/diagnostics popup),
+// plus the buffer version content was read at — see publishDiagnostics. ok
+// is false only on an actual read failure; distinct from version, since a
+// freshly opened, not-yet-edited buffer legitimately has version 0.
+func (s *Spell) checkBuffer(bufID uint32) (decors []sdk.Decoration, diags []sdk.Diagnostic, version uint64, ok bool) {
+	// Fetched before ReadBuffer so it's never newer than the content below;
+	// worst case it's slightly stale, and PublishDiagnostics's own
+	// version check on the server discards the result if so.
+	_, _, _, _, version, err := s.api.BufferInfo(bufID)
+	if err != nil {
+		return nil, nil, 0, false
+	}
 	content, err := s.api.ReadBuffer(bufID)
 	if err != nil {
-		return nil
+		return nil, nil, 0, false
 	}
 
 	s.mu.Lock()
@@ -363,40 +375,53 @@ func (s *Spell) checkBuffer(bufID uint32) []sdk.Decoration {
 
 	kind := fileKindForPath(path)
 	if kind == kindSkip {
-		return nil
+		return nil, nil, version, true
 	}
 
-	var out []sdk.Decoration
 	lines := strings.Split(content, "\n")
 	for lineIdx, line := range lines {
 		text, colOff := commentSpan(line, kind)
 		if text == "" {
 			continue
 		}
+		// colOff is a byte offset into line (from len()/strings.Index); w.col
+		// below is a rune offset into text. Convert before combining them, or
+		// any multi-byte rune earlier on the line throws every column after
+		// it off for both the decoration and the diagnostic built from it.
+		colOffRunes := utf8.RuneCountInString(line[:colOff])
 		words := splitIdentifiers(text)
 		for _, w := range words {
-			col := w.col + colOff
+			col := w.col + colOffRunes
 			if s.spell(w.text) {
 				continue
 			}
+			endCol := uint32(col + len([]rune(w.text)))
 			payload, _ := json.Marshal(fixPayload{
 				Word: w.text,
 				Line: uint32(lineIdx),
 				Col:  uint32(col),
 			})
-			out = append(out, sdk.Decoration{
+			decors = append(decors, sdk.Decoration{
 				Line:           uint32(lineIdx),
 				Col:            uint32(col),
-				EndCol:         uint32(col + len([]rune(w.text))),
+				EndCol:         endCol,
 				Kind:           sdk.DecorationUnderline,
 				UnderlineStyle: underlineStyle,
 				UnderlineColor: "#80c8fb",
 				Fixable:        true,
 				FixData:        string(payload),
 			})
+			diags = append(diags, sdk.Diagnostic{
+				Range: sdk.Range{
+					Start: sdk.Position{Line: uint32(lineIdx), Col: uint32(col)},
+					End:   sdk.Position{Line: uint32(lineIdx), Col: endCol},
+				},
+				Severity: sdk.SeverityInfo,
+				Message:  fmt.Sprintf("Possible misspelling: %q", w.text),
+			})
 		}
 	}
-	return out
+	return decors, diags, version, true
 }
 
 // scheduleCheck debounces re-checking a buffer by 500ms after a change.
@@ -406,11 +431,14 @@ func (s *Spell) scheduleCheck(bufID uint32) {
 		t.Stop()
 	}
 	s.pending[bufID] = time.AfterFunc(500*time.Millisecond, func() {
-		decors := s.checkBuffer(bufID)
+		decors, diags, version, ok := s.checkBuffer(bufID)
 		s.mu.Lock()
 		s.cache[bufID] = decors
 		delete(s.pending, bufID)
 		s.mu.Unlock()
+		if ok {
+			s.api.PublishDiagnostics(bufID, version, diags)
+		}
 	})
 	s.mu.Unlock()
 }

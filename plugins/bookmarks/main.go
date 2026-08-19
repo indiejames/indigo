@@ -66,7 +66,7 @@ func (b *Bookmarks) onAltM(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
 		return sdk.KeyResponse{Handled: false}
 	}
 
-	filePath, _, _, _, err := b.api.BufferInfo(ctx.BufID)
+	filePath, _, _, _, _, err := b.api.BufferInfo(ctx.BufID)
 	if err != nil {
 		return sdk.KeyResponse{Handled: true}
 	}
@@ -178,7 +178,7 @@ func (b *Bookmarks) onEditEvent(bufID uint32, filePath string, atLine uint32, li
 
 // getDecorations returns left-gutter decorations for bookmarks in the current buffer.
 func (b *Bookmarks) getDecorations(bufID uint32, _ uint64, _ sdk.Range) []sdk.Decoration {
-	path, _, _, _, err := b.api.BufferInfo(bufID)
+	path, _, _, _, _, err := b.api.BufferInfo(bufID)
 	if err != nil || path == "" {
 		return nil
 	}

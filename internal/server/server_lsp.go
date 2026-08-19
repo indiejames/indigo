@@ -26,9 +26,18 @@ func (s *editorService) GetDiagnostics(_ context.Context, call proto.EditorServi
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 	path := entry.buf.Path()
+	curVersion := entry.buf.Version()
+	var pluginDiags []lsp.Diagnostic
+	for _, e := range entry.pluginDiags {
+		if e.version != curVersion {
+			continue // left behind by edits since publish; would point at the wrong text
+		}
+		pluginDiags = append(pluginDiags, e.diags...)
+	}
 	s.mu.Unlock()
 
 	diags := append(s.lspMgr.GetDiagnostics(path), s.lintMgr.GetDiagnostics(path)...)
+	diags = append(diags, pluginDiags...)
 	ready := s.lspMgr.HasClient(path)
 
 	res, err := call.AllocResults()

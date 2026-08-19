@@ -26,9 +26,14 @@ func (s *editorService) GetDiagnostics(_ context.Context, call proto.EditorServi
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 	path := entry.buf.Path()
+	var pluginDiags []lsp.Diagnostic
+	for _, ds := range entry.pluginDiags {
+		pluginDiags = append(pluginDiags, ds...)
+	}
 	s.mu.Unlock()
 
 	diags := append(s.lspMgr.GetDiagnostics(path), s.lintMgr.GetDiagnostics(path)...)
+	diags = append(diags, pluginDiags...)
 	ready := s.lspMgr.HasClient(path)
 
 	res, err := call.AllocResults()

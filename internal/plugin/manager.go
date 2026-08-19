@@ -30,7 +30,7 @@ type ServerBridge interface {
 	PluginReadLines(bufID uint32, start, end uint32) ([]string, error)
 	PluginReadRange(bufID uint32, fromLine, fromCol, toLine, toCol uint32) (string, error)
 	PluginWordAt(bufID uint32, line, col uint32) (startLine, startCol, endLine, endCol uint32, found bool, err error)
-	PluginBufferInfo(bufID uint32) (path, langID string, lineCount uint32, isDirty bool, err error)
+	PluginBufferInfo(bufID uint32) (path, langID string, lineCount uint32, isDirty bool, version uint64, err error)
 	PluginVisibleRange(clientID uint64) (startLine, endLine uint32, err error)
 
 	// Editor effects
@@ -54,6 +54,12 @@ type ServerBridge interface {
 	// PluginDecorationsChanged pushes an immediate decoration refetch to any
 	// client viewing bufID, instead of it waiting for the next poll tick.
 	PluginDecorationsChanged(bufID uint32)
+	// PluginPublishDiagnostics stores pluginName's diagnostics for bufID,
+	// computed against version. Rejected (silently, no error) if version
+	// doesn't match the buffer's current version — see publishDiagnostics's
+	// doc comment in plugin.capnp for why. An empty diags clears pluginName's
+	// previously published diagnostics for bufID.
+	PluginPublishDiagnostics(bufID uint32, pluginName string, version uint64, diags []PluginDiagnostic) error
 
 	// PluginOpenBuffers returns all currently-open (bufID, path) pairs so plugins
 	// can receive OnOpen for buffers that were opened before the plugin started.
@@ -119,6 +125,27 @@ type TextEdit struct {
 	FromLine, FromCol uint32
 	ToLine, ToCol     uint32
 	NewText           string
+}
+
+// PluginDiagnosticSeverity mirrors the capnp PluginDiagnosticSeverity enum.
+type PluginDiagnosticSeverity int
+
+const (
+	DiagnosticSeverityError   PluginDiagnosticSeverity = 0
+	DiagnosticSeverityWarning PluginDiagnosticSeverity = 1
+	DiagnosticSeverityInfo    PluginDiagnosticSeverity = 2
+	DiagnosticSeverityHint    PluginDiagnosticSeverity = 3
+)
+
+// PluginDiagnostic is a plain-Go representation of a capnp PluginDiagnostic,
+// used in ServerBridge. Deliberately has no Source field — the server stamps
+// the publishing plugin's name on as Source when merging with LSP/lint
+// diagnostics (see PluginPublishDiagnostics).
+type PluginDiagnostic struct {
+	FromLine, FromCol uint32
+	ToLine, ToCol     uint32
+	Severity          PluginDiagnosticSeverity
+	Message           string
 }
 
 // PluginToml is the plugin manifest format.

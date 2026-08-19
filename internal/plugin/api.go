@@ -422,7 +422,7 @@ func (s *editorApiServer) BufferInfo(_ context.Context, call pluginproto.EditorA
 	if s.bridge == nil {
 		return fmt.Errorf("no server bridge")
 	}
-	path, langID, lineCount, isDirty, err := s.bridge.PluginBufferInfo(call.Args().BufId())
+	path, langID, lineCount, isDirty, version, err := s.bridge.PluginBufferInfo(call.Args().BufId())
 	if err != nil {
 		return err
 	}
@@ -438,7 +438,53 @@ func (s *editorApiServer) BufferInfo(_ context.Context, call pluginproto.EditorA
 	}
 	res.SetLineCount(lineCount)
 	res.SetIsDirty(isDirty)
+	res.SetVersion(version)
 	return nil
+}
+
+// PublishDiagnostics implements pluginproto.EditorApi_Server.
+func (s *editorApiServer) PublishDiagnostics(_ context.Context, call pluginproto.EditorApi_publishDiagnostics) error {
+	if s.bridge == nil {
+		return fmt.Errorf("no server bridge")
+	}
+	args := call.Args()
+	rawList, err := args.Diagnostics()
+	if err != nil {
+		return err
+	}
+	diags := make([]PluginDiagnostic, 0, rawList.Len())
+	for i := range rawList.Len() {
+		item := rawList.At(i)
+		msg, err := item.Message_()
+		if err != nil {
+			return err
+		}
+		rng, err := item.Range()
+		if err != nil {
+			return err
+		}
+		start, err := rng.Start()
+		if err != nil {
+			return err
+		}
+		end, err := rng.End()
+		if err != nil {
+			return err
+		}
+		diags = append(diags, PluginDiagnostic{
+			FromLine: start.Line(),
+			FromCol:  start.Col(),
+			ToLine:   end.Line(),
+			ToCol:    end.Col(),
+			Severity: PluginDiagnosticSeverity(item.Severity()),
+			Message:  msg,
+		})
+	}
+	if err := s.bridge.PluginPublishDiagnostics(args.BufId(), s.reg.name, args.Version(), diags); err != nil {
+		return err
+	}
+	_, err = call.AllocResults()
+	return err
 }
 
 func (s *editorApiServer) VisibleRange(_ context.Context, call pluginproto.EditorApi_visibleRange) error {

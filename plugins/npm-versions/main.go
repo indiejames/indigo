@@ -74,7 +74,7 @@ func (p *npmVersionsPlugin) Init(api *sdk.Api) sdk.Info {
 // always returning nothing on the first request for a package (see
 // versionsFor).
 func (p *npmVersionsPlugin) getCompletions(bufID, line, col uint32) []sdk.CompletionItem {
-	path, _, _, _, err := p.api.BufferInfo(bufID)
+	path, _, _, _, _, err := p.api.BufferInfo(bufID)
 	if err != nil || filepath.Base(path) != "package.json" {
 		return nil
 	}

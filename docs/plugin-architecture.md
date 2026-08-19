@@ -81,6 +81,7 @@ The render loop and keypress path **never block** on plugin I/O. Snappiness is e
 | Gutter decorations                        | Async, cached last result   | none    |
 | Overlay / virtual text                    | Async, cached last result   | none    |
 | Status bar items                          | Async, cached last result   | none    |
+| Diagnostics (`PublishDiagnostics`)        | Push, cached until republished or the buffer closes | none |
 | **Key binding handler**                   | Await response              | 300 ms  |
 | **Insert-mode hook** (e.g. bracket close) | Fire-and-forget notification after char is inserted; response applied if it arrives | 300 ms |
 | **Menu action handler** (Command menu)    | Await response              | 300 ms  |
@@ -95,6 +96,8 @@ For the interactive cases (key bindings and menu actions), the server dispatches
 > **Note:** `registerCommand`/`OnCommand` handlers are stored server-side but nothing currently calls them — the client's `:name` command line does not yet route to plugin-registered commands. This is a known gap, not a design choice; treat `OnCommand` as reserved for now.
 
 Decoration updates (gutter annotations, overlays, status bar items) are polled by the client (every 3rd tick of its 120ms timer, ~360ms average) and rendered from that cache every frame — stale decorations are preferable to a frozen editor. A plugin that needs a decoration change to show up sooner than the next poll — e.g. after finishing async work like an LLM completion — can call the SDK's `RefreshDecorations(bufID)`, which pushes an immediate refetch to any client currently viewing that buffer instead of waiting on the poll cadence.
+
+Diagnostics work differently from decorations even though both are "async, cached": a decoration provider is *pulled* by the server on every client poll (bounded by a 200ms per-plugin timeout — see `GetDecorations` in `internal/plugin/manager.go`), so a slow computation just returns stale data next tick. Diagnostics have no pull counterpart at all — `PublishDiagnostics(bufID, version, diags)` is a one-way push the plugin calls whenever it finishes computing (e.g. after a debounced spell-check pass), and the server caches whatever was last published per plugin per buffer until either the plugin republishes or the buffer closes. This avoids forcing a possibly-slow computation (spell-checking a large file, say) into a tight poll-cycle timeout the way a pull model would. `version` must be the buffer's version — from `BufferInfo` — that the plugin actually computed diagnostics against; the server silently discards a publish whose version doesn't match the buffer's *current* version rather than let a plugin overwrite live diagnostics with results computed against content that's since changed. Published diagnostics are merged into the exact same list LSP/lint diagnostics populate — the status bar's error/warning/info counts, the diagnostics popup (Shift+E), gutter markers — with `Source` set to the publishing plugin's name; the client doesn't need to know or care where a given diagnostic came from. See `plugins/indigo-spell` for a working example (spelling issues, previously underline-decoration-only, are now also published as info-severity diagnostics).
 
 Overlay decorations are rendered in a single pass through each visible line's runes — labels are injected directly at their target column during the normal character-rendering loop, with no ANSI post-processing. Rendering cost is O(visible_lines × line_width) regardless of how many overlay decorations the plugin returns, so a plugin returning 500 overlays costs no more than one returning 5.
 
@@ -129,6 +132,7 @@ Overlay decorations are rendered in a single pass through each visible line's ru
 | Register menu action | Contribute an item to the space Command menu (invoked by selection, never bound to a physical key) |
 | Register action provider | Contribute context-sensitive actions to the Shift+F popup |
 | Register completion provider | Contribute candidates to the completion popup, merged with the buffer's language-server completions |
+| Publish diagnostics  | Report issues (bufID, version, diagnostics) merged into the editor's LSP/lint diagnostics — status bar counts, diagnostics popup, gutter markers |
 
 ### Workspace access
 
@@ -199,11 +203,15 @@ interface EditorApi {
     readLines       @11 (bufId: UInt32, startLine: UInt32, endLine: UInt32) -> (lines: List(Text));
     readRange       @12 (bufId: UInt32, from: Position, to: Position) -> (text: Text);
     wordAt          @13 (bufId: UInt32, pos: Position) -> (start: Position, end: Position, found: Bool);
-    bufferInfo      @14 (bufId: UInt32) -> (path: Text, languageId: Text, lineCount: UInt32, isDirty: Bool);
+    bufferInfo      @14 (bufId: UInt32) -> (path: Text, languageId: Text, lineCount: UInt32, isDirty: Bool, version: UInt64);
     visibleRange    @15 (clientId: UInt64) -> (startLine: UInt32, endLine: UInt32);
 
     # Push an immediate decoration refetch to clients viewing bufId
     refreshDecorations @21 (bufId: UInt32) -> ();
+
+    # Publish this plugin's diagnostics for bufId, computed against version
+    # (see bufferInfo). Rejected silently if version is stale.
+    publishDiagnostics @23 (bufId: UInt32, version: UInt64, diagnostics: List(PluginDiagnostic)) -> ();
 }
 
 # Handler interfaces — implemented by the plugin, called by the server
@@ -242,6 +250,13 @@ interface InputPromptHandler {
 }
 interface EditEventHandler {
     linesChanged @0 (bufId: UInt32, filePath: Text, atLine: UInt32, lineDelta: Int32) -> ();
+}
+struct PluginDiagnostic {
+    range    @0 :PluginRange;
+    severity @1 :PluginDiagnosticSeverity;  # error | warning | info | hint
+    message  @2 :Text;
+    # No source field — the server stamps the publishing plugin's name on
+    # as Source when merging with LSP/lint diagnostics.
 }
 ```
 

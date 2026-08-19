@@ -110,6 +110,12 @@ type bufferEntry struct {
 	// safe watermark for document.Buffer.TrimHistory — see that function's
 	// doc comment.
 	sinceByClient map[uint64]uint64
+	// pluginDiags holds each plugin's most recently published diagnostics
+	// for this buffer, keyed by plugin name (see PluginPublishDiagnostics).
+	// Lives on bufferEntry rather than a separate map so it's cleaned up
+	// automatically when the entry itself is removed in CloseBuffer/Save's
+	// wholesale-swap paths — no separate forget-on-close call needed.
+	pluginDiags map[string][]lsp.Diagnostic
 }
 
 // clientEntry holds connection metadata for a connected client.

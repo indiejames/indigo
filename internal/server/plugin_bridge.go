@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/lsp"
 	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
@@ -117,18 +118,73 @@ func isWordRune(r rune) bool {
 }
 
 // PluginBufferInfo implements plugin.ServerBridge.
-func (s *editorService) PluginBufferInfo(bufID uint32) (path, langID string, lineCount uint32, isDirty bool, err error) {
+func (s *editorService) PluginBufferInfo(bufID uint32) (path, langID string, lineCount uint32, isDirty bool, version uint64, err error) {
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
 	s.mu.Unlock()
 	if !ok {
-		return "", "", 0, false, fmt.Errorf("unknown buffer %d", bufID)
+		return "", "", 0, false, 0, fmt.Errorf("unknown buffer %d", bufID)
 	}
 	path = entry.buf.Path()
 	langID = langIDForPath(path)
 	lineCount = uint32(entry.buf.LineCount())
 	isDirty = entry.buf.Dirty()
-	return path, langID, lineCount, isDirty, nil
+	version = entry.buf.Version()
+	return path, langID, lineCount, isDirty, version, nil
+}
+
+// pluginDiagnosticSeverity maps a plugin.PluginDiagnosticSeverity to the
+// equivalent lsp.DiagnosticSeverity, so plugin-published diagnostics render
+// identically to LSP/lint ones (status bar counts, diagnostics popup).
+func pluginDiagnosticSeverity(sev plugin.PluginDiagnosticSeverity) lsp.DiagnosticSeverity {
+	switch sev {
+	case plugin.DiagnosticSeverityWarning:
+		return lsp.SeverityWarning
+	case plugin.DiagnosticSeverityInfo:
+		return lsp.SeverityInformation
+	case plugin.DiagnosticSeverityHint:
+		return lsp.SeverityHint
+	default:
+		return lsp.SeverityError
+	}
+}
+
+// PluginPublishDiagnostics implements plugin.ServerBridge. See
+// publishDiagnostics's doc comment in plugin.capnp for the staleness
+// contract: a version that doesn't match the buffer's current version is
+// discarded silently rather than overwriting live diagnostics with ones
+// computed against stale content.
+func (s *editorService) PluginPublishDiagnostics(bufID uint32, pluginName string, version uint64, diags []plugin.PluginDiagnostic) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	if version != entry.buf.Version() {
+		return nil
+	}
+	if len(diags) == 0 {
+		delete(entry.pluginDiags, pluginName)
+		return nil
+	}
+	converted := make([]lsp.Diagnostic, len(diags))
+	for i, d := range diags {
+		converted[i] = lsp.Diagnostic{
+			Range: lsp.Range{
+				Start: lsp.Position{Line: int(d.FromLine), Character: int(d.FromCol)},
+				End:   lsp.Position{Line: int(d.ToLine), Character: int(d.ToCol)},
+			},
+			Severity: pluginDiagnosticSeverity(d.Severity),
+			Source:   pluginName,
+			Message:  d.Message,
+		}
+	}
+	if entry.pluginDiags == nil {
+		entry.pluginDiags = make(map[string][]lsp.Diagnostic)
+	}
+	entry.pluginDiags[pluginName] = converted
+	return nil
 }
 
 // langIDForPath returns a language ID string based on file extension.

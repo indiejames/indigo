@@ -378,6 +378,77 @@ func (a *Api) RefreshDecorations(bufID uint32) {
 	}()
 }
 
+// DiagnosticSeverity mirrors the editor's LSP diagnostic severity levels.
+type DiagnosticSeverity int
+
+const (
+	SeverityError   DiagnosticSeverity = 0
+	SeverityWarning DiagnosticSeverity = 1
+	SeverityInfo    DiagnosticSeverity = 2
+	SeverityHint    DiagnosticSeverity = 3
+)
+
+// Diagnostic is one issue reported via PublishDiagnostics, e.g. a spelling
+// error or a lint finding. Range uses the same buffer coordinates as
+// TextEdit/ApplyEdit.
+type Diagnostic struct {
+	Range    Range
+	Severity DiagnosticSeverity
+	Message  string
+}
+
+// PublishDiagnostics reports this plugin's diagnostics for bufID, merged
+// into the same list LSP/lint diagnostics populate (status bar counts, the
+// diagnostics popup, gutter markers) with Source set to this plugin's name.
+// version must be the buffer version diags were computed against (see
+// BufferInfo) — the server discards the call if version doesn't match the
+// buffer's current version, rather than risk overwriting live diagnostics
+// with ones computed against stale content; recompute and call again
+// instead of retrying blindly. An empty diags clears this plugin's
+// previously published diagnostics for bufID. Fire-and-forget, like
+// RefreshDecorations: dispatched and awaited in the background so a slow or
+// unresponsive server connection can't stall the caller.
+func (a *Api) PublishDiagnostics(bufID uint32, version uint64, diags []Diagnostic) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		fut, rel := a.api.PublishDiagnostics(ctx, func(p pluginproto.EditorApi_publishDiagnostics_Params) error {
+			p.SetBufId(bufID)
+			p.SetVersion(version)
+			list, err := p.NewDiagnostics(int32(len(diags)))
+			if err != nil {
+				return err
+			}
+			for i, d := range diags {
+				item := list.At(i)
+				rng, err := item.NewRange()
+				if err != nil {
+					return err
+				}
+				start, err := rng.NewStart()
+				if err != nil {
+					return err
+				}
+				start.SetLine(d.Range.Start.Line)
+				start.SetCol(d.Range.Start.Col)
+				end, err := rng.NewEnd()
+				if err != nil {
+					return err
+				}
+				end.SetLine(d.Range.End.Line)
+				end.SetCol(d.Range.End.Col)
+				item.SetSeverity(pluginproto.PluginDiagnosticSeverity(d.Severity))
+				if err := item.SetMessage_(d.Message); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		defer rel()
+		fut.Struct() //nolint:errcheck
+	}()
+}
+
 // CompletionItem is one completion candidate contributed to the editor's
 // completion popup, merged with any language-server-provided items.
 type CompletionItem struct {
@@ -646,8 +717,9 @@ func (a *Api) WordAt(bufID uint32, pos Position) (start, end Position, found boo
 	return Position{s.Line(), s.Col()}, Position{e.Line(), e.Col()}, true, nil
 }
 
-// BufferInfo returns metadata about bufID.
-func (a *Api) BufferInfo(bufID uint32) (path, langID string, lineCount uint32, isDirty bool, err error) {
+// BufferInfo returns metadata about bufID. version is the buffer's current
+// version, for passing to PublishDiagnostics — see its doc comment.
+func (a *Api) BufferInfo(bufID uint32) (path, langID string, lineCount uint32, isDirty bool, version uint64, err error) {
 	fut, rel := a.api.BufferInfo(context.Background(), func(p pluginproto.EditorApi_bufferInfo_Params) error {
 		p.SetBufId(bufID)
 		return nil
@@ -655,13 +727,14 @@ func (a *Api) BufferInfo(bufID uint32) (path, langID string, lineCount uint32, i
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return "", "", 0, false, err
+		return "", "", 0, false, 0, err
 	}
 	path, _ = res.Path()
 	langID, _ = res.LanguageId()
 	lineCount = res.LineCount()
 	isDirty = res.IsDirty()
-	return path, langID, lineCount, isDirty, nil
+	version = res.Version()
+	return path, langID, lineCount, isDirty, version, nil
 }
 
 // VisibleRange returns the [startLine, endLine] currently visible in clientID's viewport.

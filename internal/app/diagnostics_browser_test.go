@@ -72,3 +72,25 @@ func TestHandleDiagBrowserKeyEnterEmitsPickedMsg(t *testing.T) {
 		t.Errorf("picked = %+v, want {absPath: b.go, line: 7, col: 1}", msg)
 	}
 }
+
+// TestDiagBrowserViewDoesNotPanicOnNarrowWidth is a regression test:
+// View computed innerW := db.width - 4 with no floor, so a terminal
+// narrower than 4 columns made strings.Repeat(" ", innerW) panic on a
+// negative count before rendering even got to the truncation logic.
+func TestDiagBrowserViewDoesNotPanicOnNarrowWidth(t *testing.T) {
+	for _, w := range []int{0, 1, 2, 3, 4, 5} {
+		db := &diagBrowser{
+			items:  []client.ClientWorkspaceDiag{{Path: "a.go", Line: 0, Col: 0, Message: "issue"}},
+			width:  w,
+			height: 10,
+		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("View() panicked at width=%d: %v", w, r)
+				}
+			}()
+			db.View()
+		}()
+	}
+}

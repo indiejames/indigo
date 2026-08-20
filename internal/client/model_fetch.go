@@ -353,6 +353,7 @@ func (m Model) fetchFixes() tea.Cmd {
 	decor := m.fixableDecorationAtCursor()
 	bufID := m.bufID
 	at := m.cursor
+	version := m.buf.Version()
 	line := uint32(m.cursor.Line)
 	col := uint32(m.cursor.Col)
 
@@ -403,7 +404,7 @@ func (m Model) fetchFixes() tea.Cmd {
 			}
 		}
 
-		return fixItemsMsg{items: items, decor: decor, bufID: bufID, at: at}
+		return fixItemsMsg{items: items, decor: decor, bufID: bufID, at: at, version: version}
 	}
 }
 

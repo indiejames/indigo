@@ -99,9 +99,25 @@ type pathBufferSnapshot struct {
 func (s *editorService) snapshotOpenBuffers() []pathBufferSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	snaps := make([]pathBufferSnapshot, 0, len(s.buffers))
+	// Keyed by path, not bufID: SaveAs has no guard against renaming a
+	// buffer onto a path another open buffer already uses, so two different
+	// bufIDs can end up sharing one path. Merging here (rather than one
+	// entry per bufID) keeps that pre-existing gap from double-counting or
+	// double-listing the same file's diagnostics in the workspace-wide
+	// view — LSP/lint diagnostics are already deduplicated for free since
+	// they're fetched once per unique path either way; plugin diagnostics
+	// are explicitly merged since those are tracked per bufID.
+	byPath := make(map[string]pathBufferSnapshot, len(s.buffers))
 	for _, entry := range s.buffers {
-		snaps = append(snaps, pathBufferSnapshot{path: entry.buf.Path(), pluginDiags: currentPluginDiags(entry)})
+		path := entry.buf.Path()
+		sn := byPath[path]
+		sn.path = path
+		sn.pluginDiags = append(sn.pluginDiags, currentPluginDiags(entry)...)
+		byPath[path] = sn
+	}
+	snaps := make([]pathBufferSnapshot, 0, len(byPath))
+	for _, sn := range byPath {
+		snaps = append(snaps, sn)
 	}
 	return snaps
 }
@@ -117,16 +133,32 @@ func (s *editorService) GetWorkspaceDiagnostics(_ context.Context, call proto.Ed
 		d    lsp.Diagnostic
 	}
 	var items []pathDiag
-	truncated := false
-outer:
 	for _, sn := range snaps {
 		for _, d := range s.mergedDiagnostics(sn.path, sn.pluginDiags) {
-			if len(items) >= maxWorkspaceDiagnostics {
-				truncated = true
-				break outer
-			}
 			items = append(items, pathDiag{path: sn.path, d: d})
 		}
+	}
+	// snapshotOpenBuffers iterates a map, so items would otherwise come back
+	// in a different arbitrary order on every call; sort deterministically
+	// (most severe first) so truncation below discards the least-important
+	// entries instead of an arbitrary map-order-dependent subset.
+	sort.Slice(items, func(i, j int) bool {
+		a, b := items[i], items[j]
+		if a.d.Severity != b.d.Severity {
+			return a.d.Severity < b.d.Severity // error(1) < warning(2) < info(3) < hint(4)
+		}
+		if a.path != b.path {
+			return a.path < b.path
+		}
+		if a.d.Range.Start.Line != b.d.Range.Start.Line {
+			return a.d.Range.Start.Line < b.d.Range.Start.Line
+		}
+		return a.d.Range.Start.Character < b.d.Range.Start.Character
+	})
+	truncated := false
+	if len(items) > maxWorkspaceDiagnostics {
+		items = items[:maxWorkspaceDiagnostics]
+		truncated = true
 	}
 
 	res, err := call.AllocResults()

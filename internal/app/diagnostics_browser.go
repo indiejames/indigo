@@ -72,7 +72,7 @@ func (db *diagBrowser) moveDown() {
 // the style of the workspace search picker (grepPicker.View).
 func (db *diagBrowser) View() string {
 	const chrome = 5
-	innerW := db.width - 4
+	innerW := max(1, db.width-4)
 	maxItems := db.height - chrome - 2
 	if maxItems < 1 {
 		maxItems = 1
@@ -201,11 +201,17 @@ func diagDisplayPath(workDir, path string) string {
 // diagResultLine formats one diagnostic as "[E] path:line: message",
 // truncated to maxW runes.
 func diagResultLine(workDir string, it client.ClientWorkspaceDiag, maxW int) string {
+	if maxW <= 0 {
+		return ""
+	}
 	rel := diagDisplayPath(workDir, it.Path)
 	prefix := fmt.Sprintf("[%s] %s:%d:", diagSeverityLabel(it.Severity), rel, it.Line+1)
 	full := prefix + " " + it.Message
 	runes := []rune(full)
 	if len(runes) > maxW {
+		if maxW == 1 {
+			return "…"
+		}
 		return string(runes[:maxW-1]) + "…"
 	}
 	return full

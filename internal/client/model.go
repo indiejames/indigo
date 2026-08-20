@@ -86,15 +86,21 @@ type sigHelpMsg struct{ help *ClientSigHelp }
 type pluginBindingsMsg struct{ bindings []ClientPluginBinding }
 
 // fixItemsMsg carries fix suggestions and/or context-sensitive actions for the F popup.
-// bufID/at are stamped at request time in fetchFixes and checked on arrival
-// so a slow response for a since-abandoned buffer/cursor position doesn't
-// pop up showing fixes for wherever the request happened to be made, not
-// where the cursor is now.
+// bufID/at/version are stamped at request time in fetchFixes and checked on
+// arrival so a slow response for a since-abandoned buffer/cursor position
+// doesn't pop up showing fixes for wherever the request happened to be
+// made, not where the cursor is now. version catches a narrower case at/
+// bufID alone can't: the cursor returning to the exact requested position
+// after an intervening edit (e.g. type a character, then undo it) — the
+// buffer's content changed and reverted, but a stale LSP action's edits
+// still encode positions computed against the original content, so
+// applying it could silently corrupt text or land somewhere nonsensical.
 type fixItemsMsg struct {
-	items []ClientFixItem
-	decor *ClientDecoration // nil when items come only from action providers
-	bufID uint32
-	at    document.Pos
+	items   []ClientFixItem
+	decor   *ClientDecoration // nil when items come only from action providers
+	bufID   uint32
+	at      document.Pos
+	version uint64
 }
 
 // completionsMsg carries fresh completion items.
@@ -1073,11 +1079,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyCompletionItem(msg.item, msg.at, msg.prefix)
 
 	case fixItemsMsg:
-		// Drop a response that came back for a different buffer, or after the
-		// cursor moved (the user navigated away before the LSP/plugin fetch
-		// completed): showing it would pop up fixes for a position the user
-		// isn't at anymore.
-		if msg.bufID != m.bufID || m.cursor != msg.at {
+		// Drop a response that came back for a different buffer, after the
+		// cursor moved, or after the buffer's content changed since the
+		// request (even if the cursor ended up back at the same position —
+		// see fixItemsMsg's doc comment): showing or applying it could pop
+		// up (or silently apply) fixes computed against text that no longer
+		// matches what's actually there.
+		if msg.bufID != m.bufID || m.cursor != msg.at || msg.version != m.buf.Version() {
+			m = m.pushStatus("Fixes unavailable (buffer changed)")
 			return m, nil
 		}
 		if len(msg.items) > 0 {

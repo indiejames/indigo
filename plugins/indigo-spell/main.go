@@ -161,6 +161,16 @@ type Spell struct {
 	cache    map[uint32][]sdk.Decoration
 	pending  map[uint32]*time.Timer // debounce timers
 	bufPaths map[uint32]string      // bufID → file path (for kind detection)
+	// generation guards against a superseded check clobbering a newer one's
+	// result: scheduleCheck bumps it and each check's callback captures the
+	// value at schedule time, only applying its result if the buffer's
+	// generation hasn't moved on by the time it completes. Needed because
+	// t.Stop() on an already-fired timer is a no-op — if invalidateAll (or
+	// another edit) reschedules a check while an older one for the same
+	// buffer is mid-flight (its own two RPC round trips: BufferInfo then
+	// ReadBuffer), both run concurrently with no guarantee the newer one
+	// finishes last.
+	generation map[uint32]uint64
 
 	// user dictionaries (words added at runtime)
 	globalDictPath    string
@@ -172,6 +182,7 @@ func (s *Spell) Init(api *sdk.Api) sdk.Info {
 	s.api = api
 	s.cache = make(map[uint32][]sdk.Decoration)
 	s.pending = make(map[uint32]*time.Timer)
+	s.generation = make(map[uint32]uint64)
 	s.bufPaths = make(map[uint32]string)
 	s.userWords = make(map[string]struct{})
 
@@ -430,17 +441,29 @@ func (s *Spell) scheduleCheck(bufID uint32) {
 	if t, ok := s.pending[bufID]; ok {
 		t.Stop()
 	}
+	s.generation[bufID]++
+	gen := s.generation[bufID]
 	s.pending[bufID] = time.AfterFunc(500*time.Millisecond, func() {
 		decors, diags, version, ok := s.checkBuffer(bufID)
-		s.mu.Lock()
-		s.cache[bufID] = decors
-		delete(s.pending, bufID)
-		s.mu.Unlock()
-		if ok {
-			s.api.PublishDiagnostics(bufID, version, diags)
-		}
+		s.applyCheckResult(bufID, gen, decors, diags, version, ok)
 	})
 	s.mu.Unlock()
+}
+
+// applyCheckResult stores a completed check's decorations/diagnostics for
+// bufID, unless gen has been superseded by a newer scheduleCheck call since
+// this check started — see the generation field's doc comment.
+func (s *Spell) applyCheckResult(bufID uint32, gen uint64, decors []sdk.Decoration, diags []sdk.Diagnostic, version uint64, ok bool) {
+	s.mu.Lock()
+	delete(s.pending, bufID)
+	stale := s.generation[bufID] != gen
+	if !stale {
+		s.cache[bufID] = decors
+	}
+	s.mu.Unlock()
+	if ok && !stale {
+		s.api.PublishDiagnostics(bufID, version, diags)
+	}
 }
 
 // --- SDK callbacks ---
@@ -463,6 +486,7 @@ func (s *Spell) onBufferClose(bufID uint32, _ string) {
 	}
 	delete(s.cache, bufID)
 	delete(s.bufPaths, bufID)
+	delete(s.generation, bufID)
 }
 
 func (s *Spell) getDecorations(bufID uint32, _ uint64, _ sdk.Range) []sdk.Decoration {

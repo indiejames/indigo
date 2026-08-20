@@ -517,11 +517,19 @@ func (c *Client) CodeActions(path string, startLine, startCol, endLine, endCol i
 	return c.codeActionRequest(path, rng, CodeActionContext{Diagnostics: relevant})
 }
 
-// diagnosticOverlapsRange reports whether d's range overlaps rng (touching
-// at a single point counts as overlapping, so a zero-width cursor range
-// still matches a diagnostic that starts or ends exactly there).
+// diagnosticOverlapsRange reports whether d's range overlaps rng. rng.Start
+// == rng.End is treated as a plain cursor position rather than a real
+// range: touching at a single point still counts, so a cursor sitting
+// exactly at a diagnostic's start/end column matches, and so does a
+// genuinely zero-width diagnostic located exactly there. A non-zero-width
+// rng (an active selection) instead uses strict half-open overlap —
+// touching at a shared boundary with no actually-shared text is not a real
+// overlap, e.g. a diagnostic that starts exactly where the selection ends.
 func diagnosticOverlapsRange(d Diagnostic, rng Range) bool {
-	return !posBefore(rng.End, d.Range.Start) && !posBefore(d.Range.End, rng.Start)
+	if rng.Start == rng.End {
+		return !posBefore(rng.Start, d.Range.Start) && !posBefore(d.Range.End, rng.Start)
+	}
+	return posBefore(d.Range.Start, rng.End) && posBefore(rng.Start, d.Range.End)
 }
 
 func posBefore(a, b Position) bool {

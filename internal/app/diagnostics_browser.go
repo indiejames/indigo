@@ -77,15 +77,19 @@ func (a App) fetchDiagBrowserResults(seq int) tea.Cmd {
 // the diagnostic list — the scan itself may still be running when the
 // re-fetch lands, in which case it just shows the same results again until
 // the user presses "r" once more, or reopens the browser, after the scan
-// has actually finished.
-func (a App) rescanDiagBrowser() tea.Cmd {
+// has actually finished. Returns the updated App (with diagSeq bumped) as
+// well as the fetch command: a.diagSeq is a plain field, not a pointer, so
+// the increment below only sticks if the caller propagates this returned
+// App back into the model — unlike a.diagBrowser.seq, which is reachable
+// through the *diagBrowser pointer and so mutates in place either way.
+func (a App) rescanDiagBrowser() (App, tea.Cmd) {
 	a.diagSeq++
 	seq := a.diagSeq
 	a.diagBrowser.seq = seq
 	a.diagBrowser.loading = true
 	a.diagBrowser.errMsg = ""
 	rpc := a.rpc
-	return func() tea.Msg {
+	return a, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := rpc.RescanWorkspaceDiagnostics(ctx); err != nil {

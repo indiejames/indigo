@@ -160,10 +160,10 @@ interface EditorService {
   # which is scoped to a single bufId. Open buffers get live LSP + lint +
   # plugin diagnostics (same sources as getDiagnostics); files that aren't
   # open in any buffer get whatever the last workspace lint scan found for
-  # them (see rescanWorkspaceDiagnostics and PLAN.md — LSP/plugin coverage
-  # for unopened files is a documented gap, not yet implemented). truncated
-  # is true if the result was capped (see maxWorkspaceDiagnostics in
-  # server_lsp.go) rather than exhaustive.
+  # them (see rescanWorkspaceDiagnostics). LSP/plugin diagnostic coverage
+  # for unopened files is a known, documented gap, not yet implemented.
+  # truncated is true if the result was capped (see maxWorkspaceDiagnostics
+  # in server_lsp.go) rather than exhaustive.
   getWorkspaceDiagnostics @51 () -> (items :List(WorkspaceDiagnosticItem), truncated :Bool);
   # getWorkspaceDiagnosticsSummary is the cheap counts-only counterpart to
   # getWorkspaceDiagnostics, for a workspace-wide status indicator that

@@ -1,6 +1,9 @@
 package lint
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,6 +113,112 @@ func TestScanWorkspaceKeepsStaleResultsOnFailure(t *testing.T) {
 	}
 	if err := m.WorkspaceScanError("sh"); err == nil {
 		t.Error("WorkspaceScanError should report the failure even though stale results are kept")
+	}
+}
+
+// Note: runWorkspaceScan's coalesced-handoff fix (workspaceRunning now
+// stays true across a pending follow-up run instead of briefly dropping to
+// false between the two, see its doc comment) has no dedicated regression
+// test — the window it closes is a handful of instructions between an
+// unlock and a re-lock, too narrow for any black-box poll loop to reliably
+// observe either with or without the fix, so a timing-based test here would
+// either be flaky or silently prove nothing (confirmed: a naive polling
+// test passed identically against both the buggy and fixed code). Same
+// class of "not reliably testable without test-only production hooks" call
+// already made for a couple of other narrow races in this codebase (see
+// CLAUDE.md's audit backlog, e.g. SaveAs/DiscardRecovery).
+
+// TestShutdownCancelsInFlightWorkspaceScan is a regression test for
+// Manager.Shutdown: without it, a long-running workspace-scan subprocess
+// (up to workspaceScanTimeout, 2 minutes) would keep running orphaned after
+// the server process that spawned it has already exited. Shutdown cancels
+// scanCtx, which runWorkspaceLinter's context.WithTimeout derives from, so
+// the scan should fail well before its own timeout once Shutdown is called.
+func TestShutdownCancelsInFlightWorkspaceScan(t *testing.T) {
+	lc := config.LinterConfig{
+		Extensions:    []string{"go"},
+		Command:       "sh",
+		WorkspaceArgs: []string{"-c", "sleep 30 && echo '{\"Issues\":[]}'"},
+		Format:        "golangci-lint-json",
+	}
+	m := newWorkspaceTestManager(t.TempDir(), lc)
+
+	m.ScanWorkspace()
+	time.Sleep(20 * time.Millisecond) // let the subprocess actually start
+	m.Shutdown()
+
+	waitForWorkspaceScan(t, m) // should resolve almost immediately, not after 30s
+
+	if err := m.WorkspaceScanError("sh"); err == nil {
+		t.Error("WorkspaceScanError = nil, want the cancellation error surfaced after Shutdown")
+	}
+}
+
+// TestScanWorkspaceTimesOutAndKeepsStaleResults verifies runWorkspaceLinter
+// actually enforces workspaceScanTimeout: a linter that hangs past it should
+// be killed and its failure recorded as a deadline-exceeded error, with the
+// previous (successful) scan's results left visible — same "leave stale
+// data visible" contract TestScanWorkspaceKeepsStaleResultsOnFailure already
+// covers for an outright command failure, exercised here for a timeout
+// instead.
+func TestScanWorkspaceTimesOutAndKeepsStaleResults(t *testing.T) {
+	orig := workspaceScanTimeout
+	workspaceScanTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { workspaceScanTimeout = orig })
+
+	workDir := t.TempDir()
+	lc := shWorkspaceJSON("sh", `{"Issues":[{"FromLinter":"x","Text":"boom","Severity":"error","Pos":{"Filename":"a.go","Line":1,"Column":1}}]}`)
+	m := newWorkspaceTestManager(workDir, lc)
+
+	m.ScanWorkspace()
+	waitForWorkspaceScan(t, m)
+	if len(m.WorkspaceScanSnapshot()) != 1 {
+		t.Fatalf("expected 1 file populated by the first (successful) scan")
+	}
+
+	hanging := lc
+	hanging.WorkspaceArgs = []string{"-c", "sleep 30"}
+	m.userLints = []config.LinterConfig{hanging}
+
+	m.ScanWorkspace()
+	waitForWorkspaceScan(t, m)
+
+	if len(m.WorkspaceScanSnapshot()) != 1 {
+		t.Errorf("a timed-out rescan should leave the previous scan's results visible, got %+v", m.WorkspaceScanSnapshot())
+	}
+	err := m.WorkspaceScanError("sh")
+	if err == nil {
+		t.Fatal("WorkspaceScanError = nil, want a deadline-exceeded error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("WorkspaceScanError = %v, want context.DeadlineExceeded", err)
+	}
+}
+
+// TestScanWorkspaceFailureIncludesStderrPreview verifies a workspace-scan
+// command that fails outright (non-zero exit, unparseable stdout) folds a
+// preview of its stderr into WorkspaceScanError, not just a bare exit
+// status — the only way that failure is visible at all, since there's no
+// per-file editor context to hint at the cause the way an open buffer's own
+// diagnostics would.
+func TestScanWorkspaceFailureIncludesStderrPreview(t *testing.T) {
+	lc := config.LinterConfig{
+		Extensions:    []string{"go"},
+		Command:       "sh",
+		WorkspaceArgs: []string{"-c", "echo 'config error: bad rule xyz' >&2; exit 1"},
+		Format:        "golangci-lint-json",
+	}
+	m := newWorkspaceTestManager(t.TempDir(), lc)
+
+	m.ScanWorkspace()
+	waitForWorkspaceScan(t, m)
+
+	err := m.WorkspaceScanError("sh")
+	if err == nil {
+		t.Fatal("WorkspaceScanError = nil, want a failure")
+	}
+	if !strings.Contains(err.Error(), "config error: bad rule xyz") {
+		t.Errorf("WorkspaceScanError = %q, want it to include the command's stderr", err.Error())
 	}
 }
 

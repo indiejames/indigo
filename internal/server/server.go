@@ -218,12 +218,13 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 	if watcher != nil {
 		go svc.watchLoop()
 	}
-	// Kick off an initial workspace lint scan in the background so files
-	// nobody has opened yet already have something in
-	// getWorkspaceDiagnostics/Summary by the time a client first asks —
-	// see lint.Manager.ScanWorkspace's doc comment for why this only runs
-	// at startup and on explicit rescan, not per-edit.
-	go svc.lintMgr.ScanWorkspace()
+	// Kick off an initial workspace lint scan so files nobody has opened
+	// yet already have something in getWorkspaceDiagnostics/Summary by the
+	// time a client first asks — see lint.Manager.ScanWorkspace's doc
+	// comment for why this only runs at startup and on explicit rescan, not
+	// per-edit. ScanWorkspace itself only ever launches its own background
+	// goroutine and returns immediately, so no extra `go` is needed here.
+	svc.lintMgr.ScanWorkspace()
 	return svc
 }
 
@@ -605,6 +606,7 @@ func (s *Server) Wait() {
 	s.deleteAllRecoveryFiles()
 	s.svc.lspMgr.Shutdown()
 	s.svc.pluginMgr.Shutdown()
+	s.svc.lintMgr.Shutdown()
 	if s.svc.watcher != nil {
 		s.svc.watcher.Close() //nolint:errcheck
 	}

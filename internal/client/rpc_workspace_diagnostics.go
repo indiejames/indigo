@@ -26,8 +26,9 @@ type WorkspaceDiagnosticsResult struct {
 // GetWorkspaceDiagnostics fetches diagnostics across the whole project:
 // live diagnostics for every open buffer, plus whatever the last workspace
 // lint scan found for files that aren't open in any buffer — see
-// RescanWorkspaceDiagnostics to trigger a fresh scan, and PLAN.md for the
-// still-open LSP/plugin unopened-file coverage gap.
+// RescanWorkspaceDiagnostics to trigger a fresh scan. LSP/plugin diagnostic
+// coverage for unopened files is a known, documented gap, not yet
+// implemented.
 func (r *RPC) GetWorkspaceDiagnostics(ctx context.Context) (WorkspaceDiagnosticsResult, error) {
 	fut, rel := r.svc.GetWorkspaceDiagnostics(ctx, func(proto.EditorService_getWorkspaceDiagnostics_Params) error {
 		return nil

@@ -326,6 +326,39 @@ func (m Model) View() string {
 		}
 	}
 
+	// Overlay error toast (bottom, above the status bar): non-modal, doesn't
+	// intercept keys, auto-dismisses via tickMsg (see pushStatus/toastDuration).
+	if m.status != "" && isErrMessage(m.status) {
+		popup := renderToast(m.status, m.width)
+		popH := len(popup)
+		popW := lipgloss.Width(popup[0])
+		popCol := max(0, (m.width-popW)/2)
+		startRow := max(0, vis-popH)
+		for pi, popLine := range popup {
+			if row := startRow + pi; row >= 0 && row < vis {
+				lines[row] = overlayRight(lines[row], popLine, popCol)
+			}
+		}
+	}
+
+	// Overlay severe-error modal (centered, topmost, drawn last): must be
+	// dismissed via Enter/Esc — see handleKey's severeErr gate. maxPopH
+	// mirrors the help/message-log popups' floor so the dialog (including
+	// its dismiss-hint footer) always fits within the visible area.
+	if m.severeErr != "" {
+		maxPopH := max(6, vis-4)
+		popup := renderSevereErrorPopup(m.severeErr, m.width, maxPopH)
+		popH := len(popup)
+		popW := lipgloss.Width(popup[0])
+		popCol := max(0, (m.width-popW)/2)
+		startRow := max(0, vis/2-popH/2)
+		for pi, popLine := range popup {
+			if row := startRow + pi; row < vis {
+				lines[row] = overlayRight(lines[row], popLine, popCol)
+			}
+		}
+	}
+
 	var sb strings.Builder
 	for _, line := range lines {
 		sb.WriteString(line)
@@ -604,7 +637,10 @@ func (m Model) renderStatusBar() string {
 	switch {
 	case m.recoveryPrompt:
 		centerContent = "Recovery file found!   Use it [y]   Ignore and delete [n]"
-	case m.status != "":
+	case m.status != "" && !isErrMessage(m.status):
+		// Error-class status text renders as the toast overlay instead (see
+		// View()) — the center segment truncates long messages and this spot
+		// is easy to miss once attention moves elsewhere.
 		centerContent = m.status
 	default:
 		if len(m.searchMatches) > 0 {

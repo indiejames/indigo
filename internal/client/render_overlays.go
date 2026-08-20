@@ -1311,3 +1311,93 @@ func renderMessageLogPopup(width, scroll, maxH int, log []logEntry) []string {
 	out = append(out, bottom)
 	return out
 }
+
+// renderToast renders a non-modal, auto-dismissing banner for an error-class
+// status message (see isErrMessage) — the bottom-of-screen counterpart to
+// the status bar's center segment, sized to fit the full (wrapped) message
+// rather than truncating it. Composited in View(); cleared by the tickMsg
+// handler in model.go once toastDuration elapses.
+func renderToast(text string, maxW int) []string {
+	// max(1, ...) rather than a higher floor: on a pathologically narrow
+	// terminal a forced-wider minimum would make the box itself overflow
+	// maxW, since the caller centers it by column offset alone with no
+	// clipping (same reasoning as helpPopupInnerWidth).
+	innerW := max(1, min(maxW-4, 100))
+	body := wrapToWidth(text, innerW)
+	border := lipgloss.NewStyle().Background(popupBg).Foreground(lipgloss.Color(activeDiagError))
+	textStyle := diagErrorStyle.Background(popupBg)
+
+	top := border.Render(bdrTL + strings.Repeat(bdrH, innerW) + bdrTR)
+	out := []string{top}
+	for _, line := range body {
+		lw := lipgloss.Width(line)
+		if lw < innerW {
+			line += strings.Repeat(" ", innerW-lw)
+		}
+		out = append(out, border.Render(bdrV)+textStyle.Render(line)+border.Render(bdrV))
+	}
+	out = append(out, border.Render(bdrBL+strings.Repeat(bdrH, innerW)+bdrBR))
+	return out
+}
+
+// renderSevereErrorPopup renders the centered, must-dismiss error dialog for
+// failures that leave the buffer's state in question — see pushSevereError
+// and handleKey's severeErr gate, which blocks all other input until
+// Enter/Esc dismisses it. maxH bounds the total number of lines returned
+// (including borders and the dismiss-hint footer): the caller composites
+// this by row index and silently drops anything past the visible area, so
+// without a cap a long message could push the bottom border and the only
+// visible instructions for dismissing the modal off-screen, leaving the
+// user stuck looking at an apparently-uncloseable dialog. The body is
+// truncated with an ellipsis marker line instead.
+func renderSevereErrorPopup(text string, maxW, maxH int) []string {
+	// max(1, ...) rather than a higher floor: see renderToast's innerW comment.
+	innerW := max(1, min(maxW-4, 70))
+	body := wrapToWidth(text, innerW)
+	border := lipgloss.NewStyle().Background(popupBg).Foreground(lipgloss.Color(activeDiagError))
+	textStyle := diagErrorStyle.Background(popupBg)
+
+	// top(1) + blank spacer(1) + bottom-with-hint(1) = 3 fixed lines; the
+	// rest of maxH is available for the (possibly truncated) body.
+	bodyBudget := max(1, maxH-3)
+	if len(body) > bodyBudget {
+		if bodyBudget > 1 {
+			body = append(body[:bodyBudget-1:bodyBudget-1], "…")
+		} else {
+			body = []string{"…"}
+		}
+	}
+
+	title := " Error "
+	titleRunes := []rune(title)
+	if len(titleRunes) > innerW {
+		titleRunes = titleRunes[:innerW]
+	}
+	dashes := max(0, innerW-len(titleRunes))
+	top := border.Render(bdrTL + string(titleRunes) + strings.Repeat(bdrH, dashes) + bdrTR)
+
+	out := []string{top}
+	for _, line := range body {
+		lw := lipgloss.Width(line)
+		if lw < innerW {
+			line += strings.Repeat(" ", innerW-lw)
+		} else if lw > innerW {
+			line = ansi.Truncate(line, innerW, "")
+		}
+		out = append(out, border.Render(bdrV)+textStyle.Render(line)+border.Render(bdrV))
+	}
+	out = append(out, border.Render(bdrV)+popupTextStyle.Render(strings.Repeat(" ", innerW))+border.Render(bdrV))
+
+	hint := "Enter/Esc to dismiss"
+	hintRunes := []rune(hint)
+	if len(hintRunes) > innerW {
+		hintRunes = hintRunes[:max(0, innerW-1)]
+		if innerW > 0 {
+			hintRunes = append(hintRunes, '…')
+		}
+	}
+	hintPad := max(0, innerW-len(hintRunes))
+	bottom := border.Render(bdrBL) + popupKeyStyle.Render(string(hintRunes)) + popupTextStyle.Render(strings.Repeat(" ", hintPad)) + border.Render(bdrBR)
+	out = append(out, bottom)
+	return out
+}

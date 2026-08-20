@@ -37,8 +37,8 @@ func TestApplyOpFailedMsgTriggersResync(t *testing.T) {
 	updated, cmd := m.Update(applyOpFailedMsg{err: errTest})
 	m2 := updated.(Model)
 
-	if m2.status == "" {
-		t.Error("expected a status message after an ApplyOp failure")
+	if m2.severeErr == "" {
+		t.Error("expected a must-dismiss error modal after an ApplyOp failure")
 	}
 	if cmd == nil {
 		t.Fatal("expected a non-nil resync command")
@@ -76,6 +76,9 @@ func TestBufferResyncMsgAppliesNewContent(t *testing.T) {
 	}
 	if !m2.buf.Dirty() {
 		t.Error("resynced buffer should be marked dirty")
+	}
+	if m2.severeErr == "" {
+		t.Error("expected a must-dismiss modal prompting the user to check their last change")
 	}
 	_ = cmd // reparseHighlight() is nil here since the test model has no highlighter configured
 }
@@ -148,7 +151,7 @@ func TestBufferResyncMsgHandlesFetchError(t *testing.T) {
 	if m2.buf.Content() != "hello\n" {
 		t.Errorf("buf.Content() = %q, want unchanged after a failed resync fetch", m2.buf.Content())
 	}
-	if m2.status == "" {
-		t.Error("expected a status message after a failed resync fetch")
+	if m2.severeErr == "" {
+		t.Error("expected a must-dismiss error modal after a failed resync fetch")
 	}
 }

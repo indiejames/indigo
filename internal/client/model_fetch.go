@@ -25,6 +25,22 @@ func (m Model) fetchDiagnostics() tea.Cmd {
 	}
 }
 
+// fetchWorkspaceDiagnosticsSummary polls the cheap counts-only workspace
+// diagnostic summary (see RPC.GetWorkspaceDiagnosticsSummary) for the
+// status bar's project-wide indicator. Unlike fetchDiagnostics this isn't
+// scoped to any one buffer, so there's no bufID to stamp or check.
+func (m Model) fetchWorkspaceDiagnosticsSummary() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		summary, err := m.rpc.GetWorkspaceDiagnosticsSummary(ctx)
+		if err != nil {
+			return nil
+		}
+		return workspaceDiagSummaryMsg{summary: summary}
+	}
+}
+
 // fetchDecorations polls all plugin DecorationProviders for the current buffer/viewport.
 // The current viewport is sent inline before fetching so the server always uses
 // an up-to-date range — sending both from the same goroutine guarantees ordering.

@@ -421,6 +421,10 @@ func (a App) handleDiagBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.diagBrowser != nil {
 			a.diagBrowser.moveDown()
 		}
+	case "r":
+		if a.diagBrowser != nil {
+			return a, a.rescanDiagBrowser()
+		}
 	}
 	return a, nil
 }

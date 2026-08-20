@@ -1,9 +1,13 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/indiejames/indigo/internal/client"
 )
@@ -55,6 +59,42 @@ type diagBrowserPickedMsg struct {
 
 // diagBrowserCancelledMsg is sent when the user presses Esc.
 type diagBrowserCancelledMsg struct{}
+
+// fetchDiagBrowserResults fetches the current workspace diagnostics for
+// a.diagBrowser, guarded by seq (see diagBrowserResultsMsg).
+func (a App) fetchDiagBrowserResults(seq int) tea.Cmd {
+	rpc := a.rpc
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		result, err := rpc.GetWorkspaceDiagnostics(ctx)
+		return diagBrowserResultsMsg{seq: seq, result: result, err: err}
+	}
+}
+
+// rescanDiagBrowser triggers a fresh workspace lint scan (fire-and-forget
+// on the server, see RPC.RescanWorkspaceDiagnostics) and then re-fetches
+// the diagnostic list — the scan itself may still be running when the
+// re-fetch lands, in which case it just shows the same results again until
+// the user presses "r" once more, or reopens the browser, after the scan
+// has actually finished.
+func (a App) rescanDiagBrowser() tea.Cmd {
+	a.diagSeq++
+	seq := a.diagSeq
+	a.diagBrowser.seq = seq
+	a.diagBrowser.loading = true
+	a.diagBrowser.errMsg = ""
+	rpc := a.rpc
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := rpc.RescanWorkspaceDiagnostics(ctx); err != nil {
+			return diagBrowserResultsMsg{seq: seq, err: err}
+		}
+		result, err := rpc.GetWorkspaceDiagnostics(ctx)
+		return diagBrowserResultsMsg{seq: seq, result: result, err: err}
+	}
+}
 
 func (db *diagBrowser) moveUp() {
 	if db.cursor > 0 {
@@ -112,7 +152,7 @@ func (db *diagBrowser) View() string {
 	sb.WriteString(pickerTitleStyle.Render(clamp(title)))
 	sb.WriteByte('\n')
 
-	hint := clamp("  ↑↓/jk navigate  Enter open  Esc cancel")
+	hint := clamp("  ↑↓/jk navigate  Enter open  r rescan  Esc cancel")
 	sb.WriteString(pickerQueryStyle.Render(hint))
 	sb.WriteByte('\n')
 
@@ -135,7 +175,7 @@ func (db *diagBrowser) View() string {
 			sb.WriteByte('\n')
 		}
 	case len(db.items) == 0:
-		sb.WriteString(pickerItemStyle.Render(clamp("  No diagnostics in any open buffer")))
+		sb.WriteString(pickerItemStyle.Render(clamp("  No diagnostics found")))
 		sb.WriteByte('\n')
 		for i := 1; i < maxItems; i++ {
 			sb.WriteString(pickerItemStyle.Render(pad))

@@ -122,26 +122,57 @@ func (s *editorService) snapshotOpenBuffers() []pathBufferSnapshot {
 	return snaps
 }
 
-// GetWorkspaceDiagnostics aggregates diagnostics across every open buffer —
-// see its doc comment in editor.capnp for the "open buffers only, not the
-// whole workspace on disk" scope for now.
-func (s *editorService) GetWorkspaceDiagnostics(_ context.Context, call proto.EditorService_getWorkspaceDiagnostics) error {
-	snaps := s.snapshotOpenBuffers()
+// workspacePathDiag pairs one diagnostic with the file it belongs to —
+// getWorkspaceDiagnostics/Summary both need this (unlike getDiagnostics,
+// scoped to one already-known bufID) since a single result covers many
+// files at once.
+type workspacePathDiag struct {
+	path string
+	d    lsp.Diagnostic
+}
 
-	type pathDiag struct {
-		path string
-		d    lsp.Diagnostic
-	}
-	var items []pathDiag
+// allWorkspaceDiagnostics is the shared source of truth for
+// getWorkspaceDiagnostics and getWorkspaceDiagnosticsSummary: live,
+// merged (LSP + lint + plugin) diagnostics for every open buffer, plus
+// whatever the last workspace lint scan (lintMgr.WorkspaceScanSnapshot,
+// see lint.Manager.ScanWorkspace) found for files that aren't open in any
+// buffer. An open buffer's live diagnostics always win over a scan result
+// for the same path — the scan can be arbitrarily stale (it only reruns on
+// startup/explicit rescan, not per-edit) where the open buffer's LSP/lint
+// state is already kept current by the normal per-buffer paths.
+func (s *editorService) allWorkspaceDiagnostics() []workspacePathDiag {
+	snaps := s.snapshotOpenBuffers()
+	openPaths := make(map[string]bool, len(snaps))
+	var items []workspacePathDiag
 	for _, sn := range snaps {
+		openPaths[sn.path] = true
 		for _, d := range s.mergedDiagnostics(sn.path, sn.pluginDiags) {
-			items = append(items, pathDiag{path: sn.path, d: d})
+			items = append(items, workspacePathDiag{path: sn.path, d: d})
 		}
 	}
-	// snapshotOpenBuffers iterates a map, so items would otherwise come back
-	// in a different arbitrary order on every call; sort deterministically
-	// (most severe first) so truncation below discards the least-important
-	// entries instead of an arbitrary map-order-dependent subset.
+	for path, diags := range s.lintMgr.WorkspaceScanSnapshot() {
+		if openPaths[path] {
+			continue
+		}
+		for _, d := range diags {
+			items = append(items, workspacePathDiag{path: path, d: d})
+		}
+	}
+	return items
+}
+
+// GetWorkspaceDiagnostics aggregates diagnostics across the whole project —
+// see allWorkspaceDiagnostics for the open-buffer/scanned-file merge, and
+// its doc comment in editor.capnp for the current source-coverage scope
+// (LSP/plugin diagnostics for unopened files are still a documented gap).
+func (s *editorService) GetWorkspaceDiagnostics(_ context.Context, call proto.EditorService_getWorkspaceDiagnostics) error {
+	items := s.allWorkspaceDiagnostics()
+
+	// allWorkspaceDiagnostics' inputs (a map iteration plus a second map's
+	// worth of scanned files) come back in a different arbitrary order on
+	// every call; sort deterministically (most severe first) so truncation
+	// below discards the least-important entries instead of an arbitrary
+	// order-dependent subset.
 	sort.Slice(items, func(i, j int) bool {
 		a, b := items[i], items[j]
 		if a.d.Severity != b.d.Severity {
@@ -190,26 +221,22 @@ func (s *editorService) GetWorkspaceDiagnostics(_ context.Context, call proto.Ed
 }
 
 // GetWorkspaceDiagnosticsSummary is the cheap counts-only counterpart to
-// GetWorkspaceDiagnostics.
+// GetWorkspaceDiagnostics, drawing from the same allWorkspaceDiagnostics
+// source.
 func (s *editorService) GetWorkspaceDiagnosticsSummary(_ context.Context, call proto.EditorService_getWorkspaceDiagnosticsSummary) error {
-	snaps := s.snapshotOpenBuffers()
+	items := s.allWorkspaceDiagnostics()
 
-	var errCnt, warnCnt, infoCnt, fileCnt uint32
-	for _, sn := range snaps {
-		diags := s.mergedDiagnostics(sn.path, sn.pluginDiags)
-		if len(diags) == 0 {
-			continue
-		}
-		fileCnt++
-		for _, d := range diags {
-			switch d.Severity {
-			case lsp.SeverityError:
-				errCnt++
-			case lsp.SeverityWarning:
-				warnCnt++
-			default:
-				infoCnt++
-			}
+	var errCnt, warnCnt, infoCnt uint32
+	files := make(map[string]bool)
+	for _, it := range items {
+		files[it.path] = true
+		switch it.d.Severity {
+		case lsp.SeverityError:
+			errCnt++
+		case lsp.SeverityWarning:
+			warnCnt++
+		default:
+			infoCnt++
 		}
 	}
 
@@ -220,7 +247,19 @@ func (s *editorService) GetWorkspaceDiagnosticsSummary(_ context.Context, call p
 	res.SetErrorCount(errCnt)
 	res.SetWarningCount(warnCnt)
 	res.SetInfoCount(infoCnt)
-	res.SetFileCount(fileCnt)
+	res.SetFileCount(uint32(len(files)))
+	return nil
+}
+
+// RescanWorkspaceDiagnostics triggers an async whole-project lint scan —
+// see lint.Manager.ScanWorkspace's doc comment. Fire-and-forget: it starts
+// (or queues, if one is already running) the scan and returns immediately;
+// results surface through the next GetWorkspaceDiagnostics/Summary call.
+func (s *editorService) RescanWorkspaceDiagnostics(_ context.Context, call proto.EditorService_rescanWorkspaceDiagnostics) error {
+	if _, err := call.AllocResults(); err != nil {
+		return err
+	}
+	s.lintMgr.ScanWorkspace()
 	return nil
 }
 

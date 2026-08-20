@@ -9,12 +9,14 @@ import (
 
 func init() {
 	parsers["eslint-json"] = parseESLint
+	workspaceParsers["eslint-json"] = parseESLintWorkspace
 }
 
 // eslintResult models one entry of `eslint --format json`'s output: an
 // array of per-file results. Only Messages is used — the rest (errorCount,
 // fixable counts, ...) isn't needed for diagnostics.
 type eslintResult struct {
+	FilePath string `json:"filePath"`
 	Messages []struct {
 		RuleID    string `json:"ruleId"`
 		Severity  int    `json:"severity"` // 1 = warning, 2 = error
@@ -69,4 +71,45 @@ func eslintSeverity(sev int) lsp.DiagnosticSeverity {
 		return lsp.SeverityError
 	}
 	return lsp.SeverityWarning
+}
+
+// parseESLintWorkspace converts a whole-project `eslint . --format json`
+// report into a path -> diagnostics map, using each result's own filePath
+// instead of a single caller-supplied path.
+func parseESLintWorkspace(out []byte, workDir string) (map[string][]lsp.Diagnostic, error) {
+	var results []eslintResult
+	if err := json.Unmarshal(out, &results); err != nil {
+		return nil, fmt.Errorf("eslint: parse output: %w", err)
+	}
+
+	byPath := make(map[string][]lsp.Diagnostic)
+	for _, r := range results {
+		if r.FilePath == "" || len(r.Messages) == 0 {
+			continue
+		}
+		path := resolveScanPath(workDir, r.FilePath)
+		for _, m := range r.Messages {
+			startLine := max(0, m.Line-1)
+			startCol := max(0, m.Column-1)
+			endLine, endCol := startLine, startCol+1
+			if m.EndLine > 0 {
+				endLine = max(0, m.EndLine-1)
+				endCol = max(0, m.EndColumn-1)
+			}
+			source := "eslint"
+			if m.RuleID != "" {
+				source = "eslint:" + m.RuleID
+			}
+			byPath[path] = append(byPath[path], lsp.Diagnostic{
+				Range: lsp.Range{
+					Start: lsp.Position{Line: startLine, Character: startCol},
+					End:   lsp.Position{Line: endLine, Character: endCol},
+				},
+				Severity: eslintSeverity(m.Severity),
+				Source:   source,
+				Message:  m.Message,
+			})
+		}
+	}
+	return byPath, nil
 }

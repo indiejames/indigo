@@ -218,6 +218,12 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 	if watcher != nil {
 		go svc.watchLoop()
 	}
+	// Kick off an initial workspace lint scan in the background so files
+	// nobody has opened yet already have something in
+	// getWorkspaceDiagnostics/Summary by the time a client first asks —
+	// see lint.Manager.ScanWorkspace's doc comment for why this only runs
+	// at startup and on explicit rescan, not per-edit.
+	go svc.lintMgr.ScanWorkspace()
 	return svc
 }
 

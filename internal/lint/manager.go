@@ -36,20 +36,45 @@ type Manager struct {
 	lastErr     map[string]error            // path -> error from the most recently completed run, nil once one succeeds
 	activeToken map[string]uint64           // path -> token of the run currently allowed to write results for it
 	tokenSeq    uint64                      // monotonically increasing source for activeToken values
+
+	// Workspace-wide scan state (Manager.ScanWorkspace), independent of the
+	// per-buffer state above — it covers files that aren't open in any
+	// buffer, which the maps above never touch. Guarded by workspaceMu
+	// rather than mu since a scan can run concurrently with, and outlive,
+	// any number of per-file lint runs.
+	workspaceMu      sync.Mutex
+	workspaceByCmd   map[string]map[string][]lsp.Diagnostic // linter command -> path -> most recently completed scan's diagnostics
+	workspaceErrs    map[string]error                       // linter command -> error from its most recently completed scan, nil once one succeeds
+	workspaceRunning bool
+	workspacePending bool
+
+	// scanCtx bounds every workspace-scan subprocess (runWorkspaceLinter),
+	// separately from the per-file runLinter timeouts above: a scan can run
+	// up to workspaceScanTimeout (2 minutes), long enough that a server
+	// shutdown mid-scan would otherwise leave an orphaned linter process
+	// running detached from indigo for the rest of that window. cancelScan
+	// is called by Shutdown to tear it down promptly instead.
+	scanCtx    context.Context
+	cancelScan context.CancelFunc
 }
 
 // NewManager builds a Manager. autoLints are detected once at startup by
 // scanning PATH and <workDir>/node_modules/.bin/, mirroring format.Manager.
 func NewManager(cfg *config.Config, workDir string) *Manager {
+	scanCtx, cancelScan := context.WithCancel(context.Background())
 	m := &Manager{
-		userLints:   cfg.Linters,
-		workDir:     workDir,
-		cached:      make(map[string][]lsp.Diagnostic),
-		running:     make(map[string]bool),
-		pending:     make(map[string]bool),
-		content:     make(map[string]string),
-		lastErr:     make(map[string]error),
-		activeToken: make(map[string]uint64),
+		userLints:      cfg.Linters,
+		workDir:        workDir,
+		cached:         make(map[string][]lsp.Diagnostic),
+		running:        make(map[string]bool),
+		pending:        make(map[string]bool),
+		content:        make(map[string]string),
+		lastErr:        make(map[string]error),
+		activeToken:    make(map[string]uint64),
+		workspaceByCmd: make(map[string]map[string][]lsp.Diagnostic),
+		workspaceErrs:  make(map[string]error),
+		scanCtx:        scanCtx,
+		cancelScan:     cancelScan,
 	}
 	localBin := filepath.Join(workDir, "node_modules", ".bin")
 	for _, d := range config.DefaultLinters {
@@ -219,6 +244,183 @@ func (m *Manager) Forget(path string) {
 	delete(m.activeToken, path)
 }
 
+// Shutdown cancels scanCtx, tearing down (via KillGroup, same as a normal
+// timeout — see runWorkspaceLinter) any workspace-scan subprocess still
+// running rather than leaving it orphaned past the server's own exit.
+// Per-file lint runs aren't covered: their individual 30s timeouts are
+// short enough that this hasn't been worth the same treatment.
+func (m *Manager) Shutdown() {
+	m.cancelScan()
+}
+
+// workspaceScanTimeout bounds one workspace-scan linter invocation — longer
+// than the per-file 30s timeout in runLinter since a whole-project run
+// (`golangci-lint run ./...`, `eslint .`, ...) legitimately takes longer.
+// A var, not a const, so tests can shrink it rather than paying the real
+// timeout when exercising the hang path (mirrors format.Manager's
+// externalFormatTimeout).
+var workspaceScanTimeout = 120 * time.Second
+
+// effectiveWorkspaceLinters returns the deduplicated (by Command) set of
+// configured/auto-detected linters that support a workspace scan, i.e.
+// have a non-empty WorkspaceArgs. User config takes precedence over
+// defaults for a given command, same as findLinter, achieved here simply by
+// visiting userLints first and skipping a command already seen.
+func (m *Manager) effectiveWorkspaceLinters() []config.LinterConfig {
+	seen := make(map[string]bool)
+	var out []config.LinterConfig
+	for _, l := range m.userLints {
+		if len(l.WorkspaceArgs) == 0 || seen[l.Command] {
+			continue
+		}
+		seen[l.Command] = true
+		out = append(out, l)
+	}
+	for _, l := range m.autoLints {
+		if len(l.WorkspaceArgs) == 0 || seen[l.Command] {
+			continue
+		}
+		seen[l.Command] = true
+		out = append(out, l)
+	}
+	return out
+}
+
+// ScanWorkspace runs every workspace-capable linter (see
+// effectiveWorkspaceLinters) against the whole project in the background,
+// so GetWorkspaceScanDiagnostics/WorkspaceScanSnapshot can serve results for
+// files that aren't open in any buffer — the per-file cache above never
+// covers those, since nothing ever calls RunAsync/RunOnEdit for a file
+// nobody opened. Call this on server startup and in response to an
+// explicit rescan request; it deliberately runs no more often than that
+// (unlike RunOnEdit's per-keystroke cadence) since a whole-project lint
+// invocation is far more expensive than a single-file one. A scan already
+// in progress coalesces a new request into one more run right after it
+// finishes, same coalescing shape runAsync uses per-path.
+func (m *Manager) ScanWorkspace() {
+	m.workspaceMu.Lock()
+	if m.workspaceRunning {
+		m.workspacePending = true
+		m.workspaceMu.Unlock()
+		return
+	}
+	m.workspaceRunning = true
+	m.workspaceMu.Unlock()
+
+	go m.runWorkspaceScan()
+}
+
+// runWorkspaceScan runs every workspace-capable linter concurrently (each
+// targets a different toolchain, so there's no shared resource to
+// serialize on) and, once all have finished, replaces each linter's slice
+// of workspaceByCmd wholesale on success — a scan is authoritative for the
+// whole project, so unlike the per-file cache there's no older result to
+// merge with. A linter whose run fails keeps its previous (stale) results
+// visible rather than being cleared, matching the "leave stale data visible
+// until a fresh fetch replaces it" philosophy runLinter's caller already
+// follows for the per-file cache; only its recorded error changes.
+//
+// A request that coalesced in while this run was already in flight
+// (workspacePending) is handled by looping right here rather than
+// unlocking, dropping workspaceRunning, and having ScanWorkspace kick off a
+// fresh goroutine: that would leave a window, between the unlock below and
+// the recursive ScanWorkspace call, where workspaceRunning reads false even
+// though a follow-up run is about to start — during which a concurrent
+// ScanWorkspace caller (e.g. another "r" press) would see no scan in
+// progress and launch a second one that races the coalesced follow-up
+// instead of being coalesced into it. Looping keeps workspaceRunning true
+// for the entire handoff, so WorkspaceScanning() and ScanWorkspace's own
+// running-check stay accurate throughout.
+func (m *Manager) runWorkspaceScan() {
+	for {
+		linters := m.effectiveWorkspaceLinters()
+
+		type scanResult struct {
+			cmd   string
+			diags map[string][]lsp.Diagnostic
+			err   error
+		}
+		results := make(chan scanResult, len(linters))
+		var wg sync.WaitGroup
+		for _, lc := range linters {
+			wg.Add(1)
+			go func(lc config.LinterConfig) {
+				defer wg.Done()
+				diags, err := runWorkspaceLinter(m.scanCtx, lc, m.workDir)
+				results <- scanResult{cmd: lc.Command, diags: diags, err: err}
+			}(lc)
+		}
+		wg.Wait()
+		close(results)
+
+		m.workspaceMu.Lock()
+		for r := range results {
+			if r.err != nil {
+				m.workspaceErrs[r.cmd] = r.err
+				continue
+			}
+			delete(m.workspaceErrs, r.cmd)
+			m.workspaceByCmd[r.cmd] = r.diags
+		}
+		if !m.workspacePending {
+			m.workspaceRunning = false
+			m.workspaceMu.Unlock()
+			return
+		}
+		m.workspacePending = false
+		m.workspaceMu.Unlock()
+	}
+}
+
+// WorkspaceScanDiagnostics returns path's diagnostics from the most
+// recently completed workspace scan, merged across every linter that
+// reported something for it (normally just one, keyed by extension, but
+// nothing stops two configured linters from covering the same file).
+func (m *Manager) WorkspaceScanDiagnostics(path string) []lsp.Diagnostic {
+	m.workspaceMu.Lock()
+	defer m.workspaceMu.Unlock()
+	var out []lsp.Diagnostic
+	for _, byPath := range m.workspaceByCmd {
+		out = append(out, byPath[path]...)
+	}
+	return out
+}
+
+// WorkspaceScanSnapshot returns every path the most recently completed
+// workspace scan(s) found diagnostics for, merged across linters. The
+// caller (GetWorkspaceDiagnostics/Summary in internal/server) is expected
+// to skip any path that's also an open buffer, since that path's live,
+// possibly-newer diagnostics already supersede a scan result.
+func (m *Manager) WorkspaceScanSnapshot() map[string][]lsp.Diagnostic {
+	m.workspaceMu.Lock()
+	defer m.workspaceMu.Unlock()
+	merged := make(map[string][]lsp.Diagnostic)
+	for _, byPath := range m.workspaceByCmd {
+		for path, diags := range byPath {
+			merged[path] = append(merged[path], diags...)
+		}
+	}
+	return merged
+}
+
+// WorkspaceScanning reports whether a workspace scan is currently running
+// (including one queued to run again immediately after).
+func (m *Manager) WorkspaceScanning() bool {
+	m.workspaceMu.Lock()
+	defer m.workspaceMu.Unlock()
+	return m.workspaceRunning
+}
+
+// WorkspaceScanError returns the error from cmd's most recently completed
+// workspace-scan run, or nil if that run succeeded (or cmd never ran). Same
+// rationale as LastError: WorkspaceScanSnapshot alone can't distinguish "no
+// issues" from "this linter has been failing" for a given tool.
+func (m *Manager) WorkspaceScanError(cmd string) error {
+	m.workspaceMu.Lock()
+	defer m.workspaceMu.Unlock()
+	return m.workspaceErrs[cmd]
+}
+
 // runLinter executes lc's command against filePath and parses its output.
 // The process runs with workDir as its working directory — cargo clippy in
 // particular discovers Cargo.toml from the CWD rather than from a
@@ -265,6 +467,77 @@ func runLinter(lc config.LinterConfig, filePath, content, workDir string) ([]lsp
 		return nil, parseErr
 	}
 	return diags, nil
+}
+
+// maxStderrPreview bounds how much of a failed workspace-scan command's
+// stderr gets folded into its returned error — enough to show a real
+// culprit (a config error, an unresolvable import, ...) without risking an
+// unbounded error string from a linter that dumps something huge.
+const maxStderrPreview = 2048
+
+// runWorkspaceLinter executes lc's WorkspaceArgs invocation (a whole-project
+// run, e.g. `golangci-lint run ./...`) with workDir as both cwd and the
+// base for resolving any relative path the tool reports, and parses its
+// output with lc.Format's workspace (multi-file) parser. Mirrors runLinter
+// except: no {file}/content substitution (a workspace run has no single
+// target file or stdin content — WorkspaceArgs is used verbatim), a longer
+// timeout (workspaceScanTimeout, not runLinter's 30s), and a stderr preview
+// folded into a run failure's error — a workspace scan's failure is only
+// ever visible via WorkspaceScanError (there's no per-file editor context to
+// hint at what went wrong the way an open buffer's own diagnostics would),
+// so a bare "exit status 1" is much less actionable here than for
+// runLinter's single-file case.
+func runWorkspaceLinter(parentCtx context.Context, lc config.LinterConfig, workDir string) (map[string][]lsp.Diagnostic, error) {
+	parse, ok := workspaceParsers[lc.Format]
+	if !ok {
+		return nil, fmt.Errorf("lint: no workspace parser for format %q (%s)", lc.Format, lc.Command)
+	}
+
+	cmd := expandPath(lc.Command)
+
+	ctx, cancel := context.WithTimeout(parentCtx, workspaceScanTimeout)
+	defer cancel()
+
+	proc := exec.CommandContext(ctx, cmd, lc.WorkspaceArgs...)
+	procutil.SetPgid(proc)
+	proc.Cancel = func() error { return procutil.KillGroup(proc) }
+	proc.Dir = workDir
+	var out, stderr bytes.Buffer
+	proc.Stdout = &out
+	proc.Stderr = &stderr
+	runErr := proc.Run()
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	diags, parseErr := parse(out.Bytes(), workDir)
+	if parseErr != nil {
+		if runErr != nil {
+			return nil, fmt.Errorf("%s: %w%s", lc.Command, runErr, stderrPreview(stderr.Bytes()))
+		}
+		return nil, parseErr
+	}
+	return diags, nil
+}
+
+// stderrPreview formats up to maxStderrPreview bytes of a failed process's
+// stderr as an error-message suffix (": <preview>"), or "" if there was
+// none to show.
+func stderrPreview(stderr []byte) string {
+	stderr = bytes.TrimSpace(stderr)
+	if len(stderr) == 0 {
+		return ""
+	}
+	truncated := len(stderr) > maxStderrPreview
+	if truncated {
+		stderr = stderr[:maxStderrPreview]
+	}
+	suffix := ""
+	if truncated {
+		suffix = "…"
+	}
+	return fmt.Sprintf(": %s%s", stderr, suffix)
 }
 
 func matchesExt(extensions []string, ext string) bool {

@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -9,14 +10,19 @@ import (
 )
 
 func newTestManager(lints ...config.LinterConfig) *Manager {
+	scanCtx, cancelScan := context.WithCancel(context.Background())
 	return &Manager{
-		userLints:   lints,
-		cached:      make(map[string][]lsp.Diagnostic),
-		running:     make(map[string]bool),
-		pending:     make(map[string]bool),
-		content:     make(map[string]string),
-		lastErr:     make(map[string]error),
-		activeToken: make(map[string]uint64),
+		userLints:      lints,
+		cached:         make(map[string][]lsp.Diagnostic),
+		running:        make(map[string]bool),
+		pending:        make(map[string]bool),
+		content:        make(map[string]string),
+		lastErr:        make(map[string]error),
+		activeToken:    make(map[string]uint64),
+		workspaceByCmd: make(map[string]map[string][]lsp.Diagnostic),
+		workspaceErrs:  make(map[string]error),
+		scanCtx:        scanCtx,
+		cancelScan:     cancelScan,
 	}
 }
 

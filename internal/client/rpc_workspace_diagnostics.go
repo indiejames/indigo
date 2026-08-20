@@ -23,9 +23,12 @@ type WorkspaceDiagnosticsResult struct {
 	Truncated bool
 }
 
-// GetWorkspaceDiagnostics fetches diagnostics across every currently open
-// buffer. Scope note: this covers open buffers only, not the whole
-// workspace on disk — see PLAN.md's workspace-scan follow-up.
+// GetWorkspaceDiagnostics fetches diagnostics across the whole project:
+// live diagnostics for every open buffer, plus whatever the last workspace
+// lint scan found for files that aren't open in any buffer — see
+// RescanWorkspaceDiagnostics to trigger a fresh scan. LSP/plugin diagnostic
+// coverage for unopened files is a known, documented gap, not yet
+// implemented.
 func (r *RPC) GetWorkspaceDiagnostics(ctx context.Context) (WorkspaceDiagnosticsResult, error) {
 	fut, rel := r.svc.GetWorkspaceDiagnostics(ctx, func(proto.EditorService_getWorkspaceDiagnostics_Params) error {
 		return nil
@@ -80,4 +83,18 @@ func (r *RPC) GetWorkspaceDiagnosticsSummary(ctx context.Context) (WorkspaceDiag
 		InfoCount:    int(res.InfoCount()),
 		FileCount:    int(res.FileCount()),
 	}, nil
+}
+
+// RescanWorkspaceDiagnostics triggers an async whole-project lint scan on
+// the server (see lint.Manager.ScanWorkspace) to refresh diagnostics for
+// files that aren't open in any buffer. Fire-and-forget: this call returns
+// once the scan has been (re)started, not once it completes — call
+// GetWorkspaceDiagnostics/Summary again afterward to pick up fresh results.
+func (r *RPC) RescanWorkspaceDiagnostics(ctx context.Context) error {
+	fut, rel := r.svc.RescanWorkspaceDiagnostics(ctx, func(proto.EditorService_rescanWorkspaceDiagnostics_Params) error {
+		return nil
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
 }

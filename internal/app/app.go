@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -408,13 +407,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			loading: true,
 			seq:     seq,
 		}
-		rpc := a.rpc
-		return a, func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			result, err := rpc.GetWorkspaceDiagnostics(ctx)
-			return diagBrowserResultsMsg{seq: seq, result: result, err: err}
-		}
+		return a, a.fetchDiagBrowserResults(seq)
 
 	case diagBrowserResultsMsg:
 		if a.diagBrowser != nil && msg.seq == a.diagBrowser.seq {

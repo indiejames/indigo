@@ -155,19 +155,29 @@ interface EditorService {
   # empty means no language server, no organize-imports support, or nothing
   # to change.
   lspOrganizeImports @50 (bufId :UInt32) -> (edits :List(PluginEdit));
-  # getWorkspaceDiagnostics aggregates diagnostics (LSP + lint + plugin)
-  # across every currently open buffer, tagged with each one's file path —
-  # unlike getDiagnostics, which is scoped to a single bufId. truncated is
-  # true if the result was capped (see maxWorkspaceDiagnostics in
-  # server_lsp.go) rather than exhaustive. Does not cover files that aren't
-  # open in any buffer — see docs/plugin-architecture.md and PLAN.md for
-  # the planned workspace-scan follow-up that would extend coverage there.
+  # getWorkspaceDiagnostics aggregates diagnostics across the whole
+  # project, tagged with each one's file path — unlike getDiagnostics,
+  # which is scoped to a single bufId. Open buffers get live LSP + lint +
+  # plugin diagnostics (same sources as getDiagnostics); files that aren't
+  # open in any buffer get whatever the last workspace lint scan found for
+  # them (see rescanWorkspaceDiagnostics). LSP/plugin diagnostic coverage
+  # for unopened files is a known, documented gap, not yet implemented.
+  # truncated is true if the result was capped (see maxWorkspaceDiagnostics
+  # in server_lsp.go) rather than exhaustive.
   getWorkspaceDiagnostics @51 () -> (items :List(WorkspaceDiagnosticItem), truncated :Bool);
   # getWorkspaceDiagnosticsSummary is the cheap counts-only counterpart to
   # getWorkspaceDiagnostics, for a workspace-wide status indicator that
-  # doesn't need the full list. fileCount is the number of distinct open
-  # buffers with at least one diagnostic.
+  # doesn't need the full list. fileCount is the number of distinct files
+  # (open buffers plus workspace-scanned files) with at least one
+  # diagnostic.
   getWorkspaceDiagnosticsSummary @52 () -> (errorCount :UInt32, warningCount :UInt32, infoCount :UInt32, fileCount :UInt32);
+  # rescanWorkspaceDiagnostics triggers an async whole-project lint scan
+  # (internal/lint.Manager.ScanWorkspace) to refresh diagnostics for files
+  # that aren't open in any buffer. Fire-and-forget: this returns as soon as
+  # the scan is (re)started, not once it completes — results show up
+  # through the next getWorkspaceDiagnostics/Summary call. A scan already in
+  # progress coalesces this into one more run right after it finishes.
+  rescanWorkspaceDiagnostics @53 () -> ();
 }
 
 # MenuItemInfo is one node in the Command-menu tree contributed by a plugin.

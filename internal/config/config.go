@@ -46,29 +46,45 @@ type Keybind struct {
 // buffer's live, unsaved content on every edit instead of only on save.
 // Linters without an in-memory/stdin mode (golangci-lint, cargo clippy —
 // both need a real on-disk project to compile against) stay save-triggered.
+// WorkspaceArgs, when non-empty, is a whole-project invocation of Command
+// (e.g. `golangci-lint run ./...`) used by the workspace diagnostic scan
+// (internal/lint.Manager.ScanWorkspace) to find issues in files that aren't
+// open in any buffer — a separate invocation shape from Args, which always
+// targets one file via {file}. A linter with no WorkspaceArgs is simply
+// skipped during a workspace scan; its per-buffer Args-based linting is
+// unaffected.
 type LinterConfig struct {
-	Extensions []string `toml:"extensions"`
-	Command    string   `toml:"command"`
-	Args       []string `toml:"args,omitempty"`
-	Format     string   `toml:"format"`
-	Stdin      bool     `toml:"stdin,omitempty"`
+	Extensions    []string `toml:"extensions"`
+	Command       string   `toml:"command"`
+	Args          []string `toml:"args,omitempty"`
+	WorkspaceArgs []string `toml:"workspace_args,omitempty"`
+	Format        string   `toml:"format"`
+	Stdin         bool     `toml:"stdin,omitempty"`
 }
 
 // DefaultLinters are tried when no user linter config matches an extension.
 // Only entries whose command is found in PATH (or node_modules/.bin) are used.
 var DefaultLinters = []LinterConfig{
 	{Extensions: []string{"go"}, Command: "golangci-lint",
-		Args: []string{"run", "--output.json.path=stdout", "{file}"}, Format: "golangci-lint-json"},
+		Args:          []string{"run", "--output.json.path=stdout", "{file}"},
+		WorkspaceArgs: []string{"run", "--output.json.path=stdout", "./..."},
+		Format:        "golangci-lint-json"},
 	{Extensions: []string{"js", "jsx", "ts", "tsx"}, Command: "eslint",
-		Args:   []string{"--stdin", "--stdin-filename", "{file}", "--format", "json"},
-		Format: "eslint-json", Stdin: true},
+		Args:          []string{"--stdin", "--stdin-filename", "{file}", "--format", "json"},
+		WorkspaceArgs: []string{".", "--format", "json"},
+		Format:        "eslint-json", Stdin: true},
 	{Extensions: []string{"py"}, Command: "ruff",
-		Args:   []string{"check", "--stdin-filename", "{file}", "--output-format", "json", "-"},
-		Format: "ruff-json", Stdin: true},
+		Args:          []string{"check", "--stdin-filename", "{file}", "--output-format", "json", "-"},
+		WorkspaceArgs: []string{"check", "--output-format", "json", "."},
+		Format:        "ruff-json", Stdin: true},
 	// cargo clippy has no single-file argument — it lints the whole crate
-	// containing the saved file, discovered from Manager's workDir.
+	// containing the saved file, discovered from Manager's workDir. Its
+	// per-file Args already amount to a whole-crate run, so WorkspaceArgs
+	// is identical.
 	{Extensions: []string{"rs"}, Command: "cargo",
-		Args: []string{"clippy", "--message-format", "json"}, Format: "cargo-clippy-json"},
+		Args:          []string{"clippy", "--message-format", "json"},
+		WorkspaceArgs: []string{"clippy", "--message-format", "json"},
+		Format:        "cargo-clippy-json"},
 }
 
 // DefaultFormatters are tried (in order) when no user formatter config matches

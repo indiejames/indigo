@@ -152,6 +152,33 @@ args       = ["run", "--output.json.path=stdout", "{file}"]
 format     = "golangci-lint-json"
 ```
 
+### Workspace diagnostic scan
+
+`:diagnostics` (or `:diag`) opens a project-wide diagnostic browser (`Enter` jumps to a
+result, `r` triggers a fresh scan, `Esc` closes it). Unlike the per-buffer diagnostics
+above, it also covers files that aren't open in any buffer, sourced from a whole-project
+invocation of each configured/auto-detected linter that defines `workspace_args` — a
+separate, `{file}`-free argument list run once against the whole workspace root instead of
+one file at a time (e.g. `golangci-lint run ./...` instead of `golangci-lint run {file}`).
+All four built-in linters above already define one. A scan runs automatically once when
+the server starts and again on every `r` in the browser; it does not run on every edit or
+save the way per-buffer linting does, since a whole-project run is much more expensive.
+A linter with no `workspace_args` is simply skipped during a scan — its normal per-buffer
+linting is unaffected.
+
+```toml
+[[linter]]
+extensions     = ["go"]
+command        = "golangci-lint"
+args           = ["run", "--output.json.path=stdout", "{file}"]
+workspace_args = ["run", "--output.json.path=stdout", "./..."]
+format         = "golangci-lint-json"
+```
+
+A file that's both open in a buffer and covered by a workspace scan always shows the open
+buffer's live diagnostics — the scan result for that file is superseded, never merged
+alongside it, since the scan can be arbitrarily stale relative to live editing.
+
 ## File type aliases
 
 Map a file extension or an exact filename to an existing syntax-highlighting language, for

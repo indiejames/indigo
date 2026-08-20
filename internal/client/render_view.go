@@ -342,9 +342,12 @@ func (m Model) View() string {
 	}
 
 	// Overlay severe-error modal (centered, topmost, drawn last): must be
-	// dismissed via Enter/Esc — see handleKey's severeErr gate.
+	// dismissed via Enter/Esc — see handleKey's severeErr gate. maxPopH
+	// mirrors the help/message-log popups' floor so the dialog (including
+	// its dismiss-hint footer) always fits within the visible area.
 	if m.severeErr != "" {
-		popup := renderSevereErrorPopup(m.severeErr, m.width)
+		maxPopH := max(6, vis-4)
+		popup := renderSevereErrorPopup(m.severeErr, m.width, maxPopH)
 		popH := len(popup)
 		popW := lipgloss.Width(popup[0])
 		popCol := max(0, (m.width-popW)/2)

@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestIsErrMessage(t *testing.T) {
@@ -158,9 +161,75 @@ func TestRenderToastWrapsAndBorders(t *testing.T) {
 }
 
 func TestRenderSevereErrorPopupIncludesDismissHint(t *testing.T) {
-	lines := renderSevereErrorPopup("buffer may be out of sync with the server", 80)
+	lines := renderSevereErrorPopup("buffer may be out of sync with the server", 80, 20)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "dismiss") {
 		t.Errorf("renderSevereErrorPopup should include a dismiss hint, got:\n%s", joined)
+	}
+}
+
+// TestRenderSevereErrorPopupCapsHeightAndKeepsFooter is a regression test:
+// renderSevereErrorPopup previously had no height cap, so a long message
+// could push the bottom border and the dismiss-hint footer — the only
+// visible instructions for closing a modal that blocks all input — past
+// what the caller actually composites into the view.
+func TestRenderSevereErrorPopupCapsHeightAndKeepsFooter(t *testing.T) {
+	longText := strings.Repeat("this is a very long error message. ", 40)
+	const maxH = 10
+	lines := renderSevereErrorPopup(longText, 80, maxH)
+
+	if len(lines) > maxH {
+		t.Errorf("renderSevereErrorPopup: got %d lines, want <= maxH (%d)", len(lines), maxH)
+	}
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, "dismiss") {
+		t.Errorf("last line should still be the dismiss-hint footer even when truncated, got %q", last)
+	}
+}
+
+// TestRenderToastInnerWidthNeverExceedsMaxW is a regression test: a forced
+// minimum inner width used to let the toast box overflow maxW on a narrow
+// terminal (render_view.go centers popups by column offset alone, with no
+// clipping, so an oversized box corrupts the rendered line).
+func TestRenderToastInnerWidthNeverExceedsMaxW(t *testing.T) {
+	const maxW = 8
+	lines := renderToast("E: short", maxW)
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > maxW {
+			t.Errorf("renderToast line width = %d, want <= maxW (%d): %q", w, maxW, l)
+		}
+	}
+}
+
+// TestRenderSevereErrorPopupWidthNeverExceedsMaxW mirrors the toast case for
+// the severe-error modal.
+func TestRenderSevereErrorPopupWidthNeverExceedsMaxW(t *testing.T) {
+	const maxW = 8
+	lines := renderSevereErrorPopup("E: short", maxW, 10)
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > maxW {
+			t.Errorf("renderSevereErrorPopup line width = %d, want <= maxW (%d): %q", w, maxW, l)
+		}
+	}
+}
+
+// TestMouseMsgBlockedBySevereError verifies mouse events are swallowed while
+// the must-dismiss modal is up — handleKey's severeErr gate only guards
+// tea.KeyMsg, but tea.MouseMsg is handled separately in Model.Update and
+// bypasses it entirely unless also guarded there.
+func TestMouseMsgBlockedBySevereError(t *testing.T) {
+	m := newTestModel("hello\nworld\n")
+	m.severeErr = "buffer may be out of sync with the server"
+	prevCursor := m.cursor
+	prevTopLine := m.topLine
+
+	updated, cmd := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 0, Y: 1})
+	m2 := updated.(Model)
+
+	if cmd != nil {
+		t.Error("expected no command from a mouse event while the severe-error modal is up")
+	}
+	if m2.cursor != prevCursor || m2.topLine != prevTopLine {
+		t.Error("mouse event should not move the cursor or scroll while the severe-error modal is up")
 	}
 }

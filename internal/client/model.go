@@ -1270,6 +1270,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
+		// The severe-error modal must block all input until explicitly
+		// dismissed (see handleKey's severeErr gate) — mouse events bypass
+		// handleKey entirely, so they need their own guard here.
+		if m.severeErr != "" {
+			return m, nil
+		}
 		prevTopLine := m.topLine
 		prevCursor := m.cursor
 		prevSel := copySel(m.sel)

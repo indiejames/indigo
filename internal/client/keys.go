@@ -407,6 +407,19 @@ func (m Model) handleMenuActionRPC(pluginName, action string) (tea.Model, tea.Cm
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// The severe-error modal (see pushSevereError) blocks all other input
+	// until explicitly dismissed — unlike the toast overlay, which is purely
+	// visual, this covers failures the user must consciously acknowledge
+	// (an edit that may not have reached the server, or a resync whose
+	// outcome they need to check) rather than risk them typing straight
+	// through it unread.
+	if m.severeErr != "" {
+		switch msg.String() {
+		case "enter", "esc":
+			m.severeErr = ""
+		}
+		return m, nil
+	}
 	if m.recoveryPrompt {
 		return m.handleRecoveryPrompt(msg)
 	}

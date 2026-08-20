@@ -571,7 +571,9 @@ type Model struct {
 	height              int
 	filePath            string
 	workDir             string // project root, used for display-path shortening
-	status              string // transient error message shown in modeline
+	status              string    // transient status/error message shown in modeline or, for error-class text, the toast overlay (see isErrMessage)
+	statusAt            time.Time // when status was last set; drives toast auto-dismiss
+	severeErr           string    // non-empty = must-dismiss error modal is visible (see handleKey); state-affecting failures only
 	sel                 *Selection
 	dragging            bool
 	lastClickAt         time.Time
@@ -743,6 +745,12 @@ func (m Model) clientID() uint64 {
 // maxMessageLog caps how many status messages the message-log popup retains.
 const maxMessageLog = 300
 
+// toastDuration is how long an error-class status message (see isErrMessage)
+// stays visible as the toast overlay before the tickMsg handler clears it.
+// Non-error status messages have no expiry — they persist until replaced,
+// same as before this existed.
+const toastDuration = 6 * time.Second
+
 // logEntry records one status-bar message for the message-log popup (space l).
 type logEntry struct {
 	at    time.Time
@@ -750,20 +758,46 @@ type logEntry struct {
 	isErr bool
 }
 
-// pushStatus sets the transient status-bar message and, unless it's a clear
-// (text == ""), appends it to messageLog for later review. Error messages
-// follow the "E: "/"ERR: " convention used throughout this package.
-func (m Model) pushStatus(text string) Model {
-	m.status = text
-	if text == "" {
-		return m
-	}
-	isErr := strings.HasPrefix(text, "E:") || strings.HasPrefix(text, "ERR:")
+// isErrMessage reports whether a status/log message follows the "E: "/"ERR: "
+// error convention used throughout this package. Error-class text renders as
+// the auto-dismissing toast overlay (see View()) instead of the status-bar
+// center segment, since that segment truncates long messages and is easy to
+// miss once attention moves elsewhere.
+func isErrMessage(text string) bool {
+	return strings.HasPrefix(text, "E:") || strings.HasPrefix(text, "ERR:")
+}
+
+// appendMessageLog appends an entry to messageLog for later review (space l),
+// trimming to the most recent maxMessageLog entries.
+func (m Model) appendMessageLog(text string, isErr bool) Model {
 	m.messageLog = append(m.messageLog, logEntry{at: time.Now(), text: text, isErr: isErr})
 	if len(m.messageLog) > maxMessageLog {
 		m.messageLog = append([]logEntry(nil), m.messageLog[len(m.messageLog)-maxMessageLog:]...)
 	}
 	return m
+}
+
+// pushStatus sets the transient status-bar/toast message and, unless it's a
+// clear (text == ""), appends it to messageLog for later review.
+func (m Model) pushStatus(text string) Model {
+	m.status = text
+	if text == "" {
+		return m
+	}
+	m.statusAt = time.Now()
+	return m.appendMessageLog(text, isErrMessage(text))
+}
+
+// pushSevereError shows a must-dismiss error modal (see handleKey's severeErr
+// gate and renderSevereErrorPopup) instead of the toast pushStatus's
+// error-class text would otherwise use. Reserved for failures that leave the
+// buffer's state in question — an edit that failed to reach the server, or a
+// resync whose outcome the user needs to consciously check — where silently
+// auto-dismissing or letting a later status overwrite it risks the user
+// never noticing. Still recorded in messageLog like any other message.
+func (m Model) pushSevereError(text string) Model {
+	m.severeErr = text
+	return m.appendMessageLog(text, true)
 }
 
 // cursorSnap captures the current cursor, selection, and extra-cursor state.
@@ -850,6 +884,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.updateViewportCmd()
 
 	case tickMsg:
+		if m.status != "" && isErrMessage(m.status) && time.Since(m.statusAt) > toastDuration {
+			m.status = ""
+		}
 		m.diagTick++
 		m.decorTick++
 		m.inlayTick++
@@ -934,7 +971,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case applyOpFailedMsg:
-		m = m.pushStatus("ERR: edit failed to reach server, resyncing: " + msg.err.Error())
+		m = m.pushSevereError("ERR: edit failed to reach server, resyncing: " + msg.err.Error())
 		return m, m.resyncFromServer()
 
 	case bufferResyncMsg:
@@ -942,7 +979,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // stale result from a previous buffer switch; discard
 		}
 		if msg.err != nil {
-			m = m.pushStatus("ERR: resync failed, buffer may be out of sync with the server: " + msg.err.Error())
+			m = m.pushSevereError("ERR: resync failed, buffer may be out of sync with the server: " + msg.err.Error())
 			return m, nil
 		}
 		if msg.path != "" && msg.path != m.filePath {
@@ -968,7 +1005,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor.Col = lineLen
 		}
 		m.scrollToCursor()
-		m = m.pushStatus("Buffer resynced from server — please check your last change")
+		m = m.pushSevereError("Buffer resynced from server — please check your last change")
 		return m, m.reparseHighlight()
 
 	case PluginShowMsgMsg:

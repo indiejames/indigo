@@ -1311,3 +1311,60 @@ func renderMessageLogPopup(width, scroll, maxH int, log []logEntry) []string {
 	out = append(out, bottom)
 	return out
 }
+
+// renderToast renders a non-modal, auto-dismissing banner for an error-class
+// status message (see isErrMessage) — the bottom-of-screen counterpart to
+// the status bar's center segment, sized to fit the full (wrapped) message
+// rather than truncating it. Composited in View(); cleared by the tickMsg
+// handler in model.go once toastDuration elapses.
+func renderToast(text string, maxW int) []string {
+	innerW := max(10, min(maxW-4, 100))
+	body := wrapToWidth(text, innerW)
+	border := lipgloss.NewStyle().Background(popupBg).Foreground(lipgloss.Color(activeDiagError))
+	textStyle := diagErrorStyle.Background(popupBg)
+
+	top := border.Render(bdrTL + strings.Repeat(bdrH, innerW) + bdrTR)
+	out := []string{top}
+	for _, line := range body {
+		lw := lipgloss.Width(line)
+		if lw < innerW {
+			line += strings.Repeat(" ", innerW-lw)
+		}
+		out = append(out, border.Render(bdrV)+textStyle.Render(line)+border.Render(bdrV))
+	}
+	out = append(out, border.Render(bdrBL+strings.Repeat(bdrH, innerW)+bdrBR))
+	return out
+}
+
+// renderSevereErrorPopup renders the centered, must-dismiss error dialog for
+// failures that leave the buffer's state in question — see pushSevereError
+// and handleKey's severeErr gate, which blocks all other input until
+// Enter/Esc dismisses it.
+func renderSevereErrorPopup(text string, maxW int) []string {
+	innerW := max(20, min(maxW-4, 70))
+	body := wrapToWidth(text, innerW)
+	border := lipgloss.NewStyle().Background(popupBg).Foreground(lipgloss.Color(activeDiagError))
+	textStyle := diagErrorStyle.Background(popupBg)
+
+	title := " Error "
+	titleRunes := []rune(title)
+	dashes := max(0, innerW-len(titleRunes))
+	top := border.Render(bdrTL + title + strings.Repeat(bdrH, dashes) + bdrTR)
+
+	out := []string{top}
+	for _, line := range body {
+		lw := lipgloss.Width(line)
+		if lw < innerW {
+			line += strings.Repeat(" ", innerW-lw)
+		}
+		out = append(out, border.Render(bdrV)+textStyle.Render(line)+border.Render(bdrV))
+	}
+	out = append(out, border.Render(bdrV)+popupTextStyle.Render(strings.Repeat(" ", innerW))+border.Render(bdrV))
+
+	hint := "Enter/Esc to dismiss"
+	hintRunes := []rune(hint)
+	hintPad := max(0, innerW-len(hintRunes))
+	bottom := border.Render(bdrBL) + popupKeyStyle.Render(hint) + popupTextStyle.Render(strings.Repeat(" ", hintPad)) + border.Render(bdrBR)
+	out = append(out, bottom)
+	return out
+}

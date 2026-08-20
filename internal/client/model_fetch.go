@@ -352,6 +352,8 @@ func codeActionRange(cursor document.Pos, sel *Selection) (startLine, startCol, 
 func (m Model) fetchFixes() tea.Cmd {
 	decor := m.fixableDecorationAtCursor()
 	bufID := m.bufID
+	at := m.cursor
+	version := m.buf.Version()
 	line := uint32(m.cursor.Line)
 	col := uint32(m.cursor.Col)
 
@@ -402,7 +404,7 @@ func (m Model) fetchFixes() tea.Cmd {
 			}
 		}
 
-		return fixItemsMsg{items: items, decor: decor}
+		return fixItemsMsg{items: items, decor: decor, bufID: bufID, at: at, version: version}
 	}
 }
 
@@ -555,18 +557,33 @@ func (m Model) currentWordPrefix() string {
 }
 
 // diagsAtPos returns diagnostics whose underline range covers (line, col), most severe first.
-// A diagnostic covers col when d.Col <= col < d.EndCol (or endCol is clamped to col+1 for zero-width).
+// A diagnostic covers col when d.Col <= col < d.EndCol (or endCol is clamped to col+1 for zero-width) —
+// mirrors render.go's per-line column logic for painting a (possibly
+// multi-line) diagnostic's underline exactly, so hovering/auto-popup
+// detection matches what's actually drawn on screen: a multi-line
+// diagnostic used to only ever match on its starting line (d.Line != line
+// ignored d.EndLine entirely), so the popup silently never showed for the
+// cursor on any of its other lines even though the underline was visibly
+// there.
 func (m Model) diagsAtPos(line, col int) []ClientDiag {
 	var out []ClientDiag
 	for _, d := range m.diagnostics {
-		if d.Line != line {
-			continue
+		var match bool
+		switch {
+		case d.Line == line && d.EndLine == line:
+			end := d.EndCol
+			if end <= d.Col {
+				end = d.Col + 1
+			}
+			match = col >= d.Col && col < end
+		case d.Line == line && d.EndLine > line:
+			match = col >= d.Col // rest of the (first) line
+		case d.Line < line && d.EndLine == line:
+			match = col < d.EndCol // up to the endpoint on the (last) line
+		case d.Line < line && d.EndLine > line:
+			match = true // an interior line is covered in full
 		}
-		end := d.EndCol
-		if end <= d.Col {
-			end = d.Col + 1
-		}
-		if col >= d.Col && col < end {
+		if match {
 			out = append(out, d)
 		}
 	}

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -87,6 +88,8 @@ type App struct {
 	picker        *filePicker          // non-nil when file picker is open
 	grep          *grepPicker          // non-nil when workspace search picker is open
 	grepSeq       int                  // bumped on every new grep request; see grepResultsMsg
+	diagBrowser   *diagBrowser         // non-nil when the workspace diagnostic browser is open
+	diagSeq       int                  // bumped on every new diagnostic-browser request; see diagBrowserResultsMsg
 	bufPicker     *bufPicker           // non-nil when buffer picker popup is open
 	searchReplace *searchReplaceDialog // non-nil when the global search & replace dialog is open
 
@@ -275,6 +278,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.grep.width = msg.Width
 			a.grep.height = msg.Height
 		}
+		if a.diagBrowser != nil {
+			a.diagBrowser.width = msg.Width
+			a.diagBrowser.height = msg.Height
+		}
 		if a.bufPicker != nil {
 			a.bufPicker.width = msg.Width
 			a.bufPicker.height = msg.Height
@@ -388,6 +395,45 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case grepCancelledMsg:
 		a.grep = nil
+		return a, nil
+
+	// ---- workspace diagnostic browser open ----
+	case client.OpenDiagnosticBrowserMsg:
+		a.diagSeq++
+		seq := a.diagSeq
+		a.diagBrowser = &diagBrowser{
+			workDir: a.workDir,
+			width:   a.width,
+			height:  a.height,
+			loading: true,
+			seq:     seq,
+		}
+		rpc := a.rpc
+		return a, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			result, err := rpc.GetWorkspaceDiagnostics(ctx)
+			return diagBrowserResultsMsg{seq: seq, result: result, err: err}
+		}
+
+	case diagBrowserResultsMsg:
+		if a.diagBrowser != nil && msg.seq == a.diagBrowser.seq {
+			a.diagBrowser.loading = false
+			if msg.err != nil {
+				a.diagBrowser.errMsg = msg.err.Error()
+			} else {
+				a.diagBrowser.items = msg.result.Items
+				a.diagBrowser.truncated = msg.result.Truncated
+			}
+		}
+		return a, nil
+
+	case diagBrowserPickedMsg:
+		a.diagBrowser = nil
+		return a, a.doOpenFileAtMatch(msg.absPath, msg.line, msg.col, 0)
+
+	case diagBrowserCancelledMsg:
+		a.diagBrowser = nil
 		return a, nil
 
 	// ---- search & replace dialog ----
@@ -723,6 +769,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if a.grep != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handleGrepKey(km)
+		}
+	}
+	if a.diagBrowser != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleDiagBrowserKey(km)
 		}
 	}
 	if a.bufPicker != nil {

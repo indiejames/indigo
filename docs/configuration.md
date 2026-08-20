@@ -196,7 +196,9 @@ replace only within it, or make any selection first. A replace commit clears the
 afterward, since its bounds no longer necessarily mean anything once the text has changed.
 
 For search/replace across the whole workspace instead of one buffer, see `:grep`/`:find` and
-the search & replace dialog (Command menu: `Space`, then `s`).
+the search & replace dialog (Command menu: `Space`, then `s`). For diagnostics (LSP/lint/plugin
+issues) across every open buffer instead of just the current one, see `:diagnostics`/`:diag` —
+covers open buffers only for now, not the whole project on disk.
 
 ## Key bindings
 

@@ -16,6 +16,30 @@ import (
 	proto "github.com/indiejames/indigo/internal/proto"
 )
 
+// currentPluginDiags returns entry's plugin diagnostics that are still
+// valid against its buffer's current version — see pluginDiagEntry's doc
+// comment on why entries computed against an older version are excluded
+// rather than returned stale. Caller must hold s.mu.
+func currentPluginDiags(entry *bufferEntry) []lsp.Diagnostic {
+	curVersion := entry.buf.Version()
+	var out []lsp.Diagnostic
+	for _, e := range entry.pluginDiags {
+		if e.version != curVersion {
+			continue // left behind by edits since publish; would point at the wrong text
+		}
+		out = append(out, e.diags...)
+	}
+	return out
+}
+
+// mergedDiagnostics combines LSP + lint + (already version-filtered) plugin
+// diagnostics for one path, the same three sources GetDiagnostics and
+// GetWorkspaceDiagnostics both draw from.
+func (s *editorService) mergedDiagnostics(path string, pluginDiags []lsp.Diagnostic) []lsp.Diagnostic {
+	diags := append(s.lspMgr.GetDiagnostics(path), s.lintMgr.GetDiagnostics(path)...)
+	return append(diags, pluginDiags...)
+}
+
 func (s *editorService) GetDiagnostics(_ context.Context, call proto.EditorService_getDiagnostics) error {
 	bufID := call.Args().BufId()
 
@@ -26,18 +50,10 @@ func (s *editorService) GetDiagnostics(_ context.Context, call proto.EditorServi
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 	path := entry.buf.Path()
-	curVersion := entry.buf.Version()
-	var pluginDiags []lsp.Diagnostic
-	for _, e := range entry.pluginDiags {
-		if e.version != curVersion {
-			continue // left behind by edits since publish; would point at the wrong text
-		}
-		pluginDiags = append(pluginDiags, e.diags...)
-	}
+	pluginDiags := currentPluginDiags(entry)
 	s.mu.Unlock()
 
-	diags := append(s.lspMgr.GetDiagnostics(path), s.lintMgr.GetDiagnostics(path)...)
-	diags = append(diags, pluginDiags...)
+	diags := s.mergedDiagnostics(path, pluginDiags)
 	ready := s.lspMgr.HasClient(path)
 
 	res, err := call.AllocResults()
@@ -62,6 +78,149 @@ func (s *editorService) GetDiagnostics(_ context.Context, call proto.EditorServi
 		item.SetMessage_(d.Message) //nolint:errcheck
 		item.SetSource(d.Source)    //nolint:errcheck
 	}
+	return nil
+}
+
+// maxWorkspaceDiagnostics caps GetWorkspaceDiagnostics's result the same way
+// maxGrepResults caps workspace search (internal/app/grep.go) — a
+// misconfigured linter or a huge number of open buffers shouldn't produce
+// an unbounded capnp payload.
+const maxWorkspaceDiagnostics = 500
+
+// pathBufferSnapshot is one open buffer's path and (already version-filtered)
+// plugin diagnostics, captured under s.mu so GetWorkspaceDiagnostics(Summary)
+// can iterate lspMgr/lintMgr — which have their own locking — without
+// holding s.mu the whole time.
+type pathBufferSnapshot struct {
+	path        string
+	pluginDiags []lsp.Diagnostic
+}
+
+func (s *editorService) snapshotOpenBuffers() []pathBufferSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Keyed by path, not bufID: SaveAs has no guard against renaming a
+	// buffer onto a path another open buffer already uses, so two different
+	// bufIDs can end up sharing one path. Merging here (rather than one
+	// entry per bufID) keeps that pre-existing gap from double-counting or
+	// double-listing the same file's diagnostics in the workspace-wide
+	// view — LSP/lint diagnostics are already deduplicated for free since
+	// they're fetched once per unique path either way; plugin diagnostics
+	// are explicitly merged since those are tracked per bufID.
+	byPath := make(map[string]pathBufferSnapshot, len(s.buffers))
+	for _, entry := range s.buffers {
+		path := entry.buf.Path()
+		sn := byPath[path]
+		sn.path = path
+		sn.pluginDiags = append(sn.pluginDiags, currentPluginDiags(entry)...)
+		byPath[path] = sn
+	}
+	snaps := make([]pathBufferSnapshot, 0, len(byPath))
+	for _, sn := range byPath {
+		snaps = append(snaps, sn)
+	}
+	return snaps
+}
+
+// GetWorkspaceDiagnostics aggregates diagnostics across every open buffer —
+// see its doc comment in editor.capnp for the "open buffers only, not the
+// whole workspace on disk" scope for now.
+func (s *editorService) GetWorkspaceDiagnostics(_ context.Context, call proto.EditorService_getWorkspaceDiagnostics) error {
+	snaps := s.snapshotOpenBuffers()
+
+	type pathDiag struct {
+		path string
+		d    lsp.Diagnostic
+	}
+	var items []pathDiag
+	for _, sn := range snaps {
+		for _, d := range s.mergedDiagnostics(sn.path, sn.pluginDiags) {
+			items = append(items, pathDiag{path: sn.path, d: d})
+		}
+	}
+	// snapshotOpenBuffers iterates a map, so items would otherwise come back
+	// in a different arbitrary order on every call; sort deterministically
+	// (most severe first) so truncation below discards the least-important
+	// entries instead of an arbitrary map-order-dependent subset.
+	sort.Slice(items, func(i, j int) bool {
+		a, b := items[i], items[j]
+		if a.d.Severity != b.d.Severity {
+			return a.d.Severity < b.d.Severity // error(1) < warning(2) < info(3) < hint(4)
+		}
+		if a.path != b.path {
+			return a.path < b.path
+		}
+		if a.d.Range.Start.Line != b.d.Range.Start.Line {
+			return a.d.Range.Start.Line < b.d.Range.Start.Line
+		}
+		return a.d.Range.Start.Character < b.d.Range.Start.Character
+	})
+	truncated := false
+	if len(items) > maxWorkspaceDiagnostics {
+		items = items[:maxWorkspaceDiagnostics]
+		truncated = true
+	}
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	res.SetTruncated(truncated)
+	if len(items) == 0 {
+		return nil
+	}
+	list, err := res.NewItems(int32(len(items)))
+	if err != nil {
+		return err
+	}
+	for i, it := range items {
+		item := list.At(i)
+		if err := item.SetPath(it.path); err != nil {
+			return err
+		}
+		item.SetLine(uint32(it.d.Range.Start.Line))
+		item.SetCol(uint32(it.d.Range.Start.Character))
+		item.SetEndLine(uint32(it.d.Range.End.Line))
+		item.SetEndCol(uint32(it.d.Range.End.Character))
+		item.SetSeverity(uint8(it.d.Severity))
+		item.SetMessage_(it.d.Message) //nolint:errcheck
+		item.SetSource(it.d.Source)    //nolint:errcheck
+	}
+	return nil
+}
+
+// GetWorkspaceDiagnosticsSummary is the cheap counts-only counterpart to
+// GetWorkspaceDiagnostics.
+func (s *editorService) GetWorkspaceDiagnosticsSummary(_ context.Context, call proto.EditorService_getWorkspaceDiagnosticsSummary) error {
+	snaps := s.snapshotOpenBuffers()
+
+	var errCnt, warnCnt, infoCnt, fileCnt uint32
+	for _, sn := range snaps {
+		diags := s.mergedDiagnostics(sn.path, sn.pluginDiags)
+		if len(diags) == 0 {
+			continue
+		}
+		fileCnt++
+		for _, d := range diags {
+			switch d.Severity {
+			case lsp.SeverityError:
+				errCnt++
+			case lsp.SeverityWarning:
+				warnCnt++
+			default:
+				infoCnt++
+			}
+		}
+	}
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	res.SetErrorCount(errCnt)
+	res.SetWarningCount(warnCnt)
+	res.SetInfoCount(infoCnt)
+	res.SetFileCount(fileCnt)
 	return nil
 }
 

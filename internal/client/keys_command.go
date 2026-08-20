@@ -269,6 +269,10 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return OpenPickerMsg{} }
 	case "new":
 		return m, func() tea.Msg { return OpenNewFileMsg{} }
+	case "diagnostics", "diag":
+		// Workspace diagnostic browser (open buffers only for now; see
+		// PLAN.md's workspace-scan follow-up).
+		return m, func() tea.Msg { return OpenDiagnosticBrowserMsg{} }
 	case "metrics":
 		if m.metrics != nil {
 			m.metrics.show = !m.metrics.show

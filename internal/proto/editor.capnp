@@ -155,6 +155,19 @@ interface EditorService {
   # empty means no language server, no organize-imports support, or nothing
   # to change.
   lspOrganizeImports @50 (bufId :UInt32) -> (edits :List(PluginEdit));
+  # getWorkspaceDiagnostics aggregates diagnostics (LSP + lint + plugin)
+  # across every currently open buffer, tagged with each one's file path —
+  # unlike getDiagnostics, which is scoped to a single bufId. truncated is
+  # true if the result was capped (see maxWorkspaceDiagnostics in
+  # server_lsp.go) rather than exhaustive. Does not cover files that aren't
+  # open in any buffer — see docs/plugin-architecture.md and PLAN.md for
+  # the planned workspace-scan follow-up that would extend coverage there.
+  getWorkspaceDiagnostics @51 () -> (items :List(WorkspaceDiagnosticItem), truncated :Bool);
+  # getWorkspaceDiagnosticsSummary is the cheap counts-only counterpart to
+  # getWorkspaceDiagnostics, for a workspace-wide status indicator that
+  # doesn't need the full list. fileCount is the number of distinct open
+  # buffers with at least one diagnostic.
+  getWorkspaceDiagnosticsSummary @52 () -> (errorCount :UInt32, warningCount :UInt32, infoCount :UInt32, fileCount :UInt32);
 }
 
 # MenuItemInfo is one node in the Command-menu tree contributed by a plugin.
@@ -290,6 +303,20 @@ struct LspDiagnostic {
   severity @4 :UInt8;
   message  @5 :Text;
   source   @6 :Text;
+}
+
+# WorkspaceDiagnosticItem is one diagnostic from getWorkspaceDiagnostics,
+# the same shape as LspDiagnostic plus the path it belongs to (getDiagnostics
+# omits path since it's already scoped to one bufId's caller-known path).
+struct WorkspaceDiagnosticItem {
+  path     @0 :Text;
+  line     @1 :UInt32;
+  col      @2 :UInt32;
+  endLine  @3 :UInt32;
+  endCol   @4 :UInt32;
+  severity @5 :UInt8;
+  message  @6 :Text;
+  source   @7 :Text;
 }
 
 struct HoverResult {

@@ -29,6 +29,9 @@ func (a App) View() string {
 	if a.grep != nil {
 		return a.grep.View()
 	}
+	if a.diagBrowser != nil {
+		return a.diagBrowser.View()
+	}
 	if len(a.buffers) == 0 {
 		return "No buffer open. Press ctrl+p to open a file."
 	}

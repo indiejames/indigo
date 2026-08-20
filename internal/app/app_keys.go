@@ -400,3 +400,27 @@ func (a App) handleGrepKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	return a, nil
 }
+
+// handleDiagBrowserKey routes key events to the workspace diagnostic browser.
+func (a App) handleDiagBrowserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		return a, func() tea.Msg { return diagBrowserCancelledMsg{} }
+	case "enter":
+		if a.diagBrowser != nil && len(a.diagBrowser.items) > 0 {
+			it := a.diagBrowser.items[a.diagBrowser.cursor]
+			return a, func() tea.Msg {
+				return diagBrowserPickedMsg{absPath: it.Path, line: it.Line, col: it.Col}
+			}
+		}
+	case "up", "ctrl+p", "k":
+		if a.diagBrowser != nil {
+			a.diagBrowser.moveUp()
+		}
+	case "down", "ctrl+n", "j":
+		if a.diagBrowser != nil {
+			a.diagBrowser.moveDown()
+		}
+	}
+	return a, nil
+}

@@ -232,6 +232,12 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return GrepMsg{Pattern: pattern, Include: include, Exclude: exclude} }
 	}
 
+	// :diagnostics/:diag — workspace diagnostic browser (open buffers only
+	// for now; see PLAN.md's workspace-scan follow-up).
+	if cmd == "diagnostics" || cmd == "diag" {
+		return m, func() tea.Msg { return OpenDiagnosticBrowserMsg{} }
+	}
+
 	// Bare number → go to line.
 	if n, err := strconv.Atoi(cmd); err == nil {
 		lc := m.displayLineCount()

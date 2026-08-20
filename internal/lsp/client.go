@@ -495,15 +495,40 @@ func (c *Client) codeActionRequest(path string, rng Range, actionCtx CodeActionC
 // startLine/startCol and endLine/endCol may be equal (a plain cursor
 // position) or span a selection, which lets the server offer range-only
 // actions like Extract Function/Extract Variable alongside point-based
-// quick-fixes. The server's cached diagnostics for the file are included in
-// the request context so that diagnostic-driven fixes (e.g. "remove unused
-// import") are surfaced too.
+// quick-fixes. Only the file's diagnostics that actually overlap the
+// requested range are included in the request context — CodeActionContext's
+// diagnostics field is specified as "diagnostics ... overlapping the range
+// provided", and passing the whole file's diagnostics regardless of range
+// let a server return quick-fixes for a diagnostic anywhere in the file, not
+// just near the cursor/selection (e.g. gopls offering a far-away
+// "replace if/else with max" suggestion no matter where the request was
+// actually made).
 func (c *Client) CodeActions(path string, startLine, startCol, endLine, endCol int) ([]CodeAction, error) {
 	rng := Range{
 		Start: Position{Line: startLine, Character: startCol},
 		End:   Position{Line: endLine, Character: endCol},
 	}
-	return c.codeActionRequest(path, rng, CodeActionContext{Diagnostics: c.GetDiagnostics(path)})
+	var relevant []Diagnostic
+	for _, d := range c.GetDiagnostics(path) {
+		if diagnosticOverlapsRange(d, rng) {
+			relevant = append(relevant, d)
+		}
+	}
+	return c.codeActionRequest(path, rng, CodeActionContext{Diagnostics: relevant})
+}
+
+// diagnosticOverlapsRange reports whether d's range overlaps rng (touching
+// at a single point counts as overlapping, so a zero-width cursor range
+// still matches a diagnostic that starts or ends exactly there).
+func diagnosticOverlapsRange(d Diagnostic, rng Range) bool {
+	return !posBefore(rng.End, d.Range.Start) && !posBefore(d.Range.End, rng.Start)
+}
+
+func posBefore(a, b Position) bool {
+	if a.Line != b.Line {
+		return a.Line < b.Line
+	}
+	return a.Character < b.Character
 }
 
 // OrganizeImports requests "source.organizeImports" code actions for path

@@ -527,10 +527,27 @@ func (s *Spell) applyFix(fixData string, index uint32) {
 	}
 }
 
+// invalidateAll forces a fresh check of every buffer this plugin has seen
+// opened, rather than merely blanking the decoration cache. Blanking alone
+// left two things stale after a dictionary-add fix: the decoration cache
+// would stay empty until the next actual edit to that specific buffer (which
+// might never come), and — worse — the diagnostic already published for the
+// fixed word via PublishDiagnostics was never cleared or replaced at all,
+// since nothing re-ran checkBuffer to republish. A forced recheck fixes both:
+// scheduleCheck's callback always calls PublishDiagnostics when it succeeds,
+// including with an empty list, which is what actually clears a stale
+// server-side diagnostic (see PluginPublishDiagnostics's empty-clears case).
 func (s *Spell) invalidateAll() {
 	s.mu.Lock()
 	s.cache = make(map[uint32][]sdk.Decoration)
+	bufIDs := make([]uint32, 0, len(s.bufPaths))
+	for id := range s.bufPaths {
+		bufIDs = append(bufIDs, id)
+	}
 	s.mu.Unlock()
+	for _, id := range bufIDs {
+		s.scheduleCheck(id)
+	}
 }
 
 // --- Ex commands ---

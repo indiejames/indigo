@@ -86,9 +86,15 @@ type sigHelpMsg struct{ help *ClientSigHelp }
 type pluginBindingsMsg struct{ bindings []ClientPluginBinding }
 
 // fixItemsMsg carries fix suggestions and/or context-sensitive actions for the F popup.
+// bufID/at are stamped at request time in fetchFixes and checked on arrival
+// so a slow response for a since-abandoned buffer/cursor position doesn't
+// pop up showing fixes for wherever the request happened to be made, not
+// where the cursor is now.
 type fixItemsMsg struct {
 	items []ClientFixItem
 	decor *ClientDecoration // nil when items come only from action providers
+	bufID uint32
+	at    document.Pos
 }
 
 // completionsMsg carries fresh completion items.
@@ -258,6 +264,11 @@ type GrepMsg struct {
 	Include string
 	Exclude string
 }
+
+// OpenDiagnosticBrowserMsg signals the App to open the workspace diagnostic
+// browser (currently open buffers only — see PLAN.md's workspace-scan
+// follow-up for extending this to unopened files).
+type OpenDiagnosticBrowserMsg struct{}
 
 // NextBufferMsg signals the App to switch to the next buffer.
 type NextBufferMsg struct{}
@@ -1062,6 +1073,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyCompletionItem(msg.item, msg.at, msg.prefix)
 
 	case fixItemsMsg:
+		// Drop a response that came back for a different buffer, or after the
+		// cursor moved (the user navigated away before the LSP/plugin fetch
+		// completed): showing it would pop up fixes for a position the user
+		// isn't at anymore.
+		if msg.bufID != m.bufID || m.cursor != msg.at {
+			return m, nil
+		}
 		if len(msg.items) > 0 {
 			m.fixItems = msg.items
 			m.fixDecor = msg.decor

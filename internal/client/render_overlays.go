@@ -62,7 +62,9 @@ func renderFixPopup(items []ClientFixItem, selected, maxW int) []string {
 	return lines
 }
 
-// renderDiagPopup builds styled lines for the diagnostic detail popup (Shift+E).
+// renderDiagPopup builds styled lines for the diagnostic detail popup, shown
+// automatically (no keybinding) ~300ms after the cursor lands on a line with
+// a diagnostic — see showDiagPopupMsg/scheduleShowDiagPopup in model.go.
 // It shows all diagnostics for a single line, full terminal width.
 func renderDiagPopup(diags []ClientDiag, termW int) []string {
 	innerW := max(10, termW-2)
@@ -979,6 +981,7 @@ var helpEntries = []helpEntry{
 	{key: "Selection"},
 	{key: "w", desc: "Next word start"},
 	{key: "W", desc: "Extend selection to next word start"},
+	{key: "E", desc: "Extend selection to end of word"},
 	{key: "x", desc: "Select line"},
 	{key: "X", desc: "Extend line backward"},
 	{key: "z", desc: "Set mark at cursor (Esc clears)"},
@@ -1006,7 +1009,6 @@ var helpEntries = []helpEntry{
 	{key: ""},
 	{key: "LSP / Diagnostics"},
 	{key: "K", desc: "Hover documentation"},
-	{key: "E", desc: "Toggle diagnostic detail"},
 	{key: "SPC a", desc: "Code actions (fixes & refactors)"},
 	{key: ""},
 	{key: "Completion (insert mode)"},

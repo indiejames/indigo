@@ -33,6 +33,9 @@ func (m Model) fetchWorkspaceDiagnosticsSummary() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
+		if m.rpc == nil {
+			return nil
+		}
 		summary, err := m.rpc.GetWorkspaceDiagnosticsSummary(ctx)
 		if err != nil {
 			return nil

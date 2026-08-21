@@ -76,6 +76,14 @@ type diagnosticsMsg struct {
 	lspReady bool // true only when the LSP client process is actually running
 }
 
+// workspaceDiagSummaryMsg carries a fresh workspace-wide diagnostic summary
+// from the server (see RPC.GetWorkspaceDiagnosticsSummary). Not bufID-scoped
+// — it's the same project-wide count regardless of which buffer is active,
+// so there's no staleness check to make on arrival, unlike diagnosticsMsg.
+type workspaceDiagSummaryMsg struct {
+	summary WorkspaceDiagnosticsSummary
+}
+
 // hoverMsg carries a hover result.
 type hoverMsg struct{ result ClientHoverResult }
 
@@ -622,6 +630,13 @@ type Model struct {
 	diagnostics []ClientDiag
 	diagTick    int  // counter; fetch every 10 ticks (~1.2s)
 	lspActive   bool // true once first diagnostic poll returns (LSP is running)
+
+	// Workspace-wide diagnostic summary, for the status bar's separate
+	// project-scope indicator (distinct from the per-buffer E/W/I slots
+	// above). Updated far less often than per-buffer diagnostics since it's
+	// driven by an infrequent workspace lint scan, not live edits.
+	workspaceDiagSummary WorkspaceDiagnosticsSummary
+	workspaceDiagTick    int // counter; fetch every 50 ticks (~6s)
 	helpVisible bool // true = help popup visible
 	helpScroll  int  // scroll offset within the help popup
 
@@ -872,7 +887,7 @@ func tick() tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(tick(), m.reparseHighlight(), m.fetchDecorations(), m.fetchInlayHints(), m.fetchSemanticTokens(), m.ReportActiveContextCmd())
+	return tea.Batch(tick(), m.reparseHighlight(), m.fetchDecorations(), m.fetchInlayHints(), m.fetchSemanticTokens(), m.fetchWorkspaceDiagnosticsSummary(), m.ReportActiveContextCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -891,6 +906,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.decorTick++
 		m.inlayTick++
 		m.semanticTick++
+		m.workspaceDiagTick++
 		if m.flashTick > 0 {
 			m.flashTick--
 		}
@@ -906,6 +922,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.semanticTick%10 == 0 {
 			cmds = append(cmds, m.fetchSemanticTokens())
+		}
+		if m.workspaceDiagTick%50 == 0 {
+			cmds = append(cmds, m.fetchWorkspaceDiagnosticsSummary())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -1062,6 +1081,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.diagPopup && !m.diagPopupSuppressed && atCursor {
 			return m, scheduleShowDiagPopup()
 		}
+		return m, nil
+
+	case workspaceDiagSummaryMsg:
+		m.workspaceDiagSummary = msg.summary
 		return m, nil
 
 	case showDiagPopupMsg:

@@ -501,6 +501,26 @@ func (m Model) statusBarColumn() int {
 	return m.cursor.Col + 1
 }
 
+// renderWorkspaceDiagSegment renders the fixed-width, project-wide
+// diagnostic summary segment (see workspaceDiagSummaryMsg). Colored by the
+// highest severity present, blank (all spaces, same width) when the
+// workspace has nothing to report or no summary has arrived yet.
+func (m Model) renderWorkspaceDiagSegment() string {
+	s := m.workspaceDiagSummary
+	total := s.ErrorCount + s.WarningCount + s.InfoCount
+	if total <= 0 {
+		return barStyle.Render("        ")
+	}
+	style := barDiagInfoStyle
+	switch {
+	case s.ErrorCount > 0:
+		style = barDiagErrorStyle
+	case s.WarningCount > 0:
+		style = barDiagWarnStyle
+	}
+	return style.Render(fmt.Sprintf(" WS %3d ", min(total, 999)))
+}
+
 func (m Model) renderStatusBar() string {
 	if m.width == 0 {
 		return ""
@@ -583,6 +603,14 @@ func (m Model) renderStatusBar() string {
 		diagSlot(infoCnt, "I", barDiagInfoStyle) +
 		barStyle.Render(" ")
 	right = diagSeg + right
+
+	// Workspace-wide diagnostic summary — a separate segment from the
+	// per-buffer E/W/I slots above so "is this file clean" and "is the
+	// project clean" stay visually distinct (see PLAN.md's workspace
+	// diagnostics status-bar design note). Fixed width like the per-buffer
+	// slots, blank (not hidden) when there's nothing to report, so it never
+	// changes this group's total width.
+	right = m.renderWorkspaceDiagSegment() + right
 
 	ftName := fileTypeName(m.filePath)
 	right = fileTypeStyle.Render("  "+ftName+"  ") + right

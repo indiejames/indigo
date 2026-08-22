@@ -3,7 +3,9 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,9 +18,12 @@ import (
 	"github.com/indiejames/indigo/internal/procutil"
 )
 
-// Client manages a single language server process.
+// Client manages a single language server, either a spawned process (cmd
+// set) or a TCP connection to one already running elsewhere (netConn set —
+// see NewTCPClient). Exactly one of the two is non-nil for a given Client.
 type Client struct {
 	cmd     *exec.Cmd
+	netConn net.Conn
 	conn    *jsonrpcConn
 	logFile *os.File
 
@@ -82,6 +87,37 @@ func NewClient(command string, args []string, rootDir string) (*Client, error) {
 		rootURI:     pathToURI(rootDir),
 	}
 	c.conn = newJSONRPCConnWithClose(stdout, stdin, c.handleNotification, nil, func() { c.closed.Store(true) })
+	return c, nil
+}
+
+// tcpDialTimeout bounds how long NewTCPClient waits to connect. Short,
+// unlike a process spawn: an unreachable address (Godot not running, wrong
+// port) should fail fast so Manager.startClient's caller isn't blocked and
+// the failedStarts cooldown kicks in promptly.
+const tcpDialTimeout = 3 * time.Second
+
+// NewTCPClient connects to a language server already listening on address
+// instead of spawning one — the shape Godot's GDScript language server
+// uses (it only exists as a TCP listener, default "localhost:6005", inside
+// an already-running Godot editor process with the project open; indigo
+// has no way to launch Godot itself). Initialize() must still be called
+// before using the client, exactly as with NewClient. jsonrpcConn only
+// needs an io.Reader/io.Writer pair (proven by the net.Pipe()-backed test
+// in crash_recovery_test.go), so a net.Conn wires in the same way NewClient
+// wires stdout/stdin.
+func NewTCPClient(address, rootDir string) (*Client, error) {
+	conn, err := net.DialTimeout("tcp", address, tcpDialTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("dial language server at %q: %w", address, err)
+	}
+
+	c := &Client{
+		netConn:     conn,
+		docVersions: make(map[string]int),
+		diagnostics: make(map[string][]Diagnostic),
+		rootURI:     pathToURI(rootDir),
+	}
+	c.conn = newJSONRPCConnWithClose(conn, conn, c.handleNotification, nil, func() { c.closed.Store(true) })
 	return c, nil
 }
 
@@ -801,6 +837,14 @@ func (c *Client) Format(path, content string, opts FormattingOptions) (string, b
 	}
 	raw, err := c.conn.Call(ctx, "textDocument/formatting", params)
 	if err != nil {
+		var rpcErr *jsonrpcError
+		if errors.As(err, &rpcErr) && rpcErr.Code == jsonrpcMethodNotFound {
+			// Server advertised documentFormattingProvider but doesn't
+			// actually implement the request — treat like "no formatting
+			// support" (see jsonrpcMethodNotFound's doc comment) instead
+			// of surfacing a hard error on every save.
+			return content, false, nil
+		}
 		return content, false, err
 	}
 	if string(raw) == "null" {
@@ -885,6 +929,9 @@ func (c *Client) terminate() {
 	if c.cmd != nil && c.cmd.Process != nil {
 		procutil.KillGroup(c.cmd) //nolint:errcheck
 		c.cmd.Wait()              //nolint:errcheck
+	}
+	if c.netConn != nil {
+		c.netConn.Close() //nolint:errcheck
 	}
 	if c.logFile != nil {
 		c.logFile.Close() //nolint:errcheck

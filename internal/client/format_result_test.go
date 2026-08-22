@@ -36,6 +36,57 @@ func TestFormatResultRefreshesHighlighting(t *testing.T) {
 	}
 }
 
+// TestFormatResultAdoptsGenerationOnChange is a regression test: Format is
+// one of the RPCs that wholesale-swaps the buffer object on the server when
+// it makes a change (format-on-save, explicit format), the same as
+// openFile/getUpdates/getBufferSnapshot — but formatResultMsg used to carry
+// no generation at all, so the very next updatesMsg poll would see the
+// server's bumped generation, not recognize it as this client's own
+// change, and spuriously trigger resyncFromServer() (with its user-facing
+// "Buffer resynced from server" severe-error modal) even though nothing
+// was actually wrong. The handler must adopt msg.generation into
+// m.generation on the changed path so that poll no longer looks like a
+// foreign swap.
+func TestFormatResultAdoptsGenerationOnChange(t *testing.T) {
+	m := newTestModel("func foo() {}\n")
+	m.generation = 3
+	m.generationKnown = true
+
+	m2, _ := m.Update(formatResultMsg{content: "func bar() {}\n", changed: true, generation: 4})
+	got := m2.(Model)
+
+	if got.generation != 4 {
+		t.Errorf("generation = %d, want 4 (adopted from the format result)", got.generation)
+	}
+	if !got.generationKnown {
+		t.Error("generationKnown should remain true after adopting a format result's generation")
+	}
+
+	m3, cmd := got.Update(updatesMsg{generation: 4})
+	got3 := m3.(Model)
+	if got3.severeErr != "" {
+		t.Errorf("severeErr = %q, want empty — a poll matching the just-adopted generation must not trigger a resync", got3.severeErr)
+	}
+	_ = cmd
+}
+
+// TestFormatResultUnchangedLeavesGenerationAlone is a regression test
+// alongside the one above: when Format reports changed=false, the server
+// never swapped the buffer, so generation is meaningless (left at its zero
+// value) and must not overwrite the client's real remembered generation.
+func TestFormatResultUnchangedLeavesGenerationAlone(t *testing.T) {
+	m := newTestModel("func foo() {}\n")
+	m.generation = 3
+	m.generationKnown = true
+
+	m2, _ := m.Update(formatResultMsg{changed: false, noFormatter: true, generation: 0})
+	got := m2.(Model)
+
+	if got.generation != 3 {
+		t.Errorf("generation = %d, want unchanged at 3 (changed=false means no server-side swap happened)", got.generation)
+	}
+}
+
 // TestFormatResultDiscardsStaleBufID is a regression test: formatResultMsg
 // used to carry no bufID at all, so a slow format result that arrived after
 // the user switched to a different buffer would unconditionally replace

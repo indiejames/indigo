@@ -28,6 +28,16 @@ type jsonrpcError struct {
 
 func (e *jsonrpcError) Error() string { return fmt.Sprintf("jsonrpc error %d: %s", e.Code, e.Message) }
 
+// jsonrpcMethodNotFound is the standard JSON-RPC error code a server
+// returns for a request it doesn't implement. Some servers advertise a
+// capability in their initialize response but don't actually implement the
+// corresponding request (observed with Godot's GDScript language server
+// and textDocument/formatting: it sets documentFormattingProvider but
+// returns this on an actual format request) — callers that already gate on
+// the capability may still want to treat this specific error as "not
+// supported" rather than a hard failure, as a defensive fallback.
+const jsonrpcMethodNotFound = -32601
+
 // notificationHandler is called for incoming notifications (no id).
 type notificationHandler func(method string, params json.RawMessage)
 

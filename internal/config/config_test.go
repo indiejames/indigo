@@ -363,6 +363,73 @@ func TestEffectiveLanguageServersPartialExtensionOverlapShadowsWholeDefaultEntry
 	}
 }
 
+func TestLoadRejectsLanguageServerWithBothCommandAndAddress(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	cfgDir := filepath.Join(dir, "indigo")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `[[language_server]]
+extensions = ["gd"]
+command = "godot"
+address = "localhost:6005"
+`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(); err == nil {
+		t.Error("Load() should reject a language_server entry with both command and address set")
+	}
+}
+
+func TestLoadRejectsLanguageServerWithNeitherCommandNorAddress(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	cfgDir := filepath.Join(dir, "indigo")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `[[language_server]]
+extensions = ["gd"]
+`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(); err == nil {
+		t.Error("Load() should reject a language_server entry with neither command nor address set")
+	}
+}
+
+func TestLoadAcceptsLanguageServerWithAddressOnly(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	cfgDir := filepath.Join(dir, "indigo")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `[[language_server]]
+extensions = ["gd"]
+address = "localhost:6005"
+`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.LanguageServers) != 1 || cfg.LanguageServers[0].Address != "localhost:6005" {
+		t.Fatalf("LanguageServers = %v, want a single address-only entry", cfg.LanguageServers)
+	}
+}
+
 func TestDefaultLintersCoverExpectedExtensions(t *testing.T) {
 	// DefaultLinters is package-level data consumed by internal/lint; this
 	// guards against an extension silently losing its default linter entry.

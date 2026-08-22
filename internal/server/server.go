@@ -195,6 +195,7 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 			Extensions: ls.Extensions,
 			Command:    ls.Command,
 			Args:       ls.Args,
+			Address:    ls.Address,
 		}
 	}
 	lspMgr := lsp.NewManager(workspaceDir, servers)

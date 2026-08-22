@@ -8,6 +8,7 @@ import (
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/format"
 	"github.com/indiejames/indigo/internal/lint"
 	"github.com/indiejames/indigo/internal/lsp"
 	"github.com/indiejames/indigo/internal/plugin"
@@ -118,6 +119,64 @@ func TestGetBufferSnapshotUnknownBufferErrors(t *testing.T) {
 	defer rel()
 	if _, err := fut.Struct(); err == nil {
 		t.Error("expected an error for an unknown buffer, got nil")
+	}
+}
+
+// TestFormatBumpsGenerationAndReturnsIt is a regression test: Format is one
+// of the four sites that wholesale-swaps entry.buf (alongside SaveAs,
+// DiscardRecovery, and Save's format-on-save branch — see this file's
+// other tests), but unlike those, its capnp result carried no generation
+// field at all until this fix. A client that formats its own buffer and
+// applies the returned content locally had no way to update its remembered
+// generation, so its very next GetUpdates poll would see the server's
+// bumped value, mistake its own change for a foreign swap, and trigger an
+// unnecessary resync (surfaced to the user as a "Buffer resynced from
+// server" severe-error modal). Format must report the post-swap
+// generation, matching SaveAs/DiscardRecovery/GetUpdates/GetBufferSnapshot.
+func TestFormatBumpsGenerationAndReturnsIt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.go")
+
+	cfg := &config.Config{
+		Formatters: []config.FormatterConfig{
+			{Extensions: []string{"go"}, Command: "tr", Args: []string{"a-z", "A-Z"}},
+		},
+	}
+	s := &editorService{
+		cfg: cfg,
+		buffers: map[uint32]*bufferEntry{
+			1: {buf: document.New(path, "hello\n")},
+		},
+		fmtMgr:      format.NewManager(nil, cfg, dir),
+		lspMgr:      lsp.NewManager(dir, nil),
+		lintMgr:     &lint.Manager{},
+		pluginMgr:   &plugin.Manager{},
+		dirWatches:  make(map[string]int),
+		savingPaths: make(map[string]time.Time),
+	}
+	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
+
+	if s.buffers[1].generation != 0 {
+		t.Fatalf("test setup: generation = %d, want 0 before any swap", s.buffers[1].generation)
+	}
+
+	fut, rel := client.Format(context.Background(), func(p proto.EditorService_format_Params) error {
+		p.SetBufId(1)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+	if !res.Changed() {
+		t.Fatal("test setup: expected a change (tr a-z A-Z uppercases \"hello\\n\") — check the fake formatter command")
+	}
+	if s.buffers[1].generation != 1 {
+		t.Fatalf("entry.generation = %d, want 1 after Format's buffer swap", s.buffers[1].generation)
+	}
+	if res.Generation() != 1 {
+		t.Errorf("Format response generation = %d, want 1 (matching entry.generation)", res.Generation())
 	}
 }
 

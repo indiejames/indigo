@@ -235,11 +235,11 @@ func (m Model) fetchFormat(thenSave bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		content, changed, noFormatter, err := m.rpc.Format(ctx, bufID)
+		content, changed, noFormatter, generation, err := m.rpc.Format(ctx, bufID)
 		if err != nil {
 			return formatResultMsg{bufID: bufID, thenSave: thenSave, err: err}
 		}
-		return formatResultMsg{bufID: bufID, content: content, changed: changed, thenSave: thenSave, noFormatter: noFormatter}
+		return formatResultMsg{bufID: bufID, content: content, changed: changed, thenSave: thenSave, noFormatter: noFormatter, generation: generation}
 	}
 }
 

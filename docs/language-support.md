@@ -69,6 +69,7 @@ Language servers are started automatically when you open a file with a matching 
 | `.rb` | `solargraph` | `gem install solargraph` |
 | `.java` | `jdtls` | [github.com/eclipse-jdtls/eclipse.jdt.ls](https://github.com/eclipse-jdtls/eclipse.jdt.ls) |
 | `.zig` | `zls` | [github.com/zigtools/zls](https://github.com/zigtools/zls) |
+| `.gd` | Godot's built-in GDScript server | requires the Godot editor to already be running with the project open — see `address` in [configuration.md](configuration.md#tcp-backed-servers-gdscript--godot); indigo cannot launch Godot itself |
 
 ## Auto-formatting
 

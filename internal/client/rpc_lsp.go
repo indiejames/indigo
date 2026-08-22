@@ -485,8 +485,15 @@ func (r *RPC) DocumentSymbols(ctx context.Context, bufID uint32) ([]ClientSymbol
 	return out, nil
 }
 
-// Format requests server-side formatting for bufID.
-func (r *RPC) Format(ctx context.Context, bufID uint32) (content string, changed bool, noFormatter bool, err error) {
+// Format requests server-side formatting for bufID. generation is only
+// meaningful when changed is true — Format is one of the RPCs that
+// wholesale-swaps the buffer object on the server when it makes a change
+// (see editor.capnp's doc comment on the format method), so a caller that
+// applies the returned content locally must also adopt generation into its
+// own remembered generation, or its next GetUpdates poll will (correctly,
+// but spuriously — it was this same call's own change) detect a mismatch
+// and trigger an unnecessary resync.
+func (r *RPC) Format(ctx context.Context, bufID uint32) (content string, changed bool, noFormatter bool, generation uint64, err error) {
 	fut, rel := r.svc.Format(ctx, func(p proto.EditorService_format_Params) error {
 		p.SetBufId(bufID)
 		return nil
@@ -494,13 +501,13 @@ func (r *RPC) Format(ctx context.Context, bufID uint32) (content string, changed
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return "", false, false, err
+		return "", false, false, 0, err
 	}
 	content, err = res.Content()
 	if err != nil {
-		return "", false, false, err
+		return "", false, false, 0, err
 	}
-	return content, res.Changed(), res.NoFormatter(), nil
+	return content, res.Changed(), res.NoFormatter(), res.Generation(), nil
 }
 
 // ClientInlayHint is an inlay hint (inferred type or parameter name) to render

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -8,10 +9,18 @@ import (
 )
 
 // LanguageServer maps file extensions to a language server command.
+// Exactly one of Command or Address must be set: Command spawns a process
+// and talks LSP over its stdio, the normal case; Address instead dials a
+// TCP address where a language server is already listening — the shape
+// Godot's GDScript language server uses (it only exists as a TCP listener,
+// default "localhost:6005", inside a running Godot editor process; indigo
+// cannot launch Godot itself, so this only works while the editor is
+// already open with the project loaded).
 type LanguageServer struct {
 	Extensions []string `toml:"extensions"`
 	Command    string   `toml:"command"`
 	Args       []string `toml:"args,omitempty"`
+	Address    string   `toml:"address,omitempty"`
 }
 
 // FormatterConfig maps file extensions to an external formatter command.
@@ -121,6 +130,13 @@ var defaultLanguageServers = []LanguageServer{
 	{Extensions: []string{"rb"}, Command: "solargraph", Args: []string{"stdio"}},
 	{Extensions: []string{"java"}, Command: "jdtls"},
 	{Extensions: []string{"zig"}, Command: "zls"},
+	// GDScript has no default entry here (unlike every other language
+	// above): Godot's language server only exists as a TCP listener inside
+	// a running Godot editor, at an address indigo has no way to guess
+	// (and no way to launch on its own) — see LanguageServer's Address
+	// field doc. Users who want it must add an explicit
+	// [[language_server]] block with address = "localhost:6005" (or
+	// wherever their editor instance is listening).
 }
 
 // IndentSettings controls the whitespace used for one indent level.
@@ -403,7 +419,8 @@ const defaultConfigTemplate = `# Indigo editor configuration
 #
 # Indigo has built-in defaults for Go, Rust, TypeScript/JavaScript, Python,
 # C/C++, Lua, Ruby, Java, and Zig. Add a [[language_server]] block to
-# override or add a server for a given set of file extensions.
+# override or add a server for a given set of file extensions. Each entry
+# must set exactly one of command or address.
 #
 # [[language_server]]
 # extensions = ["go"]
@@ -413,6 +430,14 @@ const defaultConfigTemplate = `# Indigo editor configuration
 # [[language_server]]
 # extensions = ["rs"]
 # command    = "rust-analyzer"
+#
+# A server reached over TCP instead of spawned (e.g. Godot's GDScript
+# language server, which only runs inside an already-open Godot editor and
+# cannot be launched by indigo) uses address instead of command:
+#
+# [[language_server]]
+# extensions = ["gd"]
+# address    = "localhost:6005"
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -488,9 +513,10 @@ func Path() (string, error) {
 }
 
 // Load reads the config file, returning defaults for any missing or
-// unreadable file. A parse error is the only failure that is returned.
-// When the file does not exist, a commented-out template is created so the
-// user has a ready-made reference to all available settings.
+// unreadable file. A parse error or a language_server validation error
+// (see validateLanguageServers) are the only failures returned. When the
+// file does not exist, a commented-out template is created so the user has
+// a ready-made reference to all available settings.
 func Load() (*Config, error) {
 	cfg := defaults()
 
@@ -524,5 +550,22 @@ func Load() (*Config, error) {
 		// discards the error still ends up in a fully-valid state.
 		return defaults(), err
 	}
+	if err := validateLanguageServers(cfg.LanguageServers); err != nil {
+		return defaults(), err
+	}
 	return cfg, nil
+}
+
+// validateLanguageServers checks that every configured language_server
+// entry sets exactly one of Command or Address. Catching this here, at
+// load time, gives a clear error instead of a confusing failure later at
+// connect time (a spawn attempt on an empty Command, or a dial attempt on
+// an empty Address).
+func validateLanguageServers(servers []LanguageServer) error {
+	for _, ls := range servers {
+		if (ls.Command == "") == (ls.Address == "") {
+			return fmt.Errorf("language_server %v: exactly one of command or address must be set", ls.Extensions)
+		}
+	}
+	return nil
 }

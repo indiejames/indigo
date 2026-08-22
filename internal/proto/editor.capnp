@@ -64,7 +64,14 @@ interface EditorService {
   signatureHelp   @11 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :SignatureHelp);
   complete        @12 (bufId :UInt32, line :UInt32, col :UInt32)               -> (items :List(CompletionItem));
   definition      @13 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :DefinitionResult);
-  format          @14 (bufId :UInt32)                                           -> (content :Text, changed :Bool, noFormatter :Bool);
+  # generation: see openFile's doc comment — Format is one of the sites
+  # that wholesale-swaps the buffer object when it makes a change, so a
+  # caller must adopt this into its own remembered generation the same way
+  # it would after openFile/getUpdates/getBufferSnapshot, or its very next
+  # getUpdates poll will (correctly, but confusingly for this specific
+  # case — it was this same client's own edit) see a mismatch and trigger
+  # an unnecessary resync. Only meaningful when changed is true.
+  format          @14 (bufId :UInt32)                                           -> (content :Text, changed :Bool, noFormatter :Bool, generation :UInt64);
   handlePluginKey      @15 (clientId :UInt64, bufId :UInt32, key :Text, mode :Text, cursorLine :UInt32, cursorCol :UInt32) -> (result :PluginKeyResult);
   updateViewport       @16 (clientId :UInt64, topLine :UInt32, height :UInt32)      -> ();
   getPluginDecorations @17 (clientId :UInt64, bufId :UInt32)                        -> (decorations :List(PluginDecoration));

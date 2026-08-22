@@ -215,7 +215,14 @@ type formatResultMsg struct {
 	changed     bool
 	thenSave    bool
 	noFormatter bool
-	err         error // non-nil on an RPC failure; every other field is zero when set
+	// generation is only meaningful when changed is true — see RPC.Format's
+	// doc comment. The formatResultMsg handler must adopt it into
+	// m.generation on that path, or the next updatesMsg poll spuriously
+	// treats this client's own format-on-save as a foreign buffer swap and
+	// triggers an unnecessary resync (with its user-facing severe-error
+	// modal).
+	generation uint64
+	err        error // non-nil on an RPC failure; every other field is zero when set
 }
 
 type CloseBufferMsg struct{}
@@ -1217,6 +1224,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var refreshCmd tea.Cmd
 		if msg.changed {
 			m.buf = document.New(m.filePath, msg.content)
+			// document.New always starts a fresh buffer at version 0 (the
+			// server's swapped-in buffer is the same fresh object — see
+			// editor.capnp's generation doc comment), matching
+			// discardRecoveryMsg's handler just above. Leaving m.version at
+			// its pre-format value would let a later GetUpdates poll's
+			// sinceVersion race ahead of the server's actual reset
+			// version, so a real op from another client landing in that
+			// window would look already-seen and never be delivered.
+			m.version = 0
+			m.generation = msg.generation
+			m.generationKnown = true
 			m.undoStack = nil
 			m.redoStack = nil
 			m.currentGroup = nil

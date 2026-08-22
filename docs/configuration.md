@@ -56,7 +56,7 @@ indigo starts language servers automatically when you open a file with a support
 
 ### Custom language servers
 
-Add a `[[language_server]]` block for each override. User entries take precedence over built-in defaults for the listed extensions.
+Add a `[[language_server]]` block for each override. User entries take precedence over built-in defaults for the listed extensions. Each entry must set exactly one of `command` (spawn a process, talk LSP over its stdio — the normal case) or `address` (dial a TCP address where a language server is already listening).
 
 ```toml
 [[language_server]]
@@ -68,6 +68,18 @@ args       = ["--stdio"]
 extensions = ["ml", "mli"]
 command    = "ocamllsp"
 ```
+
+#### TCP-backed servers (GDScript / Godot)
+
+Godot doesn't ship a standalone LSP binary — its GDScript language server only exists as a TCP listener (default `localhost:6005`) inside a *running* Godot editor with the project open. Use `address` instead of `command` for this case:
+
+```toml
+[[language_server]]
+extensions = ["gd"]
+address    = "localhost:6005"
+```
+
+Indigo cannot launch Godot itself, so this only does anything while the editor is already open — GDScript completion/diagnostics/etc. simply do nothing until it is. There's no auto-launch and no bespoke reconnect loop beyond the same one-minute retry cooldown applied to every other language server's failed start attempts, so once Godot is running, the next edit or request against a `.gd` file picks the connection back up on its own.
 
 ## Formatters
 

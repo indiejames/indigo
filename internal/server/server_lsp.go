@@ -952,6 +952,7 @@ func (s *editorService) Format(_ context.Context, call proto.EditorService_forma
 		return fmtErr
 	}
 
+	var generation uint64
 	if changed {
 		s.mu.Lock()
 		entry, ok = s.buffers[bufID]
@@ -965,6 +966,7 @@ func (s *editorService) Format(_ context.Context, call proto.EditorService_forma
 			newBuf.MarkDirty()
 			entry.buf = newBuf
 			entry.generation++
+			generation = entry.generation
 			s.buffers[bufID] = entry
 			s.mu.Unlock()
 			go s.lspMgr.DidChange(path, formatted)
@@ -990,6 +992,10 @@ func (s *editorService) Format(_ context.Context, call proto.EditorService_forma
 	}
 	res.SetChanged(changed)
 	res.SetNoFormatter(noFormatter)
+	// Only meaningful when changed is true (see the capnp doc comment) —
+	// left at its zero value otherwise, which callers must ignore exactly
+	// as they ignore Content in that case.
+	res.SetGeneration(generation)
 	return nil
 }
 

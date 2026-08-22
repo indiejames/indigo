@@ -8,11 +8,18 @@ import (
 	"time"
 )
 
-// ServerConfig describes how to launch a language server for a set of file extensions.
+// ServerConfig describes how to reach a language server for a set of file
+// extensions — either by spawning Command (the normal case) or, when
+// Address is set instead, by dialing that TCP address (see NewTCPClient;
+// Godot's GDScript server is the motivating case, since it only exists as
+// a TCP listener inside an already-running Godot editor). Exactly one of
+// Command/Address is expected to be set — config.Load already validates
+// this for user-configured entries.
 type ServerConfig struct {
 	Extensions []string
 	Command    string
 	Args       []string
+	Address    string
 }
 
 // startRetryCooldown is how long clientForPath waits before retrying a
@@ -126,17 +133,25 @@ func (m *Manager) clientForPath(path string) *Client {
 // holding m.mu, so diagnostics polls and other operations on other languages
 // can proceed concurrently. Callers must hold the langID slot in m.starting.
 func (m *Manager) startClient(langID string, cfg *ServerConfig) *Client {
-	cmd := cfg.Command
-	c, err := NewClient(cmd, cfg.Args, m.rootDir)
-	if err != nil {
-		// Also check <workDir>/node_modules/.bin/ for locally-installed servers.
-		local := filepath.Join(m.rootDir, "node_modules", ".bin", filepath.Base(cmd))
-		if info, statErr := os.Stat(local); statErr == nil && !info.IsDir() {
-			c, err = NewClient(local, cfg.Args, m.rootDir)
+	var c *Client
+	var err error
+	if cfg.Address != "" {
+		// TCP-backed server: dial only, no node_modules/.bin fallback —
+		// that fallback only makes sense for a spawned binary.
+		c, err = NewTCPClient(cfg.Address, m.rootDir)
+	} else {
+		cmd := cfg.Command
+		c, err = NewClient(cmd, cfg.Args, m.rootDir)
+		if err != nil {
+			// Also check <workDir>/node_modules/.bin/ for locally-installed servers.
+			local := filepath.Join(m.rootDir, "node_modules", ".bin", filepath.Base(cmd))
+			if info, statErr := os.Stat(local); statErr == nil && !info.IsDir() {
+				c, err = NewClient(local, cfg.Args, m.rootDir)
+			}
 		}
 	}
 	if err != nil {
-		// Language server not installed — silently skip.
+		// Language server not installed/reachable — silently skip.
 		m.recordFailedStart(langID)
 		return nil
 	}

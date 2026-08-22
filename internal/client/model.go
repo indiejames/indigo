@@ -1224,6 +1224,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var refreshCmd tea.Cmd
 		if msg.changed {
 			m.buf = document.New(m.filePath, msg.content)
+			// document.New always starts a fresh buffer at version 0 (the
+			// server's swapped-in buffer is the same fresh object — see
+			// editor.capnp's generation doc comment), matching
+			// discardRecoveryMsg's handler just above. Leaving m.version at
+			// its pre-format value would let a later GetUpdates poll's
+			// sinceVersion race ahead of the server's actual reset
+			// version, so a real op from another client landing in that
+			// window would look already-seen and never be delivered.
+			m.version = 0
 			m.generation = msg.generation
 			m.generationKnown = true
 			m.undoStack = nil

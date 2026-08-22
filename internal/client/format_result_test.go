@@ -87,6 +87,27 @@ func TestFormatResultUnchangedLeavesGenerationAlone(t *testing.T) {
 	}
 }
 
+// TestFormatResultResetsVersionOnChange is a regression test:
+// discardRecoveryMsg's handler (the sibling wholesale-buffer-swap case)
+// already resets m.version to 0 right after replacing m.buf with a fresh
+// document.New, since a fresh buffer always starts at version 0 on the
+// server too. formatResultMsg's changed branch does the identical
+// document.New swap but was missing the matching m.version reset — left
+// at a stale pre-format value, a later GetUpdates poll's sinceVersion
+// could race ahead of the server's actual (reset) version, silently
+// skipping a real op from another client that lands in that window.
+func TestFormatResultResetsVersionOnChange(t *testing.T) {
+	m := newTestModel("func foo() {}\n")
+	m.version = 7
+
+	m2, _ := m.Update(formatResultMsg{content: "func bar() {}\n", changed: true, generation: 1})
+	got := m2.(Model)
+
+	if got.version != 0 {
+		t.Errorf("version = %d, want 0 (reset to match the fresh post-format buffer)", got.version)
+	}
+}
+
 // TestFormatResultDiscardsStaleBufID is a regression test: formatResultMsg
 // used to carry no bufID at all, so a slow format result that arrived after
 // the user switched to a different buffer would unconditionally replace

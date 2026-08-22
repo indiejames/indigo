@@ -910,8 +910,19 @@ func applyEdits(content string, edits []TextEdit) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
-// Shutdown sends shutdown + exit and kills the process.
+// Shutdown sends shutdown + exit and kills the process — for a
+// TCP-attached client (netConn set, see NewTCPClient) it only disconnects
+// instead. The process on the other end of a TCP connection isn't ours to
+// spawn or own the lifecycle of: Godot's GDScript server in particular is
+// shared by the whole running editor (and potentially other clients
+// attached to it), so an "exit" notification would tell that shared server
+// to shut down out from under the user instead of just ending indigo's own
+// session with it.
 func (c *Client) Shutdown() {
+	if c.netConn != nil {
+		c.terminate()
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	c.conn.Call(ctx, "shutdown", nil) //nolint:errcheck

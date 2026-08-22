@@ -102,6 +102,54 @@ func TestNewTCPClientRefusedConnectionReturnsError(t *testing.T) {
 	}
 }
 
+// TestTCPClientShutdownDoesNotSendShutdownOrExit is a regression test:
+// Shutdown's original implementation unconditionally sent the "shutdown"
+// request + "exit" notification before killing the connection, which is
+// correct for a spawned process indigo owns the lifecycle of, but wrong
+// for a TCP-attached server like Godot's — indigo didn't launch it, and
+// Godot's GDScript language server is shared by the whole running editor
+// (and potentially other attached clients), so "exit" would tell that
+// shared server to shut down instead of just ending indigo's own session
+// with it. A TCP-backed Client must only close its own connection.
+func TestTCPClientShutdownDoesNotSendShutdownOrExit(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close() //nolint:errcheck
+
+	gotMethod := make(chan string, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close() //nolint:errcheck
+		fakeServer := newJSONRPCConn(conn, conn, func(method string, _ json.RawMessage) {
+			gotMethod <- method
+		}, func(method string, _ json.RawMessage) (any, error) {
+			gotMethod <- method
+			return InitializeResult{}, nil
+		})
+		_ = fakeServer
+		<-time.After(2 * time.Second)
+	}()
+
+	c, err := NewTCPClient(ln.Addr().String(), "/workspace")
+	if err != nil {
+		t.Fatalf("NewTCPClient: %v", err)
+	}
+
+	c.Shutdown()
+
+	select {
+	case method := <-gotMethod:
+		t.Fatalf("Shutdown() sent %q to a TCP-attached server — it must only disconnect, never send shutdown/exit", method)
+	case <-time.After(200 * time.Millisecond):
+		// Expected: nothing was ever sent.
+	}
+}
+
 // TestNewTCPClientTerminateClosesSocket is a regression test:
 // Client.terminate's existing c.cmd != nil guard no-ops correctly for a
 // TCP client (no cmd), but without an added branch it would never close

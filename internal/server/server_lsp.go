@@ -287,10 +287,14 @@ func (s *editorService) GetWorkspaceDiagnosticsSummary(_ context.Context, call p
 	return nil
 }
 
-// RescanWorkspaceDiagnostics triggers an async whole-project lint scan —
-// see lint.Manager.ScanWorkspace's doc comment. Fire-and-forget: it starts
-// (or queues, if one is already running) the scan and returns immediately;
-// results surface through the next GetWorkspaceDiagnostics/Summary call.
+// RescanWorkspaceDiagnostics triggers async whole-project scans across
+// every diagnostic source that supports one — lint (see
+// lint.Manager.ScanWorkspace's doc comment), LSP (see
+// lsp.Manager.ScanWorkspace's doc comment, best-effort/partial coverage),
+// and any plugin with an OnWorkspaceScan handler
+// (pluginMgr.DispatchWorkspaceScan). Fire-and-forget: it starts (or queues,
+// if one is already running) each scan and returns immediately; results
+// surface through the next GetWorkspaceDiagnostics/Summary call.
 func (s *editorService) RescanWorkspaceDiagnostics(ctx context.Context, call proto.EditorService_rescanWorkspaceDiagnostics) error {
 	if _, err := call.AllocResults(); err != nil {
 		return err

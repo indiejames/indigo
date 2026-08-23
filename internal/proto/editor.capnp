@@ -184,12 +184,16 @@ interface EditorService {
   # (open buffers plus workspace-scanned files) with at least one
   # diagnostic.
   getWorkspaceDiagnosticsSummary @52 () -> (errorCount :UInt32, warningCount :UInt32, infoCount :UInt32, fileCount :UInt32);
-  # rescanWorkspaceDiagnostics triggers an async whole-project lint scan
-  # (internal/lint.Manager.ScanWorkspace) to refresh diagnostics for files
-  # that aren't open in any buffer. Fire-and-forget: this returns as soon as
-  # the scan is (re)started, not once it completes — results show up
+  # rescanWorkspaceDiagnostics triggers async whole-project scans to
+  # refresh diagnostics for files that aren't open in any buffer, across
+  # every source that supports one: lint (internal/lint.Manager.ScanWorkspace),
+  # LSP (internal/lsp.Manager.ScanWorkspace — best-effort/partial, see its
+  # doc comment), and any plugin with an OnWorkspaceScan handler
+  # (pluginMgr.DispatchWorkspaceScan). Fire-and-forget: this returns as soon
+  # as the scans are (re)started, not once they complete — results show up
   # through the next getWorkspaceDiagnostics/Summary call. A scan already in
-  # progress coalesces this into one more run right after it finishes.
+  # progress for a given source coalesces this into one more run right
+  # after it finishes.
   rescanWorkspaceDiagnostics @53 () -> ();
 }
 

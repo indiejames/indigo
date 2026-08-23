@@ -324,6 +324,19 @@ func (m *Manager) ScanWorkspace() {
 // data visible until a fresh fetch replaces it" philosophy.
 func (m *Manager) runWorkspaceScan() {
 	for {
+		if m.scanCtx.Err() != nil {
+			// Shutdown canceled scanCtx since this iteration was queued
+			// (e.g. it coalesced in via workspacePending, or Shutdown raced
+			// the very first iteration) — stop rather than firing a round
+			// of workspace/diagnostic requests doomed to fail immediately
+			// and overwrite any still-good previous results with spurious
+			// "context canceled" errors.
+			m.workspaceMu.Lock()
+			m.workspaceRunning = false
+			m.workspacePending = false
+			m.workspaceMu.Unlock()
+			return
+		}
 		clients := m.runningClients()
 
 		type scanResult struct {

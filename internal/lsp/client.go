@@ -818,6 +818,52 @@ func (c *Client) GetDiagnostics(path string) []Diagnostic {
 	return out
 }
 
+// SupportsWorkspaceDiagnostics reports whether the server advertised
+// workspace/diagnostic pull support at initialize (LSP 3.17). Most servers
+// that implement pull diagnostics at all only support the per-document
+// form, so this is expected to be false far more often than true — callers
+// (Manager.ScanWorkspace) must check it before calling WorkspaceDiagnostic
+// rather than relying on that call to fail gracefully for an unsupported
+// server, since "method not found" and "the request just returned nothing"
+// aren't reliably distinguishable across every server implementation.
+func (c *Client) SupportsWorkspaceDiagnostics() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.caps.DiagnosticProvider != nil && c.caps.DiagnosticProvider.WorkspaceDiagnostics
+}
+
+// WorkspaceDiagnostic pulls diagnostics for every file the server knows
+// about via workspace/diagnostic, returning them grouped by absolute path.
+// Always sends an empty PreviousResultIDs (see WorkspaceDiagnosticParams's
+// doc comment), so every item is expected back as a full report; an
+// "unchanged" item (no Items) simply contributes nothing for that path
+// rather than being treated as an error. Best-effort: a server that lied
+// about advertising this (jsonrpcMethodNotFound) is treated the same as
+// "no results" rather than a hard error, mirroring Format's handling of the
+// same situation for documentFormattingProvider.
+func (c *Client) WorkspaceDiagnostic(ctx context.Context) (map[string][]Diagnostic, error) {
+	raw, err := c.conn.Call(ctx, "workspace/diagnostic", WorkspaceDiagnosticParams{PreviousResultIDs: []PreviousResultID{}})
+	if err != nil {
+		var rpcErr *jsonrpcError
+		if errors.As(err, &rpcErr) && rpcErr.Code == jsonrpcMethodNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var report WorkspaceDiagnosticReport
+	if unmarshalErr := json.Unmarshal(raw, &report); unmarshalErr != nil {
+		return nil, unmarshalErr
+	}
+	out := make(map[string][]Diagnostic, len(report.Items))
+	for _, item := range report.Items {
+		if len(item.Items) == 0 {
+			continue
+		}
+		out[URIToPath(item.URI)] = item.Items
+	}
+	return out, nil
+}
+
 // Format requests textDocument/formatting and applies the returned edits.
 // Returns (content, false, nil) when the server reports no formatting support.
 func (c *Client) Format(path, content string, opts FormattingOptions) (string, bool, error) {

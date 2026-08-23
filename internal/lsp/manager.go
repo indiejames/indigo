@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,19 +41,43 @@ type Manager struct {
 	servers      []ServerConfig
 	rootDir      string
 	fileContent  map[string]string // path → content stored by DidOpen for ensureOpened
+
+	// Workspace-wide diagnostic scan state (Manager.ScanWorkspace),
+	// independent of the per-language clients above — see ScanWorkspace's
+	// doc comment. Guarded by its own mutex, mirroring
+	// internal/lint.Manager's identically-shaped workspaceMu/workspace*
+	// fields, since a scan can run concurrently with, and outlive, any
+	// number of per-buffer LSP calls.
+	workspaceMu      sync.Mutex
+	workspaceByLang  map[string]map[string][]Diagnostic // languageID → path → most recently completed scan's diagnostics
+	workspaceErrs    map[string]error                   // languageID → error from its most recently completed scan, nil once one succeeds
+	workspaceRunning bool
+	workspacePending bool
+
+	// scanCtx bounds every workspace/diagnostic request issued by
+	// ScanWorkspace, separately from each individual request's own
+	// per-server timeout — canceled by Shutdown so a scan in flight at
+	// server shutdown doesn't keep running detached from indigo.
+	scanCtx    context.Context
+	cancelScan context.CancelFunc
 }
 
 // NewManager creates a Manager for the given workspace root.
 // servers is the ordered list of language server configs; user-configured entries
 // should come first so they shadow the built-in defaults.
 func NewManager(rootDir string, servers []ServerConfig) *Manager {
+	scanCtx, cancelScan := context.WithCancel(context.Background())
 	return &Manager{
-		clients:      make(map[string]*Client),
-		failedStarts: make(map[string]time.Time),
-		starting:     make(map[string]chan struct{}),
-		servers:      servers,
-		rootDir:      rootDir,
-		fileContent:  make(map[string]string),
+		clients:         make(map[string]*Client),
+		failedStarts:    make(map[string]time.Time),
+		starting:        make(map[string]chan struct{}),
+		servers:         servers,
+		rootDir:         rootDir,
+		fileContent:     make(map[string]string),
+		workspaceByLang: make(map[string]map[string][]Diagnostic),
+		workspaceErrs:   make(map[string]error),
+		scanCtx:         scanCtx,
+		cancelScan:      cancelScan,
 	}
 }
 
@@ -235,6 +260,153 @@ func (m *Manager) GetDiagnostics(path string) []Diagnostic {
 	return nil
 }
 
+// workspaceDiagnosticTimeout bounds one server's workspace/diagnostic
+// request during a scan — separate from scanCtx (which bounds the whole
+// scan across every server) so one slow/hung server can't indefinitely
+// delay the others' results from landing. A var, not a const, so tests can
+// shrink it rather than paying the real timeout to exercise the hang path
+// (mirrors format.Manager's externalFormatTimeout).
+var workspaceDiagnosticTimeout = 30 * time.Second
+
+// runningClients returns a snapshot of every currently-alive client, keyed
+// by languageID, safe to use after releasing m.mu (mirrors the
+// snapshot-then-release-lock pattern server_lsp.go's snapshotOpenBuffers
+// already uses for the same reason: the calls made against these clients —
+// here, workspace/diagnostic requests — can each take real wall-clock
+// time and must not hold Manager's lock for their duration).
+func (m *Manager) runningClients() map[string]*Client {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]*Client, len(m.clients))
+	for lang, c := range m.clients {
+		if c.Alive() {
+			out[lang] = c
+		}
+	}
+	return out
+}
+
+// ScanWorkspace pulls workspace-wide diagnostics from every currently
+// running language server that advertised support for it (see
+// Client.SupportsWorkspaceDiagnostics), so GetWorkspaceDiagnostics/Summary
+// in internal/server can serve LSP diagnostics for files that aren't open
+// in any buffer — the per-path GetDiagnostics above never covers those,
+// since it only ever asks the server about one already-open document.
+// Deliberately best-effort and narrow, matching this feature's documented
+// scope: it never starts a language server that isn't already running (no
+// language server exists yet unless some file of that language has been
+// opened this session), and a server that never advertised
+// workspaceDiagnostics is silently skipped rather than treated as an
+// error — most servers that support pull diagnostics at all only support
+// the per-document form. Call this at server startup and on an explicit
+// rescan request, mirroring lint.Manager.ScanWorkspace's two trigger
+// points exactly; a scan already in progress coalesces a new request into
+// one more run right after it finishes, the same coalescing shape
+// lint.Manager.ScanWorkspace uses.
+func (m *Manager) ScanWorkspace() {
+	m.workspaceMu.Lock()
+	if m.workspaceRunning {
+		m.workspacePending = true
+		m.workspaceMu.Unlock()
+		return
+	}
+	m.workspaceRunning = true
+	m.workspaceMu.Unlock()
+
+	go m.runWorkspaceScan()
+}
+
+// runWorkspaceScan mirrors lint.Manager.runWorkspaceScan field-for-field,
+// including the looping (rather than recursing via a fresh ScanWorkspace
+// call) handling of a coalesced request — see that function's doc comment
+// for why the loop matters. A server whose scan fails keeps its previous
+// (stale) results visible rather than being cleared, same "leave stale
+// data visible until a fresh fetch replaces it" philosophy.
+func (m *Manager) runWorkspaceScan() {
+	for {
+		clients := m.runningClients()
+
+		type scanResult struct {
+			lang  string
+			diags map[string][]Diagnostic
+			err   error
+		}
+		results := make(chan scanResult, len(clients))
+		var wg sync.WaitGroup
+		for lang, c := range clients {
+			if !c.SupportsWorkspaceDiagnostics() {
+				continue
+			}
+			wg.Add(1)
+			go func(lang string, c *Client) {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(m.scanCtx, workspaceDiagnosticTimeout)
+				defer cancel()
+				diags, err := c.WorkspaceDiagnostic(ctx)
+				results <- scanResult{lang: lang, diags: diags, err: err}
+			}(lang, c)
+		}
+		wg.Wait()
+		close(results)
+
+		m.workspaceMu.Lock()
+		for r := range results {
+			if r.err != nil {
+				m.workspaceErrs[r.lang] = r.err
+				continue
+			}
+			delete(m.workspaceErrs, r.lang)
+			m.workspaceByLang[r.lang] = r.diags
+		}
+		if !m.workspacePending {
+			m.workspaceRunning = false
+			m.workspaceMu.Unlock()
+			return
+		}
+		m.workspacePending = false
+		m.workspaceMu.Unlock()
+	}
+}
+
+// WorkspaceScanSnapshot returns every path the most recently completed
+// workspace scan(s) found diagnostics for, merged across every running
+// language server. The caller (allWorkspaceDiagnostics in
+// internal/server) is expected to skip any path that's also an open
+// buffer, since that path's live, possibly-newer diagnostics already
+// supersede a scan result — same contract as
+// lint.Manager.WorkspaceScanSnapshot.
+func (m *Manager) WorkspaceScanSnapshot() map[string][]Diagnostic {
+	m.workspaceMu.Lock()
+	defer m.workspaceMu.Unlock()
+	merged := make(map[string][]Diagnostic)
+	for _, byPath := range m.workspaceByLang {
+		for path, diags := range byPath {
+			merged[path] = append(merged[path], diags...)
+		}
+	}
+	return merged
+}
+
+// WorkspaceScanning reports whether a workspace scan is currently running
+// (including one queued to run again immediately after).
+func (m *Manager) WorkspaceScanning() bool {
+	m.workspaceMu.Lock()
+	defer m.workspaceMu.Unlock()
+	return m.workspaceRunning
+}
+
+// WorkspaceScanError returns the error from langID's most recently
+// completed workspace-scan request, or nil if that run succeeded (or
+// langID's server never ran one — not supporting workspace diagnostics
+// isn't itself an error). Same rationale as lint.Manager.WorkspaceScanError:
+// WorkspaceScanSnapshot alone can't distinguish "no issues" from "this
+// server's scan has been failing."
+func (m *Manager) WorkspaceScanError(langID string) error {
+	m.workspaceMu.Lock()
+	defer m.workspaceMu.Unlock()
+	return m.workspaceErrs[langID]
+}
+
 // HasClient reports whether an initialized language server client exists for path.
 func (m *Manager) HasClient(path string) bool {
 	ext := strings.TrimPrefix(filepath.Ext(path), ".")
@@ -386,6 +558,8 @@ func (m *Manager) Format(path, content string, opts FormattingOptions) (string, 
 
 // Shutdown cleanly shuts down all running language servers.
 func (m *Manager) Shutdown() {
+	m.cancelScan()
+
 	m.mu.Lock()
 	clients := make([]*Client, 0, len(m.clients))
 	for _, c := range m.clients {

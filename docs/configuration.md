@@ -192,6 +192,15 @@ A file that's both open in a buffer and covered by a workspace scan always shows
 buffer's live diagnostics — the scan result for that file is superseded, never merged
 alongside it, since the scan can be arbitrarily stale relative to live editing.
 
+The same scan also asks every currently-running language server for `workspace/diagnostic`
+results, best-effort: most language servers don't implement LSP 3.17's pull-diagnostics
+extension at all, and among those that do, many only support the per-document form, not the
+workspace-wide one. When a server does advertise it, this only covers files nobody has
+opened *this session* if the server itself was already running (i.e. at least one file of
+its language has already been opened) — indigo never launches a language server purely to
+run a workspace scan. There's no configuration for this; it's automatic wherever the
+attached server happens to support it.
+
 ## File type aliases
 
 Map a file extension or an exact filename to an existing syntax-highlighting language, for

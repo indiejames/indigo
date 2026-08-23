@@ -236,6 +236,14 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 	// per-edit. ScanWorkspace itself only ever launches its own background
 	// goroutine and returns immediately, so no extra `go` is needed here.
 	svc.lintMgr.ScanWorkspace()
+	// Also kick off an LSP workspace-diagnostic scan at the same trigger
+	// point, for parity with the lint scan above — see
+	// lsp.Manager.ScanWorkspace's doc comment. In practice this is a no-op
+	// here: no language server has started yet, since nothing has been
+	// opened this session. It becomes productive once a rescan
+	// (RescanWorkspaceDiagnostics) runs after at least one LSP-backed file
+	// has been opened and its server initialized.
+	svc.lspMgr.ScanWorkspace()
 	return svc
 }
 

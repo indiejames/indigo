@@ -97,6 +97,23 @@ type ServerCapabilities struct {
 	RenameProvider             any                    `json:"renameProvider,omitempty"`
 	InlayHintProvider          any                    `json:"inlayHintProvider,omitempty"`
 	SemanticTokensProvider     *SemanticTokensOptions `json:"semanticTokensProvider,omitempty"`
+	// DiagnosticProvider advertises LSP 3.17's pull-diagnostics support.
+	// indigo only cares about the WorkspaceDiagnostics flag inside it (see
+	// DiagnosticOptions) — everything else here (per-buffer pull
+	// diagnostics via textDocument/diagnostic) is unused; diagnostics for
+	// open buffers already arrive via the push-based
+	// textDocument/publishDiagnostics notification handled in
+	// handleNotification.
+	DiagnosticProvider *DiagnosticOptions `json:"diagnosticProvider,omitempty"`
+}
+
+// DiagnosticOptions is the shape of ServerCapabilities.DiagnosticProvider.
+// WorkspaceDiagnostics is the only field indigo reads: it gates whether
+// Client.WorkspaceDiagnostic (the workspace/diagnostic pull request) is
+// worth attempting at all — most servers that implement pull diagnostics
+// only support the per-document form and leave this false.
+type DiagnosticOptions struct {
+	WorkspaceDiagnostics bool `json:"workspaceDiagnostics"`
 }
 
 // SemanticTokensLegend maps the token type/modifier indices used in a
@@ -283,6 +300,47 @@ type PublishDiagnosticsParams struct {
 	// diagnostics; see handleNotification.
 	Version     *int         `json:"version,omitempty"`
 	Diagnostics []Diagnostic `json:"diagnostics"`
+}
+
+// ---- workspace/diagnostic ----
+
+// WorkspaceDiagnosticParams requests diagnostics for every file the server
+// knows about, not just open documents. PreviousResultIDs lets a client
+// tell the server "I already have the result tagged with this resultId for
+// this uri, skip re-sending it if unchanged" — indigo always sends this
+// empty (see Client.WorkspaceDiagnostic), so every report should come back
+// as a WorkspaceFullDocumentDiagnosticReport, never the "unchanged" variant.
+type WorkspaceDiagnosticParams struct {
+	PreviousResultIDs []PreviousResultID `json:"previousResultIds"`
+}
+
+// PreviousResultID pairs a document URI with the resultId a prior
+// workspace/diagnostic response tagged it with — part of the spec's
+// incremental-result mechanism, which indigo doesn't use (see
+// WorkspaceDiagnosticParams).
+type PreviousResultID struct {
+	URI   string `json:"uri"`
+	Value string `json:"value"`
+}
+
+// WorkspaceDiagnosticReport is the response to workspace/diagnostic.
+type WorkspaceDiagnosticReport struct {
+	Items []WorkspaceDocumentDiagnosticReport `json:"items"`
+}
+
+// WorkspaceDocumentDiagnosticReport is one file's entry in a
+// WorkspaceDiagnosticReport. The spec defines this as a union of a "full"
+// report (Items populated) and an "unchanged" one (ResultID only, meaning
+// "same as the PreviousResultID you sent me") — decoded here as one flat
+// struct with Kind as the discriminator, since indigo only ever reads the
+// "full" case (see WorkspaceDiagnosticParams) and json.Unmarshal already
+// leaves Items nil for an "unchanged" report with no items field.
+type WorkspaceDocumentDiagnosticReport struct {
+	Kind     string       `json:"kind"`
+	URI      string       `json:"uri"`
+	Version  *int         `json:"version,omitempty"`
+	ResultID string       `json:"resultId,omitempty"`
+	Items    []Diagnostic `json:"items,omitempty"`
 }
 
 // ---- textDocument/formatting ----

@@ -134,10 +134,13 @@ type workspacePathDiag struct {
 // allWorkspaceDiagnostics is the shared source of truth for
 // getWorkspaceDiagnostics and getWorkspaceDiagnosticsSummary: live,
 // merged (LSP + lint + plugin) diagnostics for every open buffer, plus
-// whatever the last workspace lint scan (lintMgr.WorkspaceScanSnapshot,
-// see lint.Manager.ScanWorkspace) found for files that aren't open in any
-// buffer. An open buffer's live diagnostics always win over a scan result
-// for the same path — the scan can be arbitrarily stale (it only reruns on
+// whatever the last workspace scan found for files that aren't open in any
+// buffer — lintMgr.WorkspaceScanSnapshot (see lint.Manager.ScanWorkspace),
+// lspMgr.WorkspaceScanSnapshot (see lsp.Manager.ScanWorkspace — best-effort,
+// only covers servers that both are already running and advertised
+// workspace/diagnostic support), and snapshotPluginWorkspaceDiags. An open
+// buffer's live diagnostics always win over a scan result for the same
+// path — the scan can be arbitrarily stale (it only reruns on
 // startup/explicit rescan, not per-edit) where the open buffer's LSP/lint
 // state is already kept current by the normal per-buffer paths.
 func (s *editorService) allWorkspaceDiagnostics() []workspacePathDiag {
@@ -151,6 +154,14 @@ func (s *editorService) allWorkspaceDiagnostics() []workspacePathDiag {
 		}
 	}
 	for path, diags := range s.lintMgr.WorkspaceScanSnapshot() {
+		if openPaths[path] {
+			continue
+		}
+		for _, d := range diags {
+			items = append(items, workspacePathDiag{path: path, d: d})
+		}
+	}
+	for path, diags := range s.lspMgr.WorkspaceScanSnapshot() {
 		if openPaths[path] {
 			continue
 		}
@@ -276,15 +287,20 @@ func (s *editorService) GetWorkspaceDiagnosticsSummary(_ context.Context, call p
 	return nil
 }
 
-// RescanWorkspaceDiagnostics triggers an async whole-project lint scan —
-// see lint.Manager.ScanWorkspace's doc comment. Fire-and-forget: it starts
-// (or queues, if one is already running) the scan and returns immediately;
-// results surface through the next GetWorkspaceDiagnostics/Summary call.
+// RescanWorkspaceDiagnostics triggers async whole-project scans across
+// every diagnostic source that supports one — lint (see
+// lint.Manager.ScanWorkspace's doc comment), LSP (see
+// lsp.Manager.ScanWorkspace's doc comment, best-effort/partial coverage),
+// and any plugin with an OnWorkspaceScan handler
+// (pluginMgr.DispatchWorkspaceScan). Fire-and-forget: it starts (or queues,
+// if one is already running) each scan and returns immediately; results
+// surface through the next GetWorkspaceDiagnostics/Summary call.
 func (s *editorService) RescanWorkspaceDiagnostics(ctx context.Context, call proto.EditorService_rescanWorkspaceDiagnostics) error {
 	if _, err := call.AllocResults(); err != nil {
 		return err
 	}
 	s.lintMgr.ScanWorkspace()
+	s.lspMgr.ScanWorkspace()
 	if s.pluginMgr != nil {
 		s.pluginMgr.DispatchWorkspaceScan(ctx)
 	}

@@ -78,6 +78,27 @@ interface EditorApi {
   # markers) — unlike DecorationProvider, there is no pull/poll counterpart,
   # this call is the only way plugin diagnostics reach the editor.
   publishDiagnostics @23 (bufId :UInt32, version :UInt64, diagnostics :List(PluginDiagnostic)) -> ();
+  # publishWorkspaceDiagnostics is the path-keyed sibling of publishDiagnostics,
+  # for a file that may not be open in any buffer (no bufId/version exists for
+  # one). Called from a WorkspaceScanHandler.scan callback (see
+  # registerWorkspaceScanHandler) while walking the project. Like
+  # publishDiagnostics, one call is the authoritative diagnostic list for
+  # (this plugin, path) — a later call replaces the previous one entirely,
+  # and an empty diagnostics list clears it. There is no staleness check
+  # here (nothing to compare against for an unopened file); an open buffer's
+  # live diagnostics always supersede whatever was published here for the
+  # same path, never merge alongside it — see allWorkspaceDiagnostics.
+  publishWorkspaceDiagnostics @24 (path :Text, diagnostics :List(PluginDiagnostic)) -> ();
+  # registerWorkspaceScanHandler registers a handler invoked when the editor
+  # runs (or re-runs) a workspace-wide diagnostic scan — at server startup
+  # and on an explicit rescan (the diagnostic browser's "r" key), mirroring
+  # lint.Manager.ScanWorkspace's own trigger points. The handler should walk
+  # the project (e.g. every text file under the workspace root) and call
+  # publishWorkspaceDiagnostics per file as it goes; it is dispatched
+  # fire-and-forget with a generous timeout (scanning a whole project can
+  # take a while), so slow progress does not block the RescanWorkspaceDiagnostics
+  # RPC or any other plugin's scan.
+  registerWorkspaceScanHandler @25 (handler :WorkspaceScanHandler) -> ();
 }
 
 # Handler interfaces — implemented by the plugin, called by the server.
@@ -289,4 +310,10 @@ interface EditEventHandler {
   # linesChanged is fired after an edit at atLine that shifted the line count
   # by lineDelta (positive = lines inserted, negative = lines deleted).
   linesChanged @0 (bufId :UInt32, filePath :Text, atLine :UInt32, lineDelta :Int32) -> ();
+}
+
+# WorkspaceScanHandler is implemented by the plugin and called by the editor
+# to run a workspace-wide diagnostic scan — see registerWorkspaceScanHandler.
+interface WorkspaceScanHandler {
+  scan @0 () -> ();
 }

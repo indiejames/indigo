@@ -154,3 +154,36 @@ func TestManagerCompletionProviderRealPlugin(t *testing.T) {
 		t.Errorf("resolved.Detail = %q, want %q", resolved.Detail, "resolved:resolve-me")
 	}
 }
+
+// TestManagerDispatchWorkspaceScanRealPlugin drives DispatchWorkspaceScan
+// against the real spawned miniplugin process and confirms its registered
+// OnWorkspaceScan handler actually runs — the marker-file side channel is
+// necessary because the handler executes in a separate OS process, so it
+// can't set an in-memory flag the test could check directly.
+func TestManagerDispatchWorkspaceScanRealPlugin(t *testing.T) {
+	setUpMiniPluginInstall(t)
+
+	markerPath := filepath.Join(t.TempDir(), "scanned.marker")
+	t.Setenv("MINIPLUGIN_SCAN_MARKER", markerPath)
+
+	m := NewManager(t.TempDir(), nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(m.Shutdown)
+
+	m.DispatchWorkspaceScan(context.Background())
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(markerPath); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("miniplugin's OnWorkspaceScan handler never ran (marker file never appeared)")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

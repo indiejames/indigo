@@ -180,6 +180,15 @@ type editorService struct {
 	activeCtx   activeContext
 	activeSel   activeSelection
 
+	// pluginWorkspaceDiags holds diagnostics published via
+	// publishWorkspaceDiagnostics, keyed by file path then plugin name — the
+	// path-keyed sibling of bufferEntry.pluginDiags, for files that aren't
+	// open in any buffer (see PluginPublishWorkspaceDiagnostics). A later
+	// publish for the same (path, plugin) replaces the previous one; an
+	// empty diagnostics list clears the entry. Merged into
+	// allWorkspaceDiagnostics for paths not covered by an open buffer.
+	pluginWorkspaceDiags map[string]map[string][]lsp.Diagnostic
+
 	// statusBar holds client-contributed status bar text segments.
 	statusBar *statusBarRegistry
 
@@ -201,19 +210,20 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 	lspMgr := lsp.NewManager(workspaceDir, servers)
 	watcher, _ := fsnotify.NewWatcher()
 	svc := &editorService{
-		buffers:         make(map[uint32]*bufferEntry),
-		clientMap:       make(map[uint64]*clientEntry),
-		recDir:          recDir,
-		lspMgr:          lspMgr,
-		watcher:         watcher,
-		dirWatches:      make(map[string]int),
-		savingPaths:     make(map[string]time.Time),
-		fmtMgr:          format.NewManager(lspMgr, cfg, workspaceDir),
-		lintMgr:         lint.NewManager(cfg, workspaceDir),
-		cfg:             cfg,
-		shutdown:        shutdown,
-		onClientConnect: onClientConnect,
-		statusBar:       newStatusBarRegistry(),
+		buffers:              make(map[uint32]*bufferEntry),
+		clientMap:            make(map[uint64]*clientEntry),
+		recDir:               recDir,
+		lspMgr:               lspMgr,
+		watcher:              watcher,
+		dirWatches:           make(map[string]int),
+		savingPaths:          make(map[string]time.Time),
+		fmtMgr:               format.NewManager(lspMgr, cfg, workspaceDir),
+		lintMgr:              lint.NewManager(cfg, workspaceDir),
+		cfg:                  cfg,
+		shutdown:             shutdown,
+		onClientConnect:      onClientConnect,
+		statusBar:            newStatusBarRegistry(),
+		pluginWorkspaceDiags: make(map[string]map[string][]lsp.Diagnostic),
 	}
 	svc.pluginMgr = plugin.NewManager(workspaceDir, svc)
 	if watcher != nil {
@@ -500,7 +510,15 @@ func New(dir string) (*Server, error) {
 		srv.hasHadClient.Store(true)
 	})
 
-	go srv.svc.pluginMgr.Start(context.Background()) //nolint:errcheck
+	go func() {
+		srv.svc.pluginMgr.Start(context.Background()) //nolint:errcheck
+		// Kick off an initial workspace scan for any plugin that registered a
+		// scan handler (e.g. indigo-spell), mirroring the lint workspace scan
+		// kicked off just above in newEditorService — Start already blocked
+		// until every discovered plugin finished (or failed) initializing,
+		// so registrations from initialize are guaranteed visible here.
+		srv.svc.pluginMgr.DispatchWorkspaceScan(context.Background())
+	}()
 
 	interval := time.Duration(cfg.RecoveryIntervalSecs) * time.Second
 	srv.startFlushLoop(interval, cfg.RecoveryMaxBytes)

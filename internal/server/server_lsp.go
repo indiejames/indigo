@@ -158,7 +158,32 @@ func (s *editorService) allWorkspaceDiagnostics() []workspacePathDiag {
 			items = append(items, workspacePathDiag{path: path, d: d})
 		}
 	}
+	for path, diags := range s.snapshotPluginWorkspaceDiags() {
+		if openPaths[path] {
+			continue
+		}
+		for _, d := range diags {
+			items = append(items, workspacePathDiag{path: path, d: d})
+		}
+	}
 	return items
+}
+
+// snapshotPluginWorkspaceDiags returns a flattened path -> diagnostics view
+// of pluginWorkspaceDiags (merging every publishing plugin's diagnostics for
+// each path), captured under s.mu the same way snapshotOpenBuffers is.
+func (s *editorService) snapshotPluginWorkspaceDiags() map[string][]lsp.Diagnostic {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string][]lsp.Diagnostic, len(s.pluginWorkspaceDiags))
+	for path, byPlugin := range s.pluginWorkspaceDiags {
+		var all []lsp.Diagnostic
+		for _, diags := range byPlugin {
+			all = append(all, diags...)
+		}
+		out[path] = all
+	}
+	return out
 }
 
 // GetWorkspaceDiagnostics aggregates diagnostics across the whole project —
@@ -255,11 +280,14 @@ func (s *editorService) GetWorkspaceDiagnosticsSummary(_ context.Context, call p
 // see lint.Manager.ScanWorkspace's doc comment. Fire-and-forget: it starts
 // (or queues, if one is already running) the scan and returns immediately;
 // results surface through the next GetWorkspaceDiagnostics/Summary call.
-func (s *editorService) RescanWorkspaceDiagnostics(_ context.Context, call proto.EditorService_rescanWorkspaceDiagnostics) error {
+func (s *editorService) RescanWorkspaceDiagnostics(ctx context.Context, call proto.EditorService_rescanWorkspaceDiagnostics) error {
 	if _, err := call.AllocResults(); err != nil {
 		return err
 	}
 	s.lintMgr.ScanWorkspace()
+	if s.pluginMgr != nil {
+		s.pluginMgr.DispatchWorkspaceScan(ctx)
+	}
 	return nil
 }
 

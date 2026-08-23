@@ -487,6 +487,70 @@ func (s *editorApiServer) PublishDiagnostics(_ context.Context, call pluginproto
 	return err
 }
 
+// PublishWorkspaceDiagnostics implements pluginproto.EditorApi_Server. See
+// publishWorkspaceDiagnostics's doc comment in plugin.capnp.
+func (s *editorApiServer) PublishWorkspaceDiagnostics(_ context.Context, call pluginproto.EditorApi_publishWorkspaceDiagnostics) error {
+	if s.bridge == nil {
+		return fmt.Errorf("no server bridge")
+	}
+	args := call.Args()
+	path, err := args.Path()
+	if err != nil {
+		return err
+	}
+	rawList, err := args.Diagnostics()
+	if err != nil {
+		return err
+	}
+	diags := make([]PluginDiagnostic, 0, rawList.Len())
+	for i := range rawList.Len() {
+		item := rawList.At(i)
+		msg, err := item.Message_()
+		if err != nil {
+			return err
+		}
+		rng, err := item.Range()
+		if err != nil {
+			return err
+		}
+		start, err := rng.Start()
+		if err != nil {
+			return err
+		}
+		end, err := rng.End()
+		if err != nil {
+			return err
+		}
+		diags = append(diags, PluginDiagnostic{
+			FromLine: start.Line(),
+			FromCol:  start.Col(),
+			ToLine:   end.Line(),
+			ToCol:    end.Col(),
+			Severity: PluginDiagnosticSeverity(item.Severity()),
+			Message:  msg,
+		})
+	}
+	if err := s.bridge.PluginPublishWorkspaceDiagnostics(s.reg.name, path, diags); err != nil {
+		return err
+	}
+	_, err = call.AllocResults()
+	return err
+}
+
+// RegisterWorkspaceScanHandler implements pluginproto.EditorApi_Server.
+func (s *editorApiServer) RegisterWorkspaceScanHandler(_ context.Context, call pluginproto.EditorApi_registerWorkspaceScanHandler) error {
+	handler := call.Args().Handler()
+	if !handler.IsValid() {
+		return fmt.Errorf("invalid workspace scan handler")
+	}
+	s.reg.mu.Lock()
+	s.reg.workspaceScanHandler.Release()
+	s.reg.workspaceScanHandler = handler.AddRef()
+	s.reg.mu.Unlock()
+	_, err := call.AllocResults()
+	return err
+}
+
 func (s *editorApiServer) VisibleRange(_ context.Context, call pluginproto.EditorApi_visibleRange) error {
 	if s.bridge == nil {
 		return fmt.Errorf("no server bridge")

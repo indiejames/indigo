@@ -187,6 +187,45 @@ func (s *editorService) PluginPublishDiagnostics(bufID uint32, pluginName string
 	return nil
 }
 
+// PluginPublishWorkspaceDiagnostics implements plugin.ServerBridge. See
+// publishWorkspaceDiagnostics's doc comment in plugin.capnp: unlike
+// PluginPublishDiagnostics there is no version/staleness check (an unopened
+// file has no buffer to compare against) — a later call for the same
+// (path, pluginName) simply replaces the previous one.
+func (s *editorService) PluginPublishWorkspaceDiagnostics(pluginName, path string, diags []plugin.PluginDiagnostic) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pluginWorkspaceDiags == nil {
+		s.pluginWorkspaceDiags = make(map[string]map[string][]lsp.Diagnostic)
+	}
+	if len(diags) == 0 {
+		if byPlugin, ok := s.pluginWorkspaceDiags[path]; ok {
+			delete(byPlugin, pluginName)
+			if len(byPlugin) == 0 {
+				delete(s.pluginWorkspaceDiags, path)
+			}
+		}
+		return nil
+	}
+	converted := make([]lsp.Diagnostic, len(diags))
+	for i, d := range diags {
+		converted[i] = lsp.Diagnostic{
+			Range: lsp.Range{
+				Start: lsp.Position{Line: int(d.FromLine), Character: int(d.FromCol)},
+				End:   lsp.Position{Line: int(d.ToLine), Character: int(d.ToCol)},
+			},
+			Severity: pluginDiagnosticSeverity(d.Severity),
+			Source:   pluginName,
+			Message:  d.Message,
+		}
+	}
+	if s.pluginWorkspaceDiags[path] == nil {
+		s.pluginWorkspaceDiags[path] = make(map[string][]lsp.Diagnostic)
+	}
+	s.pluginWorkspaceDiags[path][pluginName] = converted
+	return nil
+}
+
 // langIDForPath returns a language ID string based on file extension.
 func langIDForPath(path string) string {
 	dot := strings.LastIndexByte(path, '.')

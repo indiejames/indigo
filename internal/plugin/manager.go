@@ -60,6 +60,10 @@ type ServerBridge interface {
 	// doc comment in plugin.capnp for why. An empty diags clears pluginName's
 	// previously published diagnostics for bufID.
 	PluginPublishDiagnostics(bufID uint32, pluginName string, version uint64, diags []PluginDiagnostic) error
+	// PluginPublishWorkspaceDiagnostics is the path-keyed sibling of
+	// PluginPublishDiagnostics, for a file that may not be open in any
+	// buffer — see publishWorkspaceDiagnostics's doc comment in plugin.capnp.
+	PluginPublishWorkspaceDiagnostics(pluginName, path string, diags []PluginDiagnostic) error
 
 	// PluginOpenBuffers returns all currently-open (bufID, path) pairs so plugins
 	// can receive OnOpen for buffers that were opened before the plugin started.
@@ -194,16 +198,17 @@ type registeredPlugin struct {
 	// reaping completing instead of polling for the process to disappear.
 	reapDone <-chan struct{}
 
-	mu                 sync.RWMutex
-	keyBindings        map[string]pluginproto.KeyHandler
-	insertHooks        map[string]pluginproto.KeyHandler
-	commands           map[string]pluginproto.CommandHandler
-	menuActions        map[string]pluginproto.KeyHandler
-	bufHandler         pluginproto.BufferEventHandler
-	decorProvider      pluginproto.DecorationProvider
-	actionProvider     pluginproto.ActionProvider
-	completionProvider pluginproto.CompletionProvider
-	editHandler        pluginproto.EditEventHandler
+	mu                   sync.RWMutex
+	keyBindings          map[string]pluginproto.KeyHandler
+	insertHooks          map[string]pluginproto.KeyHandler
+	commands             map[string]pluginproto.CommandHandler
+	menuActions          map[string]pluginproto.KeyHandler
+	bufHandler           pluginproto.BufferEventHandler
+	decorProvider        pluginproto.DecorationProvider
+	actionProvider       pluginproto.ActionProvider
+	completionProvider   pluginproto.CompletionProvider
+	editHandler          pluginproto.EditEventHandler
+	workspaceScanHandler pluginproto.WorkspaceScanHandler
 
 	// menuItems is this plugin's declared Command-menu tree, read once from
 	// the manifest at startup (static — not affected by RegisterMenuAction).
@@ -230,6 +235,7 @@ func (p *registeredPlugin) release() {
 	p.actionProvider.Release()
 	p.completionProvider.Release()
 	p.editHandler.Release()
+	p.workspaceScanHandler.Release()
 }
 
 // Manager discovers plugins in the user's plugins directory and manages their
@@ -1090,6 +1096,43 @@ func (m *Manager) DispatchEditEvent(ctx context.Context, bufID uint32, filePath 
 				}
 				ps.SetAtLine(atLine)
 				ps.SetLineDelta(lineDelta)
+				return nil
+			})
+			defer rel()
+			fut.Struct() //nolint:errcheck
+		}(h)
+	}
+}
+
+// workspaceScanTimeout bounds one plugin's Scan call. Generous relative to
+// the other dispatch timeouts in this file (500ms for linesChanged, 2s for
+// RefreshDecorations) because a real scan handler (e.g. indigo-spell
+// spell-checking every file in the project) may need to walk a large tree —
+// unlike those other calls, this one is expected to take real wall-clock
+// time, not just round-trip a small RPC.
+const workspaceScanTimeout = 2 * time.Minute
+
+// DispatchWorkspaceScan fires scan on every plugin that registered a
+// workspace scan handler, so it can walk the project and report diagnostics
+// for files nobody has open via PublishWorkspaceDiagnostics. Dispatched
+// fire-and-forget, one goroutine per plugin, mirroring DispatchEditEvent —
+// callers (server startup, an explicit rescan) return immediately rather
+// than waiting for scans to finish.
+func (m *Manager) DispatchWorkspaceScan(ctx context.Context) {
+	m.mu.Lock()
+	plugins := m.plugins
+	m.mu.Unlock()
+	for _, p := range plugins {
+		p.mu.RLock()
+		h := p.workspaceScanHandler
+		p.mu.RUnlock()
+		if !h.IsValid() {
+			continue
+		}
+		go func(h pluginproto.WorkspaceScanHandler) {
+			tctx, cancel := context.WithTimeout(ctx, workspaceScanTimeout)
+			defer cancel()
+			fut, rel := h.Scan(tctx, func(pluginproto.WorkspaceScanHandler_scan_Params) error {
 				return nil
 			})
 			defer rel()

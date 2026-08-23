@@ -150,7 +150,18 @@ func applyOp(m Model, op document.Op) (Model, tea.Cmd) {
 	m.redoStack = nil // any new edit invalidates the redo history
 	m = m.shiftLSPOverlayLines(atLine, delta)
 	m, refreshCmd := m.scheduleLSPOverlayRefresh()
-	return m, tea.Batch(m.sendOp(op), m.reparseHighlight(), recordCmd, refreshCmd)
+	// sendOp applies op to m.buf as a side effect (see its doc comment)
+	// before returning the network-send cmd, so it must run before
+	// scrollToCursor — scrollToCursor's wrap-chunk math needs the
+	// post-edit line content to correctly detect a cursor that just
+	// wrapped onto a new visual row. The caller already moved m.cursor to
+	// reflect the edit before calling applyOp; re-syncing the viewport
+	// here (rather than at every applyOp call site) keeps every
+	// applyOp-routed edit — self-insert, backspace, tab, Enter, auto-pair,
+	// ... — from ever leaving the cursor rendered off-screen.
+	sendCmd := m.sendOp(op)
+	m.scrollToCursor()
+	return m, tea.Batch(sendCmd, m.reparseHighlight(), recordCmd, refreshCmd)
 }
 
 // shiftLSPOverlayLines re-keys cached semantic-token/inlay-hint data by delta
@@ -289,6 +300,10 @@ func applyBatch(m Model, ops []document.Op) (Model, tea.Cmd) {
 	// op sends need this guarantee, so reparseHighlight/recordCmd — which
 	// don't depend on send order — still run concurrently with each other
 	// once the sends finish.
+	// Same reasoning as applyOp: the caller already positioned m.cursor for
+	// the post-edit state, so re-sync the viewport here rather than at
+	// every applyBatch call site.
+	m.scrollToCursor()
 	tail := append([]tea.Cmd{m.reparseHighlight(), recordCmd}, extraCmds...)
 	return m, tea.Sequence(append(sendCmds, tea.Batch(tail...))...)
 }

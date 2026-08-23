@@ -199,6 +199,13 @@ type Config struct {
 	RulerColumn          int               `toml:"ruler_column"`
 	InlayHints           bool              `toml:"inlay_hints"`
 	SemanticTokens       bool              `toml:"semantic_tokens"`
+	// ScrollOff sets the minimum number of lines kept visible above and
+	// below the cursor while it is not at the very start/end of the buffer
+	// (Helix/Vim call this "scrolloff"): the viewport scrolls proactively as
+	// the cursor approaches an edge, instead of only reacting once the
+	// cursor would otherwise land off-screen. 0 disables the margin,
+	// restoring the old reveal-only-when-necessary behavior.
+	ScrollOff int `toml:"scroll_off"`
 	// CursorColumnStyle selects what the status bar's column number means:
 	// "view" (default) shows the on-screen visual column, counting a tab as
 	// however many columns it visually occupies (VS Code-style); "buffer"
@@ -247,6 +254,7 @@ func defaults() *Config {
 		RulerColumn:          0,
 		InlayHints:           false,
 		SemanticTokens:       false,
+		ScrollOff:            5,
 		CursorColumnStyle:    "view",
 	}
 }
@@ -389,6 +397,12 @@ const defaultConfigTemplate = `# Indigo editor configuration
 
 # Draw indent guide lines at each tab-stop in the leading whitespace of lines.
 # indent_guides = true
+
+# Minimum number of lines kept visible above/below the cursor as it moves
+# (Helix/Vim "scrolloff"). The viewport scrolls proactively to keep this
+# margin instead of only reacting once the cursor would go off-screen. Set
+# to 0 to restore reveal-only-when-necessary scrolling.
+# scroll_off = 5
 
 # What the status bar's column number means: "view" shows the on-screen
 # visual column (a tab counts as however many columns it occupies, VS

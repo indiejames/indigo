@@ -302,25 +302,27 @@ func (m Model) chunkOfCol(line, col, cw int) int {
 }
 
 // findTopLineForCursor returns the buffer line and chunk that should be at
-// the top of the viewport so the cursor falls within the last visible row.
-func (m Model) findTopLineForCursor(cw, vis int) (int, int) {
+// the top of the viewport so the cursor's own chunk lands at screen row
+// targetRow (0-based, counting down from the top of the viewport).
+func (m Model) findTopLineForCursor(cw, targetRow int) (int, int) {
 	cursorChunk := m.chunkOfCol(m.cursor.Line, m.cursor.Col, cw)
-	return m.findTopLineForRow(m.cursor.Line, cursorChunk, cw, vis)
+	return m.findTopLineForRow(m.cursor.Line, cursorChunk, cw, targetRow)
 }
 
 // findTopLineForRow returns the buffer line and chunk that should be at the
 // top of the viewport so that the given wrap chunk of the given buffer line
-// falls within the last visible row. findTopLineForCursor is the common case
-// (anchored on the cursor's own chunk); scrollToShowLineTail anchors on a
-// different chunk of the same line to bring a line's later wrap chunks into
-// view instead.
-func (m Model) findTopLineForRow(line, chunk, cw, vis int) (int, int) {
+// lands at screen row targetRow. findTopLineForCursor is the common case
+// (anchored on the cursor's own chunk, at whatever row scrollToCursor's
+// scrolloff margin calls for); scrollToShowLineTail anchors on a different
+// chunk of the same line, always at the last visible row, to bring a line's
+// later wrap chunks into view instead.
+func (m Model) findTopLineForRow(line, chunk, cw, targetRow int) (int, int) {
 	// Number of rows above the target chunk that we can fill.
-	rowsAbove := vis - 1 - chunk
+	rowsAbove := targetRow - chunk
 	if rowsAbove <= 0 {
-		// The target line's chunks alone need all visible rows or more.
-		// Start from the chunk that puts the target chunk at the bottom.
-		targetChunk := max(0, chunk-(vis-1))
+		// The target line's chunks alone need all rows up to targetRow, or
+		// more. Start from the chunk that puts the target chunk at targetRow.
+		targetChunk := max(0, chunk-targetRow)
 		return line, targetChunk
 	}
 	l := line - 1
@@ -360,7 +362,7 @@ func (m *Model) scrollToShowLineTail(line int) {
 	runes := []rune(m.buf.Line(line))
 	exp, _ := expandTabsRemap(runes)
 	lastChunk := visualChunks(len(exp), cw) - 1
-	topLine, topChunk := m.findTopLineForRow(line, lastChunk, cw, vis)
+	topLine, topChunk := m.findTopLineForRow(line, lastChunk, cw, vis-1)
 	// Showing the tail must never scroll the cursor's own chunk out of
 	// view: if the line has more chunks than fit in the viewport at all,
 	// anchoring on the tail and anchoring on the cursor can't both be
@@ -377,21 +379,56 @@ func (m *Model) scrollToShowLineTail(line int) {
 	}
 }
 
-func (m *Model) scrollToCursor() {
-	if m.cursor.Line < m.topLine {
-		m.topLine = m.cursor.Line
-		m.topChunk = 0
-		return
+// defaultScrollOff is the margin used when no config is available, e.g. a
+// Model built directly (as most tests do) rather than through New/WithConfig.
+const defaultScrollOff = 5
+
+// effectiveScrollOff returns the configured scrolloff margin, clamped to be
+// non-negative.
+func (m Model) effectiveScrollOff() int {
+	if m.cfg == nil {
+		return defaultScrollOff
 	}
+	return max(0, m.cfg.ScrollOff)
+}
+
+// scrollToCursor adjusts topLine/topChunk so the cursor stays at least
+// scrollOff rows from the top and bottom edges of the viewport (Helix/Vim's
+// "scrolloff"), scrolling proactively as the cursor approaches an edge
+// rather than only reacting once it would otherwise land off-screen. The
+// margin is clamped to half the viewport so it degrades gracefully in a
+// short terminal or split; it also degrades naturally at the ends of the
+// buffer, since findTopLineForRow's backward search simply stops at line 0
+// when there aren't enough lines above the cursor to fill the margin, and
+// buildScreenLayout already renders blank/tilde rows past the last line so
+// the same margin can be honored below the last line too.
+func (m *Model) scrollToCursor() {
 	cw := m.contentWidth()
 	vis := m.visibleLines()
-	curVisRow := m.cursorVisualRowFromTop(cw)
-	if curVisRow < vis {
+	margin := min(m.effectiveScrollOff(), (vis-1)/2)
+	cursorChunk := m.chunkOfCol(m.cursor.Line, m.cursor.Col, cw)
+
+	// Cursor is above the viewport entirely, or sitting on the current top
+	// line but in an earlier chunk than what's shown (e.g. Home on a
+	// long wrapped line whose later chunks are what's currently visible).
+	if m.cursor.Line < m.topLine || (m.cursor.Line == m.topLine && cursorChunk < m.topChunk) {
+		m.topLine, m.topChunk = m.findTopLineForCursor(cw, margin)
+		m.topLine = max(0, m.topLine)
+		m.topChunk = max(0, m.topChunk)
 		return
 	}
-	topLine, topChunk := m.findTopLineForCursor(cw, vis)
-	m.topLine = max(0, topLine)
-	m.topChunk = max(0, topChunk)
+
+	curVisRow := m.cursorVisualRowFromTop(cw)
+	switch {
+	case curVisRow > vis-1-margin:
+		m.topLine, m.topChunk = m.findTopLineForCursor(cw, vis-1-margin)
+	case curVisRow < margin:
+		m.topLine, m.topChunk = m.findTopLineForCursor(cw, margin)
+	default:
+		return
+	}
+	m.topLine = max(0, m.topLine)
+	m.topChunk = max(0, m.topChunk)
 }
 
 func (m Model) visibleLines() int {

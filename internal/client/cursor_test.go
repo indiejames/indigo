@@ -1,8 +1,10 @@
 package client
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
 )
 
@@ -101,13 +103,139 @@ func TestScrollToCursorScrollsDown(t *testing.T) {
 }
 
 func TestScrollToCursorScrollsUp(t *testing.T) {
+	// ScrollOff: 0 isolates this from the scrolloff margin feature (see the
+	// dedicated TestScrollToCursorScrollOff* tests below) so it keeps
+	// testing exactly what it says: reveal-only scrolling with no margin.
 	m := newTestModel("a\nb\nc\nd\ne\n")
+	m.cfg = &config.Config{ScrollOff: 0}
 	m.height = 4
 	m.topLine = 4
 	m.cursor.Line = 1
 	m.scrollToCursor()
 	if m.topLine != 1 {
 		t.Errorf("topLine = %d, want 1", m.topLine)
+	}
+}
+
+// --- scrolloff margin ---
+
+func TestEffectiveScrollOff(t *testing.T) {
+	m := newTestModel("hello\n")
+	if got := m.effectiveScrollOff(); got != defaultScrollOff {
+		t.Errorf("nil cfg: effectiveScrollOff() = %d, want %d", got, defaultScrollOff)
+	}
+	m.cfg = &config.Config{ScrollOff: 2}
+	if got := m.effectiveScrollOff(); got != 2 {
+		t.Errorf("configured ScrollOff=2: effectiveScrollOff() = %d, want 2", got)
+	}
+	m.cfg = &config.Config{ScrollOff: -3}
+	if got := m.effectiveScrollOff(); got != 0 {
+		t.Errorf("negative ScrollOff: effectiveScrollOff() = %d, want 0 (clamped)", got)
+	}
+}
+
+func longLineBuffer(n int) string {
+	var s string
+	for i := 0; i < n; i++ {
+		s += "line\n"
+	}
+	return s
+}
+
+// TestScrollToCursorScrollOffDefaultScrollsBeforeBottomEdge is a regression
+// test for the reported bug: with the default scrolloff margin, the cursor
+// must never be allowed to reach the very last visible row (let alone go
+// past it) while there's still buffer content below — the viewport should
+// scroll early, leaving `defaultScrollOff` rows of margin.
+func TestScrollToCursorScrollOffDefaultScrollsBeforeBottomEdge(t *testing.T) {
+	m := newTestModel(longLineBuffer(100))
+	m.height = 24 // visibleLines = 23, margin = 5 (unclamped)
+	m.topLine = 0
+	m.cursor.Line = 22 // the last visible row under the old (margin-0) rule
+	m.scrollToCursor()
+
+	wantTopLine := 22 - (23 - 1 - defaultScrollOff) // 22 - 17 = 5
+	if m.topLine != wantTopLine {
+		t.Errorf("topLine = %d, want %d", m.topLine, wantTopLine)
+	}
+	row := m.cursorVisualRowFromTop(m.contentWidth())
+	if want := 23 - 1 - defaultScrollOff; row != want {
+		t.Errorf("cursor visual row = %d, want %d (margin rows from the bottom edge)", row, want)
+	}
+}
+
+// TestScrollToCursorScrollOffPullsViewUpNearTopEdge mirrors the bottom-edge
+// case for the top: moving toward line 0 (without actually leaving the
+// viewport) should still pull topLine up to restore the margin.
+func TestScrollToCursorScrollOffPullsViewUpNearTopEdge(t *testing.T) {
+	m := newTestModel(longLineBuffer(100))
+	m.height = 24 // visibleLines = 23, margin = 5
+	m.topLine = 10
+	m.cursor.Line = 11 // 1 row below topLine — inside the top margin band
+	m.scrollToCursor()
+
+	wantTopLine := 11 - defaultScrollOff // 6
+	if m.topLine != wantTopLine {
+		t.Errorf("topLine = %d, want %d", m.topLine, wantTopLine)
+	}
+}
+
+// TestScrollToCursorScrollOffPinsAtBufferStart verifies Helix's "runs out of
+// lines" behavior: near line 0, there aren't enough lines above the cursor
+// to fill the margin, so topLine simply pins at 0 instead of going negative
+// or leaving the cursor stranded above the viewport.
+func TestScrollToCursorScrollOffPinsAtBufferStart(t *testing.T) {
+	m := newTestModel(longLineBuffer(10))
+	m.height = 24
+	m.topLine = 0
+	m.cursor.Line = 2
+	m.scrollToCursor()
+	if m.topLine != 0 {
+		t.Errorf("topLine = %d, want 0 (buffer start, not enough lines above cursor to fill the margin)", m.topLine)
+	}
+}
+
+// TestScrollToCursorScrollOffLeavesBlankLinesBelowLastLine is the literal
+// scenario from the bug report: landing on the last line of a buffer that's
+// taller than the viewport should leave a few blank rows below it, not push
+// the last line all the way to the bottom edge.
+func TestScrollToCursorScrollOffLeavesBlankLinesBelowLastLine(t *testing.T) {
+	m := newTestModel(strings.TrimSuffix(longLineBuffer(30), "\n")) // 30 real lines, no phantom
+	m.height = 24                                                    // visibleLines = 23, margin = 5
+	m.topLine = 0
+	last := m.buf.LineCount() - 1 // 29
+	m.cursor = document.Pos{Line: last, Col: 0}
+	m.scrollToCursor()
+
+	cw := m.contentWidth()
+	vis := m.visibleLines()
+	layout := m.buildScreenLayout(vis, cw)
+	cursorRow := screenRowOf(layout, last, 0, cw)
+	if cursorRow < 0 {
+		t.Fatalf("cursor not visible; topLine=%d layout=%+v", m.topLine, layout)
+	}
+	if want := vis - 1 - defaultScrollOff; cursorRow != want {
+		t.Errorf("cursor row = %d, want %d (margin rows above the bottom edge)", cursorRow, want)
+	}
+	for row := cursorRow + 1; row < vis; row++ {
+		if layout[row].bufLine < m.buf.LineCount() {
+			t.Errorf("row %d should be blank (past the last line) but shows bufLine %d", row, layout[row].bufLine)
+		}
+	}
+}
+
+// TestScrollToCursorScrollOffClampsForShortViewport ensures a viewport too
+// short for the configured margin degrades gracefully (half the viewport,
+// rounded down) instead of the margin math going negative or the cursor
+// never being able to reach the bottom rows at all.
+func TestScrollToCursorScrollOffClampsForShortViewport(t *testing.T) {
+	m := newTestModel(longLineBuffer(20))
+	m.height = 4 // visibleLines = 3, so margin clamps to (3-1)/2 = 1
+	m.topLine = 0
+	m.cursor.Line = 2 // last visible row under the unclamped default margin's reach
+	m.scrollToCursor()
+	if got, want := m.cursorVisualRowFromTop(m.contentWidth()), 3-1-1; got != want {
+		t.Errorf("cursor visual row = %d, want %d (margin clamped to 1)", got, want)
 	}
 }
 

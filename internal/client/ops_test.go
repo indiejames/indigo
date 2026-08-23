@@ -133,6 +133,54 @@ func TestApplyOpPreservesLSPOverlaysAcrossEdits(t *testing.T) {
 	}
 }
 
+// TestApplyOpScrollsViewportToKeepCursorVisible is a regression test: every
+// applyOp call site (self-insert, backspace, tab, Enter, auto-pair, ...)
+// already moves m.cursor to reflect the edit before calling applyOp, but
+// applyOp itself never re-synced the viewport — so an edit that pushed the
+// cursor past the bottom of the viewport (e.g. typing enough characters to
+// soft-wrap the current line onto a new visual row while already at the
+// last visible row) left it rendered off-screen for the rest of the insert
+// session, since nothing else re-checks until the next cursor-moving key.
+func TestApplyOpScrollsViewportToKeepCursorVisible(t *testing.T) {
+	// cw = 5 (width 5, no gutter): "12345" is exactly one visual chunk;
+	// appending a 6th character wraps it onto a second chunk.
+	m := newTestModel("a\nb\n12345")
+	m.rpc = &RPC{}
+	m.cfg = &config.Config{ScrollOff: 0} // isolate from the scrolloff feature
+	m.height = 4                         // visibleLines = 3
+	m.width = 5
+	m.topLine = 0
+	m.cursor = document.Pos{Line: 2, Col: 5} // already at the last visible row
+
+	op := document.Op{Type: document.OpInsert, InsertLine: 2, InsertCol: 5, InsertText: "6"}
+	m.cursor.Col = 6 // caller-side cursor update, as every real call site does
+	m2, _ := applyOp(m, op)
+
+	if row, vis := m2.cursorVisualRowFromTop(m2.contentWidth()), m2.visibleLines(); row >= vis {
+		t.Errorf("cursor scrolled off-screen after applyOp: row=%d, visibleLines=%d, topLine=%d", row, vis, m2.topLine)
+	}
+}
+
+// TestApplyBatchScrollsViewportToKeepCursorVisible is applyBatch's
+// counterpart to TestApplyOpScrollsViewportToKeepCursorVisible.
+func TestApplyBatchScrollsViewportToKeepCursorVisible(t *testing.T) {
+	m := newTestModel("a\nb\n12345")
+	m.rpc = &RPC{}
+	m.cfg = &config.Config{ScrollOff: 0}
+	m.height = 4
+	m.width = 5
+	m.topLine = 0
+	m.cursor = document.Pos{Line: 2, Col: 5}
+
+	ops := []document.Op{{Type: document.OpInsert, InsertLine: 2, InsertCol: 5, InsertText: "6"}}
+	m.cursor.Col = 6
+	m2, _ := applyBatch(m, ops)
+
+	if row, vis := m2.cursorVisualRowFromTop(m2.contentWidth()), m2.visibleLines(); row >= vis {
+		t.Errorf("cursor scrolled off-screen after applyBatch: row=%d, visibleLines=%d, topLine=%d", row, vis, m2.topLine)
+	}
+}
+
 // TestRenderLineChunkSkipsStaleSpanPastLineEnd is the actual safety net for
 // no longer clearing on edit: a span whose StartCol no longer fits the
 // (now-shorter) line — e.g. a semantic-token span computed before the user

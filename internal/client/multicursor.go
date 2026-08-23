@@ -9,9 +9,33 @@ import (
 	"github.com/indiejames/indigo/internal/document"
 )
 
+// searchMatchAtCursor returns the currently active / search match when the
+// cursor sits exactly on its start — true right after committing a search
+// (Enter) or cycling with n/N, before the cursor has moved elsewhere.
+// selectNextOccurrence uses this to seed Ctrl+D from the actual search
+// match instead of the generic word-boundary heuristic, so a punctuation-
+// or regex-shaped match (not just a whole word) seeds the multi-cursor flow
+// correctly too. A zero-length match can't seed a text-based multi-select,
+// so that's excluded here same as selectAllSearchMatches excludes it there.
+func searchMatchAtCursor(m *Model) (substituteMatch, bool) {
+	if m.searchIdx < 0 || m.searchIdx >= len(m.searchMatches) {
+		return substituteMatch{}, false
+	}
+	sm := m.searchMatches[m.searchIdx]
+	if sm.line != m.cursor.Line || sm.col != m.cursor.Col || sm.length <= 0 {
+		return substituteMatch{}, false
+	}
+	return sm, true
+}
+
 // selectNextOccurrence implements Ctrl+D (VS Code Cmd+D behaviour).
 //
-// First call: selects the complete word containing (or adjacent to) the cursor.
+// First call: selects the complete word containing (or adjacent to) the
+// cursor — unless the cursor is sitting on the current / search match (see
+// searchMatchAtCursor), in which case that match is selected instead, and
+// the search overlay/state is cleared the same way Alt+Enter clears it
+// (see selectAllSearchMatches) since Ctrl+D takes over as the driver of
+// where the cursor goes next.
 //   - Cursor on a word char → whole word via findWholeWordAt (scans ← and →).
 //   - Cursor just after a word → whole word to the left.
 //   - Otherwise → first word to the right via findWordAt.
@@ -22,6 +46,16 @@ import (
 // Returns true if any state changed.
 func selectNextOccurrence(m *Model) bool {
 	if m.sel == nil {
+		if sm, ok := searchMatchAtCursor(m); ok {
+			m.sel = &Selection{
+				Anchor: document.Pos{Line: sm.line, Col: sm.col},
+				Head:   document.Pos{Line: sm.line, Col: sm.col + sm.length - 1},
+			}
+			m.cursor = m.sel.Head
+			*m = m.withClearedSearch()
+			m.scrollToCursor()
+			return true
+		}
 		runes := []rune(m.buf.Line(m.cursor.Line))
 		if len(runes) == 0 {
 			return false
@@ -103,6 +137,44 @@ func selectNextOccurrence(m *Model) bool {
 		sel:     newSel,
 		goalCol: -1,
 	})
+	return true
+}
+
+// selectAllSearchMatches converts every match from the active / search
+// (m.searchMatches, already computed by updateSearch) into a cursor: the
+// first match becomes the primary selection, the rest become extra
+// cursors — the same one-cursor-per-occurrence shape Ctrl+D
+// (selectNextOccurrence) builds up manually one occurrence at a time, but
+// all at once. A zero-length match (a regex like \b with no width) gets a
+// bare cursor with no selection, same as a bare ExtraCursor elsewhere.
+// Returns false (no state changed) if there are no matches.
+func selectAllSearchMatches(m *Model) bool {
+	if len(m.searchMatches) == 0 {
+		return false
+	}
+
+	toCursor := func(mt substituteMatch) (document.Pos, *Selection) {
+		if mt.length <= 0 {
+			return document.Pos{Line: mt.line, Col: mt.col}, nil
+		}
+		sel := &Selection{
+			Anchor: document.Pos{Line: mt.line, Col: mt.col},
+			Head:   document.Pos{Line: mt.line, Col: mt.col + mt.length - 1},
+		}
+		return sel.Head, sel
+	}
+
+	pos, sel := toCursor(m.searchMatches[0])
+	m.cursor = pos
+	m.sel = sel
+
+	m.extraCursors = nil
+	for _, mt := range m.searchMatches[1:] {
+		p, s := toCursor(mt)
+		m.extraCursors = append(m.extraCursors, ExtraCursor{pos: p, sel: s, goalCol: -1})
+	}
+
+	m.scrollToCursor()
 	return true
 }
 

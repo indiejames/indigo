@@ -99,6 +99,15 @@ func (m Model) handleSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor = document.Pos{Line: sm.line, Col: sm.col}
 			m.scrollToCursor()
 		}
+	case "alt+enter":
+		// Select every current match at once: one cursor per occurrence,
+		// same shape Ctrl+D builds up one at a time in Normal mode.
+		if !selectAllSearchMatches(&m) {
+			m = m.pushStatus("E: pattern not found")
+			return m, nil
+		}
+		m.mode = ModeNormal
+		m = m.withClearedSearch()
 	case "backspace":
 		runes := []rune(m.searchQuery)
 		if len(runes) > 0 {

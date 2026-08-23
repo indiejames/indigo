@@ -1025,6 +1025,7 @@ var helpEntries = []helpEntry{
 	{key: "Ctrl+p", desc: "File picker"},
 	{key: "Ctrl+s", desc: "Save"},
 	{key: "]b / [b", desc: "Next / previous buffer"},
+	{key: "Ctrl+l / Ctrl+h", desc: "Next / previous buffer (Normal & Insert)"},
 	{key: ":"},
 	{key: "  w", desc: "Save"},
 	{key: "  q", desc: "Close buffer"},

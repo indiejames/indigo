@@ -176,6 +176,23 @@ type Spell struct {
 	globalDictPath    string
 	workspaceDictPath string
 	userWords         map[string]struct{} // in-memory set (global + workspace)
+
+	// workspace-scan state, guarded by mu. The editor dispatches
+	// OnWorkspaceScan fire-and-forget on every trigger (startup, an
+	// explicit rescan) with no coalescing of its own, so two triggers close
+	// together would otherwise walk the tree concurrently — scanning +
+	// rescanPending serialize runs the same way lint.Manager.ScanWorkspace
+	// coalesces concurrent requests on the editor side: a request that
+	// arrives mid-scan doesn't spawn a second walk, it just schedules one
+	// more run after the current one finishes. scannedPaths remembers which
+	// files had diagnostics published by the last completed scan, so the
+	// next one can explicitly clear (publish empty for) any that no longer
+	// do — a file that's fixed, deleted, or renamed between scans would
+	// otherwise keep a stale diagnostic forever, since nothing else ever
+	// revisits it.
+	scanning      bool
+	rescanPending bool
+	scannedPaths  map[string]struct{}
 }
 
 func (s *Spell) Init(api *sdk.Api) sdk.Info {
@@ -185,6 +202,7 @@ func (s *Spell) Init(api *sdk.Api) sdk.Info {
 	s.generation = make(map[uint32]uint64)
 	s.bufPaths = make(map[uint32]string)
 	s.userWords = make(map[string]struct{})
+	s.scannedPaths = make(map[string]struct{})
 
 	// Load the base en_US dictionary from embedded bytes.
 	checker, err := gospell.NewGoSpellReader(
@@ -304,7 +322,10 @@ func persistWord(path, word string) error {
 // Checks the user word set, then the base checker, then any extra language checkers.
 func (s *Spell) spell(word string) bool {
 	lower := strings.ToLower(word)
-	if _, ok := s.userWords[lower]; ok {
+	s.mu.Lock()
+	_, known := s.userWords[lower]
+	s.mu.Unlock()
+	if known {
 		return true
 	}
 	if s.checker.Spell(word) {
@@ -500,10 +521,55 @@ var skipScanDirs = map[string]bool{
 // OnWorkspaceScan handler; the editor calls it at startup and on an
 // explicit rescan.
 func (s *Spell) runWorkspaceScan() {
+	s.runScanSerialized(s.scanWorkspaceOnce)
+}
+
+// runScanSerialized guards against overlapping scanOnce runs — the editor
+// dispatches OnWorkspaceScan fire-and-forget on every trigger (startup, an
+// explicit rescan) with no coalescing on its own side, so two triggers
+// close together would otherwise walk the tree concurrently and could
+// publish an older run's result for a path after a newer run's. If a call
+// arrives while one is already in flight, it doesn't spawn a second run —
+// it just schedules exactly one more run after the current one finishes
+// (however many overlapping requests arrive meanwhile, they coalesce into
+// that single rerun), mirroring lint.Manager.ScanWorkspace's own
+// concurrent-request coalescing on the editor side.
+func (s *Spell) runScanSerialized(scanOnce func()) {
+	s.mu.Lock()
+	if s.scanning {
+		s.rescanPending = true
+		s.mu.Unlock()
+		return
+	}
+	s.scanning = true
+	s.mu.Unlock()
+
+	for {
+		scanOnce()
+
+		s.mu.Lock()
+		if !s.rescanPending {
+			s.scanning = false
+			s.mu.Unlock()
+			return
+		}
+		s.rescanPending = false
+		s.mu.Unlock()
+	}
+}
+
+// scanWorkspaceOnce is one walk of the workspace tree, called only from
+// runWorkspaceScan (which guarantees at most one of these runs at a time).
+// It publishes diagnostics for every file with misspellings, then clears
+// (publishes empty for) any path that had diagnostics after the previous
+// scan but not this one — fixed, deleted, or renamed since — so a stale
+// diagnostic never lingers past a file actually being clean or gone.
+func (s *Spell) scanWorkspaceOnce() {
 	root, err := os.Getwd()
 	if err != nil {
 		return
 	}
+	found := make(map[string]struct{})
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error { //nolint:errcheck
 		if err != nil {
 			return nil // unreadable entry (permissions, race with deletion) — skip, keep walking
@@ -524,9 +590,35 @@ func (s *Spell) runWorkspaceScan() {
 			return nil
 		}
 		diags := s.checkFileDiagnostics(path, string(data))
+		if len(diags) == 0 {
+			return nil // nothing to publish; cleared below if it had diags last scan
+		}
+		found[path] = struct{}{}
 		s.api.PublishWorkspaceDiagnostics(path, diags)
 		return nil
 	})
+
+	s.mu.Lock()
+	prev := s.scannedPaths
+	s.scannedPaths = found
+	s.mu.Unlock()
+	for _, path := range pathsToClear(prev, found) {
+		s.api.PublishWorkspaceDiagnostics(path, nil)
+	}
+}
+
+// pathsToClear returns every path in prev that's absent from found — the
+// diff that drives which previously-published paths need an explicit empty
+// publish to clear a now-stale diagnostic (fixed, deleted, or renamed since
+// the scan that produced prev).
+func pathsToClear(prev, found map[string]struct{}) []string {
+	var out []string
+	for path := range prev {
+		if _, ok := found[path]; !ok {
+			out = append(out, path)
+		}
+	}
+	return out
 }
 
 // scheduleCheck debounces re-checking a buffer by 500ms after a change.

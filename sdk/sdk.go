@@ -27,6 +27,7 @@
 //   - [Api.Decorations] / [Api.DecorationsFull] — provide gutter/overlay/status-bar decorations
 //   - [Api.RegisterActionProvider] — contribute items to the F-key action popup
 //   - [Api.OnEditEvent] — track line-count-changing edits for position maintenance
+//   - [Api.OnWorkspaceScan] — contribute diagnostics for files across the whole project, not just open buffers
 //
 // Editor effects (may be called at any time, including from callbacks):
 //   - [Api.ApplyEdit] — apply text edits to a buffer
@@ -447,6 +448,78 @@ func (a *Api) PublishDiagnostics(bufID uint32, version uint64, diags []Diagnosti
 		defer rel()
 		fut.Struct() //nolint:errcheck
 	}()
+}
+
+// PublishWorkspaceDiagnostics is the path-keyed sibling of
+// PublishDiagnostics, for a file that may not be open in any buffer — call
+// it from an OnWorkspaceScan handler as it walks the project. Like
+// PublishDiagnostics, one call is the authoritative diagnostic list for
+// this plugin and path: a later call replaces the previous one, and an
+// empty diags clears it. There is no version/staleness check here (nothing
+// to compare against for a file with no live buffer); an open buffer's own
+// PublishDiagnostics always supersedes whatever was published here for the
+// same path. Fire-and-forget, like PublishDiagnostics/RefreshDecorations.
+func (a *Api) PublishWorkspaceDiagnostics(path string, diags []Diagnostic) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		fut, rel := a.api.PublishWorkspaceDiagnostics(ctx, func(p pluginproto.EditorApi_publishWorkspaceDiagnostics_Params) error {
+			if err := p.SetPath(path); err != nil {
+				return err
+			}
+			list, err := p.NewDiagnostics(int32(len(diags)))
+			if err != nil {
+				return err
+			}
+			for i, d := range diags {
+				item := list.At(i)
+				rng, err := item.NewRange()
+				if err != nil {
+					return err
+				}
+				start, err := rng.NewStart()
+				if err != nil {
+					return err
+				}
+				start.SetLine(d.Range.Start.Line)
+				start.SetCol(d.Range.Start.Col)
+				end, err := rng.NewEnd()
+				if err != nil {
+					return err
+				}
+				end.SetLine(d.Range.End.Line)
+				end.SetCol(d.Range.End.Col)
+				item.SetSeverity(pluginproto.PluginDiagnosticSeverity(d.Severity))
+				if err := item.SetMessage_(d.Message); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		defer rel()
+		fut.Struct() //nolint:errcheck
+	}()
+}
+
+// OnWorkspaceScan registers handler to be called when the editor runs a
+// workspace-wide diagnostic scan — once at server startup, and again on an
+// explicit rescan (the diagnostic browser's "r" key). handler should walk
+// the project (e.g. every text file under the workspace root, resolved
+// relative to the plugin process's own working directory, which is the
+// workspace root) and call PublishWorkspaceDiagnostics per file as it goes.
+// It is invoked in the background with a generous timeout on the editor
+// side, so a slow scan does not block anything else — but handler itself
+// should still return once its own scan work is dispatched (start a
+// goroutine internally if the scan is long-running) rather than blocking
+// the RPC call for the scan's full duration.
+func (a *Api) OnWorkspaceScan(handler func()) error {
+	srv := pluginproto.WorkspaceScanHandler_ServerToClient(&workspaceScanHandlerServer{fn: handler})
+	fut, rel := a.api.RegisterWorkspaceScanHandler(context.Background(), func(p pluginproto.EditorApi_registerWorkspaceScanHandler_Params) error {
+		return p.SetHandler(srv)
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
 }
 
 // CompletionItem is one completion candidate contributed to the editor's
@@ -1374,6 +1447,18 @@ func (s *editEventHandlerServer) LinesChanged(_ context.Context, call pluginprot
 	filePath, _ := args.FilePath()
 	if s.fn != nil {
 		s.fn(args.BufId(), filePath, args.AtLine(), args.LineDelta())
+	}
+	_, err := call.AllocResults()
+	return err
+}
+
+type workspaceScanHandlerServer struct {
+	fn func()
+}
+
+func (s *workspaceScanHandlerServer) Scan(_ context.Context, call pluginproto.WorkspaceScanHandler_scan) error {
+	if s.fn != nil {
+		s.fn()
 	}
 	_, err := call.AllocResults()
 	return err

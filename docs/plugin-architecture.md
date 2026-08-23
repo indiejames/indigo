@@ -82,6 +82,7 @@ The render loop and keypress path **never block** on plugin I/O. Snappiness is e
 | Overlay / virtual text                    | Async, cached last result   | none    |
 | Status bar items                          | Async, cached last result   | none    |
 | Diagnostics (`PublishDiagnostics`)        | Push, cached until republished or the buffer closes | none |
+| Workspace diagnostics (`PublishWorkspaceDiagnostics`) | Push, cached until republished; run from an `OnWorkspaceScan` handler | 2 min per plugin per scan |
 | **Key binding handler**                   | Await response              | 300 ms  |
 | **Insert-mode hook** (e.g. bracket close) | Fire-and-forget notification after char is inserted; response applied if it arrives | 300 ms |
 | **Menu action handler** (Command menu)    | Await response              | 300 ms  |
@@ -98,6 +99,8 @@ For the interactive cases (key bindings and menu actions), the server dispatches
 Decoration updates (gutter annotations, overlays, status bar items) are polled by the client (every 3rd tick of its 120ms timer, ~360ms average) and rendered from that cache every frame — stale decorations are preferable to a frozen editor. A plugin that needs a decoration change to show up sooner than the next poll — e.g. after finishing async work like an LLM completion — can call the SDK's `RefreshDecorations(bufID)`, which pushes an immediate refetch to any client currently viewing that buffer instead of waiting on the poll cadence.
 
 Diagnostics work differently from decorations even though both are "async, cached": a decoration provider is *pulled* by the server on every client poll (bounded by a 200ms per-plugin timeout — see `GetDecorations` in `internal/plugin/manager.go`), so a slow computation just returns stale data next tick. Diagnostics have no pull counterpart at all — `PublishDiagnostics(bufID, version, diags)` is a one-way push the plugin calls whenever it finishes computing (e.g. after a debounced spell-check pass), and the server caches whatever was last published per plugin per buffer until either the plugin republishes or the buffer closes. This avoids forcing a possibly-slow computation (spell-checking a large file, say) into a tight poll-cycle timeout the way a pull model would. `version` must be the buffer's version — from `BufferInfo` — that the plugin actually computed diagnostics against; the server silently discards a publish whose version doesn't match the buffer's *current* version rather than let a plugin overwrite live diagnostics with results computed against content that's since changed. Published diagnostics are merged into the exact same list LSP/lint diagnostics populate — the status bar's error/warning/info counts, the diagnostics popup (Shift+E), gutter markers — with `Source` set to the publishing plugin's name; the client doesn't need to know or care where a given diagnostic came from. See `plugins/indigo-spell` for a working example (spelling issues, previously underline-decoration-only, are now also published as info-severity diagnostics).
+
+**Workspace diagnostics extend the same push model to files nobody has open.** `PublishDiagnostics` only ever covers an open buffer — it needs a `bufId` and a `version` to check staleness against, neither of which exists for a file with no live `document.Buffer`. `PublishWorkspaceDiagnostics(path, diags)` is the path-keyed sibling: no version check (there is nothing to compare against), and one call is the authoritative diagnostic list for `(this plugin, path)` — a later call replaces the previous one, and an empty list clears it. Nothing calls this on its own; a plugin populates it from a handler registered via `OnWorkspaceScan(func())`, which the editor invokes fire-and-forget (a generous 2-minute per-plugin timeout, since walking a whole project can take real wall-clock time) at server startup and again on an explicit rescan (the diagnostic browser's `r` key) — the same two trigger points `lint.Manager.ScanWorkspace` already uses for the equivalent whole-project lint invocation. Results merge into `GetWorkspaceDiagnostics`/`GetWorkspaceDiagnosticsSummary` for any path not currently open in a buffer; an open buffer's live `PublishDiagnostics` diagnostics always supersede a stale workspace-scan entry for the same path rather than being merged alongside it. See `plugins/indigo-spell`'s `runWorkspaceScan` for a working example — it walks the project tree (skipping `.git`, `node_modules`, and similar non-source directories) reusing the exact same comment-scoping/identifier-splitting logic its per-buffer check already used, so a file shows the same spelling diagnostics whether or not anyone has it open.
 
 Overlay decorations are rendered in a single pass through each visible line's runes — labels are injected directly at their target column during the normal character-rendering loop, with no ANSI post-processing. Rendering cost is O(visible_lines × line_width) regardless of how many overlay decorations the plugin returns, so a plugin returning 500 overlays costs no more than one returning 5.
 
@@ -133,6 +136,7 @@ Overlay decorations are rendered in a single pass through each visible line's ru
 | Register action provider | Contribute context-sensitive actions to the Shift+F popup |
 | Register completion provider | Contribute candidates to the completion popup, merged with the buffer's language-server completions |
 | Publish diagnostics  | Report issues (bufID, version, diagnostics) merged into the editor's LSP/lint diagnostics — status bar counts, diagnostics popup, gutter markers |
+| Publish workspace diagnostics | Report issues for a path with no open buffer, from an `OnWorkspaceScan` handler — merged the same way, for files nobody has open |
 
 ### Workspace access
 
@@ -212,6 +216,13 @@ interface EditorApi {
     # Publish this plugin's diagnostics for bufId, computed against version
     # (see bufferInfo). Rejected silently if version is stale.
     publishDiagnostics @23 (bufId: UInt32, version: UInt64, diagnostics: List(PluginDiagnostic)) -> ();
+
+    # Path-keyed sibling of publishDiagnostics for files with no open buffer
+    # (no bufId/version to check). Call from an OnWorkspaceScan handler.
+    publishWorkspaceDiagnostics @24 (path: Text, diagnostics: List(PluginDiagnostic)) -> ();
+    # Register a handler invoked on a workspace-wide diagnostic scan
+    # (server startup, or an explicit rescan).
+    registerWorkspaceScanHandler @25 (handler: WorkspaceScanHandler) -> ();
 }
 
 # Handler interfaces — implemented by the plugin, called by the server
@@ -250,6 +261,9 @@ interface InputPromptHandler {
 }
 interface EditEventHandler {
     linesChanged @0 (bufId: UInt32, filePath: Text, atLine: UInt32, lineDelta: Int32) -> ();
+}
+interface WorkspaceScanHandler {
+    scan @0 () -> ();
 }
 struct PluginDiagnostic {
     range    @0 :PluginRange;

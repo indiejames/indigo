@@ -5,6 +5,8 @@
 package main
 
 import (
+	"os"
+
 	"github.com/indiejames/indigo/sdk"
 )
 
@@ -21,6 +23,17 @@ func (miniPlugin) Init(api *sdk.Api) sdk.Info {
 			}},
 		}
 	})
+	api.OnWorkspaceScan(func() { //nolint:errcheck
+		// Marker-file signal: this process is a separate spawned binary, so
+		// the test can't observe an in-memory flag directly. The marker
+		// path travels in via env var (os.StartProcess propagates the
+		// parent's environment — see manager.go's startPlugin), set by the
+		// test with t.Setenv before Manager.Start spawns this process.
+		if marker := os.Getenv("MINIPLUGIN_SCAN_MARKER"); marker != "" {
+			os.WriteFile(marker, []byte("scanned"), 0o644) //nolint:errcheck
+		}
+	})
+
 	api.CompletionsFull(sdk.CompletionHandlers{ //nolint:errcheck
 		GetCompletions: func(bufID, line, col uint32) []sdk.CompletionItem {
 			return []sdk.CompletionItem{{

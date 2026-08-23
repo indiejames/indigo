@@ -72,9 +72,9 @@ type fileKind int
 
 const (
 	kindText   fileKind = iota // check all text (markdown, plain text)
-	kindCStyle                  // check only // and /* */ comments + string literals
-	kindHash                    // check only # comments
-	kindSkip                    // skip entirely (binary-like data files)
+	kindCStyle                 // check only // and /* */ comments + string literals
+	kindHash                   // check only # comments
+	kindSkip                   // skip entirely (binary-like data files)
 )
 
 // fileKindForPath determines the checking strategy based on file extension.
@@ -235,6 +235,8 @@ func (s *Spell) Init(api *sdk.Api) sdk.Info {
 		OnClose:  s.onBufferClose,
 	})
 
+	api.OnWorkspaceScan(func() { go s.runWorkspaceScan() }) //nolint:errcheck
+
 	api.OnCommand("spell-add", s.cmdAddGlobal)              //nolint:errcheck
 	api.OnCommand("spell-add-workspace", s.cmdAddWorkspace) //nolint:errcheck
 
@@ -362,6 +364,50 @@ func (s *Spell) loadExtraWordLists(dir string) {
 	}
 }
 
+// misspelling is one flagged word's position and text, shared between the
+// per-buffer (checkBuffer) and whole-project (checkFileDiagnostics) checking
+// paths so the identifier-splitting/comment-scoping logic below is written
+// once.
+type misspelling struct {
+	line, col, endCol uint32
+	word              string
+}
+
+// findMisspellings scans content (the text of the file at path, whichever
+// source it came from — a live buffer or disk) and returns every word that
+// fails s.spell, restricted to the checkable portion of each line per
+// fileKindForPath/commentSpan (comments only for source files, everything
+// for text files, nothing for kindSkip).
+func (s *Spell) findMisspellings(path, content string) []misspelling {
+	kind := fileKindForPath(path)
+	if kind == kindSkip {
+		return nil
+	}
+	var out []misspelling
+	lines := strings.Split(content, "\n")
+	for lineIdx, line := range lines {
+		text, colOff := commentSpan(line, kind)
+		if text == "" {
+			continue
+		}
+		// colOff is a byte offset into line (from len()/strings.Index); w.col
+		// below is a rune offset into text. Convert before combining them, or
+		// any multi-byte rune earlier on the line throws every column after
+		// it off for both the decoration and the diagnostic built from it.
+		colOffRunes := utf8.RuneCountInString(line[:colOff])
+		words := splitIdentifiers(text)
+		for _, w := range words {
+			col := w.col + colOffRunes
+			if s.spell(w.text) {
+				continue
+			}
+			endCol := uint32(col + len([]rune(w.text)))
+			out = append(out, misspelling{line: uint32(lineIdx), col: uint32(col), endCol: endCol, word: w.text})
+		}
+	}
+	return out
+}
+
 // checkBuffer reads a buffer and returns its decoration list alongside the
 // same misspellings as diagnostics (for the status bar/diagnostics popup),
 // plus the buffer version content was read at — see publishDiagnostics. ok
@@ -384,55 +430,103 @@ func (s *Spell) checkBuffer(bufID uint32) (decors []sdk.Decoration, diags []sdk.
 	path := s.bufPaths[bufID]
 	s.mu.Unlock()
 
-	kind := fileKindForPath(path)
-	if kind == kindSkip {
-		return nil, nil, version, true
-	}
-
-	lines := strings.Split(content, "\n")
-	for lineIdx, line := range lines {
-		text, colOff := commentSpan(line, kind)
-		if text == "" {
-			continue
-		}
-		// colOff is a byte offset into line (from len()/strings.Index); w.col
-		// below is a rune offset into text. Convert before combining them, or
-		// any multi-byte rune earlier on the line throws every column after
-		// it off for both the decoration and the diagnostic built from it.
-		colOffRunes := utf8.RuneCountInString(line[:colOff])
-		words := splitIdentifiers(text)
-		for _, w := range words {
-			col := w.col + colOffRunes
-			if s.spell(w.text) {
-				continue
-			}
-			endCol := uint32(col + len([]rune(w.text)))
-			payload, _ := json.Marshal(fixPayload{
-				Word: w.text,
-				Line: uint32(lineIdx),
-				Col:  uint32(col),
-			})
-			decors = append(decors, sdk.Decoration{
-				Line:           uint32(lineIdx),
-				Col:            uint32(col),
-				EndCol:         endCol,
-				Kind:           sdk.DecorationUnderline,
-				UnderlineStyle: underlineStyle,
-				UnderlineColor: "#80c8fb",
-				Fixable:        true,
-				FixData:        string(payload),
-			})
-			diags = append(diags, sdk.Diagnostic{
-				Range: sdk.Range{
-					Start: sdk.Position{Line: uint32(lineIdx), Col: uint32(col)},
-					End:   sdk.Position{Line: uint32(lineIdx), Col: endCol},
-				},
-				Severity: sdk.SeverityInfo,
-				Message:  fmt.Sprintf("Possible misspelling: %q", w.text),
-			})
-		}
+	for _, m := range s.findMisspellings(path, content) {
+		payload, _ := json.Marshal(fixPayload{
+			Word: m.word,
+			Line: m.line,
+			Col:  m.col,
+		})
+		decors = append(decors, sdk.Decoration{
+			Line:           m.line,
+			Col:            m.col,
+			EndCol:         m.endCol,
+			Kind:           sdk.DecorationUnderline,
+			UnderlineStyle: underlineStyle,
+			UnderlineColor: "#80c8fb",
+			Fixable:        true,
+			FixData:        string(payload),
+		})
+		diags = append(diags, sdk.Diagnostic{
+			Range: sdk.Range{
+				Start: sdk.Position{Line: m.line, Col: m.col},
+				End:   sdk.Position{Line: m.line, Col: m.endCol},
+			},
+			Severity: sdk.SeverityInfo,
+			Message:  fmt.Sprintf("Possible misspelling: %q", m.word),
+		})
 	}
 	return decors, diags, version, true
+}
+
+// checkFileDiagnostics is checkBuffer's counterpart for a file read from
+// disk rather than a live buffer — used by the workspace scan, where no
+// bufID/decorations exist, only a path and its on-disk content.
+func (s *Spell) checkFileDiagnostics(path, content string) []sdk.Diagnostic {
+	var diags []sdk.Diagnostic
+	for _, m := range s.findMisspellings(path, content) {
+		diags = append(diags, sdk.Diagnostic{
+			Range: sdk.Range{
+				Start: sdk.Position{Line: m.line, Col: m.col},
+				End:   sdk.Position{Line: m.line, Col: m.endCol},
+			},
+			Severity: sdk.SeverityInfo,
+			Message:  fmt.Sprintf("Possible misspelling: %q", m.word),
+		})
+	}
+	return diags
+}
+
+// maxScanFileSize skips files larger than this during a workspace scan, so
+// a stray large generated/data file that fileKindForPath's extension list
+// doesn't already exclude can't make a scan spend a long time tokenizing it.
+const maxScanFileSize = 1 << 20 // 1MB
+
+// skipScanDirs are directory names never descended into during a workspace
+// scan: VCS metadata and dependency/build output, never source the user is
+// actively writing prose or comments into. Dot-directories (.git among them)
+// are skipped generically below; this covers the common non-dot ones.
+var skipScanDirs = map[string]bool{
+	"node_modules": true,
+	"vendor":       true,
+	"dist":         true,
+	"build":        true,
+	"target":       true,
+}
+
+// runWorkspaceScan walks every file under the plugin process's working
+// directory (the workspace root — see Init's s.workspaceDictPath comment,
+// which relies on the same assumption) and publishes spelling diagnostics
+// for each one via PublishWorkspaceDiagnostics. Registered as the
+// OnWorkspaceScan handler; the editor calls it at startup and on an
+// explicit rescan.
+func (s *Spell) runWorkspaceScan() {
+	root, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error { //nolint:errcheck
+		if err != nil {
+			return nil // unreadable entry (permissions, race with deletion) — skip, keep walking
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if path != root && (strings.HasPrefix(name, ".") || skipScanDirs[name]) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil || info.Size() > maxScanFileSize {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil || !utf8.Valid(data) {
+			return nil
+		}
+		diags := s.checkFileDiagnostics(path, string(data))
+		s.api.PublishWorkspaceDiagnostics(path, diags)
+		return nil
+	})
 }
 
 // scheduleCheck debounces re-checking a buffer by 500ms after a change.

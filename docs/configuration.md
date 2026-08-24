@@ -244,6 +244,16 @@ buffer when one exists — select a line with `x` (or extend across several) to 
 replace only within it, or make any selection first. A replace commit clears the selection
 afterward, since its bounds no longer necessarily mean anything once the text has changed.
 
+Search results feed directly into multi-cursor editing, two ways:
+
+- `Alt+Enter` while searching selects every match at once — one cursor per occurrence (see
+  `select-next-occurrence`/`ctrl+d` below), ready to edit all of them together.
+- Committing a search normally (`Enter`, or navigating matches with `n`/`N`) leaves the cursor
+  on a match; a following `ctrl+d` seeds the usual incremental multi-cursor flow from that
+  exact match instead of guessing a word boundary, so punctuation- or regex-shaped matches
+  (not just whole words) seed it correctly too. Each further `ctrl+d` adds the next occurrence
+  as normal.
+
 For search/replace across the whole workspace instead of one buffer, see `:grep`/`:find` and
 the search & replace dialog (Command menu: `Space`, then `s`). For diagnostics (LSP/lint/plugin
 issues) across every open buffer instead of just the current one, see `:diagnostics`/`:diag` —

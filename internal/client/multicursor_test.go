@@ -537,3 +537,116 @@ func TestBuildExtraCursorOverlaysCursorPastLastLineSkipped(t *testing.T) {
 		}
 	}
 }
+
+// TestSelectAllSearchMatchesNoMatchesReturnsFalse verifies selectAllSearchMatches
+// is a no-op when there are no search matches to select.
+func TestSelectAllSearchMatchesNoMatchesReturnsFalse(t *testing.T) {
+	m := newTestModel("foo bar foo\n")
+	m.searchMatches = nil
+
+	if selectAllSearchMatches(&m) {
+		t.Fatal("selectAllSearchMatches returned true with no matches")
+	}
+	if m.sel != nil || len(m.extraCursors) != 0 {
+		t.Error("selectAllSearchMatches mutated state despite returning false")
+	}
+}
+
+// TestSelectAllSearchMatchesCreatesOneCursorPerMatch verifies every match
+// becomes a selection: the first as the primary m.sel/m.cursor, the rest as
+// extraCursors, in document order.
+func TestSelectAllSearchMatchesCreatesOneCursorPerMatch(t *testing.T) {
+	m := newTestModel("foo bar foo baz foo\n")
+	matches, err := findMatches(m.buf, "foo")
+	if err != nil {
+		t.Fatalf("findMatches: %v", err)
+	}
+	if len(matches) != 3 {
+		t.Fatalf("findMatches found %d matches, want 3", len(matches))
+	}
+	m.searchMatches = matches
+
+	if !selectAllSearchMatches(&m) {
+		t.Fatal("selectAllSearchMatches returned false, want true")
+	}
+
+	if m.sel == nil {
+		t.Fatal("m.sel is nil, want a selection covering the first match")
+	}
+	if m.sel.Anchor != (document.Pos{Line: 0, Col: 0}) || m.sel.Head != (document.Pos{Line: 0, Col: 2}) {
+		t.Errorf("primary selection = %+v, want anchor (0,0) head (0,2)", m.sel)
+	}
+	if m.cursor != m.sel.Head {
+		t.Errorf("cursor = %+v, want %+v (== primary selection head)", m.cursor, m.sel.Head)
+	}
+
+	if len(m.extraCursors) != 2 {
+		t.Fatalf("len(extraCursors) = %d, want 2", len(m.extraCursors))
+	}
+	wantCols := []int{8, 16}
+	for i, ec := range m.extraCursors {
+		if ec.sel == nil {
+			t.Fatalf("extraCursors[%d].sel is nil, want a selection", i)
+		}
+		wantAnchor := document.Pos{Line: 0, Col: wantCols[i]}
+		wantHead := document.Pos{Line: 0, Col: wantCols[i] + 2}
+		if ec.sel.Anchor != wantAnchor || ec.sel.Head != wantHead {
+			t.Errorf("extraCursors[%d].sel = %+v, want anchor %+v head %+v", i, ec.sel, wantAnchor, wantHead)
+		}
+		if ec.pos != wantHead {
+			t.Errorf("extraCursors[%d].pos = %+v, want %+v", i, ec.pos, wantHead)
+		}
+		if ec.goalCol != -1 {
+			t.Errorf("extraCursors[%d].goalCol = %d, want -1", i, ec.goalCol)
+		}
+	}
+}
+
+// TestSelectAllSearchMatchesZeroLengthMatchGetsBareCursor verifies a
+// zero-width match (possible with a regex like \b) becomes a bare cursor
+// with no selection, rather than an invalid inverted-range Selection.
+func TestSelectAllSearchMatchesZeroLengthMatchGetsBareCursor(t *testing.T) {
+	m := newTestModel("foo\n")
+	m.searchMatches = []substituteMatch{
+		{line: 0, col: 0, length: 3},
+		{line: 0, col: 3, length: 0},
+	}
+
+	if !selectAllSearchMatches(&m) {
+		t.Fatal("selectAllSearchMatches returned false, want true")
+	}
+
+	if len(m.extraCursors) != 1 {
+		t.Fatalf("len(extraCursors) = %d, want 1", len(m.extraCursors))
+	}
+	ec := m.extraCursors[0]
+	if ec.sel != nil {
+		t.Errorf("extraCursors[0].sel = %+v, want nil for a zero-length match", ec.sel)
+	}
+	if ec.pos != (document.Pos{Line: 0, Col: 3}) {
+		t.Errorf("extraCursors[0].pos = %+v, want (0,3)", ec.pos)
+	}
+}
+
+// TestSelectAllSearchMatchesResetsPreviousExtraCursors verifies a stale set
+// of extraCursors from an earlier operation doesn't leak into the new
+// selection — selectAllSearchMatches must replace, not append.
+func TestSelectAllSearchMatchesResetsPreviousExtraCursors(t *testing.T) {
+	m := newTestModel("foo foo\n")
+	m.extraCursors = []ExtraCursor{{pos: document.Pos{Line: 0, Col: 5}, goalCol: -1}}
+	matches, err := findMatches(m.buf, "foo")
+	if err != nil {
+		t.Fatalf("findMatches: %v", err)
+	}
+	m.searchMatches = matches
+
+	if !selectAllSearchMatches(&m) {
+		t.Fatal("selectAllSearchMatches returned false, want true")
+	}
+	if len(m.extraCursors) != 1 {
+		t.Fatalf("len(extraCursors) = %d, want 1 (stale cursor must be replaced)", len(m.extraCursors))
+	}
+	if m.extraCursors[0].pos.Col != 6 {
+		t.Errorf("extraCursors[0].pos.Col = %d, want 6 (second 'foo')", m.extraCursors[0].pos.Col)
+	}
+}

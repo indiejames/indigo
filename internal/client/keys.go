@@ -58,6 +58,12 @@ var prefixCmds = []command{
 		return m, nil
 	}},
 	{key: "ctrl+c", name: "quit-hint", label: "Quit hint", execute: executeCancelHint},
+	{key: "ctrl+h", name: "prev-buffer", label: "Previous buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
+		return m, func() tea.Msg { return PrevBufferMsg{} }
+	}},
+	{key: "ctrl+l", name: "next-buffer", label: "Next buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
+		return m, func() tea.Msg { return NextBufferMsg{} }
+	}},
 	{key: ":", name: "command-mode", label: "Command mode", execute: executeEnterCommandMode},
 	{key: "/", name: "search", label: "Search", execute: executeEnterSearchMode},
 	{key: "esc", name: "cancel-selection", label: "Cancel selection", execute: executeEscNormal},

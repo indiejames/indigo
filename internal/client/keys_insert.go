@@ -168,6 +168,12 @@ var insertCmds = []command{
 	// Escape to normal mode (vim convention) — never close from insert mode.
 	{key: "ctrl+c", name: "exit-insert-mode", label: "Exit insert mode", execute: executeInsertCtrlC},
 	{key: "ctrl+s", name: "save", label: "Save", execute: executeSave},
+	{key: "ctrl+h", name: "prev-buffer", label: "Previous buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
+		return m, func() tea.Msg { return PrevBufferMsg{} }
+	}},
+	{key: "ctrl+l", name: "next-buffer", label: "Next buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
+		return m, func() tea.Msg { return NextBufferMsg{} }
+	}},
 	{key: "backspace", name: "backspace", label: "Backspace", execute: executeInsertBackspace},
 	{key: "delete", name: "delete-forward", label: "Delete forward", execute: executeInsertDelete},
 	{key: "enter", name: "newline", label: "Newline", execute: executeInsertEnter},

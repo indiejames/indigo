@@ -9,9 +9,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/indiejames/indigo/internal/procutil"
 )
 
 const maxGrepResults = 500
@@ -80,6 +86,11 @@ func matchGlobs(includes, excludes []string, relPath string) bool {
 	return false
 }
 
+// rgExecutable is the rg binary name/path used by searchWithRg — a seam so
+// tests can substitute a stand-in script without needing a real ripgrep
+// binary with controllable output/timing.
+var rgExecutable = "rg"
+
 // rgAvailable reports whether rg is on the PATH.
 func rgAvailable() bool {
 	_, err := exec.LookPath("rg")
@@ -138,18 +149,20 @@ func searchWithRg(workDir, pattern, include, exclude string, caseSensitive, isRe
 	}
 	args = append(args, workDir)
 
-	cmd := exec.Command("rg", args...)
-	out, err := cmd.Output()
+	cmd := exec.Command(rgExecutable, args...)
+	procutil.SetPgid(cmd)
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		if exit, ok := err.(*exec.ExitError); ok && exit.ExitCode() == 1 {
-			return nil, nil // exit 1 = no matches found
-		}
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
 
 	var results []GrepResult
-	scanner := bufio.NewScanner(strings.NewReader(string(out)))
-	for scanner.Scan() && len(results) < maxGrepResults {
+	killedEarly := false
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
 		var msg rgMsg
 		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil || msg.Type != "match" {
 			continue
@@ -175,11 +188,125 @@ func searchWithRg(workDir, pattern, include, exclude string, caseSensitive, isRe
 			MatchLen: matchLen,
 			LineText: line,
 		})
+		if len(results) >= maxGrepResults {
+			// Stop reading and kill rg now instead of letting it run to
+			// completion: cmd.Wait() below would otherwise block until rg
+			// finishes scanning the whole workspace even though we already
+			// have all the matches we're going to display.
+			killedEarly = true
+			_ = procutil.KillGroup(cmd)
+			break
+		}
+	}
+
+	waitErr := cmd.Wait()
+	if killedEarly {
+		return results, nil
+	}
+	if waitErr != nil {
+		if exit, ok := waitErr.(*exec.ExitError); ok && exit.ExitCode() == 1 {
+			return nil, nil // exit 1 = no matches found
+		}
+		return nil, waitErr
 	}
 	return results, nil
 }
 
 // ---- built-in Go walker (fallback) ----
+
+// fileListCacheTTL bounds how stale candidateFileListCache's enumerated
+// file list is allowed to get. A var (not const) so tests can shrink it
+// instead of sleeping for a production-sized window.
+var fileListCacheTTL = 20 * time.Second
+
+// candidateWalkCount counts how many times walkCandidateFiles has actually
+// re-walked the filesystem (as opposed to serving a cached list) — a test
+// seam for verifying the cache is actually being hit, not just that results
+// are correct.
+var candidateWalkCount int64
+
+// candidateFileListCache holds the most recently enumerated candidate file
+// list for one workDir — the set of files that pass the ignoredDirs and
+// maxFileBytes checks, before this search's own include/exclude globs are
+// applied (those vary per search, so they're filtered back in by the
+// caller instead of being part of the cache key). Repeated searches over
+// the same workspace (adjusting the pattern or include/exclude filters
+// between them, or just re-running the same search) skip the walk phase
+// entirely as long as the cache hasn't expired. This only helps
+// searchBuiltin: the rg backend does its own internal directory walk
+// (which also honors real .gitignore files, unlike this cache's
+// ignoredDirs-only filtering) so there's no walk on the Go side to cache
+// for that path.
+var candidateFileListCache struct {
+	mu      sync.Mutex
+	workDir string
+	builtAt time.Time
+	paths   []string
+	rels    []string
+}
+
+// cachedCandidateFiles returns the enumerated candidate file list for
+// workDir, reusing the cached list if it's for the same workDir and still
+// within fileListCacheTTL, or re-walking and refreshing the cache
+// otherwise. Deliberately bounded-staleness rather than exactly invalidated
+// on every filesystem change: a file created or deleted during the TTL
+// window won't show up/disappear until the next re-walk, but this avoids
+// having to wire up filesystem-change notifications (indigo's client
+// process has no such signal for arbitrary out-of-band changes — e.g. a
+// git checkout — happening outside its own edit/save paths) just to serve
+// a cache that's only ever used to speed up interactive, human-paced
+// repeated searches in the same session.
+func cachedCandidateFiles(workDir string) (paths, rels []string, err error) {
+	candidateFileListCache.mu.Lock()
+	if candidateFileListCache.workDir == workDir && time.Since(candidateFileListCache.builtAt) < fileListCacheTTL {
+		paths, rels = candidateFileListCache.paths, candidateFileListCache.rels
+		candidateFileListCache.mu.Unlock()
+		return paths, rels, nil
+	}
+	candidateFileListCache.mu.Unlock()
+
+	paths, rels, err = walkCandidateFiles(workDir)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	candidateFileListCache.mu.Lock()
+	candidateFileListCache.workDir = workDir
+	candidateFileListCache.builtAt = time.Now()
+	candidateFileListCache.paths = paths
+	candidateFileListCache.rels = rels
+	candidateFileListCache.mu.Unlock()
+
+	return paths, rels, nil
+}
+
+// walkCandidateFiles walks workDir collecting every file that passes the
+// ignoredDirs and maxFileBytes checks, in walk order. It applies no
+// include/exclude glob filtering — those are per-search and applied
+// separately by the caller against this (potentially cached) list.
+func walkCandidateFiles(workDir string) (paths, rels []string, err error) {
+	atomic.AddInt64(&candidateWalkCount, 1)
+	walkErr := filepath.WalkDir(workDir, func(path string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if ignoredDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil || info.Size() > maxFileBytes {
+			return nil
+		}
+		rel, _ := filepath.Rel(workDir, path)
+		paths = append(paths, path)
+		rels = append(rels, rel)
+		return nil
+	})
+	return paths, rels, walkErr
+}
 
 // searchBuiltin searches all text files under workDir for pattern, using
 // caseSensitive/isRegex exactly as given. Only the first match per line is
@@ -238,32 +365,79 @@ func searchBuiltin(workDir, pattern, include, exclude string, caseSensitive, isR
 		}
 	}
 
-	var results []GrepResult
-	err := filepath.WalkDir(workDir, func(path string, d fs.DirEntry, werr error) error {
-		if werr != nil {
-			return nil
+	// Enumerate eligible files first — this phase is cheap (stat, no file
+	// content read) and stays sequential, since directory walking itself
+	// isn't the bottleneck on large trees; reading and matching file
+	// *contents* is, and that's what gets parallelized below. The
+	// ignoredDirs/size-filtered candidate list (everything *except* this
+	// search's own include/exclude globs) is cached across calls for the
+	// same workDir — see candidateFileListCache — since re-walking a large
+	// tree is the same cost whether or not the user changed their pattern
+	// or glob filters between searches.
+	allPaths, allRels, walkErr := cachedCandidateFiles(workDir)
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	var paths, rels []string
+	for i, rel := range allRels {
+		if matchGlobs(includes, excludes, rel) {
+			paths = append(paths, allPaths[i])
+			rels = append(rels, rel)
 		}
-		if d.IsDir() {
-			if ignoredDirs[d.Name()] {
-				return filepath.SkipDir
+	}
+
+	// Scan files across a worker pool. Each worker writes only to its own
+	// index of perFile, so the final concatenation below reproduces the
+	// exact file order the old fully-sequential walk produced regardless of
+	// which worker finishes which file first — no ordering surprises from
+	// parallelizing this.
+	perFile := make([][]GrepResult, len(paths))
+	var matched int64 // approximate running total, used only to skip starting new files once we're well past the cap
+
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers > len(paths) {
+		numWorkers = len(paths)
+	}
+	if numWorkers > 16 {
+		numWorkers = 16
+	}
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+
+	idxCh := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range idxCh {
+				if atomic.LoadInt64(&matched) >= maxGrepResults {
+					continue
+				}
+				var fileResults []GrepResult
+				grepFile(rels[i], paths[i], matchLine, &fileResults)
+				if len(fileResults) > 0 {
+					perFile[i] = fileResults
+					atomic.AddInt64(&matched, int64(len(fileResults)))
+				}
 			}
-			return nil
-		}
-		if len(results) >= maxGrepResults {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil || info.Size() > maxFileBytes {
-			return nil
-		}
-		rel, _ := filepath.Rel(workDir, path)
-		if !matchGlobs(includes, excludes, rel) {
-			return nil
-		}
-		grepFile(rel, path, matchLine, &results)
-		return nil
-	})
-	return results, err
+		}()
+	}
+	for i := range paths {
+		idxCh <- i
+	}
+	close(idxCh)
+	wg.Wait()
+
+	var results []GrepResult
+	for _, fr := range perFile {
+		results = append(results, fr...)
+	}
+	if len(results) > maxGrepResults {
+		results = results[:maxGrepResults]
+	}
+	return results, nil
 }
 
 // matchGlob reports whether relPath matches the user-supplied file glob.

@@ -2,8 +2,10 @@ package app
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -21,7 +23,11 @@ import (
 )
 
 const maxGrepResults = 500
-const maxFileBytes = 5 * 1024 * 1024 // 5 MB
+
+// maxFileBytes is a var, not a const, so tests can shrink it instead of
+// generating multi-megabyte fixtures to exercise the oversized-file/record
+// skip paths in searchBuiltin and searchWithRg.
+var maxFileBytes = 5 * 1024 * 1024 // 5 MB
 
 // GrepResult is one match found during workspace search.
 type GrepResult struct {
@@ -121,6 +127,48 @@ type rgSubmatch struct {
 	End   int `json:"end"`
 }
 
+// readCappedLine reads one '\n'-terminated record from r using
+// bufio.Reader.ReadSlice, which — unlike bufio.Scanner or
+// bufio.Reader.ReadBytes/ReadString — never grows its own buffer past a
+// fixed size to accumulate an arbitrarily long token. That means a record
+// longer than maxLen is detected (and its still-unread remainder drained,
+// so the next call resumes at the following record rather than getting
+// stuck on this one) using only the reader's fixed internal buffer, not
+// memory proportional to the oversized record's actual length.
+//
+// Returns (nil, true, nil) for a record longer than maxLen, (line, false,
+// nil) for a normal record, (nil, false, io.EOF) at a clean end of input
+// with no more data, or (nil, false, err) on a genuine read error.
+func readCappedLine(r *bufio.Reader, maxLen int) (line []byte, oversized bool, err error) {
+	var buf []byte
+	for {
+		chunk, e := r.ReadSlice('\n')
+		if !oversized && len(buf)+len(chunk) > maxLen {
+			oversized = true
+			buf = nil
+		}
+		if !oversized {
+			buf = append(buf, chunk...)
+		}
+		switch e {
+		case nil:
+			if oversized {
+				return nil, true, nil
+			}
+			return buf, false, nil
+		case bufio.ErrBufferFull:
+			continue
+		case io.EOF:
+			if len(buf) == 0 && !oversized {
+				return nil, false, io.EOF
+			}
+			return buf, oversized, nil
+		default:
+			return nil, false, e
+		}
+	}
+}
+
 // searchWithRg runs rg --json and parses its output into GrepResults.
 // rg exit code 1 means "no matches" — not an error.
 func searchWithRg(workDir, pattern, include, exclude string, caseSensitive, isRegex bool) ([]GrepResult, error) {
@@ -142,6 +190,13 @@ func searchWithRg(workDir, pattern, include, exclude string, caseSensitive, isRe
 	} else {
 		args = append(args, "--ignore-case")
 	}
+	// Keep rg's own file handling aligned with searchBuiltin's size policy
+	// (maxFileBytes): a file rg would skip for being too large can't hand
+	// us an oversized single-line match record either. Must come before
+	// the "--" below — anything after "--" is positional (pattern, then
+	// paths), so a flag placed after it would be parsed as a literal path
+	// argument instead and make rg fail immediately.
+	args = append(args, "--max-filesize", fmt.Sprintf("%d", maxFileBytes))
 	if isRegex {
 		args = append(args, "--regexp", pattern)
 	} else {
@@ -159,43 +214,61 @@ func searchWithRg(workDir, pattern, include, exclude string, caseSensitive, isRe
 		return nil, err
 	}
 
+	// readCappedLine (rather than bufio.Scanner, which has a fixed max
+	// token size and treats exceeding it as a fatal, unrecoverable error)
+	// lets an unexpectedly long line be skipped without ever forcing us to
+	// kill rg and discard every match found so far. --max-filesize above
+	// already keeps rg from handing us a line from an oversized file at
+	// all; this is a defensive backstop for the same policy (e.g. a test
+	// double, or any future rg build, that doesn't honor the flag) — an
+	// over-limit record is simply skipped, not fatal, and read in bounded
+	// memory regardless of how long the actual line turns out to be.
+	reader := bufio.NewReader(stdout)
 	var results []GrepResult
 	killedEarly := false
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
-	for scanner.Scan() {
-		var msg rgMsg
-		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil || msg.Type != "match" {
-			continue
+	var readErr error
+	for {
+		lineBytes, oversized, err := readCappedLine(reader, maxFileBytes)
+		if !oversized && len(lineBytes) > 0 {
+			line := bytes.TrimRight(lineBytes, "\n\r")
+			var msg rgMsg
+			if uerr := json.Unmarshal(line, &msg); uerr == nil && msg.Type == "match" {
+				var m rgMatchData
+				if uerr := json.Unmarshal(msg.Data, &m); uerr == nil {
+					matchLine := strings.TrimRight(m.Lines.Text, "\n\r")
+					col, matchLen := 0, 0
+					if len(m.Submatches) > 0 {
+						sm := m.Submatches[0]
+						s := min(sm.Start, len(matchLine))
+						e := min(sm.End, len(matchLine))
+						col = utf8.RuneCountInString(matchLine[:s])
+						matchLen = utf8.RuneCountInString(matchLine[:e]) - col
+					}
+					rel, _ := filepath.Rel(workDir, m.Path.Text)
+					results = append(results, GrepResult{
+						RelPath:  rel,
+						Line:     int(m.LineNumber) - 1, // rg reports 1-based line numbers
+						Col:      col,
+						MatchLen: matchLen,
+						LineText: matchLine,
+					})
+					if len(results) >= maxGrepResults {
+						// Stop reading and kill rg now instead of letting
+						// it run to completion: cmd.Wait() below would
+						// otherwise block until rg finishes scanning the
+						// whole workspace even though we already have all
+						// the matches we're going to display.
+						killedEarly = true
+						_ = procutil.KillGroup(cmd)
+						break
+					}
+				}
+			}
 		}
-		var m rgMatchData
-		if err := json.Unmarshal(msg.Data, &m); err != nil {
-			continue
-		}
-		line := strings.TrimRight(m.Lines.Text, "\n\r")
-		col, matchLen := 0, 0
-		if len(m.Submatches) > 0 {
-			sm := m.Submatches[0]
-			s := min(sm.Start, len(line))
-			e := min(sm.End, len(line))
-			col = utf8.RuneCountInString(line[:s])
-			matchLen = utf8.RuneCountInString(line[:e]) - col
-		}
-		rel, _ := filepath.Rel(workDir, m.Path.Text)
-		results = append(results, GrepResult{
-			RelPath:  rel,
-			Line:     int(m.LineNumber) - 1, // rg reports 1-based line numbers
-			Col:      col,
-			MatchLen: matchLen,
-			LineText: line,
-		})
-		if len(results) >= maxGrepResults {
-			// Stop reading and kill rg now instead of letting it run to
-			// completion: cmd.Wait() below would otherwise block until rg
-			// finishes scanning the whole workspace even though we already
-			// have all the matches we're going to display.
-			killedEarly = true
-			_ = procutil.KillGroup(cmd)
+		if err != nil {
+			if err != io.EOF {
+				readErr = err
+			}
 			break
 		}
 	}
@@ -205,14 +278,15 @@ func searchWithRg(workDir, pattern, include, exclude string, caseSensitive, isRe
 		return results, nil
 	}
 
-	if scanErr := scanner.Err(); scanErr != nil {
-		// Scan() stopped early on something other than EOF (e.g. a line
-		// past the buffer above). rg may still be running and blocked
-		// writing further output into a pipe nobody is draining anymore —
-		// kill it before Wait() instead of risking an indefinite hang.
+	if readErr != nil {
+		// A genuine read error (as opposed to a too-long line, which is
+		// handled above without ever reaching this point) — rg may still
+		// be running and blocked writing further output into a pipe nobody
+		// is draining anymore, so kill it before Wait() instead of risking
+		// an indefinite hang.
 		_ = procutil.KillGroup(cmd)
 		_ = cmd.Wait()
-		return nil, scanErr
+		return nil, readErr
 	}
 
 	waitErr := cmd.Wait()
@@ -310,7 +384,7 @@ func walkCandidateFiles(workDir string) (paths, rels []string, err error) {
 			return nil
 		}
 		info, err := d.Info()
-		if err != nil || info.Size() > maxFileBytes {
+		if err != nil || info.Size() > int64(maxFileBytes) {
 			return nil
 		}
 		rel, _ := filepath.Rel(workDir, path)

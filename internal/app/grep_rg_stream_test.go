@@ -1,7 +1,9 @@
 package app
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,49 +117,84 @@ func TestSearchWithRgHandlesLongMatchLine(t *testing.T) {
 	}
 }
 
-// TestSearchWithRgKillsProcessOnScanError is a regression test: a line
-// exceeding even the enlarged scanner buffer makes scanner.Scan() return
-// false with a non-nil Err() rather than a clean EOF. The old code treated
-// that identically to a clean EOF and fell through to cmd.Wait() — but if
-// rg (or, here, the fake standing in for it) is still trying to write more
-// output into a pipe nobody is draining anymore, it blocks on that write
-// forever, and cmd.Wait() would then hang right alongside it. searchWithRg
-// must kill the process instead of waiting on it in that case.
-func TestSearchWithRgKillsProcessOnScanError(t *testing.T) {
+
+
+// withMaxFileBytes temporarily overrides maxFileBytes for the duration of a
+// test.
+func withMaxFileBytes(t *testing.T, n int) {
+	t.Helper()
+	orig := maxFileBytes
+	maxFileBytes = n
+	t.Cleanup(func() { maxFileBytes = orig })
+}
+
+// TestSearchWithRgSkipsOversizedRecordWithoutLosingOtherMatches is a
+// regression test for the review finding on the fix above: the original
+// version of this test (and the code it exercised) treated an
+// over-buffer-size line as a fatal error — killing rg and discarding every
+// match found so far, even ones already read before the oversized line.
+// The correct behavior, matching searchBuiltin's existing "skip files over
+// maxFileBytes" policy, is to skip just the oversized record and keep
+// going: matches before *and after* it must both still come back, with no
+// error.
+func TestSearchWithRgSkipsOversizedRecordWithoutLosingOtherMatches(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not available")
 	}
-	if _, err := exec.LookPath("yes"); err != nil {
-		t.Skip("yes not available")
-	}
+
+	withMaxFileBytes(t, 200) // small cap so the test fixture doesn't need a multi-MB oversized line
 
 	dir := t.TempDir()
-	// One "line" (20MB, no newline) bigger than searchWithRg's scanner
-	// buffer, forcing a scan error — followed by a producer ("yes") that
-	// never stops on its own, standing in for a still-running rg that would
-	// block writing into an undrained pipe if not killed. Built from
-	// /dev/zero translated to 'a' rather than "yes | tr -d '\n'": the
-	// latter strips one in every two bytes (each "a\n" pair from yes loses
-	// its newline), so the resulting line is only half the requested byte
-	// count — comfortably under the buffer max instead of over it.
+	oversizedLine := strings.Repeat("x", 500) // well past the 200-byte cap above
 	script := "#!/bin/sh\n" +
-		"head -c 20000000 /dev/zero | tr '\\0' 'a'\n" +
-		"echo\n" +
-		"yes 'still writing more output after the oversized line'\n"
-	scriptPath := writeFakeRg(t, dir, "fake-rg-oversized.sh", script)
+		`echo '{"type":"match","data":{"path":{"text":"/tmp/fake.go"},"lines":{"text":"first match"},"line_number":1,"submatches":[{"start":0,"end":5}]}}'` + "\n" +
+		"echo '" + oversizedLine + "'\n" +
+		`echo '{"type":"match","data":{"path":{"text":"/tmp/fake.go"},"lines":{"text":"second match"},"line_number":2,"submatches":[{"start":0,"end":6}]}}'` + "\n"
+	scriptPath := writeFakeRg(t, dir, "fake-rg-oversized-record.sh", script)
 	useFakeRg(t, scriptPath)
 
-	start := time.Now()
 	results, err := searchWithRg(dir, "hello", "", "", false, false)
-	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("searchWithRg: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want 2 (matches before and after the oversized record)", len(results))
+	}
+	if results[0].LineText != "first match" || results[1].LineText != "second match" {
+		t.Errorf("results = %+v, want first/second match preserved around the skipped oversized record", results)
+	}
+}
 
-	if err == nil {
-		t.Fatalf("expected an error from an oversized line, got nil (results: %+v)", results)
+// TestReadCappedLineBoundsMemoryOnOversizedRecord verifies readCappedLine
+// itself: a record far longer than maxLen is reported as oversized without
+// requiring the caller to have buffered the full oversized record (unlike
+// bufio.Reader.ReadBytes, which has no such cap at all), and reading
+// resumes correctly at the next record afterward.
+func TestReadCappedLineBoundsMemoryOnOversizedRecord(t *testing.T) {
+	huge := strings.Repeat("z", 50000) // much larger than the 100-byte cap below
+	input := "short\n" + huge + "\nafter\n"
+	reader := bufio.NewReader(strings.NewReader(input))
+
+	// readCappedLine includes the trailing delimiter in a normal record,
+	// same as bufio.Reader.ReadBytes/ReadSlice — callers (searchWithRg)
+	// trim it themselves, same as they already do for bufio.Scanner output.
+	line, oversized, err := readCappedLine(reader, 100)
+	if err != nil || oversized || string(line) != "short\n" {
+		t.Fatalf("1st record: got (%q, %v, %v), want (\"short\\n\", false, nil)", line, oversized, err)
 	}
-	if results != nil {
-		t.Errorf("expected nil results on scan error, got %+v", results)
+
+	line, oversized, err = readCappedLine(reader, 100)
+	if err != nil || !oversized || line != nil {
+		t.Fatalf("2nd record: got (%q, %v, %v), want (nil, true, nil)", line, oversized, err)
 	}
-	if elapsed > 5*time.Second {
-		t.Fatalf("searchWithRg took %v — rg was not killed promptly after the scan error (possible hang)", elapsed)
+
+	line, oversized, err = readCappedLine(reader, 100)
+	if err != nil || oversized || string(line) != "after\n" {
+		t.Fatalf("3rd record: got (%q, %v, %v), want (\"after\\n\", false, nil)", line, oversized, err)
+	}
+
+	_, _, err = readCappedLine(reader, 100)
+	if err != io.EOF {
+		t.Fatalf("4th record: got err %v, want io.EOF", err)
 	}
 }

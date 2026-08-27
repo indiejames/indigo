@@ -93,7 +93,7 @@ var rgExecutable = "rg"
 
 // rgAvailable reports whether rg is on the PATH.
 func rgAvailable() bool {
-	_, err := exec.LookPath("rg")
+	_, err := exec.LookPath(rgExecutable)
 	return err == nil
 }
 
@@ -162,6 +162,7 @@ func searchWithRg(workDir, pattern, include, exclude string, caseSensitive, isRe
 	var results []GrepResult
 	killedEarly := false
 	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 	for scanner.Scan() {
 		var msg rgMsg
 		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil || msg.Type != "match" {
@@ -199,10 +200,22 @@ func searchWithRg(workDir, pattern, include, exclude string, caseSensitive, isRe
 		}
 	}
 
-	waitErr := cmd.Wait()
 	if killedEarly {
+		_ = cmd.Wait() // reap the killed process; its exit status is meaningless here
 		return results, nil
 	}
+
+	if scanErr := scanner.Err(); scanErr != nil {
+		// Scan() stopped early on something other than EOF (e.g. a line
+		// past the buffer above). rg may still be running and blocked
+		// writing further output into a pipe nobody is draining anymore —
+		// kill it before Wait() instead of risking an indefinite hang.
+		_ = procutil.KillGroup(cmd)
+		_ = cmd.Wait()
+		return nil, scanErr
+	}
+
+	waitErr := cmd.Wait()
 	if waitErr != nil {
 		if exit, ok := waitErr.(*exec.ExitError); ok && exit.ExitCode() == 1 {
 			return nil, nil // exit 1 = no matches found

@@ -19,6 +19,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/indiejames/indigo/internal/procutil"
 )
 
@@ -716,12 +718,17 @@ func (gp *grepPicker) View() string {
 	}
 
 	pad := strings.Repeat(" ", innerW)
+	// ANSI-aware (via lipgloss.Width/ansiTruncate, not a raw rune count):
+	// grepResultLine can embed a bold-preserving escape sequence around the
+	// matched text (see boldPreserving in searchreplace.go), which a plain
+	// rune-count clamp would misjudge as extra visible width and truncate
+	// or pad incorrectly.
 	clamp := func(s string) string {
-		r := []rune(s)
-		if len(r) > innerW {
-			return string(r[:innerW-1]) + "…"
+		w := lipgloss.Width(s)
+		if w > innerW {
+			return ansiTruncate(s, innerW)
 		}
-		return s + strings.Repeat(" ", innerW-len(r))
+		return s + strings.Repeat(" ", innerW-w)
 	}
 
 	var sb strings.Builder
@@ -821,14 +828,53 @@ func (gp *grepPicker) View() string {
 	return out.String()
 }
 
-// grepResultLine formats one result as "path:line: content" truncated to maxW runes.
+// grepResultLine formats one result as "path:line: content", windowed to at
+// most maxW runes so the match stays visible: whatever width remains once
+// the match itself is reserved is split (via splitContext, shared with the
+// search/replace dialog's results list) between context before and after
+// the match, as a best-effort centering that degrades gracefully near
+// either end of the line.
 func grepResultLine(r GrepResult, maxW int) string {
-	prefix := fmt.Sprintf("%s:%d:", r.RelPath, r.Line+1)
+	label := fmt.Sprintf("%s:%d: ", r.RelPath, r.Line+1)
 	content := strings.TrimLeft(r.LineText, " \t")
-	full := prefix + " " + content
-	runes := []rune(full)
-	if len(runes) > maxW {
-		return string(runes[:maxW-1]) + "…"
+	trimmedCount := len([]rune(r.LineText)) - len([]rune(content))
+	matchStart := max(r.Col-trimmedCount, 0)
+	matchEnd := max(matchStart+r.MatchLen, matchStart)
+
+	// avail and all budget math below are in terminal cells (lipgloss.Width),
+	// not rune counts — a wide rune (e.g. CJK) occupies 2 cells, so a
+	// rune-count budget would let such a line silently render wider than
+	// maxW.
+	avail := maxW - lipgloss.Width(label)
+	if avail < 1 {
+		return fitSide(label+content, maxW, false)
 	}
-	return full
+
+	cr := []rune(content)
+	if matchEnd > len(cr) {
+		matchEnd = len(cr)
+	}
+	if matchStart > matchEnd {
+		matchStart = matchEnd
+	}
+	before := string(cr[:matchStart])
+	match := string(cr[matchStart:matchEnd])
+	after := string(cr[matchEnd:])
+
+	beforeShown, afterShown := splitContext(before, after, avail-lipgloss.Width(match))
+	line := label + beforeShown + match + afterShown
+	// The match itself may be wider than avail (rare); hard-clip as a last
+	// resort rather than overflowing the caller's width budget. This check
+	// (and everything above it) works in plain text, so it must run before
+	// the match is styled below — bold's escape codes aren't real display
+	// width but would still throw off a width measurement.
+	if lipgloss.Width(line) > maxW {
+		return fitSide(line, maxW, false)
+	}
+
+	// boldPreserving (not a plain lipgloss Render) because this row is
+	// about to be wrapped in pickerItemStyle/pickerSelStyle, both of which
+	// set a background — a full-reset style Render nested inside would cut
+	// a visible gap in it.
+	return label + beforeShown + boldPreserving(match) + afterShown
 }

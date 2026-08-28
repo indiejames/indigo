@@ -288,7 +288,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.searchReplace != nil {
 			a.searchReplace.width = msg.Width
 			a.searchReplace.height = msg.Height
-			a.searchReplace.viewport.Width = dialogInnerW(msg.Width)
+			// refreshResultsView (not just poking viewport.Width) so
+			// existing result lines are rebuilt at the new resultsW():
+			// the viewport only re-wraps/pads its stored content lazily on
+			// scroll, so leaving stale lines in place after a resize could
+			// hard-clip a match that was previously kept visible, or leave
+			// a growing box's newly available width unused.
+			a.searchReplace.refreshResultsView()
 		}
 		if a.pluginPopup != nil {
 			a.pluginPopup.width = msg.Width

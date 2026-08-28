@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/document"
@@ -56,6 +57,10 @@ type searchReplaceDialog struct {
 	results   []GrepResult
 	cursor    int
 	viewport  viewport.Model
+	// resultsMaxContentW is the natural (untruncated) width of the widest
+	// current result line, used by resultsW to size the results box to fit
+	// its content instead of always claiming the maximum available width.
+	resultsMaxContentW int
 
 	errMsg string
 
@@ -101,6 +106,42 @@ func newSearchReplaceDialog(workDir string, w, h int) *searchReplaceDialog {
 func dialogInnerW(termW int) int {
 	w := min(64, termW-12)
 	return max(w, 24)
+}
+
+// dialogResultsW is the width of the results list and its viewport, kept
+// separate from dialogInnerW (which sizes the search/replace/filter input
+// boxes) so the results — where a long file path can otherwise crowd out
+// the matching text — can use most of the available terminal width instead
+// of being capped at the same narrow width as a single-line text input.
+func dialogResultsW(termW int) int {
+	return max(termW-12, 24)
+}
+
+// resultsW is the width of the results list and its viewport: it shrinks to
+// fit the widest current result line rather than always claiming
+// dialogResultsW's full terminal-width-based cap, but never shrinks below
+// the search/replace input boxes' width (dialogInnerW) and never exceeds
+// that cap either.
+func (d *searchReplaceDialog) resultsW() int {
+	return min(max(d.resultsMaxContentW, dialogInnerW(d.width)), dialogResultsW(d.width))
+}
+
+// resultLineNaturalWidth returns the width renderResultLine's line would be
+// for r if nothing were truncated, used to size the results box to fit
+// content instead of always claiming the maximum available width.
+func (d *searchReplaceDialog) resultLineNaturalWidth(r GrepResult) int {
+	oldText := oldTextOf(r)
+	newText := d.replaceInput.Value()
+	loc := fmt.Sprintf("%s:%d:", r.RelPath, r.Line+1)
+	prefix := strings.TrimLeft(r.LineText[:byteOffsetOfRune(r.LineText, r.Col)], " \t")
+	suffix := suffixOf(r)
+
+	tailPlain := oldText
+	if d.replaceOpen && newText != "" {
+		tailPlain = oldText + " → " + newText
+	}
+
+	return lipgloss.Width(loc) + 1 + lipgloss.Width(prefix) + lipgloss.Width(tailPlain) + lipgloss.Width(suffix)
 }
 
 // ---- messages ----
@@ -210,18 +251,43 @@ func (a App) startSearchReplaceSearch(d *searchReplaceDialog) tea.Cmd {
 	return tea.Batch(searchCmd, d.spinner.Tick)
 }
 
+// matchBounds returns the clamped [start,end) rune range r.Col/r.MatchLen
+// describe within r.LineText, or (0,0) if r.Col is out of range.
+func matchBounds(r GrepResult) (start, end int) {
+	lr := []rune(r.LineText)
+	end = min(r.Col+r.MatchLen, len(lr))
+	if r.Col < 0 || r.Col > end {
+		return 0, 0
+	}
+	return r.Col, end
+}
+
 // oldTextOf returns the exact matched runes for r, used both for the on-screen
 // diff and as the server-verified oldText of a WorkspaceEdit.
 func oldTextOf(r GrepResult) string {
 	lr := []rune(r.LineText)
-	end := min(r.Col+r.MatchLen, len(lr))
-	if r.Col < 0 || r.Col > end {
-		return ""
-	}
-	return string(lr[r.Col:end])
+	start, end := matchBounds(r)
+	return string(lr[start:end])
+}
+
+// suffixOf returns the line text immediately following r's match, used to
+// show trailing context in the results list.
+func suffixOf(r GrepResult) string {
+	lr := []rune(r.LineText)
+	_, end := matchBounds(r)
+	return string(lr[end:])
 }
 
 func (d *searchReplaceDialog) refreshResultsView() {
+	maxW := 0
+	for _, r := range d.results {
+		if w := d.resultLineNaturalWidth(r); w > maxW {
+			maxW = w
+		}
+	}
+	d.resultsMaxContentW = maxW
+	d.viewport.Width = d.resultsW()
+
 	lines := make([]string, len(d.results))
 	for i, r := range d.results {
 		lines[i] = d.renderResultLine(r, i == d.cursor && d.focus == sraFocusResults)
@@ -342,8 +408,9 @@ var (
 	sraBorderFocusStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#5FD7FF"))
 	sraLabelStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#AABBCC"))
 	sraLabelFocusStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#5FD7FF")).Bold(true)
-	sraOldTextStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC6666")).Strikethrough(true)
+	sraOldTextStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC6666")).Strikethrough(true).Bold(true)
 	sraNewTextStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#66CC88")).Bold(true)
+	sraMatchStyle       = lipgloss.NewStyle().Bold(true)
 	sraSelStyle         = lipgloss.NewStyle().Background(lipgloss.Color("#2D5F8A")).Foreground(lipgloss.Color("#FFFFFF"))
 	sraDimStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("#778899"))
 	sraErrStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6B6B"))
@@ -373,35 +440,121 @@ func (d *searchReplaceDialog) renderResultLine(r GrepResult, selected bool) stri
 	newText := d.replaceInput.Value()
 	loc := fmt.Sprintf("%s:%d:", r.RelPath, r.Line+1)
 	prefix := strings.TrimLeft(r.LineText[:byteOffsetOfRune(r.LineText, r.Col)], " \t")
+	suffix := suffixOf(r)
 	showDiff := d.replaceOpen && newText != ""
 
-	w := dialogInnerW(d.width) + 10
+	w := d.resultsW()
+
+	tailPlain := oldText
+	if showDiff {
+		tailPlain = oldText + " → " + newText
+	}
+
+	// Keep the match (and its replacement, in diff mode) fully visible,
+	// then use whatever width remains to show as much surrounding line
+	// context as fits, split ~evenly between before and after the match —
+	// any unused share on a shorter side goes to the other — as a
+	// best-effort centering that degrades gracefully near either end of
+	// the line.
+	avail := w - lipgloss.Width(loc) - 1 - lipgloss.Width(tailPlain)
+	prefixShown, suffixShown := splitContext(prefix, suffix, avail)
 
 	if selected {
-		// Plain text under the selection background — nesting the old/new
-		// styling's own ANSI resets inside sraSelStyle would cut a visible
-		// gap in the highlight.
-		var plain string
+		// Under the selection background, the match is bolded with
+		// boldPreserving rather than a full-reset lipgloss Render — the
+		// latter would cut a visible gap in sraSelStyle's background.
+		diffTail := ""
 		if showDiff {
-			plain = fmt.Sprintf("%s %s%s → %s", loc, prefix, oldText, newText)
-		} else {
-			plain = fmt.Sprintf("%s %s%s", loc, prefix, oldText)
+			diffTail = " → " + newText
 		}
+		plain := fmt.Sprintf("%s %s%s%s%s", loc, prefixShown, boldPreserving(oldText), diffTail, suffixShown)
 		plain = ansiTruncate(plain, w)
 		pad := max(0, w-lipgloss.Width(plain))
 		return sraSelStyle.Render(plain + strings.Repeat(" ", pad))
 	}
 
-	var line string
+	matchRendered := sraMatchStyle.Render(oldText)
 	if showDiff {
-		line = fmt.Sprintf("%s %s%s%s %s", loc, prefix, sraOldTextStyle.Render(oldText), " → ", sraNewTextStyle.Render(newText))
-	} else {
-		line = fmt.Sprintf("%s %s%s", loc, prefix, oldText)
+		matchRendered = sraOldTextStyle.Render(oldText) + " → " + sraNewTextStyle.Render(newText)
 	}
+	line := fmt.Sprintf("%s %s%s%s", loc, prefixShown, matchRendered, suffixShown)
 	if lipgloss.Width(line) > w {
 		line = ansiTruncate(line, w)
 	}
 	return line
+}
+
+// splitContext divides avail terminal cells of width between before and
+// after — context shown immediately before and after a match — as evenly as
+// possible, reallocating any budget a shorter side can't use to the other
+// side. before is truncated from its start (kept text anchored to the
+// match, leading ellipsis); after is truncated from its end (kept text
+// anchored to the match, trailing ellipsis). Budgets and comparisons use
+// cell width (runewidth.StringWidth), not rune counts, since a wide rune
+// (e.g. CJK) occupies 2 terminal cells — a rune-count budget would let such
+// text silently render wider than avail.
+func splitContext(before, after string, avail int) (string, string) {
+	if avail < 0 {
+		avail = 0
+	}
+	beforeW := runewidth.StringWidth(before)
+	afterW := runewidth.StringWidth(after)
+
+	beforeBudget := avail / 2
+	afterBudget := avail - beforeBudget
+	if beforeW < beforeBudget {
+		afterBudget += beforeBudget - beforeW
+		beforeBudget = beforeW
+	}
+	if afterW < afterBudget {
+		extra := afterBudget - afterW
+		afterBudget = afterW
+		beforeBudget = min(beforeBudget+extra, beforeW)
+	}
+
+	return fitSide(before, beforeBudget, true), fitSide(after, afterBudget, false)
+}
+
+// fitSide returns a prefix/suffix of s whose cell width (not rune count) is
+// at most budget, so a wide rune at the cut boundary can't push the result
+// past budget columns. When s must be cut, keepEnd chooses which end is
+// preserved (true keeps the tail, with a leading ellipsis — for text
+// immediately before a match; false keeps the head, with a trailing
+// ellipsis — for text immediately after one).
+func fitSide(s string, budget int, keepEnd bool) string {
+	if budget <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= budget {
+		return s
+	}
+	if budget == 1 {
+		return "…"
+	}
+	target := budget - 1 // reserve 1 cell for the ellipsis
+	r := []rune(s)
+	if keepEnd {
+		w, i := 0, len(r)
+		for i > 0 {
+			rw := runewidth.RuneWidth(r[i-1])
+			if w+rw > target {
+				break
+			}
+			w += rw
+			i--
+		}
+		return "…" + string(r[i:])
+	}
+	w, i := 0, 0
+	for i < len(r) {
+		rw := runewidth.RuneWidth(r[i])
+		if w+rw > target {
+			break
+		}
+		w += rw
+		i++
+	}
+	return string(r[:i]) + "…"
 }
 
 func byteOffsetOfRune(s string, runeIdx int) int {
@@ -420,6 +573,20 @@ func byteOffsetOfRune(s string, runeIdx int) int {
 
 func ansiTruncate(s string, w int) string {
 	return ansi.Truncate(s, w, "…")
+}
+
+// boldPreserving wraps s in a bare SGR bold-on/bold-off pair instead of a
+// full lipgloss style Render (which appends a full reset). It's used to
+// highlight a match nested inside an already-styled line — e.g. a selected
+// row's background, or the grep picker's per-row background — where a full
+// reset mid-string would cut a visible gap in that outer styling; SGR 22
+// (bold off) clears only the bold attribute, leaving any active
+// background/foreground color from the outer style untouched.
+func boldPreserving(s string) string {
+	if s == "" {
+		return s
+	}
+	return "\x1b[1m" + s + "\x1b[22m"
 }
 
 func (d *searchReplaceDialog) render() string {
@@ -521,7 +688,7 @@ func (d *searchReplaceDialog) render() string {
 
 	if len(d.results) > 0 {
 		sb.WriteByte('\n')
-		sb.WriteString(sraBorderStyle.Width(innerW).Render(d.viewport.View()))
+		sb.WriteString(sraBorderStyle.Width(d.resultsW()).Render(d.viewport.View()))
 	}
 
 	return sraDialogBorderStyle.Render(sb.String())

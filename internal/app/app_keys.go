@@ -332,6 +332,7 @@ func (a App) handleSearchReplaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if !d.replaceOpen {
 				d.replaceInput.Blur()
 			}
+			d.refreshResultsView()
 			a.searchReplace = d
 			return a, nil
 		}
@@ -347,6 +348,7 @@ func (a App) handleSearchReplaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		case sraFocusToggle:
 			d.replaceOpen = !d.replaceOpen
+			d.refreshResultsView()
 			a.searchReplace = d
 			return a, nil
 		case sraFocusAll:

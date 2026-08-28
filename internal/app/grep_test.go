@@ -442,6 +442,44 @@ func TestGrepPickerViewBoldsMatchWithoutBreakingLayout(t *testing.T) {
 	}
 }
 
+func TestGrepResultLineWideContext(t *testing.T) {
+	// Wide (2-cell) CJK runes surrounding an ASCII match: a rune-count
+	// budget would let the rendered line silently exceed maxW.
+	r := GrepResult{
+		RelPath:  "a.go",
+		Line:     0,
+		Col:      20,
+		MatchLen: 5,
+		LineText: strings.Repeat("字", 20) + "MATCH" + strings.Repeat("符", 20),
+	}
+	for _, maxW := range []int{10, 20, 30, 40, 60, 80} {
+		line := grepResultLine(r, maxW)
+		if w := lipgloss.Width(line); w > maxW {
+			t.Errorf("grepResultLine maxW=%d produced display width %d: %q", maxW, w, line)
+		}
+	}
+}
+
+func TestGrepResultLineWideMatch(t *testing.T) {
+	// The match itself is made of wide runes.
+	r := GrepResult{
+		RelPath:  "a.go",
+		Line:     0,
+		Col:      10,
+		MatchLen: 3,
+		LineText: strings.Repeat("a", 10) + "中文字" + strings.Repeat("b", 10),
+	}
+	for _, maxW := range []int{8, 10, 15, 20, 30, 50} {
+		line := grepResultLine(r, maxW)
+		if w := lipgloss.Width(line); w > maxW {
+			t.Errorf("grepResultLine maxW=%d produced display width %d: %q", maxW, w, line)
+		}
+	}
+	if line := grepResultLine(r, 30); !strings.Contains(line, "中文字") {
+		t.Errorf("expected the wide match to remain visible at a comfortable maxW, got %q", line)
+	}
+}
+
 func TestGrepResultLineShowsContextOnBothSidesOfMatch(t *testing.T) {
 	r := GrepResult{
 		RelPath:  "a.go",

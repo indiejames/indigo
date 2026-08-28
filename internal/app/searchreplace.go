@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/document"
@@ -483,53 +484,77 @@ func (d *searchReplaceDialog) renderResultLine(r GrepResult, selected bool) stri
 	return line
 }
 
-// splitContext divides avail runes of width between before and after —
-// context shown immediately before and after a match — as evenly as
+// splitContext divides avail terminal cells of width between before and
+// after — context shown immediately before and after a match — as evenly as
 // possible, reallocating any budget a shorter side can't use to the other
 // side. before is truncated from its start (kept text anchored to the
 // match, leading ellipsis); after is truncated from its end (kept text
-// anchored to the match, trailing ellipsis).
+// anchored to the match, trailing ellipsis). Budgets and comparisons use
+// cell width (runewidth.StringWidth), not rune counts, since a wide rune
+// (e.g. CJK) occupies 2 terminal cells — a rune-count budget would let such
+// text silently render wider than avail.
 func splitContext(before, after string, avail int) (string, string) {
 	if avail < 0 {
 		avail = 0
 	}
-	br := []rune(before)
-	ar := []rune(after)
+	beforeW := runewidth.StringWidth(before)
+	afterW := runewidth.StringWidth(after)
 
 	beforeBudget := avail / 2
 	afterBudget := avail - beforeBudget
-	if len(br) < beforeBudget {
-		afterBudget += beforeBudget - len(br)
-		beforeBudget = len(br)
+	if beforeW < beforeBudget {
+		afterBudget += beforeBudget - beforeW
+		beforeBudget = beforeW
 	}
-	if len(ar) < afterBudget {
-		extra := afterBudget - len(ar)
-		afterBudget = len(ar)
-		beforeBudget = min(beforeBudget+extra, len(br))
+	if afterW < afterBudget {
+		extra := afterBudget - afterW
+		afterBudget = afterW
+		beforeBudget = min(beforeBudget+extra, beforeW)
 	}
 
 	return fitSide(before, beforeBudget, true), fitSide(after, afterBudget, false)
 }
 
-// fitSide returns at most budget runes of s. When s must be cut, keepEnd
-// chooses which end is preserved (true keeps the tail, with a leading
-// ellipsis — for text immediately before a match; false keeps the head,
-// with a trailing ellipsis — for text immediately after one).
+// fitSide returns a prefix/suffix of s whose cell width (not rune count) is
+// at most budget, so a wide rune at the cut boundary can't push the result
+// past budget columns. When s must be cut, keepEnd chooses which end is
+// preserved (true keeps the tail, with a leading ellipsis — for text
+// immediately before a match; false keeps the head, with a trailing
+// ellipsis — for text immediately after one).
 func fitSide(s string, budget int, keepEnd bool) string {
 	if budget <= 0 {
 		return ""
 	}
-	r := []rune(s)
-	if len(r) <= budget {
+	if runewidth.StringWidth(s) <= budget {
 		return s
 	}
 	if budget == 1 {
 		return "…"
 	}
+	target := budget - 1 // reserve 1 cell for the ellipsis
+	r := []rune(s)
 	if keepEnd {
-		return "…" + string(r[len(r)-(budget-1):])
+		w, i := 0, len(r)
+		for i > 0 {
+			rw := runewidth.RuneWidth(r[i-1])
+			if w+rw > target {
+				break
+			}
+			w += rw
+			i--
+		}
+		return "…" + string(r[i:])
 	}
-	return string(r[:budget-1]) + "…"
+	w, i := 0, 0
+	for i < len(r) {
+		rw := runewidth.RuneWidth(r[i])
+		if w+rw > target {
+			break
+		}
+		w += rw
+		i++
+	}
+	return string(r[:i]) + "…"
 }
 
 func byteOffsetOfRune(s string, runeIdx int) int {

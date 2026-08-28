@@ -841,16 +841,13 @@ func grepResultLine(r GrepResult, maxW int) string {
 	matchStart := max(r.Col-trimmedCount, 0)
 	matchEnd := max(matchStart+r.MatchLen, matchStart)
 
-	avail := maxW - len([]rune(label))
+	// avail and all budget math below are in terminal cells (lipgloss.Width),
+	// not rune counts — a wide rune (e.g. CJK) occupies 2 cells, so a
+	// rune-count budget would let such a line silently render wider than
+	// maxW.
+	avail := maxW - lipgloss.Width(label)
 	if avail < 1 {
-		full := []rune(label + content)
-		if len(full) <= maxW {
-			return string(full)
-		}
-		if maxW < 1 {
-			return ""
-		}
-		return string(full[:max(maxW-1, 0)]) + "…"
+		return fitSide(label+content, maxW, false)
 	}
 
 	cr := []rune(content)
@@ -864,18 +861,15 @@ func grepResultLine(r GrepResult, maxW int) string {
 	match := string(cr[matchStart:matchEnd])
 	after := string(cr[matchEnd:])
 
-	beforeShown, afterShown := splitContext(before, after, avail-len([]rune(match)))
+	beforeShown, afterShown := splitContext(before, after, avail-lipgloss.Width(match))
 	line := label + beforeShown + match + afterShown
 	// The match itself may be wider than avail (rare); hard-clip as a last
 	// resort rather than overflowing the caller's width budget. This check
-	// (and everything above it) works in plain runes, so it must run before
+	// (and everything above it) works in plain text, so it must run before
 	// the match is styled below — bold's escape codes aren't real display
-	// width but would still throw off a rune count.
-	if lr := []rune(line); len(lr) > maxW {
-		if maxW < 1 {
-			return ""
-		}
-		return string(lr[:maxW-1]) + "…"
+	// width but would still throw off a width measurement.
+	if lipgloss.Width(line) > maxW {
+		return fitSide(line, maxW, false)
 	}
 
 	// boldPreserving (not a plain lipgloss Render) because this row is

@@ -149,6 +149,80 @@ func TestSplitContext(t *testing.T) {
 	}
 }
 
+func TestFitSideWideRunes(t *testing.T) {
+	// Each of these CJK characters is 2 terminal cells wide (runewidth), so
+	// a naive rune-count budget would let the result silently render wider
+	// than requested.
+	s := "中文测试内容更多字符"
+	for budget := 0; budget <= 12; budget++ {
+		for _, keepEnd := range []bool{false, true} {
+			got := fitSide(s, budget, keepEnd)
+			if w := lipgloss.Width(got); w > budget {
+				t.Errorf("fitSide(%q, %d, %v) = %q with width %d > budget", s, budget, keepEnd, got, w)
+			}
+		}
+	}
+}
+
+func TestSplitContextWideRunes(t *testing.T) {
+	before := "中文前缀内容"
+	after := "后缀更多文字内容"
+	for avail := 0; avail <= 20; avail++ {
+		b, a := splitContext(before, after, avail)
+		if w := lipgloss.Width(b) + lipgloss.Width(a); w > avail {
+			t.Errorf("splitContext(avail=%d) total width %d exceeds avail: %q / %q", avail, w, b, a)
+		}
+	}
+}
+
+func TestRenderResultLineWideRunesRespectWidth(t *testing.T) {
+	d := newSearchReplaceDialog("/tmp", 60, 20)
+	r := GrepResult{
+		RelPath:  "a.go",
+		Line:     0,
+		Col:      20,
+		MatchLen: 5,
+		LineText: strings.Repeat("字", 20) + "MATCH" + strings.Repeat("符", 20),
+	}
+	d.results = []GrepResult{r}
+	d.refreshResultsView()
+
+	line := d.renderResultLine(r, false)
+	if w := lipgloss.Width(line); w > d.resultsW() {
+		t.Errorf("renderResultLine width %d exceeds resultsW()=%d: %q", w, d.resultsW(), line)
+	}
+	selLine := d.renderResultLine(r, true)
+	if w := lipgloss.Width(selLine); w > d.resultsW() {
+		t.Errorf("selected renderResultLine width %d exceeds resultsW()=%d: %q", w, d.resultsW(), selLine)
+	}
+}
+
+func TestSearchReplaceResizeRefreshesResultsView(t *testing.T) {
+	d := newSearchReplaceDialog("/tmp", 300, 40)
+	d.results = []GrepResult{{RelPath: "a.go", Line: 0, Col: 0, MatchLen: 3, LineText: "foo bar baz"}}
+	d.refreshResultsView()
+	correctW := d.resultsMaxContentW
+
+	// Corrupt the cached natural-content width the way it'd be stale if a
+	// resize only poked viewport.Width (the pre-fix behavior) instead of
+	// rerunning refreshResultsView — resultsMaxContentW is a distinguishing
+	// side effect only refreshResultsView touches, so this proves the full
+	// refresh actually ran rather than relying on bubbles viewport's
+	// internal wrap/clip behavior (an implementation detail).
+	d.resultsMaxContentW = -999
+
+	a := App{searchReplace: d, cfg: &config.Config{}}
+	updated, _ := a.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	a2 := updated.(App)
+
+	if a2.searchReplace.resultsMaxContentW != correctW {
+		t.Errorf("resultsMaxContentW = %d after resize, want %d recomputed — refreshResultsView must rerun on resize, not just viewport.Width", a2.searchReplace.resultsMaxContentW, correctW)
+	}
+	if a2.searchReplace.viewport.Width != a2.searchReplace.resultsW() {
+		t.Errorf("viewport.Width = %d, want %d (resultsW() after resize)", a2.searchReplace.viewport.Width, a2.searchReplace.resultsW())
+	}
+}
+
 func TestSearchReplaceResultsWShrinksToFitContent(t *testing.T) {
 	d := newSearchReplaceDialog("/tmp", 200, 40) // dialogInnerW=64, dialogResultsW=188
 

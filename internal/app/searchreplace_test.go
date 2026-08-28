@@ -1,9 +1,12 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
@@ -44,6 +47,144 @@ func TestDialogInnerW(t *testing.T) {
 		if got := dialogInnerW(c.termW); got != c.want {
 			t.Errorf("dialogInnerW(%d) = %d, want %d", c.termW, got, c.want)
 		}
+	}
+}
+
+func TestDialogResultsW(t *testing.T) {
+	cases := []struct {
+		termW int
+		want  int
+	}{
+		{200, 188},
+		{100, 88},
+		{50, 38},
+		{10, 24}, // floor
+	}
+	for _, c := range cases {
+		if got := dialogResultsW(c.termW); got != c.want {
+			t.Errorf("dialogResultsW(%d) = %d, want %d", c.termW, got, c.want)
+		}
+	}
+}
+
+func TestBoldPreserving(t *testing.T) {
+	if got := boldPreserving("MATCH"); got != "\x1b[1mMATCH\x1b[22m" {
+		t.Errorf("boldPreserving(%q) = %q, want bold-on/off wrapped, no full reset", "MATCH", got)
+	}
+	if got := boldPreserving(""); got != "" {
+		t.Errorf("boldPreserving(\"\") = %q, want unchanged empty string", got)
+	}
+}
+
+func TestRenderResultLineBoldsMatch(t *testing.T) {
+	d := newSearchReplaceDialog("/tmp", 100, 20)
+	r := GrepResult{RelPath: "a.go", Line: 0, Col: 4, MatchLen: 5, LineText: "foo MATCH bar"}
+
+	// Non-selected, non-diff: the match is rendered via sraMatchStyle (bold),
+	// a normal lipgloss Render (full reset) since nothing behind it needs a
+	// background preserved.
+	line := d.renderResultLine(r, false)
+	if !strings.Contains(line, sraMatchStyle.Render("MATCH")) {
+		t.Errorf("expected the match rendered via sraMatchStyle, got %q", line)
+	}
+	if !strings.Contains(ansi.Strip(line), "foo MATCH bar") {
+		t.Errorf("expected match content preserved once ANSI is stripped, got %q (stripped: %q)", line, ansi.Strip(line))
+	}
+
+	// Selected row: bold is applied via boldPreserving (no full reset),
+	// so it doesn't cut a gap in sraSelStyle's background.
+	selLine := d.renderResultLine(r, true)
+	if !strings.Contains(selLine, "\x1b[1mMATCH\x1b[22m") {
+		t.Errorf("expected boldPreserving-wrapped match in the selected row, got %q", selLine)
+	}
+}
+
+func TestRenderResultLineKeepsMatchVisibleWhenLineIsLong(t *testing.T) {
+	d := newSearchReplaceDialog("/tmp", 60, 20) // dialogResultsW(60) = 48
+
+	pad := strings.Repeat("x", 200)
+	r := GrepResult{RelPath: "a.go", Line: 0, Col: len(pad), MatchLen: 6, LineText: pad + "NEEDLE" + strings.Repeat("y", 200)}
+
+	line := d.renderResultLine(r, false)
+	if !strings.Contains(line, "NEEDLE") {
+		t.Errorf("match far into a long line was not kept visible: %q", line)
+	}
+	if !strings.HasPrefix(line, "a.go:1:") {
+		t.Errorf("expected the file:line label to stay intact: %q", line)
+	}
+	if got := lipgloss.Width(line); got > dialogResultsW(d.width) {
+		t.Errorf("rendered line width %d exceeds dialogResultsW(%d)=%d: %q", got, d.width, dialogResultsW(d.width), line)
+	}
+	// The match sits in the middle of a very long line on both sides, so a
+	// best-effort centered window should show context on both sides, not
+	// just up to the match.
+	if !strings.Contains(line, "x…NEEDLEy") && !strings.Contains(line, "xNEEDLEy") {
+		t.Errorf("expected trailing context after the match, got %q", line)
+	}
+}
+
+func TestSplitContext(t *testing.T) {
+	// Both sides longer than their fair share: split ~evenly.
+	before, after := splitContext("aaaaaaaaaa", "bbbbbbbbbb", 6)
+	if lipgloss.Width(before)+lipgloss.Width(after) > 6 {
+		t.Errorf("splitContext exceeded avail=6: %q / %q", before, after)
+	}
+	if !strings.HasPrefix(before, "…") || !strings.HasSuffix(after, "…") {
+		t.Errorf("expected ellipses on the cut sides: %q / %q", before, after)
+	}
+
+	// before is short — after should get the leftover budget.
+	before, after = splitContext("ab", "bbbbbbbbbb", 6)
+	if before != "ab" {
+		t.Errorf("short before side should be shown in full, got %q", before)
+	}
+	if lipgloss.Width(after) != 4 {
+		t.Errorf("expected after to receive before's unused budget (4 runes), got %q", after)
+	}
+
+	// Both fit: no truncation at all.
+	before, after = splitContext("ab", "cd", 100)
+	if before != "ab" || after != "cd" {
+		t.Errorf("splitContext(%q,%q,100) = %q,%q, want unchanged", "ab", "cd", before, after)
+	}
+}
+
+func TestSearchReplaceResultsWShrinksToFitContent(t *testing.T) {
+	d := newSearchReplaceDialog("/tmp", 200, 40) // dialogInnerW=64, dialogResultsW=188
+
+	// No results yet: the box should sit at the input-dialog's minimum
+	// width, not the full terminal-width-based cap.
+	if got, want := d.resultsW(), dialogInnerW(d.width); got != want {
+		t.Errorf("empty results: resultsW() = %d, want floor %d", got, want)
+	}
+
+	// A short result shouldn't force the box wider than that same floor.
+	d.results = []GrepResult{{RelPath: "a.go", Line: 0, Col: 0, MatchLen: 2, LineText: "ab"}}
+	d.refreshResultsView()
+	if got, want := d.resultsW(), dialogInnerW(d.width); got != want {
+		t.Errorf("short result: resultsW() = %d, want floor %d", got, want)
+	}
+	if d.viewport.Width != d.resultsW() {
+		t.Errorf("viewport.Width = %d, want %d to match resultsW()", d.viewport.Width, d.resultsW())
+	}
+
+	// A very long result line should widen the box, but never past
+	// dialogResultsW's terminal-width-based cap.
+	longLine := strings.Repeat("x", 500)
+	d.results = []GrepResult{{RelPath: "b.go", Line: 0, Col: 10, MatchLen: 2, LineText: longLine}}
+	d.refreshResultsView()
+	if got := d.resultsW(); got != dialogResultsW(d.width) {
+		t.Errorf("very long result: resultsW() = %d, want cap %d", got, dialogResultsW(d.width))
+	}
+
+	// A moderately long result (natural width between the floor and the
+	// cap) should size the box to fit it exactly, not jump straight to
+	// the cap.
+	d.results = []GrepResult{{RelPath: "c.go", Line: 0, Col: 5, MatchLen: 2, LineText: "0123456789"}}
+	natural := d.resultLineNaturalWidth(d.results[0])
+	d.refreshResultsView()
+	if got := d.resultsW(); got != max(natural, dialogInnerW(d.width)) {
+		t.Errorf("moderate result: resultsW() = %d, want max(natural=%d, floor=%d)", got, natural, dialogInnerW(d.width))
 	}
 }
 

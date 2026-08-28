@@ -288,7 +288,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.searchReplace != nil {
 			a.searchReplace.width = msg.Width
 			a.searchReplace.height = msg.Height
-			a.searchReplace.viewport.Width = dialogInnerW(msg.Width)
+			a.searchReplace.viewport.Width = a.searchReplace.resultsW()
 		}
 		if a.pluginPopup != nil {
 			a.pluginPopup.width = msg.Width

@@ -28,6 +28,14 @@ func (s *editorService) MoveTextToFile(_ context.Context, call proto.EditorServi
 		return err
 	}
 
+	// Find, extract, and apply the delete in one continuous lock hold: entry.buf
+	// is a plain field that Save/SaveAs/Format/DiscardRecovery all wholesale-swap
+	// under s.mu.Lock() (e.g. a format-on-save landing between a find-then-unlock
+	// and a later Apply call). Extracting the range and deleting it must happen
+	// against the exact same buf object, or the delete's coordinates — computed
+	// from content that may no longer be entry.buf's content — get applied at
+	// the wrong position in whatever buf now is. extractRange/Apply are both
+	// pure in-memory work, so holding the lock across them is cheap.
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
 	if !ok {
@@ -35,20 +43,21 @@ func (s *editorService) MoveTextToFile(_ context.Context, call proto.EditorServi
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 	srcPath := entry.buf.Path()
-	s.mu.Unlock()
-
 	text, err := extractRange(entry.buf, fromLine, fromCol, toLine, toCol)
 	if err != nil {
+		s.mu.Unlock()
 		return err
 	}
-
 	entry.buf.Apply(document.Op{
 		ClientID: clientID,
 		Type:     document.OpDelete,
 		FromLine: fromLine, FromCol: fromCol,
 		ToLine: toLine, ToCol: toCol,
 	})
-	go s.lspMgr.DidChange(srcPath, entry.buf.Content())
+	content := entry.buf.Content()
+	s.mu.Unlock()
+
+	go s.lspMgr.DidChange(srcPath, content)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, srcPath)
 
 	if err := s.appendTextToFile(clientID, destPath, text); err != nil {
@@ -133,6 +142,10 @@ func appendedContent(existing, text string) string {
 // is patched directly on disk.
 func (s *editorService) appendTextToFile(clientID uint64, path, text string) error {
 	canonPath := canonicalPath(path)
+	// Find and apply under one continuous lock hold — same reasoning as
+	// MoveTextToFile above: appendOpsForBuffer/Apply are pure in-memory work,
+	// so there's no reason to unlock in between and risk a concurrent
+	// wholesale swap of entry.buf landing before Apply runs.
 	s.mu.Lock()
 	var bufID uint32
 	var entry *bufferEntry
@@ -142,16 +155,17 @@ func (s *editorService) appendTextToFile(clientID uint64, path, text string) err
 			break
 		}
 	}
-	s.mu.Unlock()
-
 	if entry != nil {
 		for _, op := range appendOpsForBuffer(entry.buf, clientID, text) {
 			entry.buf.Apply(op)
 		}
-		go s.lspMgr.DidChange(path, entry.buf.Content())
+		content := entry.buf.Content()
+		s.mu.Unlock()
+		go s.lspMgr.DidChange(path, content)
 		go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 		return nil
 	}
+	s.mu.Unlock()
 
 	existing := ""
 	if data, err := os.ReadFile(path); err == nil {

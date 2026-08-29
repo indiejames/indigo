@@ -43,7 +43,15 @@ type errorMsg struct{ err error }
 // (which just show a status message), this one means the local buffer has
 // applied an edit the server never received — client and server have
 // diverged. See applyOpFailed's handler for the hard-resync response.
-type applyOpFailedMsg struct{ err error }
+// bufID is stamped at the point the failed op was queued and checked on
+// arrival: without it, a slow ApplyOp for a buffer the user has since
+// switched away from would resync whatever buffer now happens to be active
+// (which never diverged) while leaving the buffer that actually failed
+// silently corrupted.
+type applyOpFailedMsg struct {
+	bufID uint32
+	err   error
+}
 
 // bufferResyncMsg carries the result of re-fetching a buffer's authoritative
 // content from the server after applyOpFailedMsg, to recover from the
@@ -57,17 +65,33 @@ type bufferResyncMsg struct {
 	err        error
 }
 
-// savedMsg signals a successful save.
-type savedMsg struct{}
+// savedMsg signals a successful save. bufID is stamped at request time and
+// checked on arrival — otherwise a slow Save landing after the user switched
+// tabs would clear the dirty flag on whatever buffer is now active instead
+// of the one actually saved.
+type savedMsg struct{ bufID uint32 }
 
-// savedAsMsg signals a successful save-as; carries the new path.
+// savedAsMsg signals a successful save-as; carries the new path. bufID is
+// stamped at request time and checked on arrival: without it, a slow SaveAs
+// landing after the user switched to a different buffer would silently
+// repoint that other (unrelated) buffer's identity at the new path and mark
+// it clean — hiding its real unsaved changes behind the wrong filename, and
+// corrupting whatever a later save of it writes to.
 type savedAsMsg struct {
+	bufID     uint32
 	newPath   string
 	thenClose bool
 }
 
-// discardRecoveryMsg carries original file content after the server discards the recovery file.
-type discardRecoveryMsg struct{ content string }
+// discardRecoveryMsg carries original file content after the server discards
+// the recovery file. bufID is stamped at request time and checked on
+// arrival — otherwise a slow DiscardRecovery landing after the user switched
+// buffers would replace whatever buffer is now active with this buffer's
+// discarded original content.
+type discardRecoveryMsg struct {
+	bufID   uint32
+	content string
+}
 
 // diagnosticsMsg carries fresh diagnostics from the server.
 type diagnosticsMsg struct {
@@ -997,6 +1021,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case applyOpFailedMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
 		m = m.pushSevereError("ERR: edit failed to reach server, resyncing: " + msg.err.Error())
 		return m, m.resyncFromServer()
 
@@ -1040,12 +1067,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case savedMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
 		m.buf.SetClean()
 		m = m.pushStatus("")
 		m.savedUndoDepth = len(m.undoStack)
 		return m, nil
 
 	case savedAsMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
 		m.filePath = msg.newPath
 		m.saveAsThenClose = false
 		m.buf.SetClean()
@@ -1064,6 +1097,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case discardRecoveryMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
 		m.buf = document.New(m.filePath, msg.content)
 		m.version = 0
 		m.undoStack = nil

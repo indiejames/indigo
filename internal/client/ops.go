@@ -70,7 +70,7 @@ func (m Model) sendToServer(op document.Op) tea.Cmd {
 		defer cancel()
 		_, err := m.rpc.ApplyOp(ctx, m.bufID, op, m.generation)
 		if err != nil {
-			return applyOpFailedMsg{err}
+			return applyOpFailedMsg{bufID: m.bufID, err: err}
 		}
 		return nil
 	}
@@ -409,7 +409,7 @@ func (m Model) doSaveNow() tea.Cmd {
 		if err := m.rpc.Save(ctx, m.bufID); err != nil {
 			return errorMsg{err}
 		}
-		return savedMsg{}
+		return savedMsg{bufID: m.bufID}
 	}
 }
 
@@ -421,7 +421,7 @@ func (m Model) doSaveAsNow(newPath string, thenClose bool) tea.Cmd {
 		if err := m.rpc.SaveAs(ctx, m.bufID, newPath); err != nil {
 			return errorMsg{err}
 		}
-		return savedAsMsg{newPath: newPath, thenClose: thenClose}
+		return savedAsMsg{bufID: m.bufID, newPath: newPath, thenClose: thenClose}
 	}
 }
 

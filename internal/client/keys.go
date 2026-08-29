@@ -589,7 +589,7 @@ func (m Model) handleRecoveryPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				return errorMsg{err}
 			}
-			return discardRecoveryMsg{content}
+			return discardRecoveryMsg{bufID: m.bufID, content: content}
 		}
 	}
 	return m, nil

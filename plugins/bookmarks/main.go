@@ -79,8 +79,9 @@ func (b *Bookmarks) onAltM(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
 		// Already bookmarked — remove it.
 		b.mu.Lock()
 		b.bookmarks = append(b.bookmarks[:idx], b.bookmarks[idx+1:]...)
+		snapshot := snapshotBookmarks(b.bookmarks)
 		b.mu.Unlock()
-		persistBookmarks(b.bookmarks)
+		persistBookmarks(snapshot)
 		return sdk.KeyResponse{Handled: true}
 	}
 
@@ -97,8 +98,9 @@ func (b *Bookmarks) onAltM(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
 			note:     note,
 			active:   true,
 		})
+		snapshot := snapshotBookmarks(b.bookmarks)
 		b.mu.Unlock()
-		persistBookmarks(b.bookmarks)
+		persistBookmarks(snapshot)
 	}, nil)
 
 	return sdk.KeyResponse{Handled: true}
@@ -172,7 +174,7 @@ func (b *Bookmarks) onEditEvent(bufID uint32, filePath string, atLine uint32, li
 		}
 	}
 	if changed {
-		go persistBookmarks(b.bookmarks)
+		go persistBookmarks(snapshotBookmarks(b.bookmarks))
 	}
 }
 
@@ -197,6 +199,19 @@ func (b *Bookmarks) getDecorations(bufID uint32, _ uint64, _ sdk.Range) []sdk.De
 		}
 	}
 	return decorations
+}
+
+// snapshotBookmarks returns an independent copy of bmarks. Caller must hold
+// b.mu. persistBookmarks does file I/O and must never be called on b.bookmarks
+// directly outside the lock: onEditEvent can run concurrently with onAltM
+// (the plugin manager dispatches HandleKey and DispatchEditEvent as
+// independent goroutines) and mutates bookmark elements in place via pointer,
+// so an unlocked persistBookmarks call ranging over the live slice would read
+// torn fields or race append's slice-header/backing-array writes. A snapshot
+// is unaffected by any later mutation, so it's safe to read — and persist —
+// after releasing the lock.
+func snapshotBookmarks(bmarks []bookmark) []bookmark {
+	return append([]bookmark(nil), bmarks...)
 }
 
 // findBookmark returns the index of an active bookmark at (filePath, line), or -1.

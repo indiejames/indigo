@@ -271,12 +271,20 @@ func (a App) doReloadBuffer(idx int) tea.Cmd {
 	appLog("doReloadBuffer: queuing cmd for idx=%d path=%q oldBufID=%d", idx, path, oldBufID)
 	return func() tea.Msg {
 		appLog("doReloadBuffer: cmd running, calling CloseBuffer bufID=%d", oldBufID)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := rpc.CloseBuffer(ctx, oldBufID); err != nil {
-			appLog("doReloadBuffer: CloseBuffer error: %v", err)
+		// Each RPC gets its own 5s budget rather than sharing one context
+		// across both sequential calls — a slow CloseBuffer would otherwise
+		// eat into (or exhaust) the time OpenFile has left, producing a
+		// spurious "context deadline exceeded" on OpenFile even though the
+		// server would have answered fine given a fresh timeout.
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		closeErr := rpc.CloseBuffer(closeCtx, oldBufID)
+		closeCancel()
+		if closeErr != nil {
+			appLog("doReloadBuffer: CloseBuffer error: %v", closeErr)
 		}
 		appLog("doReloadBuffer: CloseBuffer done, calling OpenFile path=%q", path)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		bufID, content, version, fromRecovery, generation, err := rpc.OpenFile(ctx, path)
 		if err != nil {
 			appLog("doReloadBuffer: OpenFile error: %v", err)
@@ -284,7 +292,7 @@ func (a App) doReloadBuffer(idx int) tea.Cmd {
 		}
 		appLog("doReloadBuffer: OpenFile done, new bufID=%d contentLen=%d", bufID, len(content))
 		newModel := client.New(rpc, bufID, content, version, path, a.workDir, cfg, fromRecovery, generation)
-		return bufferReloadedMsg{idx: idx, model: newModel}
+		return bufferReloadedMsg{idx: idx, oldBufID: oldBufID, model: newModel}
 	}
 }
 

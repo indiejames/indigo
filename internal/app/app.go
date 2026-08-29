@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,10 +61,17 @@ type configTickMsg struct {
 	cfg    *config.Config // non-nil only when the file changed and parsed OK
 }
 
-// bufferReloadedMsg replaces a buffer model in-place after an external-change reload.
+// bufferReloadedMsg replaces a buffer model in-place after an external-change
+// reload. oldBufID is the BufID of the buffer doReloadBuffer(idx) was called
+// against, captured before its CloseBuffer/OpenFile round trip (up to 5s);
+// it's checked against a.buffers[idx]'s current BufID on arrival, mirroring
+// sraSingleResultMsg's am.idx staleness check, since idx alone isn't enough —
+// closing an earlier tab while this reload is in flight shifts every later
+// index down, so idx could by then point at a different, unrelated buffer.
 type bufferReloadedMsg struct {
-	idx   int
-	model client.Model
+	idx      int
+	oldBufID uint32
+	model    client.Model
 }
 
 type App struct {
@@ -637,16 +645,30 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case bufferReloadedMsg:
-		if msg.idx >= 0 && msg.idx < len(a.buffers) {
-			a.buffers[msg.idx] = msg.model
-			if msg.idx == a.active {
-				updated, _ := a.buffers[msg.idx].Update(
-					tea.WindowSizeMsg{Width: a.width, Height: a.bufHeight()})
-				a.buffers[msg.idx] = updated.(client.Model)
+		if msg.idx < 0 || msg.idx >= len(a.buffers) || a.buffers[msg.idx].BufID() != msg.oldBufID {
+			// The tab at idx closed, or tabs shifted (e.g. an earlier tab
+			// closed while this reload's CloseBuffer/OpenFile round trip was
+			// in flight), so idx no longer names the buffer this reload was
+			// for — applying msg.model here would silently overwrite
+			// whatever unrelated buffer now sits at that index. The reload
+			// already opened a fresh buffer server-side; close it rather
+			// than leaking it.
+			rpc := a.rpc
+			bufID := msg.model.BufID()
+			return a, func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
+				return nil
 			}
-			return a, msg.model.Init()
 		}
-		return a, nil
+		a.buffers[msg.idx] = msg.model
+		if msg.idx == a.active {
+			updated, _ := a.buffers[msg.idx].Update(
+				tea.WindowSizeMsg{Width: a.width, Height: a.bufHeight()})
+			a.buffers[msg.idx] = updated.(client.Model)
+		}
+		return a, msg.model.Init()
 
 	// ---- edit jump list ----
 	case client.EditRecordMsg:

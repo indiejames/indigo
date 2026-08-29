@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // maxRecentFiles caps how many entries are kept per workspace.
@@ -54,6 +55,33 @@ func writeRecentList(p string, rels []string) {
 		return
 	}
 	os.WriteFile(p, data, 0600) //nolint:errcheck
+}
+
+// withRecentFilesLock runs fn while holding an exclusive advisory lock,
+// serializing recordRecentFile's read-modify-write across concurrent indigo
+// processes: each terminal window is a separate OS process (see CLAUDE.md's
+// client/server architecture) sharing the same per-workspace recent-files
+// file, so two windows opening files back-to-back without this lock could
+// both read the same starting list and the second write silently clobbers
+// the first's update — last-writer-wins data loss, not just a rare cosmetic
+// glitch. The lock is taken on a sibling .lock file (never p itself) so
+// holding it never blocks a plain read via readRecentList/loadRecentFiles.
+// Best-effort: if the lock file can't be opened or locked, fn still runs
+// unlocked rather than losing the update entirely — recording a recent file
+// is not worth failing over.
+func withRecentFilesLock(p string, fn func()) {
+	f, err := os.OpenFile(p+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		fn()
+		return
+	}
+	defer f.Close() //nolint:errcheck
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		fn()
+		return
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
+	fn()
 }
 
 // dropString returns rels with any entry equal to s removed.
@@ -156,9 +184,11 @@ func recordRecentFile(workDir, absPath string) {
 	if err != nil {
 		return
 	}
-	rels := append([]string{rel}, dropString(readRecentList(p), rel)...)
-	if len(rels) > maxRecentFiles {
-		rels = rels[:maxRecentFiles]
-	}
-	writeRecentList(p, rels)
+	withRecentFilesLock(p, func() {
+		rels := append([]string{rel}, dropString(readRecentList(p), rel)...)
+		if len(rels) > maxRecentFiles {
+			rels = rels[:maxRecentFiles]
+		}
+		writeRecentList(p, rels)
+	})
 }

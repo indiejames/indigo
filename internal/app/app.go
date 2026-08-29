@@ -253,6 +253,25 @@ func (a App) Init() tea.Cmd {
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// client.RoutableMsg (applyOpFailedMsg, savedMsg, savedAsMsg,
+	// discardRecoveryMsg, saveFailedMsg, discardRecoveryFailedMsg — see
+	// their doc comments) must reach the specific buffer they're about, even
+	// when it isn't the active tab: the generic fallback below only ever
+	// dispatches to a.buffers[a.active], so a result for a buffer the user
+	// has since switched away from would otherwise be silently dropped by
+	// that buffer's own bufID guard instead of actually being applied to it.
+	if rm, ok := msg.(client.RoutableMsg); ok {
+		bufID := rm.RouteBufID()
+		for i := range a.buffers {
+			if a.buffers[i].BufID() == bufID {
+				updated, cmd := a.buffers[i].Update(msg)
+				a.buffers[i] = updated.(client.Model)
+				return a, cmd
+			}
+		}
+		return a, nil // originating buffer no longer open; drop
+	}
+
 	switch msg := msg.(type) {
 
 	case configTickMsg:

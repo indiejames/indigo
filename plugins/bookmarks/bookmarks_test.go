@@ -34,7 +34,26 @@ func TestBookmarksNoRaceBetweenEditEventAndPersist(t *testing.T) {
 	for i := range initial {
 		initial[i] = bookmark{filePath: "/tmp/a.go", line: uint32(i), active: true}
 	}
-	b := &Bookmarks{bookmarks: initial}
+	// persistCh/persistWorker must be set up — onEditEvent's changed path
+	// calls enqueuePersist internally, which sends on persistCh; a nil
+	// channel send blocks forever, hanging the test.
+	b := &Bookmarks{bookmarks: initial, persistCh: make(chan []bookmark, 64)}
+	workerDone := make(chan struct{})
+	go func() {
+		b.persistWorker()
+		close(workerDone)
+	}()
+	// Closing persistCh and waiting for the worker to fully drain and exit,
+	// before returning, matters here specifically because of t.Setenv: HOME
+	// reverts (or the next test repoints it) the instant this test function
+	// returns, but persistWorker calls os.UserHomeDir() itself on every
+	// write — a straggler write still in flight after that point would
+	// silently land in whatever directory HOME points to *then*, not the
+	// temp dir this test set up, corrupting a later test's state.
+	defer func() {
+		close(b.persistCh)
+		<-workerDone
+	}()
 
 	const n = 200
 	var wg sync.WaitGroup
@@ -54,9 +73,9 @@ func TestBookmarksNoRaceBetweenEditEventAndPersist(t *testing.T) {
 		}
 	}()
 
-	// Simulates the alt+m "add a bookmark" path's locked mutate + snapshot +
-	// unlocked persist sequence (the same shape onAltM uses), without
-	// needing a live sdk.Api for BufferInfo/ShowInputPrompt.
+	// Simulates the alt+m "add a bookmark" path's locked mutate + enqueue
+	// sequence (the same shape onAltM uses), without needing a live sdk.Api
+	// for BufferInfo/ShowInputPrompt.
 	go func() {
 		defer wg.Done()
 		for i := 0; i < n; i++ {
@@ -66,9 +85,8 @@ func TestBookmarksNoRaceBetweenEditEventAndPersist(t *testing.T) {
 				line:     uint32(i),
 				active:   true,
 			})
-			snapshot := snapshotBookmarks(b.bookmarks)
+			b.enqueuePersist(b.bookmarks)
 			b.mu.Unlock()
-			persistBookmarks(snapshot)
 		}
 	}()
 

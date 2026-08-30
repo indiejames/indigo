@@ -14,6 +14,9 @@ func newTestSpell() *Spell {
 		generation: make(map[uint32]uint64),
 		bufPaths:   make(map[uint32]string),
 		userWords:  make(map[string]struct{}),
+		lastLines:  make(map[uint32][]string),
+		lineDecors: make(map[uint32]map[uint32][]sdk.Decoration),
+		lineDiags:  make(map[uint32]map[uint32][]sdk.Diagnostic),
 	}
 }
 
@@ -40,7 +43,7 @@ func TestApplyCheckResultDiscardsSupersededGeneration(t *testing.T) {
 
 	// The first check is scheduled (generation 1) and applies normally.
 	s.generation[bufID] = 1
-	s.applyCheckResult(bufID, 1, []sdk.Decoration{staleDecor}, nil, 100, false)
+	s.applyCheckResult(bufID, 1, nil, map[uint32][]sdk.Decoration{0: {staleDecor}}, nil, 100, false)
 	if got := s.cache[bufID]; len(got) != 1 || got[0].FixData != "stale" {
 		t.Fatalf("after first apply: cache = %+v, want [stale]", got)
 	}
@@ -50,14 +53,14 @@ func TestApplyCheckResultDiscardsSupersededGeneration(t *testing.T) {
 	// is still in flight (its RPC round trips hadn't completed yet) and
 	// now lands late, after generation has already moved on.
 	s.generation[bufID] = 2
-	s.applyCheckResult(bufID, 1, []sdk.Decoration{staleDecor}, nil, 100, false)
+	s.applyCheckResult(bufID, 1, nil, map[uint32][]sdk.Decoration{0: {staleDecor}}, nil, 100, false)
 	if got := s.cache[bufID]; len(got) != 1 || got[0].FixData != "stale" {
 		t.Fatalf("stale gen-1 result should have been discarded, cache = %+v", got)
 	}
 
 	// The gen-2 (current) check now completes and must be the one that
 	// actually lands.
-	s.applyCheckResult(bufID, 2, []sdk.Decoration{freshDecor}, nil, 200, false)
+	s.applyCheckResult(bufID, 2, nil, map[uint32][]sdk.Decoration{0: {freshDecor}}, nil, 200, false)
 	if got := s.cache[bufID]; len(got) != 1 || got[0].FixData != "fresh" {
 		t.Fatalf("current gen-2 result should have applied, cache = %+v", got)
 	}
@@ -73,7 +76,7 @@ func TestApplyCheckResultClearsPending(t *testing.T) {
 	s.pending[bufID] = nil // placeholder entry; applyCheckResult only checks presence via delete
 	s.mu.Unlock()
 
-	s.applyCheckResult(bufID, 1, nil, nil, 0, false) // stale (gen mismatch) + not ok
+	s.applyCheckResult(bufID, 1, nil, nil, nil, 0, false) // stale (gen mismatch) + not ok
 	s.mu.Lock()
 	_, stillPending := s.pending[bufID]
 	s.mu.Unlock()

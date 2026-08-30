@@ -1,9 +1,11 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -158,6 +160,56 @@ func TestRecordRecentFileExcludesGitignoredPath(t *testing.T) {
 	want := []string{"main.go"}
 	if len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("loadRecentFiles = %v, want %v (build/output.go must be gitignored out)", got, want)
+	}
+}
+
+// TestRecordRecentFileConcurrentWritesDontLoseUpdates is a regression test
+// for a cross-process data race: recordRecentFile used to do an unlocked
+// read-modify-write of the recent-files JSON file. Each terminal window is a
+// separate OS process sharing the same per-workspace file (see CLAUDE.md's
+// client/server architecture), so two windows opening files back-to-back
+// could both read the same starting list and the second write would
+// silently clobber the first's update — last-writer-wins data loss. Many
+// goroutines here simulate that (goroutines instead of real processes, since
+// flock is scoped to the open file description, not the process, so it
+// serializes concurrent goroutines the same way it would concurrent
+// processes). Every recorded file must survive.
+func TestRecordRecentFileConcurrentWritesDontLoseUpdates(t *testing.T) {
+	withTempHome(t)
+	workDir := t.TempDir()
+
+	const n = 20 // must stay <= maxRecentFiles or the cap interferes with the "nothing lost" assertion
+	paths := make([]string, n)
+	for i := 0; i < n; i++ {
+		paths[i] = filepath.Join(workDir, fmt.Sprintf("f%d.go", i))
+		if err := os.WriteFile(paths[i], nil, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	for _, p := range paths {
+		wg.Add(1)
+		go func(p string) {
+			defer wg.Done()
+			recordRecentFile(workDir, p)
+		}(p)
+	}
+	wg.Wait()
+
+	got := loadRecentFiles(workDir)
+	if len(got) != n {
+		t.Fatalf("loadRecentFiles returned %d entries, want all %d (a concurrent read-modify-write must not lose updates)", len(got), n)
+	}
+	seen := make(map[string]bool, n)
+	for _, rel := range got {
+		seen[rel] = true
+	}
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("f%d.go", i)
+		if !seen[name] {
+			t.Errorf("recorded file %q missing from final list %v", name, got)
+		}
 	}
 }
 

@@ -39,11 +39,70 @@ type updatesMsg struct {
 // errorMsg carries a non-fatal error to display in the status bar.
 type errorMsg struct{ err error }
 
+// RoutableMsg is implemented by async RPC-result messages whose bufID names
+// the specific buffer they belong to, even when that buffer isn't the
+// active tab. App.Update special-cases this interface to route the message
+// directly to the owning buffer's Model (falling through to the generic
+// active-buffer-only dispatch otherwise), instead of relying solely on each
+// buffer's own handler discarding the message when its bufID doesn't match
+// m.bufID: a bare discard silently drops the result for good if the
+// originating buffer isn't active when it arrives, whereas routing lets an
+// inactive buffer's save/discard/resync still take effect. Deliberately
+// implemented by only a handful of message types (not every bufID-carrying
+// one) — see each type's doc comment for why routing matters for it
+// specifically.
+type RoutableMsg interface {
+	RouteBufID() uint32
+}
+
 // applyOpFailedMsg carries an ApplyOp RPC failure. Unlike other RPC errors
 // (which just show a status message), this one means the local buffer has
 // applied an edit the server never received — client and server have
 // diverged. See applyOpFailed's handler for the hard-resync response.
-type applyOpFailedMsg struct{ err error }
+// bufID is stamped at the point the failed op was queued and checked on
+// arrival: without it, a slow ApplyOp for a buffer the user has since
+// switched away from would resync whatever buffer now happens to be active
+// (which never diverged) while leaving the buffer that actually failed
+// silently corrupted. Implements RoutableMsg so App routes it to that
+// buffer directly rather than dropping it when the buffer isn't active.
+type applyOpFailedMsg struct {
+	bufID uint32
+	err   error
+}
+
+// RouteBufID implements RoutableMsg.
+func (m applyOpFailedMsg) RouteBufID() uint32 { return m.bufID }
+
+// saveFailedMsg carries a Save or SaveAs RPC failure. bufID is stamped at
+// request time. Unlike a plain errorMsg (which the generic active-buffer-only
+// dispatch shows on whatever tab happens to be active when the async result
+// arrives), this is routed via RoutableMsg so a save failure is always shown
+// on the buffer whose save actually failed — otherwise a user who switched
+// tabs while a slow save failed could see the error on the wrong file, or
+// never see it at all if they don't switch back before it's overwritten by
+// another status update.
+type saveFailedMsg struct {
+	bufID uint32
+	err   error
+}
+
+// RouteBufID implements RoutableMsg.
+func (m saveFailedMsg) RouteBufID() uint32 { return m.bufID }
+
+// discardRecoveryFailedMsg carries a DiscardRecovery RPC failure. bufID is
+// stamped at request time and routed via RoutableMsg, same reasoning as
+// saveFailedMsg. Additionally restores recoveryPrompt on the originating
+// buffer: handleRecoveryPrompt already dismisses the prompt the instant the
+// user presses "n" (before the RPC, up to 5s, even starts), so a failure
+// here would otherwise leave the prompt gone with no way to retry the
+// decision.
+type discardRecoveryFailedMsg struct {
+	bufID uint32
+	err   error
+}
+
+// RouteBufID implements RoutableMsg.
+func (m discardRecoveryFailedMsg) RouteBufID() uint32 { return m.bufID }
 
 // bufferResyncMsg carries the result of re-fetching a buffer's authoritative
 // content from the server after applyOpFailedMsg, to recover from the
@@ -57,17 +116,66 @@ type bufferResyncMsg struct {
 	err        error
 }
 
-// savedMsg signals a successful save.
-type savedMsg struct{}
+// savedMsg signals a successful save. bufID is stamped at request time and
+// checked on arrival — otherwise a slow Save landing after the user switched
+// tabs would clear the dirty flag on whatever buffer is now active instead
+// of the one actually saved. version is m.buf.Version() at the moment the
+// Save RPC was issued: bufID alone only catches "wrong buffer" — it says
+// nothing about *this* buffer having been edited again (locally, or via a
+// remote op arriving through updatesMsg) while the up-to-5s round trip was
+// in flight. The server's own Save handler already detects that case and
+// leaves its copy dirty (see server_buffer.go's compare-and-swap), so
+// unconditionally calling SetClean() here on a version mismatch would
+// disagree with the server and falsely mark newer, unsaved edits as saved.
+// Implements RoutableMsg so App routes it to that buffer directly rather
+// than dropping it when the buffer isn't active.
+type savedMsg struct {
+	bufID   uint32
+	version uint64
+}
 
-// savedAsMsg signals a successful save-as; carries the new path.
+// RouteBufID implements RoutableMsg.
+func (m savedMsg) RouteBufID() uint32 { return m.bufID }
+
+// savedAsMsg signals a successful save-as; carries the new path. bufID is
+// stamped at request time and checked on arrival: without it, a slow SaveAs
+// landing after the user switched to a different buffer would silently
+// repoint that other (unrelated) buffer's identity at the new path and mark
+// it clean — hiding its real unsaved changes behind the wrong filename, and
+// corrupting whatever a later save of it writes to. version is m.buf.Version()
+// at request time, same reasoning as savedMsg's: bufID matching isn't enough
+// when the buffer itself was edited again during the round trip. Implements
+// RoutableMsg so App routes it to that buffer directly rather than dropping
+// it when the buffer isn't active.
 type savedAsMsg struct {
+	bufID     uint32
+	version   uint64
 	newPath   string
 	thenClose bool
 }
 
-// discardRecoveryMsg carries original file content after the server discards the recovery file.
-type discardRecoveryMsg struct{ content string }
+// RouteBufID implements RoutableMsg.
+func (m savedAsMsg) RouteBufID() uint32 { return m.bufID }
+
+// discardRecoveryMsg carries original file content after the server discards
+// the recovery file. bufID is stamped at request time and checked on
+// arrival — otherwise a slow DiscardRecovery landing after the user switched
+// buffers would replace whatever buffer is now active with this buffer's
+// discarded original content. version is m.buf.Version() at request time:
+// the recoveryPrompt overlay only blocks keys while it's shown, and it's
+// dismissed immediately on "n" — before the RPC round trip (up to 5s)
+// completes — so the user can keep editing the *same* buffer in that
+// window; applying msg.content then would silently discard those edits.
+// Implements RoutableMsg so App routes it to that buffer directly rather
+// than dropping it when the buffer isn't active.
+type discardRecoveryMsg struct {
+	bufID   uint32
+	version uint64
+	content string
+}
+
+// RouteBufID implements RoutableMsg.
+func (m discardRecoveryMsg) RouteBufID() uint32 { return m.bufID }
 
 // diagnosticsMsg carries fresh diagnostics from the server.
 type diagnosticsMsg struct {
@@ -997,6 +1105,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case applyOpFailedMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
 		m = m.pushSevereError("ERR: edit failed to reach server, resyncing: " + msg.err.Error())
 		return m, m.resyncFromServer()
 
@@ -1039,13 +1150,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m = m.pushStatus(msg.Text)
 		return m, nil
 
+	case saveFailedMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
+		m = m.pushStatus("ERR: " + msg.err.Error())
+		return m, nil
+
 	case savedMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
+		if msg.version != m.buf.Version() {
+			// The buffer was edited again (locally, or via a remote op from
+			// updatesMsg) while the save was in flight, so what's on disk no
+			// longer matches the buffer's current content — the server's own
+			// Save handler detects this exact race independently and leaves
+			// its copy dirty (server_buffer.go's compare-and-swap). Marking
+			// clean here would disagree with the server and falsely hide
+			// newer, unsaved edits as saved.
+			return m, nil
+		}
 		m.buf.SetClean()
 		m = m.pushStatus("")
 		m.savedUndoDepth = len(m.undoStack)
 		return m, nil
 
 	case savedAsMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
+		if msg.version != m.buf.Version() {
+			// Same reasoning as savedMsg: the buffer changed since the
+			// SaveAs was issued, so newPath's content no longer matches the
+			// buffer's current content. The server's own SaveAs handler
+			// already rejects this in the common case (it returns an error,
+			// which arrives as saveFailedMsg instead of this message) — this
+			// covers the narrower window where the server's check passed but
+			// a local edit landed before the response reached the client.
+			m = m.pushStatus("Save as skipped — buffer has changed since the request; try again")
+			return m, nil
+		}
 		m.filePath = msg.newPath
 		m.saveAsThenClose = false
 		m.buf.SetClean()
@@ -1064,6 +1209,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case discardRecoveryMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
+		if msg.version != m.buf.Version() {
+			// recoveryPrompt is dismissed the instant "n" is pressed, before
+			// the RPC (up to 5s) even starts, so the user could keep editing
+			// this same buffer in the meantime. Applying msg.content now
+			// would silently discard those edits — skip instead.
+			m = m.pushStatus("Recovery discard skipped — buffer has changed since the request")
+			return m, nil
+		}
 		m.buf = document.New(m.filePath, msg.content)
 		m.version = 0
 		m.undoStack = nil
@@ -1071,6 +1227,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentGroup = nil
 		m.savedUndoDepth = 0
 		return m, m.reparseHighlight()
+
+	case discardRecoveryFailedMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
+		// Restore the prompt so the user has a way to retry — it was
+		// dismissed optimistically the instant "n" was pressed, before this
+		// failure was known.
+		m.recoveryPrompt = true
+		m = m.pushSevereError("ERR: failed to discard recovery: " + msg.err.Error())
+		return m, nil
 
 	case diagnosticsMsg:
 		if msg.bufID != m.bufID {

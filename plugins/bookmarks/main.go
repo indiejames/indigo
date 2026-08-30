@@ -44,11 +44,19 @@ type Bookmarks struct {
 	mu        sync.Mutex
 	api       *sdk.Api
 	bookmarks []bookmark
+
+	// persistCh serializes bookmark writes onto a single worker goroutine
+	// (persistWorker) — see enqueuePersist's doc comment for why a snapshot
+	// copy alone isn't enough to keep bookmarks.json correct under
+	// concurrent mutations.
+	persistCh chan []bookmark
 }
 
 func (b *Bookmarks) Init(api *sdk.Api) sdk.Info {
 	b.api = api
 	b.bookmarks = loadBookmarks()
+	b.persistCh = make(chan []bookmark, 64)
+	go b.persistWorker()
 
 	api.OnKey("alt+m", b.onAltM)                 //nolint:errcheck
 	api.OnMenuAction("bookmarks.open", b.onAltB) //nolint:errcheck
@@ -56,6 +64,46 @@ func (b *Bookmarks) Init(api *sdk.Api) sdk.Info {
 	api.Decorations(b.getDecorations)            //nolint:errcheck
 
 	return sdk.Info{Name: "bookmarks", Version: "0.2.0"}
+}
+
+// persistWorker drains persistCh and writes each snapshot to disk one at a
+// time, for the life of the plugin process (never torn down explicitly —
+// the process exits as a whole when the server kills the plugin, same as
+// any other background goroutine in this plugin).
+func (b *Bookmarks) persistWorker() {
+	for snapshot := range b.persistCh {
+		persistBookmarks(snapshot)
+	}
+}
+
+// enqueuePersist queues bmarks to be written by the single persistWorker
+// goroutine. Caller must hold b.mu and call this *before* unlocking — the
+// enqueue must happen inside the same critical section as the mutation it's
+// persisting, or a second, concurrent mutation could enqueue its own (newer)
+// snapshot first, landing out of order.
+//
+// This exists because a snapshot copy alone (see snapshotBookmarks) only
+// fixes the *data race* on b.bookmarks — it does nothing to order the actual
+// disk writes. onAltM's add/remove paths and onEditEvent's line-shift each
+// call persistBookmarks from their own goroutine (directly, or via `go`);
+// those file writes have no ordering guarantee relative to each other even
+// though their snapshots were taken in the correct mutation order under
+// b.mu — an older snapshot's write landing on disk *after* a newer one's
+// would silently revert bookmarks.json to stale state. Routing every write
+// through one worker goroutine, fed in mutation order, guarantees the file
+// always reflects whichever snapshot was taken last.
+//
+// The send is unconditional (no "channel full, write directly" fallback):
+// a fallback like that would let a write bypass the queue and race the
+// worker's own writes under exactly the high-contention conditions this
+// exists to guard against — deterministic ordering only holds if *every*
+// write goes through the single FIFO worker, no exceptions. Blocking here is
+// safe: onAltM/onEditEvent already run on their own dispatched goroutine
+// (the plugin manager calls HandleKey/DispatchEditEvent independently per
+// invocation), and persistWorker never does anything but drain this channel,
+// so it always eventually catches up.
+func (b *Bookmarks) enqueuePersist(bmarks []bookmark) {
+	b.persistCh <- snapshotBookmarks(bmarks)
 }
 
 // onAltM toggles a bookmark on the current line.
@@ -79,8 +127,8 @@ func (b *Bookmarks) onAltM(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
 		// Already bookmarked — remove it.
 		b.mu.Lock()
 		b.bookmarks = append(b.bookmarks[:idx], b.bookmarks[idx+1:]...)
+		b.enqueuePersist(b.bookmarks)
 		b.mu.Unlock()
-		persistBookmarks(b.bookmarks)
 		return sdk.KeyResponse{Handled: true}
 	}
 
@@ -97,8 +145,8 @@ func (b *Bookmarks) onAltM(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
 			note:     note,
 			active:   true,
 		})
+		b.enqueuePersist(b.bookmarks)
 		b.mu.Unlock()
-		persistBookmarks(b.bookmarks)
 	}, nil)
 
 	return sdk.KeyResponse{Handled: true}
@@ -172,7 +220,7 @@ func (b *Bookmarks) onEditEvent(bufID uint32, filePath string, atLine uint32, li
 		}
 	}
 	if changed {
-		go persistBookmarks(b.bookmarks)
+		b.enqueuePersist(b.bookmarks)
 	}
 }
 
@@ -197,6 +245,19 @@ func (b *Bookmarks) getDecorations(bufID uint32, _ uint64, _ sdk.Range) []sdk.De
 		}
 	}
 	return decorations
+}
+
+// snapshotBookmarks returns an independent copy of bmarks. Caller must hold
+// b.mu. persistBookmarks does file I/O and must never be called on b.bookmarks
+// directly outside the lock: onEditEvent can run concurrently with onAltM
+// (the plugin manager dispatches HandleKey and DispatchEditEvent as
+// independent goroutines) and mutates bookmark elements in place via pointer,
+// so an unlocked persistBookmarks call ranging over the live slice would read
+// torn fields or race append's slice-header/backing-array writes. A snapshot
+// is unaffected by any later mutation, so it's safe to read — and persist —
+// after releasing the lock.
+func snapshotBookmarks(bmarks []bookmark) []bookmark {
+	return append([]bookmark(nil), bmarks...)
 }
 
 // findBookmark returns the index of an active bookmark at (filePath, line), or -1.

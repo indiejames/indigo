@@ -67,6 +67,17 @@ func BracketSpans(content []byte) LineSpans {
 		case stDoubleStr:
 			switch ch {
 			case '\\':
+				// A backslash-newline line continuation (e.g. C/C++) must
+				// still advance line/col the same way the top-of-loop '\n'
+				// case does — just skipping past it with i++/col++ desyncs
+				// line from the scanner's real position for the rest of the
+				// file, misplacing every later bracket span.
+				if i+1 < n && src[i+1] == '\n' {
+					i++
+					line++
+					col = 0
+					continue // don't let the loop-bottom col++ push col to 1
+				}
 				i++
 				col++ // skip escaped char
 			case '"':
@@ -76,6 +87,12 @@ func BracketSpans(content []byte) LineSpans {
 		case stSingleStr:
 			switch ch {
 			case '\\':
+				if i+1 < n && src[i+1] == '\n' {
+					i++
+					line++
+					col = 0
+					continue // don't let the loop-bottom col++ push col to 1
+				}
 				i++
 				col++ // skip escaped char
 			case '\'':

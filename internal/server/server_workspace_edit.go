@@ -61,6 +61,13 @@ func applyWorkspaceEditsToBuffer(buf *document.Buffer, clientID uint64, items []
 // indices of any that were skipped because their oldText no longer matched.
 func (s *editorService) applyItemsToPath(clientID uint64, path string, items []workspaceEditItem) (applied int, skippedIdx []int, err error) {
 	canonPath := canonicalPath(path)
+	// Find and apply under one continuous lock hold, same reasoning as
+	// MoveTextToFile/appendTextToFile (server_move_to_file.go):
+	// applyWorkspaceEditsToBuffer is pure in-memory work, so unlocking between
+	// the find and the apply only invites a concurrent wholesale swap of
+	// entry.buf (Save/SaveAs/Format/DiscardRecovery all reassign it under
+	// s.mu.Lock()) to land before the edits are applied, corrupting the
+	// buffer at stale offsets.
 	s.mu.Lock()
 	var bufID uint32
 	var entry *bufferEntry
@@ -70,15 +77,15 @@ func (s *editorService) applyItemsToPath(clientID uint64, path string, items []w
 			break
 		}
 	}
-	s.mu.Unlock()
-
 	if entry != nil {
 		applied, skippedIdx = applyWorkspaceEditsToBuffer(entry.buf, clientID, items)
 		content := entry.buf.Content()
+		s.mu.Unlock()
 		go s.lspMgr.DidChange(path, content)
 		go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 		return applied, skippedIdx, nil
 	}
+	s.mu.Unlock()
 	return s.applyWorkspaceEditsOnDisk(path, clientID, items)
 }
 

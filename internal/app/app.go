@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,10 +61,17 @@ type configTickMsg struct {
 	cfg    *config.Config // non-nil only when the file changed and parsed OK
 }
 
-// bufferReloadedMsg replaces a buffer model in-place after an external-change reload.
+// bufferReloadedMsg replaces a buffer model in-place after an external-change
+// reload. oldBufID is the BufID of the buffer doReloadBuffer(idx) was called
+// against, captured before its CloseBuffer/OpenFile round trip (up to 5s);
+// it's checked against a.buffers[idx]'s current BufID on arrival, mirroring
+// sraSingleResultMsg's am.idx staleness check, since idx alone isn't enough —
+// closing an earlier tab while this reload is in flight shifts every later
+// index down, so idx could by then point at a different, unrelated buffer.
 type bufferReloadedMsg struct {
-	idx   int
-	model client.Model
+	idx      int
+	oldBufID uint32
+	model    client.Model
 }
 
 type App struct {
@@ -245,6 +253,25 @@ func (a App) Init() tea.Cmd {
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// client.RoutableMsg (applyOpFailedMsg, savedMsg, savedAsMsg,
+	// discardRecoveryMsg, saveFailedMsg, discardRecoveryFailedMsg — see
+	// their doc comments) must reach the specific buffer they're about, even
+	// when it isn't the active tab: the generic fallback below only ever
+	// dispatches to a.buffers[a.active], so a result for a buffer the user
+	// has since switched away from would otherwise be silently dropped by
+	// that buffer's own bufID guard instead of actually being applied to it.
+	if rm, ok := msg.(client.RoutableMsg); ok {
+		bufID := rm.RouteBufID()
+		for i := range a.buffers {
+			if a.buffers[i].BufID() == bufID {
+				updated, cmd := a.buffers[i].Update(msg)
+				a.buffers[i] = updated.(client.Model)
+				return a, cmd
+			}
+		}
+		return a, nil // originating buffer no longer open; drop
+	}
+
 	switch msg := msg.(type) {
 
 	case configTickMsg:
@@ -637,16 +664,30 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case bufferReloadedMsg:
-		if msg.idx >= 0 && msg.idx < len(a.buffers) {
-			a.buffers[msg.idx] = msg.model
-			if msg.idx == a.active {
-				updated, _ := a.buffers[msg.idx].Update(
-					tea.WindowSizeMsg{Width: a.width, Height: a.bufHeight()})
-				a.buffers[msg.idx] = updated.(client.Model)
+		if msg.idx < 0 || msg.idx >= len(a.buffers) || a.buffers[msg.idx].BufID() != msg.oldBufID {
+			// The tab at idx closed, or tabs shifted (e.g. an earlier tab
+			// closed while this reload's CloseBuffer/OpenFile round trip was
+			// in flight), so idx no longer names the buffer this reload was
+			// for — applying msg.model here would silently overwrite
+			// whatever unrelated buffer now sits at that index. The reload
+			// already opened a fresh buffer server-side; close it rather
+			// than leaking it.
+			rpc := a.rpc
+			bufID := msg.model.BufID()
+			return a, func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
+				return nil
 			}
-			return a, msg.model.Init()
 		}
-		return a, nil
+		a.buffers[msg.idx] = msg.model
+		if msg.idx == a.active {
+			updated, _ := a.buffers[msg.idx].Update(
+				tea.WindowSizeMsg{Width: a.width, Height: a.bufHeight()})
+			a.buffers[msg.idx] = updated.(client.Model)
+		}
+		return a, msg.model.Init()
 
 	// ---- edit jump list ----
 	case client.EditRecordMsg:

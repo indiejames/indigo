@@ -70,7 +70,7 @@ func (m Model) sendToServer(op document.Op) tea.Cmd {
 		defer cancel()
 		_, err := m.rpc.ApplyOp(ctx, m.bufID, op, m.generation)
 		if err != nil {
-			return applyOpFailedMsg{err}
+			return applyOpFailedMsg{bufID: m.bufID, err: err}
 		}
 		return nil
 	}
@@ -403,25 +403,33 @@ func (m Model) doSave() tea.Cmd {
 
 // doSaveNow writes the buffer to disk unconditionally.
 func (m Model) doSaveNow() tea.Cmd {
+	// m.buf is a *document.Buffer shared with the live model — capture its
+	// version now, synchronously, rather than inside the closure below: the
+	// closure runs after the RPC returns (up to 5s later), by which point
+	// m.buf.Version() would reflect whatever the buffer's *current* version
+	// is, not the version that was actually sent to the server. Capturing it
+	// here is what makes the handler's later comparison meaningful.
+	startVersion := m.buf.Version()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := m.rpc.Save(ctx, m.bufID); err != nil {
-			return errorMsg{err}
+			return saveFailedMsg{bufID: m.bufID, err: err}
 		}
-		return savedMsg{}
+		return savedMsg{bufID: m.bufID, version: startVersion}
 	}
 }
 
 // doSaveAsNow writes the buffer to newPath via the server.
 func (m Model) doSaveAsNow(newPath string, thenClose bool) tea.Cmd {
+	startVersion := m.buf.Version() // see doSaveNow's comment on capturing this synchronously
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := m.rpc.SaveAs(ctx, m.bufID, newPath); err != nil {
-			return errorMsg{err}
+			return saveFailedMsg{bufID: m.bufID, err: err}
 		}
-		return savedAsMsg{newPath: newPath, thenClose: thenClose}
+		return savedAsMsg{bufID: m.bufID, version: startVersion, newPath: newPath, thenClose: thenClose}
 	}
 }
 

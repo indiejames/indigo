@@ -320,15 +320,22 @@ func persistWord(path, word string) error {
 
 // spell returns true if the word is correctly spelled.
 // Checks the user word set, then the base checker, then any extra language checkers.
+//
+// s.checker.Spell reads gospell's underlying dict, a plain map with no
+// internal synchronization of its own — it must be held under s.mu, the same
+// lock addUserWord's s.checker.AddWordRaw already writes under, or a
+// concurrent add-to-dictionary (applyFix/cmdAddGlobal/cmdAddWorkspace) racing
+// a spell check crashes the whole plugin process with Go's fatal "concurrent
+// map read and map write".
 func (s *Spell) spell(word string) bool {
 	lower := strings.ToLower(word)
 	s.mu.Lock()
 	_, known := s.userWords[lower]
+	if !known {
+		known = s.checker.Spell(word)
+	}
 	s.mu.Unlock()
 	if known {
-		return true
-	}
-	if s.checker.Spell(word) {
 		return true
 	}
 	for _, ec := range s.extraCheckers {
@@ -687,7 +694,11 @@ func (s *Spell) getFixes(fixData string) []sdk.FixItem {
 		return nil
 	}
 
+	// Held under s.mu — see spell()'s doc comment: Suggest reads the same
+	// unsynchronized gospell dict that addUserWord's AddWordRaw writes to.
+	s.mu.Lock()
 	suggestions, err := s.checker.Suggest(payload.Word, 8)
+	s.mu.Unlock()
 	if err != nil || len(suggestions) == 0 {
 		return []sdk.FixItem{
 			{Label: fmt.Sprintf("Add \"%s\" to global dictionary", payload.Word), Replace: ""},
@@ -715,7 +726,11 @@ func (s *Spell) applyFix(fixData string, index uint32) {
 	if err := json.Unmarshal([]byte(fixData), &payload); err != nil {
 		return
 	}
+	// Held under s.mu — see spell()'s doc comment: Suggest reads the same
+	// unsynchronized gospell dict that addUserWord's AddWordRaw writes to.
+	s.mu.Lock()
 	suggestions, _ := s.checker.Suggest(payload.Word, 8)
+	s.mu.Unlock()
 	// Index past suggestions = dictionary add actions.
 	addGlobalIdx := uint32(len(suggestions))
 	addWorkspaceIdx := addGlobalIdx + 1

@@ -582,14 +582,18 @@ func (m Model) handleRecoveryPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.recoveryPrompt = false
 	case "n", "N", "esc":
 		m.recoveryPrompt = false
+		// Captured synchronously (m.buf is a shared *document.Buffer) — see
+		// doSaveNow's comment in ops.go for why this can't be read inside
+		// the closure below.
+		startVersion := m.buf.Version()
 		return m, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			content, err := m.rpc.DiscardRecovery(ctx, m.bufID)
 			if err != nil {
-				return errorMsg{err}
+				return discardRecoveryFailedMsg{bufID: m.bufID, err: err}
 			}
-			return discardRecoveryMsg{content}
+			return discardRecoveryMsg{bufID: m.bufID, version: startVersion, content: content}
 		}
 	}
 	return m, nil

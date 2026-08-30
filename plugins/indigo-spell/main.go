@@ -161,6 +161,17 @@ type Spell struct {
 	cache    map[uint32][]sdk.Decoration
 	pending  map[uint32]*time.Timer // debounce timers
 	bufPaths map[uint32]string      // bufID → file path (for kind detection)
+
+	// per-buffer incremental-check state: lastLines is the buffer content at
+	// the last completed check, split into lines, used to diff against the
+	// next check's content so only lines that actually changed get
+	// re-spell-checked; lineDecors/lineDiags hold that check's results keyed
+	// by line number so unchanged lines' results can be carried forward
+	// (shifted by any line-count delta) instead of recomputed. See
+	// checkBuffer's doc comment.
+	lastLines  map[uint32][]string
+	lineDecors map[uint32]map[uint32][]sdk.Decoration
+	lineDiags  map[uint32]map[uint32][]sdk.Diagnostic
 	// generation guards against a superseded check clobbering a newer one's
 	// result: scheduleCheck bumps it and each check's callback captures the
 	// value at schedule time, only applying its result if the buffer's
@@ -201,6 +212,9 @@ func (s *Spell) Init(api *sdk.Api) sdk.Info {
 	s.pending = make(map[uint32]*time.Timer)
 	s.generation = make(map[uint32]uint64)
 	s.bufPaths = make(map[uint32]string)
+	s.lastLines = make(map[uint32][]string)
+	s.lineDecors = make(map[uint32]map[uint32][]sdk.Decoration)
+	s.lineDiags = make(map[uint32]map[uint32][]sdk.Diagnostic)
 	s.userWords = make(map[string]struct{})
 	s.scannedPaths = make(map[string]struct{})
 
@@ -412,58 +426,44 @@ func (s *Spell) findMisspellings(path, content string) []misspelling {
 		return nil
 	}
 	var out []misspelling
-	lines := strings.Split(content, "\n")
-	for lineIdx, line := range lines {
-		text, colOff := commentSpan(line, kind)
-		if text == "" {
-			continue
-		}
-		// colOff is a byte offset into line (from len()/strings.Index); w.col
-		// below is a rune offset into text. Convert before combining them, or
-		// any multi-byte rune earlier on the line throws every column after
-		// it off for both the decoration and the diagnostic built from it.
-		colOffRunes := utf8.RuneCountInString(line[:colOff])
-		words := splitIdentifiers(text)
-		for _, w := range words {
-			col := w.col + colOffRunes
-			if s.spell(w.text) {
-				continue
-			}
-			endCol := uint32(col + len([]rune(w.text)))
-			out = append(out, misspelling{line: uint32(lineIdx), col: uint32(col), endCol: endCol, word: w.text})
-		}
+	for lineIdx, line := range strings.Split(content, "\n") {
+		out = append(out, s.checkLineMisspellings(path, kind, line, uint32(lineIdx))...)
 	}
 	return out
 }
 
-// checkBuffer reads a buffer and returns its decoration list alongside the
-// same misspellings as diagnostics (for the status bar/diagnostics popup),
-// plus the buffer version content was read at — see publishDiagnostics. ok
-// is false only on an actual read failure; distinct from version, since a
-// freshly opened, not-yet-edited buffer legitimately has version 0.
-func (s *Spell) checkBuffer(bufID uint32) (decors []sdk.Decoration, diags []sdk.Diagnostic, version uint64, ok bool) {
-	// Fetched before ReadBuffer so it's never newer than the content below;
-	// worst case it's slightly stale, and PublishDiagnostics's own
-	// version check on the server discards the result if so.
-	_, _, _, _, version, err := s.api.BufferInfo(bufID)
-	if err != nil {
-		return nil, nil, 0, false
+// checkLineMisspellings is findMisspellings' single-line counterpart, shared
+// by the whole-file path above and checkBuffer's incremental per-line
+// rechecks below.
+func (s *Spell) checkLineMisspellings(path string, kind fileKind, line string, lineIdx uint32) []misspelling {
+	text, colOff := commentSpan(line, kind)
+	if text == "" {
+		return nil
 	}
-	content, err := s.api.ReadBuffer(bufID)
-	if err != nil {
-		return nil, nil, 0, false
+	// colOff is a byte offset into line (from len()/strings.Index); w.col
+	// below is a rune offset into text. Convert before combining them, or
+	// any multi-byte rune earlier on the line throws every column after
+	// it off for both the decoration and the diagnostic built from it.
+	colOffRunes := utf8.RuneCountInString(line[:colOff])
+	var out []misspelling
+	for _, w := range splitIdentifiers(text) {
+		col := w.col + colOffRunes
+		if s.spell(w.text) {
+			continue
+		}
+		endCol := uint32(col + len([]rune(w.text)))
+		out = append(out, misspelling{line: lineIdx, col: uint32(col), endCol: endCol, word: w.text})
 	}
+	return out
+}
 
-	s.mu.Lock()
-	path := s.bufPaths[bufID]
-	s.mu.Unlock()
-
-	for _, m := range s.findMisspellings(path, content) {
-		payload, _ := json.Marshal(fixPayload{
-			Word: m.word,
-			Line: m.line,
-			Col:  m.col,
-		})
+// misspellingsToDecors/misspellingsToDiags convert a line's misspellings
+// into the two published forms — split out so checkBuffer's per-line
+// incremental recheck and the whole-file paths build identical results.
+func misspellingsToDecors(ms []misspelling) []sdk.Decoration {
+	var decors []sdk.Decoration
+	for _, m := range ms {
+		payload, _ := json.Marshal(fixPayload{Word: m.word, Line: m.line, Col: m.col})
 		decors = append(decors, sdk.Decoration{
 			Line:           m.line,
 			Col:            m.col,
@@ -474,6 +474,13 @@ func (s *Spell) checkBuffer(bufID uint32) (decors []sdk.Decoration, diags []sdk.
 			Fixable:        true,
 			FixData:        string(payload),
 		})
+	}
+	return decors
+}
+
+func misspellingsToDiags(ms []misspelling) []sdk.Diagnostic {
+	var diags []sdk.Diagnostic
+	for _, m := range ms {
 		diags = append(diags, sdk.Diagnostic{
 			Range: sdk.Range{
 				Start: sdk.Position{Line: m.line, Col: m.col},
@@ -483,7 +490,153 @@ func (s *Spell) checkBuffer(bufID uint32) (decors []sdk.Decoration, diags []sdk.
 			Message:  fmt.Sprintf("Possible misspelling: %q", m.word),
 		})
 	}
-	return decors, diags, version, true
+	return diags
+}
+
+// flattenDecors/flattenDiags collapse a per-line result map (as produced and
+// stored by checkBuffer/applyCheckResult) into the flat slices GetDecorations
+// and PublishDiagnostics expect.
+func flattenDecors(m map[uint32][]sdk.Decoration) []sdk.Decoration {
+	var out []sdk.Decoration
+	for _, d := range m {
+		out = append(out, d...)
+	}
+	return out
+}
+
+func flattenDiags(m map[uint32][]sdk.Diagnostic) []sdk.Diagnostic {
+	var out []sdk.Diagnostic
+	for _, d := range m {
+		out = append(out, d...)
+	}
+	return out
+}
+
+// commonPrefixLen returns the number of leading elements identical between
+// a and b.
+func commonPrefixLen(a, b []string) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	i := 0
+	for i < n && a[i] == b[i] {
+		i++
+	}
+	return i
+}
+
+// commonSuffixLen returns the number of trailing elements identical between
+// a and b, not overlapping the first `prefix` elements of either slice —
+// prefix must be commonPrefixLen(a, b) (or smaller) so the two spans can
+// never overlap on a slice that's a prefix of itself.
+func commonSuffixLen(a, b []string, prefix int) int {
+	i, j := len(a), len(b)
+	n := 0
+	for i > prefix && j > prefix && a[i-1] == b[j-1] {
+		i--
+		j--
+		n++
+	}
+	return n
+}
+
+// checkBuffer reads a buffer and returns its new content split into lines
+// (the next check's diff baseline) plus its decorations/diagnostics, each
+// keyed by line number, and the buffer version content was read at — see
+// publishDiagnostics. ok is false only on an actual read failure; distinct
+// from version, since a freshly opened, not-yet-edited buffer legitimately
+// has version 0.
+//
+// Only lines that actually changed since the last check (diffed against the
+// per-buffer baseline in s.lastLines via a common-prefix/common-suffix
+// comparison) are re-spell-checked; every other line's result is carried
+// over from s.lineDecors/s.lineDiags, shifted by the line-count delta if the
+// edit added or removed lines. This turns a recheck after typing a single
+// character into O(1) spell-check work instead of O(file size) — the common
+// case, since scheduleCheck fires on every buffer change.
+func (s *Spell) checkBuffer(bufID uint32) (lines []string, lineDecors map[uint32][]sdk.Decoration, lineDiags map[uint32][]sdk.Diagnostic, version uint64, ok bool) {
+	// Fetched before ReadBuffer so it's never newer than the content below;
+	// worst case it's slightly stale, and PublishDiagnostics's own
+	// version check on the server discards the result if so.
+	_, _, _, _, version, err := s.api.BufferInfo(bufID)
+	if err != nil {
+		return nil, nil, nil, 0, false
+	}
+	content, err := s.api.ReadBuffer(bufID)
+	if err != nil {
+		return nil, nil, nil, 0, false
+	}
+
+	s.mu.Lock()
+	path := s.bufPaths[bufID]
+	oldLines := s.lastLines[bufID]
+	oldLineDecors := s.lineDecors[bufID]
+	oldLineDiags := s.lineDiags[bufID]
+	s.mu.Unlock()
+
+	newLines := strings.Split(content, "\n")
+	lineDecors, lineDiags = s.diffAndCheck(path, oldLines, newLines, oldLineDecors, oldLineDiags)
+	return newLines, lineDecors, lineDiags, version, true
+}
+
+// diffAndCheck is checkBuffer's diff-and-recheck core, split out so it's
+// testable without a live sdk.Api connection (it touches only s.checker/
+// s.userWords via s.spell, not s.api). Given the previous check's line-keyed
+// results and the previous/new buffer content, it recomputes spell-check
+// results only for the lines that actually changed (a common-prefix/
+// common-suffix comparison against oldLines) and carries every other line's
+// cached result forward, shifted by the line-count delta if the edit added
+// or removed lines.
+func (s *Spell) diffAndCheck(path string, oldLines, newLines []string, oldLineDecors map[uint32][]sdk.Decoration, oldLineDiags map[uint32][]sdk.Diagnostic) (lineDecors map[uint32][]sdk.Decoration, lineDiags map[uint32][]sdk.Diagnostic) {
+	kind := fileKindForPath(path)
+
+	prefix := commonPrefixLen(oldLines, newLines)
+	suffix := commonSuffixLen(oldLines, newLines, prefix)
+	changeEndNew := len(newLines) - suffix
+	if changeEndNew < prefix {
+		changeEndNew = prefix
+	}
+	oldChangeEnd := len(oldLines) - suffix
+	delta := len(newLines) - len(oldLines)
+
+	lineDecors = make(map[uint32][]sdk.Decoration, len(oldLineDecors))
+	lineDiags = make(map[uint32][]sdk.Diagnostic, len(oldLineDiags))
+
+	// Unchanged leading lines carry over unshifted.
+	for line := 0; line < prefix; line++ {
+		l := uint32(line)
+		if d, ok := oldLineDecors[l]; ok {
+			lineDecors[l] = d
+		}
+		if d, ok := oldLineDiags[l]; ok {
+			lineDiags[l] = d
+		}
+	}
+	// Unchanged trailing lines carry over shifted by however many lines the
+	// edit added/removed in the middle.
+	for line := oldChangeEnd; line < len(oldLines); line++ {
+		l := uint32(line + delta)
+		if d, ok := oldLineDecors[uint32(line)]; ok {
+			lineDecors[l] = d
+		}
+		if d, ok := oldLineDiags[uint32(line)]; ok {
+			lineDiags[l] = d
+		}
+	}
+	// Only the changed middle range is actually re-spell-checked.
+	if kind != kindSkip {
+		for line := prefix; line < changeEndNew; line++ {
+			l := uint32(line)
+			ms := s.checkLineMisspellings(path, kind, newLines[line], l)
+			if len(ms) > 0 {
+				lineDecors[l] = misspellingsToDecors(ms)
+				lineDiags[l] = misspellingsToDiags(ms)
+			}
+		}
+	}
+
+	return lineDecors, lineDiags
 }
 
 // checkFileDiagnostics is checkBuffer's counterpart for a file read from
@@ -628,7 +781,11 @@ func pathsToClear(prev, found map[string]struct{}) []string {
 	return out
 }
 
-// scheduleCheck debounces re-checking a buffer by 500ms after a change.
+// checkDebounce is how long scheduleCheck waits after the last buffer change
+// before actually rechecking it.
+const checkDebounce = 250 * time.Millisecond
+
+// scheduleCheck debounces re-checking a buffer by checkDebounce after a change.
 func (s *Spell) scheduleCheck(bufID uint32) {
 	s.mu.Lock()
 	if t, ok := s.pending[bufID]; ok {
@@ -636,26 +793,40 @@ func (s *Spell) scheduleCheck(bufID uint32) {
 	}
 	s.generation[bufID]++
 	gen := s.generation[bufID]
-	s.pending[bufID] = time.AfterFunc(500*time.Millisecond, func() {
-		decors, diags, version, ok := s.checkBuffer(bufID)
-		s.applyCheckResult(bufID, gen, decors, diags, version, ok)
+	s.pending[bufID] = time.AfterFunc(checkDebounce, func() {
+		lines, lineDecors, lineDiags, version, ok := s.checkBuffer(bufID)
+		s.applyCheckResult(bufID, gen, lines, lineDecors, lineDiags, version, ok)
 	})
 	s.mu.Unlock()
 }
 
-// applyCheckResult stores a completed check's decorations/diagnostics for
-// bufID, unless gen has been superseded by a newer scheduleCheck call since
-// this check started — see the generation field's doc comment.
-func (s *Spell) applyCheckResult(bufID uint32, gen uint64, decors []sdk.Decoration, diags []sdk.Diagnostic, version uint64, ok bool) {
+// applyCheckResult stores a completed check's per-line results for bufID —
+// both the flat cache/publish forms and the line-keyed incremental-diff
+// baseline (lines/lineDecors/lineDiags) checkBuffer's next run will diff
+// against — unless gen has been superseded by a newer scheduleCheck call
+// since this check started. See the generation field's doc comment: a
+// superseded result's diff baseline is itself unreliable (it was computed
+// against content a newer check has already moved past), so it must be
+// discarded exactly like the flat cache write always was.
+func (s *Spell) applyCheckResult(bufID uint32, gen uint64, lines []string, lineDecors map[uint32][]sdk.Decoration, lineDiags map[uint32][]sdk.Diagnostic, version uint64, ok bool) {
 	s.mu.Lock()
 	delete(s.pending, bufID)
 	stale := s.generation[bufID] != gen
+	var diags []sdk.Diagnostic
 	if !stale {
-		s.cache[bufID] = decors
+		s.cache[bufID] = flattenDecors(lineDecors)
+		s.lastLines[bufID] = lines
+		s.lineDecors[bufID] = lineDecors
+		s.lineDiags[bufID] = lineDiags
+		diags = flattenDiags(lineDiags)
 	}
 	s.mu.Unlock()
 	if ok && !stale {
 		s.api.PublishDiagnostics(bufID, version, diags)
+		// Push the new decorations immediately rather than waiting for the
+		// client's next poll tick (up to ~360ms) on top of the debounce
+		// above — the two delays otherwise stack into a noticeable lag.
+		s.api.RefreshDecorations(bufID)
 	}
 }
 
@@ -680,6 +851,9 @@ func (s *Spell) onBufferClose(bufID uint32, _ string) {
 	delete(s.cache, bufID)
 	delete(s.bufPaths, bufID)
 	delete(s.generation, bufID)
+	delete(s.lastLines, bufID)
+	delete(s.lineDecors, bufID)
+	delete(s.lineDiags, bufID)
 }
 
 func (s *Spell) getDecorations(bufID uint32, _ uint64, _ sdk.Range) []sdk.Decoration {
@@ -765,6 +939,15 @@ func (s *Spell) applyFix(fixData string, index uint32) {
 func (s *Spell) invalidateAll() {
 	s.mu.Lock()
 	s.cache = make(map[uint32][]sdk.Decoration)
+	// Clear the incremental-diff baseline too — a dictionary add changes
+	// which words fail s.spell without changing any line's text, so a
+	// same-content diff against the old baseline would (correctly, but
+	// unhelpfully) find zero changed lines and carry every stale decoration
+	// straight through. Dropping the baseline forces checkBuffer to treat
+	// every line as changed on the next check.
+	s.lastLines = make(map[uint32][]string)
+	s.lineDecors = make(map[uint32]map[uint32][]sdk.Decoration)
+	s.lineDiags = make(map[uint32]map[uint32][]sdk.Diagnostic)
 	bufIDs := make([]uint32, 0, len(s.bufPaths))
 	for id := range s.bufPaths {
 		bufIDs = append(bufIDs, id)

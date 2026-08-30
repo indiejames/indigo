@@ -98,47 +98,104 @@ func TestDiffAndCheckOnlyRechecksChangedLine(t *testing.T) {
 	}
 }
 
+// poisonDecor builds a decoration carrying a real (JSON) FixData payload, so
+// tests can verify that a carried-forward, line-shifted decoration has both
+// its own Line field *and* its embedded fixPayload.Line rewritten to the new
+// line — moving the map key alone isn't enough, since GetDecorations
+// publishes decorations flattened, keyed by nothing but their own Line.
+func poisonDecor(t *testing.T, word string, line uint32) sdk.Decoration {
+	t.Helper()
+	b, err := json.Marshal(fixPayload{Word: word, Line: line, Col: 0})
+	if err != nil {
+		t.Fatalf("marshal fixPayload: %v", err)
+	}
+	return sdk.Decoration{Line: line, Col: 0, EndCol: uint32(len(word)), FixData: string(b)}
+}
+
+func poisonDiag(word string, line uint32) sdk.Diagnostic {
+	return sdk.Diagnostic{
+		Range: sdk.Range{
+			Start: sdk.Position{Line: line, Col: 0},
+			End:   sdk.Position{Line: line, Col: uint32(len(word))},
+		},
+		Message: "poison: " + word,
+	}
+}
+
+// decorPayload unmarshals a decoration's FixData and fails the test if it's
+// not valid JSON matching fixPayload — used to confirm a rebased decoration's
+// embedded line number, not just its top-level Line field.
+func decorPayload(t *testing.T, d sdk.Decoration) fixPayload {
+	t.Helper()
+	var payload fixPayload
+	if err := json.Unmarshal([]byte(d.FixData), &payload); err != nil {
+		t.Fatalf("unmarshal FixData %q: %v", d.FixData, err)
+	}
+	return payload
+}
+
 // TestDiffAndCheckShiftsCarriedLinesOnInsertedLine verifies that when an
 // edit inserts a line in the middle, unchanged lines before and after the
 // insertion point are both carried forward from cache (not recomputed —
-// again proven via a poison marker) and that the lines after the insertion
-// point are correctly renumbered by the line-count delta.
+// proven via a poison marker) and that the lines after the insertion point
+// are correctly renumbered: not just the result map's key, but the carried
+// decoration/diagnostic's own embedded line fields (Decoration.Line,
+// fixPayload.Line inside FixData, and Diagnostic.Range.Start/End.Line).
 func TestDiffAndCheckShiftsCarriedLinesOnInsertedLine(t *testing.T) {
 	s := newTestSpellWithChecker(t)
 
 	oldLines := []string{"one", "two", "three", "four"}
-	poisonFirst := sdk.Decoration{FixData: "poison-first"}
-	poisonLast := sdk.Decoration{FixData: "poison-last"}
 	oldLineDecors := map[uint32][]sdk.Decoration{
-		0: {poisonFirst},
-		3: {poisonLast}, // attached to "four"
+		0: {poisonDecor(t, "first", 0)},
+		3: {poisonDecor(t, "last", 3)}, // attached to "four"
+	}
+	oldLineDiags := map[uint32][]sdk.Diagnostic{
+		0: {poisonDiag("first", 0)},
+		3: {poisonDiag("last", 3)},
 	}
 
 	// Insert a new (misspelled) line after index 0.
 	newLines := []string{"one", "wrongwordxyz", "two", "three", "four"}
 
-	lineDecors, _ := s.diffAndCheck("notes.txt", oldLines, newLines, oldLineDecors, nil)
+	lineDecors, lineDiags := s.diffAndCheck("notes.txt", oldLines, newLines, oldLineDecors, oldLineDiags)
 
-	if got := lineDecors[0]; len(got) != 1 || got[0].FixData != "poison-first" {
-		t.Errorf("line 0 (unchanged) = %+v, want carried-forward poison marker", got)
+	// Line 0 (prefix, unshifted) must be untouched.
+	if got := lineDecors[0]; len(got) != 1 || got[0].Line != 0 || decorPayload(t, got[0]).Line != 0 {
+		t.Errorf("line 0 (unchanged) = %+v, want carried-forward poison marker at line 0", got)
 	}
+
 	// "four" was old line 3; after inserting one line before it, it must be
-	// carried forward to new line 4 — and, crucially, still be the *cached*
-	// (poisoned) entry, not a fresh (empty, since "four" is correctly
-	// spelled) recompute.
-	if got := lineDecors[4]; len(got) != 1 || got[0].FixData != "poison-last" {
-		t.Errorf("line 4 (shifted from old line 3, unchanged) = %+v, want carried-forward poison marker", got)
+	// carried forward to new line 4 with every embedded line reference
+	// (Decoration.Line, FixData's fixPayload.Line, and the diagnostic's
+	// Range) rewritten to 4, not left at the stale value 3.
+	gotDecors, ok := lineDecors[4]
+	if !ok || len(gotDecors) != 1 {
+		t.Fatalf("line 4 (shifted from old line 3) decors = %+v, want one carried-forward entry", gotDecors)
 	}
-	// The genuinely new line must be freshly checked and flagged.
+	if gotDecors[0].Line != 4 {
+		t.Errorf("line 4 decoration.Line = %d, want 4 (rebased, not stale 3)", gotDecors[0].Line)
+	}
+	if payload := decorPayload(t, gotDecors[0]); payload.Word != "last" || payload.Line != 4 {
+		t.Errorf("line 4 FixData payload = %+v, want {Word: last, Line: 4}", payload)
+	}
+	gotDiags, ok := lineDiags[4]
+	if !ok || len(gotDiags) != 1 {
+		t.Fatalf("line 4 diags = %+v, want one carried-forward entry", gotDiags)
+	}
+	if gotDiags[0].Range.Start.Line != 4 || gotDiags[0].Range.End.Line != 4 {
+		t.Errorf("line 4 diagnostic.Range = %+v, want Start/End.Line = 4 (rebased, not stale 3)", gotDiags[0].Range)
+	}
+
+	// The genuinely new line must be freshly checked and flagged, at its own
+	// (correct, freshly computed) line number.
 	got, ok := lineDecors[1]
 	if !ok || len(got) == 0 {
 		t.Fatalf("line 1 (newly inserted) has no decorations, want a flagged misspelling")
 	}
-	var payload fixPayload
-	if err := json.Unmarshal([]byte(got[0].FixData), &payload); err != nil {
-		t.Fatalf("unmarshal FixData: %v", err)
+	if got[0].Line != 1 {
+		t.Errorf("line 1 decoration.Line = %d, want 1", got[0].Line)
 	}
-	if payload.Word != "wrongwordxyz" {
+	if payload := decorPayload(t, got[0]); payload.Word != "wrongwordxyz" {
 		t.Errorf("line 1 flagged word = %q, want %q", payload.Word, "wrongwordxyz")
 	}
 	// Lines 2/3 ("two"/"three", shifted from old 1/2) were also unchanged
@@ -149,6 +206,81 @@ func TestDiffAndCheckShiftsCarriedLinesOnInsertedLine(t *testing.T) {
 	}
 	if got := lineDecors[3]; len(got) != 0 {
 		t.Errorf("line 3 = %+v, want no decorations", got)
+	}
+}
+
+// TestDiffAndCheckShiftsCarriedLinesOnDeletedLine is the deletion-side
+// counterpart: removing a line in the middle must both drop that line's
+// stale cached decoration entirely (rather than leaking it at some other
+// line) and shift every line after it down, with each carried entry's
+// embedded line fields rebased to the new (lower) line number.
+func TestDiffAndCheckShiftsCarriedLinesOnDeletedLine(t *testing.T) {
+	s := newTestSpellWithChecker(t)
+
+	oldLines := []string{"one", "two", "deletemexyz", "three", "four"}
+	oldLineDecors := map[uint32][]sdk.Decoration{
+		0: {poisonDecor(t, "first", 0)},
+		2: {poisonDecor(t, "deletemexyz", 2)}, // the line about to be deleted
+		3: {poisonDecor(t, "three-marker", 3)},
+		4: {poisonDecor(t, "four-marker", 4)},
+	}
+	oldLineDiags := map[uint32][]sdk.Diagnostic{
+		3: {poisonDiag("three-marker", 3)},
+		4: {poisonDiag("four-marker", 4)},
+	}
+
+	// Delete old line 2 ("deletemexyz").
+	newLines := []string{"one", "two", "three", "four"}
+
+	lineDecors, lineDiags := s.diffAndCheck("notes.txt", oldLines, newLines, oldLineDecors, oldLineDiags)
+
+	// Line 0 (prefix, unshifted) must be untouched.
+	if got := lineDecors[0]; len(got) != 1 || got[0].Line != 0 {
+		t.Errorf("line 0 (unchanged) = %+v, want carried-forward poison marker at line 0", got)
+	}
+
+	// old line 3 ("three") shifts down to new line 2.
+	gotDecors, ok := lineDecors[2]
+	if !ok || len(gotDecors) != 1 {
+		t.Fatalf("line 2 (shifted from old line 3) decors = %+v, want one carried-forward entry", gotDecors)
+	}
+	if gotDecors[0].Line != 2 {
+		t.Errorf("line 2 decoration.Line = %d, want 2 (rebased, not stale 3)", gotDecors[0].Line)
+	}
+	if payload := decorPayload(t, gotDecors[0]); payload.Word != "three-marker" || payload.Line != 2 {
+		t.Errorf("line 2 FixData payload = %+v, want {Word: three-marker, Line: 2}", payload)
+	}
+	gotDiags, ok := lineDiags[2]
+	if !ok || len(gotDiags) != 1 || gotDiags[0].Range.Start.Line != 2 || gotDiags[0].Range.End.Line != 2 {
+		t.Errorf("line 2 diags = %+v, want one entry with Start/End.Line = 2", gotDiags)
+	}
+
+	// old line 4 ("four") shifts down to new line 3.
+	gotDecors, ok = lineDecors[3]
+	if !ok || len(gotDecors) != 1 {
+		t.Fatalf("line 3 (shifted from old line 4) decors = %+v, want one carried-forward entry", gotDecors)
+	}
+	if gotDecors[0].Line != 3 {
+		t.Errorf("line 3 decoration.Line = %d, want 3 (rebased, not stale 4)", gotDecors[0].Line)
+	}
+	if payload := decorPayload(t, gotDecors[0]); payload.Word != "four-marker" || payload.Line != 3 {
+		t.Errorf("line 3 FixData payload = %+v, want {Word: four-marker, Line: 3}", payload)
+	}
+
+	// The deleted line's own stale decoration must not leak anywhere in the
+	// result (not at key 2, not at any other key).
+	for line, decors := range lineDecors {
+		for _, d := range decors {
+			if payload := decorPayload(t, d); payload.Word == "deletemexyz" {
+				t.Errorf("deleted line's decoration leaked into result at line %d: %+v", line, d)
+			}
+		}
+	}
+
+	// Only 4 lines exist now; nothing should be keyed at old indices beyond
+	// that.
+	if _, ok := lineDecors[4]; ok {
+		t.Errorf("lineDecors[4] present, want no entry (file only has 4 lines now)")
 	}
 }
 

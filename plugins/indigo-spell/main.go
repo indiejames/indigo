@@ -493,6 +493,49 @@ func misspellingsToDiags(ms []misspelling) []sdk.Diagnostic {
 	return diags
 }
 
+// rebaseDecors returns a copy of decors with each entry's Line — and, when
+// present, the embedded fixPayload.Line inside FixData — rewritten to
+// newLine. Used when a carried-forward line's cached decorations are shifted
+// by an inserted/deleted line elsewhere in the buffer: the map key moving
+// isn't enough, since GetDecorations publishes the entries' own Line field.
+func rebaseDecors(decors []sdk.Decoration, newLine uint32) []sdk.Decoration {
+	if len(decors) == 0 {
+		return decors
+	}
+	out := make([]sdk.Decoration, len(decors))
+	for i, d := range decors {
+		d.Line = newLine
+		if d.FixData != "" {
+			var payload fixPayload
+			if err := json.Unmarshal([]byte(d.FixData), &payload); err == nil {
+				payload.Line = newLine
+				if b, err := json.Marshal(payload); err == nil {
+					d.FixData = string(b)
+				}
+			}
+		}
+		out[i] = d
+	}
+	return out
+}
+
+// rebaseDiags returns a copy of diags with each entry's Range.Start/End.Line
+// rewritten to newLine — see rebaseDecors. Every diagnostic this plugin
+// produces (misspellingsToDiags) starts and ends on the same line, so both
+// bounds always move together.
+func rebaseDiags(diags []sdk.Diagnostic, newLine uint32) []sdk.Diagnostic {
+	if len(diags) == 0 {
+		return diags
+	}
+	out := make([]sdk.Diagnostic, len(diags))
+	for i, d := range diags {
+		d.Range.Start.Line = newLine
+		d.Range.End.Line = newLine
+		out[i] = d
+	}
+	return out
+}
+
 // flattenDecors/flattenDiags collapse a per-line result map (as produced and
 // stored by checkBuffer/applyCheckResult) into the flat slices GetDecorations
 // and PublishDiagnostics expect.
@@ -614,13 +657,24 @@ func (s *Spell) diffAndCheck(path string, oldLines, newLines []string, oldLineDe
 		}
 	}
 	// Unchanged trailing lines carry over shifted by however many lines the
-	// edit added/removed in the middle.
+	// edit added/removed in the middle. Moving the map key isn't enough — the
+	// entries themselves embed their line number (sdk.Decoration.Line,
+	// sdk.Diagnostic.Range's Start/End.Line, and FixData's serialized
+	// fixPayload.Line), which GetDecorations/PublishDiagnostics publish
+	// as-is; left at the old line number, a carried-forward decoration would
+	// render/report on the wrong line whenever delta != 0.
 	for line := oldChangeEnd; line < len(oldLines); line++ {
 		l := uint32(line + delta)
 		if d, ok := oldLineDecors[uint32(line)]; ok {
+			if delta != 0 {
+				d = rebaseDecors(d, l)
+			}
 			lineDecors[l] = d
 		}
 		if d, ok := oldLineDiags[uint32(line)]; ok {
+			if delta != 0 {
+				d = rebaseDiags(d, l)
+			}
 			lineDiags[l] = d
 		}
 	}

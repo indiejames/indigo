@@ -105,6 +105,7 @@ type rawSpan struct {
 	endCol   int
 	ansi     string
 	priority int
+	depth    int // set by sortSpansByNesting; number of same-line spans strictly containing this one
 }
 
 func extractSpans(query *sitter.Query, tree *sitter.Tree, content []byte) LineSpans {
@@ -131,28 +132,22 @@ func extractSpans(query *sitter.Query, tree *sitter.Tree, content []byte) LineSp
 
 			if startRow == endRow {
 				endCol := byteToRuneCol(lineAt(lines, endRow), int(node.EndPoint().Column))
-				raw = append(raw, rawSpan{startRow, startCol, endCol, ansi, prio})
+				raw = append(raw, rawSpan{line: startRow, startCol: startCol, endCol: endCol, ansi: ansi, priority: prio})
 			} else {
-				raw = append(raw, rawSpan{startRow, startCol, math.MaxInt, ansi, prio})
+				raw = append(raw, rawSpan{line: startRow, startCol: startCol, endCol: math.MaxInt, ansi: ansi, priority: prio})
 				for row := startRow + 1; row < endRow; row++ {
-					raw = append(raw, rawSpan{row, 0, math.MaxInt, ansi, prio})
+					raw = append(raw, rawSpan{line: row, startCol: 0, endCol: math.MaxInt, ansi: ansi, priority: prio})
 				}
 				endCol := byteToRuneCol(lineAt(lines, endRow), int(node.EndPoint().Column))
-				raw = append(raw, rawSpan{endRow, 0, endCol, ansi, prio})
+				raw = append(raw, rawSpan{line: endRow, startCol: 0, endCol: endCol, ansi: ansi, priority: prio})
 			}
 		}
 	}
 
-	// Group by line first and sort each line's spans independently — the
-	// nesting-aware comparator below is only meaningful (and only guaranteed
-	// transitive) when comparing spans that share a line; column ranges from
-	// different lines are unrelated numbers, and a single sort.SliceStable
-	// over the whole file mixed same-line "narrower wins" decisions with
-	// cross-line priority-only decisions, which combined into cycles (e.g.
-	// line A's high-priority @comment sorting ahead of line B's
-	// @markup.heading purely on priority, while line B's own narrower
-	// @keyword sorts ahead of its line's @comment on nesting) and produced
-	// inconsistent results depending on sort implementation details.
+	// Group by line first and order each line's spans independently — column
+	// ranges from different lines are unrelated numbers, so a comparator
+	// that gives nesting any weight can only be transitive when every pair
+	// it compares shares a line.
 	byLine := make(map[int][]rawSpan)
 	for _, s := range raw {
 		byLine[s.line] = append(byLine[s.line], s)
@@ -160,28 +155,7 @@ func extractSpans(query *sitter.Query, tree *sitter.Tree, content []byte) LineSp
 
 	result := make(LineSpans, len(byLine))
 	for line, spans := range byLine {
-		// Highest priority first so the first match in renderLineRunes wins,
-		// except when one span is strictly nested inside another (e.g.
-		// gitcommit's (branch) capture sitting inside its enclosing
-		// (generated_comment)'s @comment span, or a conventional-commit
-		// (subject_prefix) inside its (subject)'s @markup.heading) — there
-		// the narrower, more specific capture always wins over its wider
-		// ancestor regardless of the priority table, matching how a query
-		// author nests captures on purpose. Spans with identical bounds
-		// (both "contain" each other) fall through to the priority table as
-		// before.
-		sort.SliceStable(spans, func(i, j int) bool {
-			a, b := spans[i], spans[j]
-			aContainsB := a.startCol <= b.startCol && a.endCol >= b.endCol
-			bContainsA := b.startCol <= a.startCol && b.endCol >= a.endCol
-			switch {
-			case aContainsB && !bContainsA:
-				return false
-			case bContainsA && !aContainsB:
-				return true
-			}
-			return a.priority > b.priority
-		})
+		sortSpansByNesting(spans)
 		lineSpans := make([]Span, len(spans))
 		for i, s := range spans {
 			lineSpans[i] = Span{s.startCol, s.endCol, s.ansi}
@@ -189,6 +163,58 @@ func extractSpans(query *sitter.Query, tree *sitter.Tree, content []byte) LineSp
 		result[line] = lineSpans
 	}
 	return result
+}
+
+// sortSpansByNesting orders spans (all on the same line — see extractSpans)
+// so that renderLineRunes, which just takes the first span covering a given
+// column, picks the most specific one: the priority table (e.g. @comment at
+// 100, the highest entry) decides between disjoint or identically-bounded
+// spans, but a capture nested inside another — e.g. gitcommit's (branch)
+// sitting inside its enclosing (generated_comment)'s @comment span, or a
+// conventional-commit (subject_prefix) inside its (subject)'s
+// @markup.heading — always wins over its wider ancestor regardless of
+// priority, matching how a query author nests captures on purpose.
+//
+// This orders by (nesting depth desc, priority desc) rather than comparing
+// containment pairwise: depth is computed once per span before sorting, so
+// the comparator is a plain lexicographic comparison of two numbers already
+// attached to each element — a strict weak ordering by construction, unlike
+// a pairwise "does A contain B" comparator, which is only a partial order
+// over containment and can cycle once a third, disjoint span with an
+// in-between priority is added (a nested span outranks its ancestor by
+// containment, the ancestor outranks the disjoint span by priority, but the
+// disjoint span can still outrank the nested span by priority too — A<B,
+// B<C, C<A). Depth avoids this because it's never compared pairwise against
+// unrelated spans' bounds; it's just an int computed once, so ties can only
+// ever fall through to the same never-cyclic priority comparison.
+func sortSpansByNesting(spans []rawSpan) {
+	for i := range spans {
+		depth := 0
+		for j := range spans {
+			if i != j && strictlyContainsSpan(spans[j], spans[i]) {
+				depth++
+			}
+		}
+		spans[i].depth = depth
+	}
+	sort.SliceStable(spans, func(i, j int) bool {
+		if spans[i].depth != spans[j].depth {
+			return spans[i].depth > spans[j].depth
+		}
+		return spans[i].priority > spans[j].priority
+	})
+}
+
+// strictlyContainsSpan reports whether outer's column range fully contains
+// inner's, and the two aren't identically bounded (in which case neither
+// "contains" the other for nesting-depth purposes — they're tied, decided by
+// priority like any other same-depth pair).
+func strictlyContainsSpan(outer, inner rawSpan) bool {
+	if outer.startCol > inner.startCol || outer.endCol < inner.endCol {
+		return false
+	}
+	sameBounds := inner.startCol <= outer.startCol && inner.endCol >= outer.endCol
+	return !sameBounds
 }
 
 // --- tree-sitter text objects ---

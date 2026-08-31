@@ -417,6 +417,9 @@ func (g *GitPlugin) onToggleBlame(_ string, ctx sdk.KeyContext) sdk.KeyResponse 
 	g.bufs[ctx.BufID] = bs
 	root := g.repoRoot
 	g.mu.Unlock()
+	if root == "" {
+		root = findRepoRoot(path)
+	}
 
 	bufID, clientID := ctx.BufID, ctx.ClientID
 	go func() {
@@ -644,8 +647,10 @@ func writeTemp(pattern, content string) (string, error) {
 }
 
 // blameHeaderRe matches a `git blame --porcelain` line-info header:
-// "<40-hex-hash> <origLine> <finalLine> [<numLines>]".
-var blameHeaderRe = regexp.MustCompile(`^([0-9a-f]{40}) (\d+) (\d+)(?: \d+)?$`)
+// "<hash> <origLine> <finalLine> [<numLines>]", where hash is 40 hex chars
+// for a SHA-1 repo or 64 hex chars for a SHA-256 repo (git's experimental
+// object format).
+var blameHeaderRe = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64}) (\d+) (\d+)(?: \d+)?$`)
 
 // parseBlamePorcelain parses `git blame --porcelain` output into a map of
 // 1-indexed final-file line numbers to blameLine. Porcelain repeats a

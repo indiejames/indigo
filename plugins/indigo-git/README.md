@@ -36,7 +36,7 @@ Both wrap around the buffer (from the last hunk back to the first, and vice vers
 
 `alt+b`, or **Command menu → Git → Toggle blame**, toggles per-buffer end-of-line blame annotations:
 
-```
+```go
 func doThing() {              a1b2c3d Jane Doe, 3 days ago
 ```
 

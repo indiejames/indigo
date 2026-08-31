@@ -126,6 +126,24 @@ func TestParseBlamePorcelainFirstAndRepeatOccurrence(t *testing.T) {
 	}
 }
 
+func TestParseBlamePorcelainSHA256Hash(t *testing.T) {
+	// git's experimental SHA-256 object format uses 64-hex-char names instead
+	// of SHA-1's 40; the header regex must accept both.
+	hash64 := "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789ab"[:64]
+	out := hash64 + " 1 1 1\n" +
+		"author Jane Doe\n" +
+		"author-time 1700000000\n" +
+		"summary Fix the thing\n" +
+		"filename foo.go\n" +
+		"\tline one\n"
+
+	blame := parseBlamePorcelain(out)
+	bl, ok := blame[1]
+	if !ok || bl.hash != hash64 || bl.author != "Jane Doe" {
+		t.Fatalf("line 1 = %+v, ok=%v, want parsed SHA-256 blame entry", bl, ok)
+	}
+}
+
 func TestIsZeroHash(t *testing.T) {
 	if !isZeroHash("0000000000000000000000000000000000000000") {
 		t.Fatal("expected all-zero hash to be recognized")

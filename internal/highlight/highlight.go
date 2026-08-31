@@ -143,14 +143,50 @@ func extractSpans(query *sitter.Query, tree *sitter.Tree, content []byte) LineSp
 		}
 	}
 
-	// Highest priority first so the first match in renderLineRunes wins.
-	sort.SliceStable(raw, func(i, j int) bool {
-		return raw[i].priority > raw[j].priority
-	})
-
-	result := make(LineSpans)
+	// Group by line first and sort each line's spans independently — the
+	// nesting-aware comparator below is only meaningful (and only guaranteed
+	// transitive) when comparing spans that share a line; column ranges from
+	// different lines are unrelated numbers, and a single sort.SliceStable
+	// over the whole file mixed same-line "narrower wins" decisions with
+	// cross-line priority-only decisions, which combined into cycles (e.g.
+	// line A's high-priority @comment sorting ahead of line B's
+	// @markup.heading purely on priority, while line B's own narrower
+	// @keyword sorts ahead of its line's @comment on nesting) and produced
+	// inconsistent results depending on sort implementation details.
+	byLine := make(map[int][]rawSpan)
 	for _, s := range raw {
-		result[s.line] = append(result[s.line], Span{s.startCol, s.endCol, s.ansi})
+		byLine[s.line] = append(byLine[s.line], s)
+	}
+
+	result := make(LineSpans, len(byLine))
+	for line, spans := range byLine {
+		// Highest priority first so the first match in renderLineRunes wins,
+		// except when one span is strictly nested inside another (e.g.
+		// gitcommit's (branch) capture sitting inside its enclosing
+		// (generated_comment)'s @comment span, or a conventional-commit
+		// (subject_prefix) inside its (subject)'s @markup.heading) — there
+		// the narrower, more specific capture always wins over its wider
+		// ancestor regardless of the priority table, matching how a query
+		// author nests captures on purpose. Spans with identical bounds
+		// (both "contain" each other) fall through to the priority table as
+		// before.
+		sort.SliceStable(spans, func(i, j int) bool {
+			a, b := spans[i], spans[j]
+			aContainsB := a.startCol <= b.startCol && a.endCol >= b.endCol
+			bContainsA := b.startCol <= a.startCol && b.endCol >= a.endCol
+			switch {
+			case aContainsB && !bContainsA:
+				return false
+			case bContainsA && !aContainsB:
+				return true
+			}
+			return a.priority > b.priority
+		})
+		lineSpans := make([]Span, len(spans))
+		for i, s := range spans {
+			lineSpans[i] = Span{s.startCol, s.endCol, s.ansi}
+		}
+		result[line] = lineSpans
 	}
 	return result
 }

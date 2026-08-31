@@ -585,6 +585,11 @@ func executeMacroRecordToggle(m Model) (tea.Model, tea.Cmd) {
 // sequence (including any RPCs/side effects individual keys trigger).
 func executeMacroReplay(m Model) (tea.Model, tea.Cmd) {
 	if m.macroRecording {
+		// Flag this rejection for Update's tea.KeyMsg case: this @ press
+		// must not itself be recorded into the in-progress macro, or
+		// replaying the finished macro would re-trigger a (now unblocked)
+		// replay of itself — see macroReplayBlocked's doc comment.
+		m.macroReplayBlocked = true
 		m = m.pushStatus("can't replay while recording (press q to stop)")
 		return m, nil
 	}

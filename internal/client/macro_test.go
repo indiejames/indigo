@@ -159,6 +159,57 @@ func TestMacroRecordLiteralQInInsertMode(t *testing.T) {
 	}
 }
 
+// TestMacroExcludesRejectedReplayFromRecording is a regression test for a
+// self-referential-replay bug: pressing @ in Normal mode while a recording
+// is in progress is rejected by executeMacroReplay (no nested replay runs
+// at that moment) — but without macroReplayBlocked's special handling, that
+// rejected @ keypress would still get *recorded* into the macro like any
+// other key. Later, replaying the finished macro would redeliver that
+// recorded @ — no longer "while recording" at that point, so it would
+// actually run — scheduling another full replay of the same macro, which
+// itself contains the same @, recursing without end. Excluding the rejected
+// @ from macroKeys prevents this at the root: @ never appears in lastMacro
+// at all, so a replay can never re-trigger itself.
+func TestMacroExcludesRejectedReplayFromRecording(t *testing.T) {
+	m := newTestModel("one\ntwo\n")
+	m.rpc = &RPC{} // zero-value RPC is safe: ClientID() just reads a field, no dial
+
+	m = runKeys(t, m,
+		fakeKey("q"),   // start recording
+		fakeKey("i"),   // enter insert mode
+		fakeKey("x"),   // literal 'x'
+		fakeKey("esc"), // back to normal
+		fakeKey("@"),   // replay attempt while recording — rejected, must NOT be recorded
+		fakeKey("q"),   // stop recording
+	)
+
+	if m.macroRecording {
+		t.Fatal("recording should have stopped by the final q")
+	}
+	if m.macroReplayBlocked {
+		t.Error("macroReplayBlocked left set — should be cleared the moment it's consumed")
+	}
+	want := []string{"i", "x", "esc"}
+	if len(m.lastMacro) != len(want) {
+		t.Fatalf("lastMacro = %v, want keys %v (no @)", m.lastMacro, want)
+	}
+	for i, k := range want {
+		if got := m.lastMacro[i].String(); got != k {
+			t.Errorf("lastMacro[%d] = %q, want %q", i, got, k)
+		}
+	}
+
+	// Replaying the finished macro on a fresh line must apply the recorded
+	// edit exactly once, not recurse — there's no @ left in the sequence to
+	// re-trigger executeMacroReplay.
+	m = runKeys(t, m, fakeKey("j")) // move to "two"
+	m = runKeys(t, m, m.lastMacro...)
+	want2 := "xone\nxtwo\n"
+	if got := m.buf.Content(); got != want2 {
+		t.Errorf("buffer after replay = %q, want %q", got, want2)
+	}
+}
+
 // TestMacroRecordToggleTwiceIsEmptyMacro verifies immediately starting and
 // stopping recording (no keys typed in between) produces an empty, harmless
 // macro rather than one containing stray state.

@@ -811,6 +811,14 @@ type Model struct {
 	macroRecording bool
 	macroKeys      []tea.KeyMsg
 	lastMacro      []tea.KeyMsg
+	// macroReplayBlocked is set by executeMacroReplay when it refuses a @
+	// press because a recording is in progress, and read (and cleared) by
+	// Update's tea.KeyMsg case right after — see that case for why: without
+	// it, the rejected @ would itself get recorded, and replaying the
+	// finished macro would then re-invoke @ (now recording-free, so it
+	// actually runs), which schedules another full replay of the same
+	// macro — containing the same @ — recursing without end.
+	macroReplayBlocked bool
 
 	// Plugin help entries loaded at startup for the ? popup.
 	pluginBindings []ClientPluginBinding
@@ -1614,7 +1622,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// that start/stop a recording (nm.macroRecording flips relative to
 		// wasRecording for those), while still capturing every other key
 		// across any mode a recording spans (insert, search, popups, ...).
-		if wasRecording && nm.macroRecording {
+		// A Normal-mode @ that executeMacroReplay rejected because a
+		// recording is in progress is excluded too (see macroReplayBlocked's
+		// doc comment) — everywhere else (Insert/Search/Command mode, where
+		// @ is never bound to replay at all) it's just a literal character
+		// and is recorded normally.
+		if nm.macroReplayBlocked {
+			nm.macroReplayBlocked = false
+		} else if wasRecording && nm.macroRecording {
 			nm.macroKeys = append(nm.macroKeys, msg)
 		}
 		// Only a vertical move (moveCursor's dLine!=0/dCol==0 branch) sets

@@ -145,6 +145,8 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 | `Mj` / `Mk`  | Move current/selected line(s) down / up      |
 | `Shift+Down` / `Shift+Up` | Move current/selected line(s) down / up (repeatable) |
 | `u` / `U`    | Undo / redo                                  |
+| `q`          | Start/stop recording a macro                 |
+| `@`          | Replay the last recorded macro               |
 | `K`          | Show hover documentation (LSP)               |
 | `/`          | Enter search mode                            |
 | `n` / `N`    | Next / previous search match                 |
@@ -297,6 +299,8 @@ Use `:grep [pattern]` for workspace-wide search across all files.
 **Auto-formatting** — On `:w` with `format_on_save = true`, indigo runs the appropriate formatter (gofmt, prettier, rustfmt, etc.) automatically. See [Language Support](docs/language-support.md) for the full list.
 
 **Linting** — On `:w`, indigo runs the appropriate linter (golangci-lint, eslint, ruff, cargo clippy, etc.) asynchronously and merges its results with LSP diagnostics, so they show up the same way (gutter markers, the `D`-popup) with no extra keybinding needed. See [Configuration](docs/configuration.md#linters) for the built-in defaults and how to add custom linters.
+
+**Macros** — Press `q` to start recording, `q` again to stop, and `@` to replay the recorded keys. There's a single macro slot (no named registers) and it isn't persisted — it's gone when indigo exits, same as a Vim register would be without `viminfo`/`shada`.
 
 **Multi-buffer** — Open multiple files in the same session. A tab bar appears when more than one buffer is open. Use `]b` / `[b` or `Ctrl+P` to navigate.
 

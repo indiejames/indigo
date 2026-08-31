@@ -802,6 +802,16 @@ type Model struct {
 	// Mark for deferred selection: set with z, select-to with Z.
 	mark *document.Pos
 
+	// Macro recording: a single, in-memory-only slot (no named registers,
+	// no persistence — see the design discussion this followed). q toggles
+	// recording; every key seen by Update while macroRecording is true gets
+	// appended to macroKeys, except the q keypresses that started/stopped
+	// the recording itself (Update's tea.KeyMsg case excludes those by
+	// comparing macroRecording before/after handleKey). @ replays lastMacro.
+	macroRecording bool
+	macroKeys      []tea.KeyMsg
+	lastMacro      []tea.KeyMsg
+
 	// Plugin help entries loaded at startup for the ? popup.
 	pluginBindings []ClientPluginBinding
 
@@ -1592,11 +1602,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		prevLine := m.cursor.Line
 		prevTopLine := m.topLine
 		prevSel := copySel(m.sel)
+		wasRecording := m.macroRecording
 		m.goalColActive = false
 		newModel, cmd := m.handleKey(msg)
 		nm, ok := newModel.(Model)
 		if !ok {
 			return newModel, cmd
+		}
+		// Record this key iff recording was already active both before and
+		// after handling it — that excludes exactly the two q keypresses
+		// that start/stop a recording (nm.macroRecording flips relative to
+		// wasRecording for those), while still capturing every other key
+		// across any mode a recording spans (insert, search, popups, ...).
+		if wasRecording && nm.macroRecording {
+			nm.macroKeys = append(nm.macroKeys, msg)
 		}
 		// Only a vertical move (moveCursor's dLine!=0/dCol==0 branch) sets
 		// goalColActive; any other key — horizontal movement, edits, jumps —

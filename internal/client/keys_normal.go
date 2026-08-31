@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -557,6 +558,51 @@ func executeSelectToMark(m Model) (tea.Model, tea.Cmd) {
 	m.sel = &Selection{Anchor: *m.mark, Head: m.cursor}
 	m = m.pushStatus("")
 	return m, nil
+}
+
+// executeMacroRecordToggle starts or stops recording into the single macro
+// slot. The q keypress itself is never part of the recorded sequence — see
+// Update's tea.KeyMsg case, which excludes it by comparing macroRecording
+// before and after this call.
+func executeMacroRecordToggle(m Model) (tea.Model, tea.Cmd) {
+	if m.macroRecording {
+		m.macroRecording = false
+		m.lastMacro = m.macroKeys
+		m.macroKeys = nil
+		m = m.pushStatus(fmt.Sprintf("macro recorded (%d keys)", len(m.lastMacro)))
+		return m, nil
+	}
+	m.macroRecording = true
+	m.macroKeys = []tea.KeyMsg{}
+	m = m.pushStatus("recording macro... (q to stop)")
+	return m, nil
+}
+
+// executeMacroReplay replays the last recorded macro by resynthesizing its
+// keys as tea.KeyMsg values and feeding them back through Update, one at a
+// time and in order, via tea.Sequence — the same dispatch path each key took
+// the first time, so replay is indistinguishable from the user retyping the
+// sequence (including any RPCs/side effects individual keys trigger).
+func executeMacroReplay(m Model) (tea.Model, tea.Cmd) {
+	if m.macroRecording {
+		// Flag this rejection for Update's tea.KeyMsg case: this @ press
+		// must not itself be recorded into the in-progress macro, or
+		// replaying the finished macro would re-trigger a (now unblocked)
+		// replay of itself — see macroReplayBlocked's doc comment.
+		m.macroReplayBlocked = true
+		m = m.pushStatus("can't replay while recording (press q to stop)")
+		return m, nil
+	}
+	if len(m.lastMacro) == 0 {
+		m = m.pushStatus("no macro recorded (press q to record one)")
+		return m, nil
+	}
+	cmds := make([]tea.Cmd, len(m.lastMacro))
+	for i, key := range m.lastMacro {
+		key := key
+		cmds[i] = func() tea.Msg { return key }
+	}
+	return m, tea.Sequence(cmds...)
 }
 
 func executeJumpBack(m Model) (tea.Model, tea.Cmd) {

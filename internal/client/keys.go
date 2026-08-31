@@ -123,6 +123,8 @@ var prefixCmds = []command{
 	{key: "alt+s", name: "split-selection-into-cursors", label: "Split selection into cursors", execute: executeSplitSelectionIntoCursors},
 	{key: "z", name: "set-mark", label: "Set mark", execute: executeSetMark},
 	{key: "Z", name: "select-to-mark", label: "Select to mark", execute: executeSelectToMark},
+	{key: "q", name: "macro-record-toggle", label: "Start/stop recording macro", execute: executeMacroRecordToggle},
+	{key: "@", name: "macro-replay", label: "Replay macro", execute: executeMacroReplay},
 	{key: ">", name: "indent", label: "Indent", execute: executeIndent},
 	{key: "<", name: "unindent", label: "Unindent", execute: executeUnindent},
 	// Move current line (or selected lines) up/down, swapping with the

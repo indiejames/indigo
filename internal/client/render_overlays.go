@@ -975,6 +975,8 @@ var helpEntries = []helpEntry{
 	{key: "y", desc: "Yank (copy) selection, or character under cursor if none"},
 	{key: "u", desc: "Undo"},
 	{key: "U", desc: "Redo"},
+	{key: "q", desc: "Start/stop recording a macro"},
+	{key: "@", desc: "Replay the last recorded macro"},
 	{key: ">", desc: "Indent selected line(s)"},
 	{key: "<", desc: "Unindent selected line(s)"},
 	{key: ""},

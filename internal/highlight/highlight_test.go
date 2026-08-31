@@ -58,6 +58,69 @@ func TestHighlightNilSafe(t *testing.T) {
 	}
 }
 
+// rawWinnerAt mirrors renderLineRunes' spanIdxAt: the first span (post-sort)
+// whose range covers col.
+func rawWinnerAt(spans []rawSpan, col int) (rawSpan, bool) {
+	for _, s := range spans {
+		if col >= s.startCol && col < s.endCol {
+			return s, true
+		}
+	}
+	return rawSpan{}, false
+}
+
+// TestSortSpansByNestingHandlesNestedAndDisjointSpans is a regression test
+// for a real cycle in the priority-only-among-disjoint-spans, containment-
+// among-nested-spans comparator this replaced: with A (cols 0-10, priority
+// 100) containing B (cols 2-5, priority 70), and a third span C (cols
+// 15-20, priority 90) disjoint from both, the old pairwise comparator gave
+// B < A (nesting), A < C (priority, 100 > 90), and C < B (priority, 90 >
+// 70) — a cycle (B < A < C < B) that made sort.SliceStable's result depend
+// on implementation details and input order rather than being well-defined.
+// Depth-based ordering has no such cycle: B (nested one level) always sorts
+// before both top-level spans, and A/C (both depth 0) fall back to
+// priority.
+func TestSortSpansByNestingHandlesNestedAndDisjointSpans(t *testing.T) {
+	a := rawSpan{line: 0, startCol: 0, endCol: 10, ansi: "A", priority: 100}
+	b := rawSpan{line: 0, startCol: 2, endCol: 5, ansi: "B", priority: 70}
+	c := rawSpan{line: 0, startCol: 15, endCol: 20, ansi: "C", priority: 90}
+
+	orderings := [][]rawSpan{
+		{a, b, c},
+		{b, a, c},
+		{c, b, a},
+		{b, c, a},
+		{a, c, b},
+		{c, a, b},
+	}
+	for _, spans := range orderings {
+		spans := append([]rawSpan(nil), spans...)
+		sortSpansByNesting(spans)
+
+		// Inside B's range, the nested span must win over its ancestor A.
+		if w, ok := rawWinnerAt(spans, 3); !ok || w.ansi != "B" {
+			t.Errorf("input order %v: winner at col 3 = %+v, want B", spanAnsis(spans), w)
+		}
+		// Inside A's range but outside B, A is the only span covering it.
+		if w, ok := rawWinnerAt(spans, 7); !ok || w.ansi != "A" {
+			t.Errorf("input order %v: winner at col 7 = %+v, want A", spanAnsis(spans), w)
+		}
+		// C is disjoint from A/B and must win in its own range regardless
+		// of A's higher priority.
+		if w, ok := rawWinnerAt(spans, 17); !ok || w.ansi != "C" {
+			t.Errorf("input order %v: winner at col 17 = %+v, want C", spanAnsis(spans), w)
+		}
+	}
+}
+
+func spanAnsis(spans []rawSpan) []string {
+	out := make([]string, len(spans))
+	for i, s := range spans {
+		out[i] = s.ansi
+	}
+	return out
+}
+
 func TestHighlightEmptyContent(t *testing.T) {
 	var h *Highlighter
 	if spans := h.Highlight([]byte{}); spans != nil {

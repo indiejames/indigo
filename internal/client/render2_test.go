@@ -11,6 +11,7 @@ import (
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/highlight"
 	"github.com/indiejames/indigo/internal/theme"
 )
 
@@ -41,6 +42,53 @@ func TestRenderLineRunesEmpty(t *testing.T) {
 	renderLineRunes(&sb, []rune{}, -1, -1, -1, nil, nil, nil)
 	if sb.String() != "" {
 		t.Errorf("empty runes: got %q, want empty", sb.String())
+	}
+}
+
+// TestRenderLineRunesNestedSpanWinsOverEnclosingSpan is a regression test
+// for renderLineRunes' half of the nested-capture rendering fix (see
+// internal/highlight's sortSpansByNesting, which is responsible for putting
+// spans in this winning-first order — this test locks down the other half
+// of the contract: given spans already in that order, spanIdxAt's "first
+// span covering this column wins" must actually surface the narrower,
+// nested span at their overlap rather than the wider one, on a line shaped
+// like a real gitcommit hint ("# On branch main", where a wide @comment
+// span covers the whole line and a narrower @markup.link span nested
+// inside it covers just "main") plus a third span disjoint from both
+// (mirroring a separate hint elsewhere on the same physical line).
+func TestRenderLineRunesNestedSpanWinsOverEnclosingSpan(t *testing.T) {
+	const (
+		outerANSI    = "\x1b[38;2;1;1;1m"
+		nestedANSI   = "\x1b[38;2;2;2;2m"
+		disjointANSI = "\x1b[38;2;3;3;3m"
+	)
+	line := []rune("# On branch main HEAD")
+	//              0123456789012345678901
+	//                        1111111111222
+	spans := []highlight.Span{
+		// Nested span must come first: it's the winner extractSpans already
+		// resolved for the overlap with the outer span below.
+		{StartCol: 12, EndCol: 16, ANSI: nestedANSI},   // "main"
+		{StartCol: 0, EndCol: 17, ANSI: outerANSI},     // "# On branch main" (the enclosing comment)
+		{StartCol: 17, EndCol: 21, ANSI: disjointANSI}, // "HEAD" — disjoint from both
+	}
+
+	var sb strings.Builder
+	renderLineRunes(&sb, line, -1, -1, -1, spans, nil, nil)
+	got := sb.String()
+
+	nestedText := outerANSI + "main"
+	if strings.Contains(got, nestedText) {
+		t.Errorf("rendered = %q: \"main\" was styled with the outer span's ANSI (%q) instead of the nested span's (%q)", got, outerANSI, nestedANSI)
+	}
+	if !strings.Contains(got, nestedANSI+"main") {
+		t.Errorf("rendered = %q, want it to contain %q (nested span wins over its enclosing span)", got, nestedANSI+"main")
+	}
+	if !strings.Contains(got, disjointANSI+"HEAD") {
+		t.Errorf("rendered = %q, want it to contain %q (disjoint span renders independently of the nested/outer pair)", got, disjointANSI+"HEAD")
+	}
+	if plain := ansi.Strip(got); plain != string(line) {
+		t.Errorf("stripped rendered text = %q, want %q (no characters lost)", plain, string(line))
 	}
 }
 

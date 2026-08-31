@@ -1,6 +1,7 @@
 package client
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -203,6 +204,120 @@ func TestRenderLineChunkSkipsStaleSpanPastLineEnd(t *testing.T) {
 
 	if strings.Contains(rendered, staleColor) {
 		t.Errorf("stale out-of-range span should be skipped entirely, rendered = %q", rendered)
+	}
+}
+
+// TestReparseHighlightStampsIncreasingSeq verifies each reparseHighlight
+// call bumps Model.hlSeq (shared across value-copies via its pointer — see
+// hlSeq's doc comment) and stamps the new value into the highlightMsg its
+// returned Cmd produces.
+func TestReparseHighlightStampsIncreasingSeq(t *testing.T) {
+	m := newAutoPairGoTestModel(t, "package main\n")
+	m.hlSeq = new(uint64)
+
+	cmd1 := m.reparseHighlight()
+	if cmd1 == nil {
+		t.Fatal("reparseHighlight() = nil Cmd, want non-nil")
+	}
+	msg1, ok := cmd1().(highlightMsg)
+	if !ok {
+		t.Fatalf("cmd1() = %T, want highlightMsg", cmd1())
+	}
+
+	cmd2 := m.reparseHighlight()
+	msg2, ok := cmd2().(highlightMsg)
+	if !ok {
+		t.Fatalf("cmd2() = %T, want highlightMsg", cmd2())
+	}
+
+	if msg1.seq == 0 {
+		t.Error("first highlightMsg.seq = 0, want a positive sequence number")
+	}
+	if msg2.seq <= msg1.seq {
+		t.Errorf("second highlightMsg.seq = %d, want it greater than the first's %d", msg2.seq, msg1.seq)
+	}
+}
+
+// TestHighlightMsgDiscardsStaleSequence verifies the highlightMsg handler
+// discards a result whose seq no longer matches Model.hlSeq's current
+// value — i.e. a highlightMsg superseded by a later reparseHighlight call
+// arriving after that later one already landed.
+func TestHighlightMsgDiscardsStaleSequence(t *testing.T) {
+	m := newTestModel("")
+	m.hlSeq = new(uint64)
+	*m.hlSeq = 2 // as if two reparseHighlight requests have been issued so far
+
+	current := highlight.LineSpans{0: {{StartCol: 0, EndCol: 1, ANSI: "current"}}}
+	stale := highlight.LineSpans{0: {{StartCol: 0, EndCol: 1, ANSI: "stale"}}}
+
+	// The current (seq 2) result arrives and is applied.
+	m2, _ := m.Update(highlightMsg{spans: current, seq: 2})
+	got := m2.(Model)
+	if !reflect.DeepEqual(got.hlSpans, current) {
+		t.Fatalf("setup: current-seq highlightMsg wasn't applied, hlSpans = %v", got.hlSpans)
+	}
+
+	// An older (seq 1) result arriving late must be discarded, not
+	// overwrite the current spans already applied.
+	m3, _ := got.Update(highlightMsg{spans: stale, seq: 1})
+	got3 := m3.(Model)
+	if !reflect.DeepEqual(got3.hlSpans, current) {
+		t.Errorf("stale highlightMsg (seq 1) overwrote current spans (seq 2): hlSpans = %v", got3.hlSpans)
+	}
+}
+
+// TestSetFileTypeAutoInvalidatesOlderInFlightHighlight is an end-to-end
+// regression test for the scenario the sequencing exists to prevent: a
+// slow ":set ft=<lang>" reparse still in flight when ":set ft=auto"
+// supersedes it must not have its late-arriving result overwrite the
+// newer, auto-detected highlighter's spans.
+func TestSetFileTypeAutoInvalidatesOlderInFlightHighlight(t *testing.T) {
+	if highlight.NewForKey("py") == nil {
+		t.Skip("no Python highlighter registered; run with -tags lang_all (or lang_py)")
+	}
+	if highlight.New("test.go") == nil {
+		t.Skip("no Go highlighter registered; run with -tags lang_all (or lang_go)")
+	}
+	m := newTestModel("def foo():\n    pass\n")
+	m.filePath = "test.go"
+	m.cfg = &config.Config{}
+	m.hlSeq = new(uint64)
+
+	m.cmdBuf = "set ft=py"
+	m1, cmd1 := m.executeCommand()
+	got1 := m1.(Model)
+	if cmd1 == nil {
+		t.Fatal("set ft=py: reparseHighlight cmd = nil")
+	}
+	staleMsg, ok := cmd1().(highlightMsg)
+	if !ok {
+		t.Fatalf("set ft=py: cmd1() = %T, want highlightMsg", cmd1())
+	}
+
+	got1.cmdBuf = "set ft=auto"
+	m2, cmd2 := got1.executeCommand()
+	got2 := m2.(Model)
+	if cmd2 == nil {
+		t.Fatal("set ft=auto: reparseHighlight cmd = nil")
+	}
+	currentMsg, ok := cmd2().(highlightMsg)
+	if !ok {
+		t.Fatalf("set ft=auto: cmd2() = %T, want highlightMsg", cmd2())
+	}
+
+	if staleMsg.seq >= currentMsg.seq {
+		t.Fatalf("set ft=py's request seq (%d) should be older than set ft=auto's (%d)", staleMsg.seq, currentMsg.seq)
+	}
+
+	// Apply in real (network/scheduling) arrival order: the newer request's
+	// result lands first, then the older, slower one arrives late.
+	m3, _ := got2.Update(currentMsg)
+	afterCurrent := m3.(Model)
+	m4, _ := afterCurrent.Update(staleMsg)
+	afterStale := m4.(Model)
+
+	if !reflect.DeepEqual(afterStale.hlSpans, afterCurrent.hlSpans) {
+		t.Error("the stale \":set ft=py\" highlight result overwrote \":set ft=auto\"'s spans")
 	}
 }
 

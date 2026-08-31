@@ -185,6 +185,34 @@ func TestEffectiveIndentSettingsLangOverrideStripsDot(t *testing.T) {
 	}
 }
 
+// TestEffectiveIndentSettingsLangOverrideBeatsDetectedIndent is a
+// regression test: a buffer whose content already sniffed as tab-indented
+// (m.detectedIndent) must still switch to the override's own indent
+// settings once ":set ft=<key>" is used — detectedIndent normally wins over
+// configured/default settings (see effectiveIndentSettings' doc comment),
+// but an explicit override is the user overruling that auto-detection on
+// purpose, so it must take precedence over detectedIndent too, not just
+// over the filePath-derived extension.
+func TestEffectiveIndentSettingsLangOverrideBeatsDetectedIndent(t *testing.T) {
+	m := newTestModel("")
+	m.filePath = "test.go"
+	m.cfg = &config.Config{}
+	detected := config.IndentSettings{Style: "tabs", Width: 8}
+	m.detectedIndent = &detected
+	m.langOverride = "py" // Python defaults to spaces, width 4
+
+	want := config.IndentSettings{Style: "spaces", Width: 4}
+	if got := m.effectiveIndentSettings(); got != want {
+		t.Errorf("effectiveIndentSettings() = %+v, want %+v (override beats detectedIndent)", got, want)
+	}
+
+	// Sanity check: with no override, detectedIndent still wins as before.
+	m.langOverride = ""
+	if got := m.effectiveIndentSettings(); got != detected {
+		t.Errorf("effectiveIndentSettings() with no override = %+v, want %+v (detectedIndent)", got, detected)
+	}
+}
+
 // TestBlockBaseIndentUsesMinimumNotFirstLine is a regression test: the
 // baseline must be the *shallowest* non-blank line in the block, not
 // whichever line comes first. A block like a wrapped import has its

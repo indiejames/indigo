@@ -444,6 +444,7 @@ func scheduleShowDiagPopup() tea.Cmd {
 type highlightMsg struct {
 	spans    highlight.LineSpans
 	duration time.Duration
+	seq      uint64 // Model.hlSeq's value when this request was issued; see reparseHighlight
 }
 
 // metricsData holds timing samples for the metrics overlay.
@@ -721,6 +722,16 @@ type Model struct {
 	searchErr           string // non-empty when regex fails to compile
 	hlr                 *highlight.Highlighter
 	hlSpans             highlight.LineSpans
+	// hlSeq is a pointer (like buf) so every value-copy of this buffer's
+	// Model shares one counter: reparseHighlight bumps it and stamps the new
+	// value onto the highlightMsg it schedules, so a highlightMsg superseded
+	// by a later reparseHighlight call (e.g. a slow parse still in flight
+	// when ":set ft=" issues a new one) can be recognized as stale and
+	// discarded instead of clobbering newer spans. nil (as in tests that
+	// build a Model{} literal directly rather than via New) disables the
+	// check rather than panicking — every highlightMsg is then treated as
+	// current, matching the pre-sequencing behavior.
+	hlSeq               *uint64
 	langOverride        string // set by ":set ft=<key>"; "" means derive language from filePath as usual
 	detectedIndent      *config.IndentSettings // sniffed from buffer content on open; nil if inconclusive
 	metrics             *metricsData
@@ -869,6 +880,7 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 		filePath:            filePath,
 		workDir:             workDir,
 		hlr:                 highlight.New(filePath),
+		hlSeq:               new(uint64),
 		detectedIndent:      config.DetectIndentSettings(content),
 		metrics:             &metricsData{},
 		recoveryPrompt:      fromRecovery,
@@ -1223,6 +1235,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case highlightMsg:
+		if m.hlSeq != nil && msg.seq != *m.hlSeq {
+			return m, nil // superseded by a newer reparseHighlight request; discard
+		}
 		m.hlSpans = msg.spans
 		if m.metrics != nil {
 			m.metrics.highlightDuration = msg.duration

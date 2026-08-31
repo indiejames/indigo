@@ -413,8 +413,8 @@ func fileTypeName(path string) string {
 	if name, ok := extDisplayName(ext); ok {
 		return name
 	}
-	if isGitCommitFileName(strings.ToLower(filepath.Base(path))) {
-		return "Git Commit"
+	if name, ok := filenameStyleDisplayName(strings.ToLower(filepath.Base(path))); ok {
+		return name
 	}
 	if ext != "" {
 		return ext
@@ -435,8 +435,8 @@ func fileTypeNameForKey(key string) string {
 	if name, ok := extDisplayName(key); ok {
 		return name
 	}
-	if isGitCommitFileName(key) {
-		return "Git Commit"
+	if name, ok := filenameStyleDisplayName(key); ok {
+		return name
 	}
 	if key != "" {
 		return key
@@ -502,14 +502,19 @@ func extDisplayName(ext string) (string, bool) {
 	return "", false
 }
 
-// isGitCommitFileName reports whether name (already lowercased) is one of
-// git's own commit-message edit files.
-func isGitCommitFileName(name string) bool {
+// filenameStyleDisplayName maps a lowercased filename-style registry key —
+// one matched by base filename rather than extension, like the
+// "dockerfile"/"commit_editmsg" family registered via registerLang in
+// internal/highlight (see docs/language-support.md) — to its human-readable
+// name.
+func filenameStyleDisplayName(name string) (string, bool) {
 	switch name {
+	case "dockerfile":
+		return "Dockerfile", true
 	case "commit_editmsg", "merge_msg", "squash_msg", "tag_editmsg":
-		return true
+		return "Git Commit", true
 	}
-	return false
+	return "", false
 }
 
 // lspServerName returns the command name of the configured LSP server for the

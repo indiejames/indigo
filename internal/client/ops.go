@@ -433,9 +433,19 @@ func (m Model) doSaveAsNow(newPath string, thenClose bool) tea.Cmd {
 	}
 }
 
+// reparseHighlight schedules a fresh syntax-highlight pass and, via
+// Model.hlSeq, stamps it as the newest outstanding request — see hlSeq's
+// doc comment for why a highlightMsg needs this to avoid a slow, superseded
+// parse (e.g. one still in flight when ":set ft=" swaps the highlighter)
+// clobbering a later, correct result.
 func (m Model) reparseHighlight() tea.Cmd {
 	if m.hlr == nil {
 		return nil
+	}
+	var seq uint64
+	if m.hlSeq != nil {
+		*m.hlSeq++
+		seq = *m.hlSeq
 	}
 	content := []byte(m.buf.Content())
 	hlr := m.hlr
@@ -449,7 +459,7 @@ func (m Model) reparseHighlight() tea.Cmd {
 				spans[ln] = append(bs, spans[ln]...)
 			}
 		}
-		return highlightMsg{spans: spans, duration: time.Since(start)}
+		return highlightMsg{spans: spans, duration: time.Since(start), seq: seq}
 	}
 }
 

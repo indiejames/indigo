@@ -8,6 +8,14 @@
 //     layout never shifts when a file gains or loses diff markers
 //   - Immediate updates: polls .git/HEAD and .git/index every 500ms for branch
 //     and staged-change detection; OnSave triggers an immediate re-diff
+//   - Inline blame: toggle per-buffer end-of-line annotations (short hash,
+//     author, relative date) via the Command menu or alt+b
+//   - Blame details: a popup with the full commit (hash/author/date/summary)
+//     for the line under the cursor, reachable from the Command menu; selecting
+//     it opens the full commit diff
+//   - Diff view: opens `git diff HEAD` for the current file in a new tab
+//   - Hunk navigation: alt+n / alt+p jump the cursor to the next/previous
+//     changed hunk, using the same diff data that drives the gutter markers
 package main
 
 import (
@@ -17,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,8 +46,27 @@ const (
 
 // bufState holds per-buffer diff and path.
 type bufState struct {
-	path  string
-	lines map[int]lineKind // 1-indexed line number → kind
+	path       string
+	lines      map[int]lineKind // 1-indexed line number → kind
+	hunkStarts []int            // 1-indexed first line of each hunk, ascending
+
+	blaming bool
+	blame   map[int]blameLine // 1-indexed line number → blame info
+}
+
+// blameLine holds the commit that last touched one line, parsed from
+// `git blame --porcelain`.
+type blameLine struct {
+	hash    string
+	author  string
+	when    time.Time
+	summary string
+}
+
+// isZeroHash reports whether hash is git's all-zero placeholder used for
+// uncommitted working-tree changes ("Not Committed Yet").
+func isZeroHash(hash string) bool {
+	return strings.Trim(hash, "0") == ""
 }
 
 // GitPlugin is the plugin state.
@@ -67,9 +95,16 @@ func (g *GitPlugin) Init(api *sdk.Api) sdk.Info {
 	})
 	api.Decorations(g.decorations) //nolint:errcheck
 
+	api.OnKey("alt+b", g.onToggleBlame)                     //nolint:errcheck
+	api.OnKey("alt+n", g.onNextHunk)                        //nolint:errcheck
+	api.OnKey("alt+p", g.onPrevHunk)                        //nolint:errcheck
+	api.OnMenuAction("git.blame", g.onToggleBlame)          //nolint:errcheck
+	api.OnMenuAction("git.blame_details", g.onBlameDetails) //nolint:errcheck
+	api.OnMenuAction("git.diff", g.onDiff)                  //nolint:errcheck
+
 	go g.pollLoop()
 
-	return sdk.Info{Name: "indigo-git", Version: "0.1.0"}
+	return sdk.Info{Name: "indigo-git", Version: "0.2.0"}
 }
 
 func (g *GitPlugin) onOpen(bufID uint32, path string) {
@@ -129,6 +164,7 @@ func (g *GitPlugin) onSave(bufID uint32, path string) {
 	}
 	if root != "" {
 		g.updateDiff(bufID, path, root)
+		g.refreshBlameIfEnabled(bufID, path, root)
 	}
 }
 
@@ -176,6 +212,7 @@ func (g *GitPlugin) pollLoop() {
 			// Branch changed → re-diff all open buffers.
 			for bufID, bs := range bufs {
 				g.updateDiff(bufID, bs.path, root)
+				g.refreshBlameIfEnabled(bufID, bs.path, root)
 			}
 		}
 
@@ -190,9 +227,25 @@ func (g *GitPlugin) pollLoop() {
 			lastIndex = indexStr
 			for bufID, bs := range bufs {
 				g.updateDiff(bufID, bs.path, root)
+				g.refreshBlameIfEnabled(bufID, bs.path, root)
 			}
 		}
 	}
+}
+
+// refreshBlameIfEnabled recomputes blame for bufID only if blame annotations
+// are currently toggled on for it — blame is comparatively expensive
+// (a full `git blame` run) so it's skipped for the common case of a buffer
+// nobody is viewing blame for.
+func (g *GitPlugin) refreshBlameIfEnabled(bufID uint32, path, root string) {
+	g.mu.RLock()
+	bs, ok := g.bufs[bufID]
+	g.mu.RUnlock()
+	if !ok || !bs.blaming {
+		return
+	}
+	g.computeBlame(bufID, path, root)
+	g.api.RefreshDecorations(bufID)
 }
 
 // updateBranch reads .git/HEAD and stores the branch name.
@@ -220,6 +273,7 @@ func (g *GitPlugin) clearLines(bufID uint32) {
 	g.mu.Lock()
 	if bs, ok := g.bufs[bufID]; ok {
 		bs.lines = map[int]lineKind{}
+		bs.hunkStarts = nil
 		g.bufs[bufID] = bs
 	}
 	g.mu.Unlock()
@@ -262,7 +316,7 @@ func (g *GitPlugin) updateDiffFromBuffer(bufID uint32, path, root string) {
 		return
 	}
 	origPath := origTmp.Name()
-	defer os.Remove(origPath) //nolint:errcheck
+	defer os.Remove(origPath)        //nolint:errcheck
 	origTmp.WriteString(headContent) //nolint:errcheck
 	_ = origTmp.Close()
 
@@ -277,12 +331,13 @@ func (g *GitPlugin) updateDiffFromBuffer(bufID uint32, path, root string) {
 
 	out := stdout.String()
 	gitLog("updateDiffFromBuffer bufID=%d relPath=%s outputLen=%d", bufID, relPath, len(out))
-	lines := parseDiff(out)
+	lines, hunkStarts := parseDiff(out)
 	gitLog("updateDiffFromBuffer bufID=%d parsed %d changed lines", bufID, len(lines))
 
 	g.mu.Lock()
 	if bs, ok := g.bufs[bufID]; ok {
 		bs.lines = lines
+		bs.hunkStarts = hunkStarts
 		g.bufs[bufID] = bs
 	}
 	g.mu.Unlock()
@@ -305,14 +360,349 @@ func (g *GitPlugin) updateDiff(bufID uint32, path, root string) {
 			return
 		}
 	}
-	lines := parseDiff(out)
+	lines, hunkStarts := parseDiff(out)
 	gitLog("updateDiff bufID=%d parsed %d changed lines", bufID, len(lines))
 	g.mu.Lock()
 	if bs, ok := g.bufs[bufID]; ok {
 		bs.lines = lines
+		bs.hunkStarts = hunkStarts
 		g.bufs[bufID] = bs
 	}
 	g.mu.Unlock()
+}
+
+// -- Blame --
+
+// computeBlame runs `git blame --porcelain` for path (blaming the working
+// tree, not a specific revision, so uncommitted lines show as "Not Committed
+// Yet") and stores the result. Blame reflects the file as last saved to
+// disk, not unsaved buffer edits — recomputing on every keystroke would make
+// an already-expensive full-file blame run constantly.
+func (g *GitPlugin) computeBlame(bufID uint32, path, root string) {
+	relPath, err := filepath.Rel(root, path)
+	if err != nil {
+		relPath = path
+	}
+	out, err := runGit(root, "blame", "--porcelain", "--", relPath)
+	if err != nil {
+		gitLog("computeBlame bufID=%d err=%v", bufID, err)
+		return
+	}
+	blame := parseBlamePorcelain(out)
+	g.mu.Lock()
+	if bs, ok := g.bufs[bufID]; ok {
+		bs.blame = blame
+		g.bufs[bufID] = bs
+	}
+	g.mu.Unlock()
+}
+
+// onToggleBlame flips inline blame annotations on/off for the current
+// buffer. Computing blame runs in the background so the key/menu response
+// isn't held up by a `git blame` invocation.
+func (g *GitPlugin) onToggleBlame(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
+	if ctx.Mode != "normal" {
+		return sdk.KeyResponse{Handled: false}
+	}
+
+	g.mu.Lock()
+	bs, ok := g.bufs[ctx.BufID]
+	if !ok {
+		g.mu.Unlock()
+		return sdk.KeyResponse{Handled: true}
+	}
+	bs.blaming = !bs.blaming
+	turningOn := bs.blaming
+	path := bs.path
+	g.bufs[ctx.BufID] = bs
+	root := g.repoRoot
+	g.mu.Unlock()
+
+	bufID, clientID := ctx.BufID, ctx.ClientID
+	go func() {
+		if !turningOn {
+			g.api.ShowMessageTo(clientID, "Blame off") //nolint:errcheck
+			g.api.RefreshDecorations(bufID)
+			return
+		}
+		if root == "" {
+			g.mu.Lock()
+			if bs, ok := g.bufs[bufID]; ok {
+				bs.blaming = false
+				g.bufs[bufID] = bs
+			}
+			g.mu.Unlock()
+			g.api.ShowMessageTo(clientID, "Not a git repository") //nolint:errcheck
+			return
+		}
+		g.computeBlame(bufID, path, root)
+		g.api.ShowMessageTo(clientID, "Blame on") //nolint:errcheck
+		g.api.RefreshDecorations(bufID)
+	}()
+
+	return sdk.KeyResponse{Handled: true}
+}
+
+// onBlameDetails shows the full commit (hash, author, date, summary) for the
+// line under the cursor in a popup; selecting it opens the full commit diff.
+// Unlike the inline toggle, this blames just the one line (`git blame -L`),
+// so it works even when the inline overlay is off.
+func (g *GitPlugin) onBlameDetails(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
+	if ctx.Mode != "normal" {
+		return sdk.KeyResponse{Handled: false}
+	}
+
+	path, _, _, _, _, err := g.api.BufferInfo(ctx.BufID)
+	if err != nil || path == "" {
+		return sdk.KeyResponse{Handled: true}
+	}
+	g.mu.RLock()
+	root := g.repoRoot
+	g.mu.RUnlock()
+	if root == "" {
+		root = findRepoRoot(path)
+	}
+	if root == "" {
+		g.api.ShowMessageTo(ctx.ClientID, "Not a git repository") //nolint:errcheck
+		return sdk.KeyResponse{Handled: true}
+	}
+
+	clientID := ctx.ClientID
+	lineNum := int(ctx.CursorLine) + 1
+	go func() {
+		relPath, err := filepath.Rel(root, path)
+		if err != nil {
+			relPath = path
+		}
+		out, err := runGit(root, "blame", "-L", fmt.Sprintf("%d,%d", lineNum, lineNum), "--porcelain", "--", relPath)
+		if err != nil {
+			g.api.ShowMessageTo(clientID, "git blame failed: "+err.Error()) //nolint:errcheck
+			return
+		}
+		blame := parseBlamePorcelain(out)
+		bl, ok := blame[lineNum]
+		if !ok {
+			g.api.ShowMessageTo(clientID, "No blame info for this line") //nolint:errcheck
+			return
+		}
+		if isZeroHash(bl.hash) {
+			g.api.ShowMessageTo(clientID, "Not committed yet") //nolint:errcheck
+			return
+		}
+		item := sdk.PopupItem{
+			Label:    fmt.Sprintf("%s  %s", bl.hash[:7], bl.author),
+			Sublabel: fmt.Sprintf("%s — %s", bl.when.Format("2006-01-02 15:04"), bl.summary),
+			Data:     bl.hash,
+		}
+		g.api.ShowPopup(fmt.Sprintf("Blame: line %d", lineNum), []sdk.PopupItem{item}, func(data string) { //nolint:errcheck
+			g.openCommitDiff(root, data, clientID)
+		}, nil)
+	}()
+
+	return sdk.KeyResponse{Handled: true}
+}
+
+// -- Hunk navigation --
+
+func (g *GitPlugin) onNextHunk(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
+	return g.jumpHunk(ctx, true)
+}
+
+func (g *GitPlugin) onPrevHunk(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
+	return g.jumpHunk(ctx, false)
+}
+
+// jumpHunk moves the cursor to the next (or previous) changed hunk, wrapping
+// around the buffer when the cursor is past the last (or before the first).
+func (g *GitPlugin) jumpHunk(ctx sdk.KeyContext, forward bool) sdk.KeyResponse {
+	if ctx.Mode != "normal" {
+		return sdk.KeyResponse{Handled: false}
+	}
+	g.mu.RLock()
+	bs, ok := g.bufs[ctx.BufID]
+	g.mu.RUnlock()
+	if !ok || len(bs.hunkStarts) == 0 {
+		g.api.ShowMessageTo(ctx.ClientID, "No changes in this file") //nolint:errcheck
+		return sdk.KeyResponse{Handled: true}
+	}
+
+	cur := int(ctx.CursorLine) + 1
+	starts := bs.hunkStarts // ascending, file order
+	target := -1
+	if forward {
+		for _, s := range starts {
+			if s > cur {
+				target = s
+				break
+			}
+		}
+		if target == -1 {
+			target = starts[0]
+		}
+	} else {
+		for i := len(starts) - 1; i >= 0; i-- {
+			if starts[i] < cur {
+				target = starts[i]
+				break
+			}
+		}
+		if target == -1 {
+			target = starts[len(starts)-1]
+		}
+	}
+
+	return sdk.KeyResponse{Handled: true, HasCursor: true, CursorLine: uint32(target - 1), CursorCol: 0}
+}
+
+// -- Diff view --
+
+// onDiff opens `git diff HEAD` for the current file in a new tab (a scratch
+// temp file, not a real repo file) so the user can review changes without
+// leaving the editor.
+func (g *GitPlugin) onDiff(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
+	if ctx.Mode != "normal" {
+		return sdk.KeyResponse{Handled: false}
+	}
+
+	path, _, _, _, _, err := g.api.BufferInfo(ctx.BufID)
+	if err != nil || path == "" {
+		return sdk.KeyResponse{Handled: true}
+	}
+	g.mu.RLock()
+	root := g.repoRoot
+	g.mu.RUnlock()
+	if root == "" {
+		root = findRepoRoot(path)
+	}
+	if root == "" {
+		g.api.ShowMessageTo(ctx.ClientID, "Not a git repository") //nolint:errcheck
+		return sdk.KeyResponse{Handled: true}
+	}
+
+	clientID := ctx.ClientID
+	go func() {
+		relPath, err := filepath.Rel(root, path)
+		if err != nil {
+			relPath = path
+		}
+		out, err := runGit(root, "diff", "HEAD", "--", relPath)
+		if err != nil {
+			// Staged new file not yet in HEAD — diff against empty to show added lines.
+			out, err = runGit(root, "diff", "--cached", "--", relPath)
+			if err != nil {
+				g.api.ShowMessageTo(clientID, "git diff failed: "+err.Error()) //nolint:errcheck
+				return
+			}
+		}
+		if strings.TrimSpace(out) == "" {
+			g.api.ShowMessageTo(clientID, "No changes in "+filepath.Base(path)) //nolint:errcheck
+			return
+		}
+		tmpPath, err := writeTemp(fmt.Sprintf("indigo-diff-%s-*.diff", filepath.Base(path)), out)
+		if err != nil {
+			g.api.ShowMessageTo(clientID, "failed to write diff: "+err.Error()) //nolint:errcheck
+			return
+		}
+		g.api.OpenFile(tmpPath, 0) //nolint:errcheck
+	}()
+
+	return sdk.KeyResponse{Handled: true}
+}
+
+// openCommitDiff opens `git show <hash>` for hash in a new tab (a scratch
+// temp file). Used by the blame-details popup's onSelect.
+func (g *GitPlugin) openCommitDiff(root, hash string, clientID uint64) {
+	out, err := runGit(root, "show", hash)
+	if err != nil {
+		g.api.ShowMessageTo(clientID, "git show failed: "+err.Error()) //nolint:errcheck
+		return
+	}
+	short := hash
+	if len(short) > 7 {
+		short = short[:7]
+	}
+	tmpPath, err := writeTemp(fmt.Sprintf("indigo-show-%s-*.diff", short), out)
+	if err != nil {
+		g.api.ShowMessageTo(clientID, "failed to write diff: "+err.Error()) //nolint:errcheck
+		return
+	}
+	g.api.OpenFile(tmpPath, 0) //nolint:errcheck
+}
+
+// writeTemp writes content to a fresh temp file (see os.CreateTemp for the
+// pattern's "*" placeholder) and returns its path.
+func writeTemp(pattern, content string) (string, error) {
+	f, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close() //nolint:errcheck
+	if _, err := f.WriteString(content); err != nil {
+		return "", err
+	}
+	return f.Name(), nil
+}
+
+// blameHeaderRe matches a `git blame --porcelain` line-info header:
+// "<40-hex-hash> <origLine> <finalLine> [<numLines>]".
+var blameHeaderRe = regexp.MustCompile(`^([0-9a-f]{40}) (\d+) (\d+)(?: \d+)?$`)
+
+// parseBlamePorcelain parses `git blame --porcelain` output into a map of
+// 1-indexed final-file line numbers to blameLine. Porcelain repeats a
+// commit's full metadata (author/author-time/summary/...) only the first
+// time that commit appears in the output; later lines from the same commit
+// show just the header followed directly by the tab-prefixed content line.
+// This walks header→[metadata]→content per line, filling in cached metadata
+// for repeat hashes, so it works for both cases uniformly.
+func parseBlamePorcelain(output string) map[int]blameLine {
+	result := map[int]blameLine{}
+	meta := map[string]*blameLine{}
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var curHash string
+	var curFinal int
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "\t") {
+			// Content line — the record for this source line ends here.
+			if curHash != "" && curFinal > 0 {
+				if bl, ok := meta[curHash]; ok {
+					result[curFinal] = *bl
+				} else {
+					result[curFinal] = blameLine{hash: curHash}
+				}
+			}
+			curHash = ""
+			continue
+		}
+		if m := blameHeaderRe.FindStringSubmatch(line); m != nil {
+			curHash = m[1]
+			curFinal, _ = strconv.Atoi(m[3])
+			if _, ok := meta[curHash]; !ok {
+				meta[curHash] = &blameLine{hash: curHash}
+			}
+			continue
+		}
+		if curHash == "" {
+			continue
+		}
+		bl := meta[curHash]
+		key, val, found := strings.Cut(line, " ")
+		if !found {
+			continue
+		}
+		switch key {
+		case "author":
+			bl.author = val
+		case "author-time":
+			secs, _ := strconv.ParseInt(val, 10, 64)
+			bl.when = time.Unix(secs, 0)
+		case "summary":
+			bl.summary = val
+		}
+	}
+	return result
 }
 
 func gitLog(format string, args ...any) {
@@ -321,7 +711,7 @@ func gitLog(format string, args ...any) {
 	if err != nil {
 		return
 	}
-	defer f.Close() //nolint:errcheck
+	defer f.Close()                      //nolint:errcheck
 	fmt.Fprintf(f, format+"\n", args...) //nolint:errcheck
 }
 
@@ -331,8 +721,12 @@ func (g *GitPlugin) decorations(bufID uint32, _ uint64, r sdk.Range) []sdk.Decor
 	branch := g.branch
 	bs, hasBuf := g.bufs[bufID]
 	var lineDiff map[int]lineKind
+	var blameData map[int]blameLine
+	blaming := false
 	if hasBuf {
 		lineDiff = bs.lines
+		blameData = bs.blame
+		blaming = bs.blaming
 	}
 	g.mu.RUnlock()
 
@@ -357,7 +751,88 @@ func (g *GitPlugin) decorations(bufID uint32, _ uint64, r sdk.Range) []sdk.Decor
 		out = append(out, dec)
 	}
 
+	if blaming && len(blameData) > 0 {
+		out = append(out, g.buildBlameOverlays(bufID, r, blameData)...)
+	}
+
 	return out
+}
+
+// buildBlameOverlays fetches the visible lines' text (needed to know where
+// each line ends) and returns one end-of-line overlay decoration per visible
+// line that has blame info.
+func (g *GitPlugin) buildBlameOverlays(bufID uint32, r sdk.Range, blameData map[int]blameLine) []sdk.Decoration {
+	lineTexts, err := g.api.ReadLines(bufID, r.Start.Line, r.End.Line+1)
+	if err != nil {
+		return nil
+	}
+	var out []sdk.Decoration
+	for i, txt := range lineTexts {
+		line := r.Start.Line + uint32(i)
+		bl, ok := blameData[int(line)+1]
+		if !ok {
+			continue
+		}
+		color := "#888888"
+		if isZeroHash(bl.hash) {
+			color = "#CC8800"
+		}
+		out = append(out, sdk.Decoration{
+			Kind:      sdk.DecorationOverlay,
+			Line:      line,
+			Col:       uint32(len([]rune(txt))),
+			Text:      formatBlameOverlay(bl),
+			TextColor: color,
+		})
+	}
+	return out
+}
+
+// formatBlameOverlay renders bl as short end-of-line virtual text, e.g.
+// "  a1b2c3d Jane Doe, 3 days ago".
+func formatBlameOverlay(bl blameLine) string {
+	if isZeroHash(bl.hash) {
+		return "  uncommitted"
+	}
+	short := bl.hash
+	if len(short) > 7 {
+		short = short[:7]
+	}
+	author := bl.author
+	if author == "" {
+		author = "unknown"
+	}
+	return fmt.Sprintf("  %s %s, %s", short, author, relativeTime(bl.when))
+}
+
+// relativeTime renders t as a short "N units ago" string, matching the grain
+// GitHub/GitLens-style blame annotations use.
+func relativeTime(t time.Time) string {
+	if t.IsZero() {
+		return "unknown time"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return pluralAgo(int(d.Minutes()), "minute")
+	case d < 24*time.Hour:
+		return pluralAgo(int(d.Hours()), "hour")
+	case d < 30*24*time.Hour:
+		return pluralAgo(int(d.Hours()/24), "day")
+	case d < 365*24*time.Hour:
+		return pluralAgo(int(d.Hours()/24/30), "month")
+	default:
+		return pluralAgo(int(d.Hours()/24/365), "year")
+	}
+}
+
+func pluralAgo(n int, unit string) string {
+	if n == 1 {
+		return fmt.Sprintf("1 %s ago", unit)
+	}
+	return fmt.Sprintf("%d %ss ago", n, unit)
 }
 
 func gutterDecoration(line uint32, kind lineKind) sdk.Decoration {
@@ -374,9 +849,11 @@ func gutterDecoration(line uint32, kind lineKind) sdk.Decoration {
 }
 
 // parseDiff parses the output of `git diff --unified=0` and returns a map of
-// 1-indexed new-file line numbers to their lineKind.
-func parseDiff(output string) map[int]lineKind {
+// 1-indexed new-file line numbers to their lineKind, plus the 1-indexed first
+// line of each hunk in file order (for hunk-navigation commands).
+func parseDiff(output string) (map[int]lineKind, []int) {
 	result := map[int]lineKind{}
+	var hunkStarts []int
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -388,6 +865,13 @@ func parseDiff(output string) map[int]lineKind {
 		if newCount == 0 && oldCount == 0 {
 			continue
 		}
+		// newStart is the first line of the new file the hunk touches; for a
+		// deletion at the very start of the file it may be 0 — clamp to 1.
+		mark := newStart
+		if mark < 1 {
+			mark = 1
+		}
+		hunkStarts = append(hunkStarts, mark)
 		switch {
 		case oldCount == 0:
 			// Pure addition: newStart..newStart+newCount are ADDED.
@@ -396,12 +880,6 @@ func parseDiff(output string) map[int]lineKind {
 			}
 		case newCount == 0:
 			// Pure deletion: mark the line at newStart as a deletion point.
-			// newStart is the first line of the new file after the deletion.
-			// If deletion is at start of file, newStart may be 0 — clamp to 1.
-			mark := newStart
-			if mark < 1 {
-				mark = 1
-			}
 			// Only mark if not already a stronger decoration.
 			if result[mark] == lineUnchanged {
 				result[mark] = lineDeleted
@@ -413,7 +891,7 @@ func parseDiff(output string) map[int]lineKind {
 			}
 		}
 	}
-	return result
+	return result, hunkStarts
 }
 
 // parseHunkHeader extracts oldCount, newStart, newCount from a @@ line.

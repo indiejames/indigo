@@ -177,6 +177,22 @@ func LineCommentPrefix(filePath string) string {
 	return "//"
 }
 
+// LineCommentPrefixForKey is LineCommentPrefix for a registry key typed
+// directly (e.g. a ":set ft=<key>" override) rather than derived from a
+// file path — same key resolution NewForKey uses: the key as given (covers
+// filename-style keys like "dockerfile"), then with a leading "." (covers
+// bare extension keys like "go"). Falls back to "//".
+func LineCommentPrefixForKey(key string) string {
+	key = strings.ToLower(key)
+	if p, ok := lineCommentByKey[key]; ok {
+		return p
+	}
+	if p, ok := lineCommentByKey["."+key]; ok {
+		return p
+	}
+	return "//"
+}
+
 func languageForPath(filePath string) (*sitter.Language, []byte) {
 	k := lookupKey(filePath)
 	if k == "" {

@@ -316,19 +316,27 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 			return m, m.doMoveFunctionToFile(strings.TrimSpace(destPath))
 		}
 		if rest, ok := strings.CutPrefix(cmd, "set ft="); ok {
-			lang := strings.TrimSpace(rest)
+			lang := strings.ToLower(strings.TrimSpace(rest))
 			if lang == "" {
-				m = m.pushStatus("E: usage: set ft=<lang>")
+				m = m.pushStatus("E: usage: set ft=<lang> (or set ft=auto to go back to the file's own type)")
 				return m, nil
+			}
+			if lang == "auto" {
+				m.langOverride = ""
+				m.hlr = highlight.New(m.filePath)
+				m.hlSpans = nil
+				m = m.pushStatus(fmt.Sprintf("File type: %s (auto)", m.effectiveFileTypeName()))
+				return m, m.reparseHighlight()
 			}
 			hlr := highlight.NewForKey(lang)
 			if hlr == nil {
 				m = m.pushStatus(fmt.Sprintf("E: unknown file type: %s", lang))
 				return m, nil
 			}
+			m.langOverride = lang
 			m.hlr = hlr
 			m.hlSpans = nil
-			m = m.pushStatus(fmt.Sprintf("File type: %s", lang))
+			m = m.pushStatus(fmt.Sprintf("File type: %s", m.effectiveFileTypeName()))
 			return m, m.reparseHighlight()
 		}
 		m = m.pushStatus(fmt.Sprintf("E: unknown command: %s", cmd))

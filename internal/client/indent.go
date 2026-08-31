@@ -11,17 +11,23 @@ import (
 )
 
 // effectiveIndentSettings resolves the indent style/width to use for this
-// buffer: the style already detected in its content takes precedence over
-// configured settings, so editing an existing file stays consistent with it
-// even when it differs from your own default.
+// buffer: an explicit ":set ft=<key>" override (see Model.langOverride)
+// takes precedence over everything, since it's the user overruling
+// auto-detection on purpose; short of that, the style already detected in
+// the buffer's content takes precedence over configured settings, so
+// editing an existing file stays consistent with it even when it differs
+// from your own default.
 func (m Model) effectiveIndentSettings() config.IndentSettings {
-	if m.detectedIndent != nil {
+	if m.langOverride == "" && m.detectedIndent != nil {
 		return *m.detectedIndent
 	}
 	if m.cfg == nil {
 		return config.IndentSettings{Style: "tabs", Width: 4}
 	}
 	ext := strings.TrimPrefix(filepath.Ext(m.filePath), ".")
+	if m.langOverride != "" {
+		ext = strings.ToLower(strings.TrimPrefix(m.langOverride, "."))
+	}
 	return m.cfg.EffectiveIndent(ext)
 }
 

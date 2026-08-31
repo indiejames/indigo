@@ -51,6 +51,24 @@ func TestCaptureANSIFallsBackToMostSpecificEntry(t *testing.T) {
 	}
 }
 
+func TestLineCommentPrefixForKey(t *testing.T) {
+	cases := []struct {
+		key  string
+		want string
+	}{
+		{"py", "#"},         // bare extension key, needs the "." prefix retry
+		{".py", "#"},        // dotted form works directly
+		{"PY", "#"},         // case-insensitive
+		{"dockerfile", "#"}, // filename-style key, no "." retry needed
+		{"not-a-real-language", "//"},
+	}
+	for _, c := range cases {
+		if got := LineCommentPrefixForKey(c.key); got != c.want {
+			t.Errorf("LineCommentPrefixForKey(%q) = %q, want %q", c.key, got, c.want)
+		}
+	}
+}
+
 func TestHighlightNilSafe(t *testing.T) {
 	var h *Highlighter
 	if spans := h.Highlight([]byte("anything")); spans != nil {

@@ -1,7 +1,26 @@
 name        = "indigo-git"
-version     = "0.1.0"
+version     = "0.2.0"
 sdk_version = "0.1.0"
-description = "Git integration: branch name in status bar, diff decorations in gutter."
+description = "Git integration: branch/diff status, inline blame (alt+b), hunk nav (alt+n/alt+p), diff view."
+
+[[menu_item]]
+label = "Git"
+key   = "g"
+
+  [[menu_item.children]]
+  label   = "Toggle blame"
+  command = "git.blame"
+  key     = "b"
+
+  [[menu_item.children]]
+  label   = "Blame details"
+  command = "git.blame_details"
+  key     = "i"
+
+  [[menu_item.children]]
+  label   = "Diff"
+  command = "git.diff"
+  key     = "d"
 
 [binaries]
 "darwin/arm64" = "indigo-git-darwin-arm64"

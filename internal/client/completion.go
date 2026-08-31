@@ -30,6 +30,7 @@ var allCmds = []cmdDesc{
 	{"quit-all!",    "Quit all, discarding changes",            false},
 	{"rename",       "Rename symbol via language server",       true},
 	{"save",         "Save file",                               false},
+	{"set ft=",      "Set this buffer's file type (ft=auto to revert)", true},
 	{"wqa",          "Save all and quit",                       false},
 	{"write",        "Save file",                               false},
 	{"write-quit",   "Save and close buffer",                   false},

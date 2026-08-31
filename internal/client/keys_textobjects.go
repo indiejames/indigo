@@ -525,10 +525,20 @@ func leadingWhitespace(runes []rune) int {
 	return i
 }
 
+// lineCommentPrefix is highlight.LineCommentPrefix, but honoring a
+// ":set ft=<key>" override (see Model.langOverride) over the prefix derived
+// from filePath.
+func (m Model) lineCommentPrefix() string {
+	if m.langOverride != "" {
+		return highlight.LineCommentPrefixForKey(m.langOverride)
+	}
+	return highlight.LineCommentPrefix(m.filePath)
+}
+
 // executeToggleComment comments or uncomments the current line (or selection).
 // All lines already commented → uncomment; otherwise → comment all.
 func executeToggleComment(m Model) (tea.Model, tea.Cmd) {
-	prefix := highlight.LineCommentPrefix(m.filePath)
+	prefix := m.lineCommentPrefix()
 	prefixRunes := []rune(prefix)
 
 	startLine, endLine := m.cursor.Line, m.cursor.Line

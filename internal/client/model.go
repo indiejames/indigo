@@ -721,6 +721,7 @@ type Model struct {
 	searchErr           string // non-empty when regex fails to compile
 	hlr                 *highlight.Highlighter
 	hlSpans             highlight.LineSpans
+	langOverride        string // set by ":set ft=<key>"; "" means derive language from filePath as usual
 	detectedIndent      *config.IndentSettings // sniffed from buffer content on open; nil if inconclusive
 	metrics             *metricsData
 	recoveryPrompt      bool // waiting for user to accept or discard recovery content
@@ -1139,7 +1140,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.path != "" && msg.path != m.filePath {
 			m.filePath = msg.path
-			m.hlr = highlight.New(msg.path)
+			if m.langOverride == "" {
+				m.hlr = highlight.New(msg.path)
+			}
 		}
 		m.buf = document.New(m.filePath, msg.content)
 		m.buf.MarkDirty() // server's content may itself be unsaved-to-disk; err toward "unsaved" rather than a false-clean marker

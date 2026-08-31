@@ -156,6 +156,35 @@ func TestEnterDetectedIndentOverridesConfig(t *testing.T) {
 	}
 }
 
+// TestEffectiveIndentSettingsRespectsLangOverride verifies a ":set ft=<key>"
+// override (Model.langOverride) drives indent settings instead of the
+// extension derived from filePath.
+func TestEffectiveIndentSettingsRespectsLangOverride(t *testing.T) {
+	m := newTestModel("")
+	m.filePath = "test.go" // Go defaults to tabs, width 4
+	m.cfg = &config.Config{}
+	m.langOverride = "py" // Python defaults to spaces, width 4
+
+	want := config.IndentSettings{Style: "spaces", Width: 4}
+	if got := m.effectiveIndentSettings(); got != want {
+		t.Errorf("effectiveIndentSettings() = %+v, want %+v (override's language, not filePath's)", got, want)
+	}
+}
+
+// TestEffectiveIndentSettingsLangOverrideStripsDot verifies a
+// dot-prefixed override key (".py") resolves the same as a bare one ("py").
+func TestEffectiveIndentSettingsLangOverrideStripsDot(t *testing.T) {
+	m := newTestModel("")
+	m.filePath = "test.go"
+	m.cfg = &config.Config{}
+	m.langOverride = ".py"
+
+	want := config.IndentSettings{Style: "spaces", Width: 4}
+	if got := m.effectiveIndentSettings(); got != want {
+		t.Errorf("effectiveIndentSettings() = %+v, want %+v", got, want)
+	}
+}
+
 // TestBlockBaseIndentUsesMinimumNotFirstLine is a regression test: the
 // baseline must be the *shallowest* non-blank line in the block, not
 // whichever line comes first. A block like a wrapped import has its

@@ -22,6 +22,9 @@ func (m Model) effectiveIndentSettings() config.IndentSettings {
 		return config.IndentSettings{Style: "tabs", Width: 4}
 	}
 	ext := strings.TrimPrefix(filepath.Ext(m.filePath), ".")
+	if m.langOverride != "" {
+		ext = strings.ToLower(strings.TrimPrefix(m.langOverride, "."))
+	}
 	return m.cfg.EffectiveIndent(ext)
 }
 

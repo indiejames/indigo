@@ -398,71 +398,118 @@ func renderSaveAsDialog(input string, maxW int) []string {
 	return []string{top, mid, bot, btm}
 }
 
+// effectiveFileTypeName is fileTypeName, but honoring a ":set ft=<key>"
+// override (see Model.langOverride) over the name derived from filePath.
+func (m Model) effectiveFileTypeName() string {
+	if m.langOverride != "" {
+		return fileTypeNameForKey(m.langOverride)
+	}
+	return fileTypeName(m.filePath)
+}
+
 // fileTypeName maps a file extension to a human-readable language name.
 func fileTypeName(path string) string {
-	switch strings.TrimPrefix(filepath.Ext(path), ".") {
-	case "go":
-		return "Go"
-	case "rs":
-		return "Rust"
-	case "ts":
-		return "TypeScript"
-	case "tsx":
-		return "TSX"
-	case "js":
-		return "JavaScript"
-	case "jsx":
-		return "JSX"
-	case "py":
-		return "Python"
-	case "c":
-		return "C"
-	case "cpp", "cc", "cxx":
-		return "C++"
-	case "h":
-		return "C Header"
-	case "hpp":
-		return "C++ Header"
-	case "java":
-		return "Java"
-	case "rb":
-		return "Ruby"
-	case "lua":
-		return "Lua"
-	case "zig":
-		return "Zig"
-	case "md":
-		return "Markdown"
-	case "toml":
-		return "TOML"
-	case "json":
-		return "JSON"
-	case "yaml", "yml":
-		return "YAML"
-	case "sh", "bash":
-		return "Shell"
-	case "html", "htm":
-		return "HTML"
-	case "css":
-		return "CSS"
-	case "sql":
-		return "SQL"
-	case "proto":
-		return "Protobuf"
-	case "capnp":
-		return "Cap'n Proto"
-	default:
-		// Match git edit files by base filename (no extension).
-		switch strings.ToLower(filepath.Base(path)) {
-		case "commit_editmsg", "merge_msg", "squash_msg", "tag_editmsg":
-			return "Git Commit"
-		}
-		ext := strings.TrimPrefix(filepath.Ext(path), ".")
-		if ext != "" {
-			return ext
-		}
-		return "Plain Text"
+	ext := strings.TrimPrefix(filepath.Ext(path), ".")
+	if name, ok := extDisplayName(ext); ok {
+		return name
 	}
+	if isGitCommitFileName(strings.ToLower(filepath.Base(path))) {
+		return "Git Commit"
+	}
+	if ext != "" {
+		return ext
+	}
+	return "Plain Text"
+}
+
+// fileTypeNameForKey is fileTypeName for a registry key typed directly
+// (e.g. a ":set ft=<key>" override) rather than derived from a file path.
+// The key is tried both as a bare extension (extDisplayName) and, since a
+// filename-style language key like "dockerfile" or "commit_editmsg" carries
+// no extension to trim, directly against the same names fileTypeName
+// matches by base filename. An unrecognized key is shown verbatim (its
+// registry entry, if any, still drives real highlighting/indent/comments —
+// this only affects the status bar label).
+func fileTypeNameForKey(key string) string {
+	key = strings.ToLower(strings.TrimPrefix(key, "."))
+	if name, ok := extDisplayName(key); ok {
+		return name
+	}
+	if isGitCommitFileName(key) {
+		return "Git Commit"
+	}
+	if key != "" {
+		return key
+	}
+	return "Plain Text"
+}
+
+// extDisplayName maps a bare file extension (no leading dot, e.g. "go",
+// "rs") to its human-readable language name.
+func extDisplayName(ext string) (string, bool) {
+	switch ext {
+	case "go":
+		return "Go", true
+	case "rs":
+		return "Rust", true
+	case "ts":
+		return "TypeScript", true
+	case "tsx":
+		return "TSX", true
+	case "js":
+		return "JavaScript", true
+	case "jsx":
+		return "JSX", true
+	case "py":
+		return "Python", true
+	case "c":
+		return "C", true
+	case "cpp", "cc", "cxx":
+		return "C++", true
+	case "h":
+		return "C Header", true
+	case "hpp":
+		return "C++ Header", true
+	case "java":
+		return "Java", true
+	case "rb":
+		return "Ruby", true
+	case "lua":
+		return "Lua", true
+	case "zig":
+		return "Zig", true
+	case "md":
+		return "Markdown", true
+	case "toml":
+		return "TOML", true
+	case "json":
+		return "JSON", true
+	case "yaml", "yml":
+		return "YAML", true
+	case "sh", "bash":
+		return "Shell", true
+	case "html", "htm":
+		return "HTML", true
+	case "css":
+		return "CSS", true
+	case "sql":
+		return "SQL", true
+	case "proto":
+		return "Protobuf", true
+	case "capnp":
+		return "Cap'n Proto", true
+	}
+	return "", false
+}
+
+// isGitCommitFileName reports whether name (already lowercased) is one of
+// git's own commit-message edit files.
+func isGitCommitFileName(name string) bool {
+	switch name {
+	case "commit_editmsg", "merge_msg", "squash_msg", "tag_editmsg":
+		return true
+	}
+	return false
 }
 
 // lspServerName returns the command name of the configured LSP server for the
@@ -612,7 +659,7 @@ func (m Model) renderStatusBar() string {
 	// changes this group's total width.
 	right = m.renderWorkspaceDiagSegment() + right
 
-	ftName := fileTypeName(m.filePath)
+	ftName := m.effectiveFileTypeName()
 	right = fileTypeStyle.Render("  "+ftName+"  ") + right
 
 	if lsp := m.lspServerName(); lsp != "" {

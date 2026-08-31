@@ -47,12 +47,12 @@ func TestFilteredCmds(t *testing.T) {
 		input string
 		want  []string
 	}{
-		{"", []string{"edit", "find", "fmt", "format", "grep", "metrics", "move-to-file", "quit", "quit!", "quit-all", "quit-all!", "rename", "save", "wqa", "write", "write-quit"}},
+		{"", []string{"edit", "find", "fmt", "format", "grep", "metrics", "move-to-file", "quit", "quit!", "quit-all", "quit-all!", "rename", "save", "set ft=", "wqa", "write", "write-quit"}},
 		// "q" is a subsequence of quit*, wqa, write-quit
 		{"q", []string{"quit", "quit!", "quit-all", "quit-all!", "wqa", "write-quit"}},
 		{"q!", []string{"quit!", "quit-all!"}},
-		// "s" is a subsequence of "metrics" (last char) and "save"
-		{"s", []string{"metrics", "save"}},
+		// "s" is a subsequence of "metrics" (last char), "save", and "set ft="
+		{"s", []string{"metrics", "save", "set ft="}},
 		{"wq", []string{"wqa", "write-quit"}},
 		// "m" matches fmt, format, metrics, move-to-file, and rename (m is a subsequence of all five)
 		{"m", []string{"fmt", "format", "metrics", "move-to-file", "rename"}},

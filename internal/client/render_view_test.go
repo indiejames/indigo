@@ -1,6 +1,12 @@
 package client
 
-import "testing"
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // TestFileTypeNameFilenameStyleKeys verifies extensionless, filename-style
 // language keys (matched by base filename rather than extension — see
@@ -86,6 +92,42 @@ func TestTruncatePathFrontPreservesFilename(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			if got := truncatePathFront(c.path, c.suffix, c.width); got != c.want {
 				t.Errorf("truncatePathFront(%q, %q, %d) = %q, want %q", c.path, c.suffix, c.width, got, c.want)
+			}
+		})
+	}
+}
+
+// TestTruncatePathFrontWideCharactersStayWithinBudget is a regression test
+// for measuring width in runes instead of terminal display cells: CJK
+// characters and other wide runes occupy two cells each, so a rune-counting
+// truncation can let the rendered path overflow its allocated status-bar
+// width even though the rune count looks like it fits. Asserts the actual
+// invariant (rendered width never exceeds the budget) rather than an exact
+// string, since hand-counting double-width runes is error-prone and not the
+// point of the test.
+func TestTruncatePathFrontWideCharactersStayWithinBudget(t *testing.T) {
+	cases := []struct {
+		name   string
+		path   string
+		suffix string
+		width  int
+	}{
+		{"wide directories, ascii filename", "/项目/文件夹/源代码/render_view.go", "", 20},
+		{"wide directories with dirty suffix", "/项目/文件夹/源代码/render_view.go", " [+]", 20},
+		{"wide filename itself too long", "/a/b/项目源代码文件非常长的名字.go", "", 12},
+		{"emoji in filename", "/Users/jamie/notes/🎉celebration-plans🎉.md", "", 18},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := truncatePathFront(c.path, c.suffix, c.width)
+			if w := lipgloss.Width(got); w > c.width {
+				t.Errorf("truncatePathFront(%q, %q, %d) = %q, rendered width %d exceeds budget %d",
+					c.path, c.suffix, c.width, got, w, c.width)
+			}
+			base := filepath.Base(c.path)
+			if lipgloss.Width(base)+lipgloss.Width(c.suffix) <= c.width && !strings.Contains(got, base) {
+				t.Errorf("truncatePathFront(%q, %q, %d) = %q, want full basename %q preserved (budget allows it)",
+					c.path, c.suffix, c.width, got, base)
 			}
 		})
 	}

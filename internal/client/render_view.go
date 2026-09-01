@@ -35,6 +35,40 @@ func truncateCenter(s string, width int) string {
 	return string(r[:width-1]) + "…"
 }
 
+// truncatePathFront clamps path to width runes by truncating from the front
+// (a leading "…") rather than the back, so the filename itself — the part a
+// user actually needs to identify the buffer — stays visible even when its
+// containing directories don't fit. suffix (the dirty-buffer marker) is
+// always shown in full and is applied after truncating path, so it's never
+// itself at risk of being cut off.
+func truncatePathFront(path, suffix string, width int) string {
+	suffixW := len([]rune(suffix))
+	pathWidth := width - suffixW
+	if pathWidth <= 0 {
+		// Not even room for the suffix alone; fall back to the generic
+		// back-truncation so at least something coherent shows.
+		return truncateCenter(path+suffix, width)
+	}
+
+	r := []rune(path)
+	if len(r) <= pathWidth {
+		return path + suffix
+	}
+
+	base := []rune(filepath.Base(path))
+	if len(base) >= pathWidth {
+		// Not even the filename fits — truncate the filename itself rather
+		// than lose the leading-ellipsis convention on something that's no
+		// longer a path remainder.
+		return truncateCenter(string(base), pathWidth) + suffix
+	}
+
+	// Keep the full filename (it's always the trailing runes of path) and
+	// ellipsize the leading directory portion ahead of it.
+	keep := pathWidth - 1 // room for the leading "…"
+	return "…" + string(r[len(r)-keep:]) + suffix
+}
+
 func (m Model) View() string {
 	if m.width == 0 {
 		return "loading…"
@@ -709,7 +743,7 @@ func (m Model) renderStatusBar() string {
 		dirtyMark = " [+]"
 	}
 	pathBudget := max(0, avail-pluginW-1)
-	pathSeg := barStyle.Render(" " + truncateCenter(dp+dirtyMark, pathBudget))
+	pathSeg := barStyle.Render(" " + truncatePathFront(dp, dirtyMark, pathBudget))
 	left := modeSeg + pathSeg
 	leftW := lipgloss.Width(left)
 

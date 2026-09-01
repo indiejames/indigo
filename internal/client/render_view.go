@@ -35,6 +35,91 @@ func truncateCenter(s string, width int) string {
 	return string(r[:width-1]) + "…"
 }
 
+// truncatePathFront clamps path to width terminal display cells — not
+// runes; wide characters (CJK, emoji) occupy two cells, so a rune count
+// alone can let the result overflow its allocated status-bar width — by
+// truncating from the front (a leading "…") rather than the back, so the
+// filename itself — the part a user actually needs to identify the buffer —
+// stays visible even when its containing directories don't fit. suffix (the
+// dirty-buffer marker) is always shown in full and is applied after
+// truncating path, so it's never itself at risk of being cut off.
+func truncatePathFront(path, suffix string, width int) string {
+	suffixW := lipgloss.Width(suffix)
+	pathWidth := width - suffixW
+	if pathWidth <= 0 {
+		// Not even room for the suffix alone; fall back to the generic
+		// back-truncation so at least something coherent shows.
+		return truncateCenter(path+suffix, width)
+	}
+
+	if lipgloss.Width(path) <= pathWidth {
+		return path + suffix
+	}
+
+	base := filepath.Base(path)
+	if lipgloss.Width(base) >= pathWidth {
+		// Not even the filename fits — truncate the filename itself rather
+		// than lose the leading-ellipsis convention on something that's no
+		// longer a path remainder. truncateBackCells (not truncateCenter)
+		// keeps this cell-width-correct for wide-character filenames.
+		return truncateBackCells(base, pathWidth) + suffix
+	}
+
+	// Keep the full filename (it's always the trailing portion of path) and
+	// ellipsize the leading directory portion ahead of it, trimmed by
+	// display cell width so wide characters can't push the result over
+	// pathWidth.
+	return "…" + truncateFrontCells(path, pathWidth-1) + suffix
+}
+
+// truncateBackCells keeps the leading runes of s that fit within width
+// display cells, dropping the rest and appending "…" — like truncateCenter,
+// but measured in cells rather than runes so wide characters (CJK, emoji)
+// can't push the result over width.
+func truncateBackCells(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	budget := width - 1
+	r := []rune(s)
+	w, end := 0, 0
+	for end < len(r) {
+		cw := lipgloss.Width(string(r[end]))
+		if w+cw > budget {
+			break
+		}
+		w += cw
+		end++
+	}
+	return string(r[:end]) + "…"
+}
+
+// truncateFrontCells returns the trailing runes of s that fit within width
+// display cells, dropping leading runes — measured in cells rather than
+// runes so wide characters can't push the result over width.
+func truncateFrontCells(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	w, start := 0, len(r)
+	for start > 0 {
+		cw := lipgloss.Width(string(r[start-1]))
+		if w+cw > width {
+			break
+		}
+		w += cw
+		start--
+	}
+	return string(r[start:])
+}
+
 func (m Model) View() string {
 	if m.width == 0 {
 		return "loading…"
@@ -709,7 +794,7 @@ func (m Model) renderStatusBar() string {
 		dirtyMark = " [+]"
 	}
 	pathBudget := max(0, avail-pluginW-1)
-	pathSeg := barStyle.Render(" " + truncateCenter(dp+dirtyMark, pathBudget))
+	pathSeg := barStyle.Render(" " + truncatePathFront(dp, dirtyMark, pathBudget))
 	left := modeSeg + pathSeg
 	leftW := lipgloss.Width(left)
 

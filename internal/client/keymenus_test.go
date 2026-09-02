@@ -172,6 +172,9 @@ func TestApplyKeymenusUnknownAction(t *testing.T) {
 	if len(warnings) != 1 || !strings.Contains(warnings[0], `unknown action "does-not-exist"`) {
 		t.Fatalf("warnings = %v, want one containing the unknown action", warnings)
 	}
+	if _, ok := findCommand([]string{"ctrl+g", "z"}); ok {
+		t.Error("invalid child (unknown action) should not be reachable at ctrl+g z")
+	}
 	if _, ok := findCommand([]string{"ctrl+g", "s"}); !ok {
 		t.Error("valid sibling should still apply despite the invalid one")
 	}

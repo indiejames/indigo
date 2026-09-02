@@ -114,6 +114,79 @@ func TestExecuteCommandSetFileTypeUnknown(t *testing.T) {
 	}
 }
 
+// TestExecuteCommandSaveViaAlias verifies ":save" resolves through the
+// unified action registry (ex_actions.go) rather than falling through to
+// "unknown command" — the ":" half of the save/ctrl+s unification proof
+// (see TestExActionRegistryMatchesTreeAction for the "same function" half).
+func TestExecuteCommandSaveViaAlias(t *testing.T) {
+	m := newTestModel("hello\n")
+	m.cmdBuf = "save"
+	m2, cmd := m.executeCommand()
+	got := m2.(Model)
+	if got.mode != ModeNormal {
+		t.Errorf("mode = %v, want ModeNormal", got.mode)
+	}
+	if strings.Contains(got.status, "unknown command") {
+		t.Errorf("status = %q, want no unknown-command error", got.status)
+	}
+	if cmd == nil {
+		t.Error(`":save" should return a non-nil cmd (doSave)`)
+	}
+}
+
+// TestExecuteCommandQuitDirtyGuard pins down the highest-risk regression in
+// the dispatch-unification refactor: ":q"/":quit" on a dirty buffer must
+// still refuse and report the error, not silently close (that behavior is
+// what force-quit, ":q!", exists for).
+func TestExecuteCommandQuitDirtyGuard(t *testing.T) {
+	for _, cmdText := range []string{"q", "quit"} {
+		m := newTestModel("hello\n")
+		m.buf.MarkDirty()
+		m.cmdBuf = cmdText
+		m2, cmd := m.executeCommand()
+		got := m2.(Model)
+		if !strings.Contains(got.status, "unsaved changes") {
+			t.Errorf(":%s on dirty buffer: status = %q, want it to mention unsaved changes", cmdText, got.status)
+		}
+		if got.mode != ModeNormal {
+			t.Errorf(":%s on dirty buffer: mode = %v, want ModeNormal", cmdText, got.mode)
+		}
+		if cmd != nil {
+			t.Errorf(":%s on dirty buffer: cmd = %v, want nil (buffer must not close)", cmdText, cmd)
+		}
+	}
+}
+
+// TestExecuteCommandAllZeroArgAliasesRecognized is the regression net for
+// exCommandAliases itself: every alias must resolve to a real registered
+// action, catching a typo made while transcribing the old switch's case
+// labels into the map.
+func TestExecuteCommandAllZeroArgAliasesRecognized(t *testing.T) {
+	reg := exActionRegistry()
+	for alias, name := range exCommandAliases {
+		if _, ok := reg[name]; !ok {
+			t.Errorf("exCommandAliases[%q] = %q, which is not registered in exActionRegistry()", alias, name)
+		}
+	}
+}
+
+// TestExecuteCommandAliasesPinTrickyPairs directly pins the pairs where a
+// transcription mistake would silently change behavior rather than error:
+// "q!"/"quit!" must map to the force variant, not the dirty-checked one.
+func TestExecuteCommandAliasesPinTrickyPairs(t *testing.T) {
+	cases := map[string]string{
+		"q":     "quit",
+		"quit":  "quit",
+		"q!":    "quit-force",
+		"quit!": "quit-force",
+	}
+	for alias, want := range cases {
+		if got := exCommandAliases[alias]; got != want {
+			t.Errorf("exCommandAliases[%q] = %q, want %q", alias, got, want)
+		}
+	}
+}
+
 // TestExecuteCommandSetFileTypeAuto verifies ":set ft=auto" clears a
 // previously set override and reverts to filePath-derived language.
 func TestExecuteCommandSetFileTypeAuto(t *testing.T) {

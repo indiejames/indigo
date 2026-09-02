@@ -1,8 +1,11 @@
 package client
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/indiejames/indigo/internal/config"
 )
@@ -130,5 +133,108 @@ func TestApplyKeybindOverridesInsertMode(t *testing.T) {
 	got := m2.(Model)
 	if got.cursor.Col != 0 {
 		t.Errorf("ctrl+g bound to line-start: cursor.Col = %d, want 0", got.cursor.Col)
+	}
+}
+
+// fnPointer returns a comparable identity for an action's execute function,
+// so two command nodes can be checked for pointing at the literal same
+// implementation rather than just having equal names.
+func fnPointer(fn func(Model) (tea.Model, tea.Cmd)) uintptr {
+	return reflect.ValueOf(fn).Pointer()
+}
+
+// TestNoDuplicateActionNames guards the invariant the rest of the
+// unification work depends on: a name must never resolve to two different
+// execute functions. Names are now load-bearing for both [[keybind]]
+// overrides and ":"-command resolution (see ex_actions.go), so a
+// copy-pasted name landing on the wrong action would be a real bug, not a
+// style nit.
+func TestNoDuplicateActionNames(t *testing.T) {
+	check := func(t *testing.T, label string, cmds []command) {
+		seen := map[string]uintptr{}
+		var walk func([]command)
+		walk = func(cs []command) {
+			for _, c := range cs {
+				if c.name != "" && c.execute != nil {
+					p := fnPointer(c.execute)
+					if prev, ok := seen[c.name]; ok && prev != p {
+						t.Errorf("%s: name %q is bound to two different execute functions", label, c.name)
+					}
+					seen[c.name] = p
+				}
+				if len(c.children) > 0 {
+					walk(c.children)
+				}
+			}
+		}
+		walk(cmds)
+	}
+	check(t, "prefixCmds", defaultPrefixCmds)
+	check(t, "insertCmds", defaultInsertCmds)
+
+	treeNames := actionRegistry(defaultPrefixCmds)
+	for name := range exOnlyActions {
+		if _, exists := treeNames[name]; exists {
+			t.Errorf("exOnlyActions[%q] collides with an existing keypress-tree action name", name)
+		}
+	}
+}
+
+// TestApplyKeybindOverridesReachesFormerlyMenuOnlyAction proves that naming
+// a menu leaf (here, "go-to-top", previously reachable only via "g g") is
+// enough on its own to make it bindable to a bare key via config — no
+// override-mechanism changes needed.
+func TestApplyKeybindOverridesReachesFormerlyMenuOnlyAction(t *testing.T) {
+	resetKeybinds(t)
+	cfg := &config.Config{Keybinds: []config.Keybind{
+		{Mode: "normal", Key: "ctrl+g", Action: "go-to-top"},
+	}}
+	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+
+	m := newTestModel("a\nb\nc\n")
+	m.cursor.Line = 2
+	m2, _ := m.handleNormal(fakeKey("ctrl+g"))
+	got := m2.(Model)
+	if got.cursor.Line != 0 {
+		t.Errorf("ctrl+g bound to go-to-top: cursor.Line = %d, want 0", got.cursor.Line)
+	}
+}
+
+// TestApplyKeybindOverridesExOnlyAction proves an action with no keypress
+// or menu equivalent at all (exOnlyActions) is a valid [[keybind]] target,
+// once merged into applyKeybindOverrides' action maps.
+func TestApplyKeybindOverridesExOnlyAction(t *testing.T) {
+	resetKeybinds(t)
+	cfg := &config.Config{Keybinds: []config.Keybind{
+		{Mode: "normal", Key: "ctrl+q", Action: "quit-force"},
+	}}
+	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+
+	m := newTestModel("hello\n")
+	_, cmd := m.handleNormal(fakeKey("ctrl+q"))
+	if cmd == nil {
+		t.Error("ctrl+q bound to quit-force: expected a non-nil cmd (doCloseBuffer)")
+	}
+}
+
+// TestExActionRegistryMatchesTreeAction confirms exActionRegistry's "save"
+// entry is literally the same function ctrl+s uses — the concrete
+// unification win: no second, independently-maintained implementation.
+func TestExActionRegistryMatchesTreeAction(t *testing.T) {
+	resetKeybinds(t)
+	treeFn, ok := actionRegistry(prefixCmds)["save"]
+	if !ok {
+		t.Fatal(`"save" not found in the keypress tree's action registry`)
+	}
+	exFn, ok := exActionRegistry()["save"]
+	if !ok {
+		t.Fatal(`"save" not found in exActionRegistry`)
+	}
+	if fnPointer(treeFn) != fnPointer(exFn) {
+		t.Error("exActionRegistry()[\"save\"] is not the same function ctrl+s uses")
 	}
 }

@@ -253,94 +253,69 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	switch cmd {
-	case "fmt", "format":
-		return m, m.fetchFormat(false)
-	case "w", "write", "s", "save":
-		return m, m.doSave()
-	case "q", "quit":
-		if m.buf.Dirty() {
-			m = m.pushStatus("E: unsaved changes (use :q! to discard)")
+	// Zero-argument commands ("save", "quit", "fmt", ...) resolve through
+	// the same named-action registry keypresses use — see ex_actions.go.
+	// This is what makes e.g. ":save" literally invoke the same function
+	// ctrl+s does, instead of a second hand-written implementation.
+	if name, ok := exCommandAliases[cmd]; ok {
+		if fn, ok := exActionRegistry()[name]; ok {
+			return fn(m)
+		}
+	}
+
+	if path, ok := strings.CutPrefix(cmd, "w "); ok && strings.TrimSpace(path) != "" {
+		newPath, err := filepath.Abs(strings.TrimSpace(path))
+		if err != nil {
+			m = m.pushStatus(fmt.Sprintf("E: bad path: %v", err))
 			return m, nil
 		}
-		return m, m.doCloseBuffer()
-	case "q!", "quit!":
-		return m, m.doCloseBuffer()
-	case "wq", "x", "write-quit":
-		return m, m.doSaveAndClose()
-	case "qa", "quit-all":
-		return m, func() tea.Msg { return QuitAllMsg{} }
-	case "qa!", "quit-all!":
-		return m, func() tea.Msg { return QuitAllMsg{Force: true} }
-	case "wqa":
-		return m, func() tea.Msg { return QuitAllMsg{SaveAll: true} }
-	case "e", "edit":
-		return m, func() tea.Msg { return OpenPickerMsg{} }
-	case "new":
-		return m, func() tea.Msg { return OpenNewFileMsg{} }
-	case "diagnostics", "diag":
-		// Workspace diagnostic browser (open buffers only for now; see
-		// PLAN.md's workspace-scan follow-up).
-		return m, func() tea.Msg { return OpenDiagnosticBrowserMsg{} }
-	case "metrics":
-		if m.metrics != nil {
-			m.metrics.show = !m.metrics.show
+		return m, m.doSaveAsNow(newPath, false)
+	}
+	if path, ok := strings.CutPrefix(cmd, "wq "); ok && strings.TrimSpace(path) != "" {
+		newPath, err := filepath.Abs(strings.TrimSpace(path))
+		if err != nil {
+			m = m.pushStatus(fmt.Sprintf("E: bad path: %v", err))
+			return m, nil
 		}
-	default:
-		if path, ok := strings.CutPrefix(cmd, "w "); ok && strings.TrimSpace(path) != "" {
-			newPath, err := filepath.Abs(strings.TrimSpace(path))
-			if err != nil {
-				m = m.pushStatus(fmt.Sprintf("E: bad path: %v", err))
-				return m, nil
-			}
-			return m, m.doSaveAsNow(newPath, false)
-		}
-		if path, ok := strings.CutPrefix(cmd, "wq "); ok && strings.TrimSpace(path) != "" {
-			newPath, err := filepath.Abs(strings.TrimSpace(path))
-			if err != nil {
-				m = m.pushStatus(fmt.Sprintf("E: bad path: %v", err))
-				return m, nil
-			}
-			return m, m.doSaveAsNow(newPath, true)
-		}
-		if newName, ok := strings.CutPrefix(cmd, "extract-rename "); ok && strings.TrimSpace(newName) != "" && m.pendingExtract != nil {
-			p := m.pendingExtract
-			m.pendingExtract = nil
-			return m.doApplyExtractAndRename(p.edits, p.kind, strings.TrimSpace(newName))
-		}
+		return m, m.doSaveAsNow(newPath, true)
+	}
+	if newName, ok := strings.CutPrefix(cmd, "extract-rename "); ok && strings.TrimSpace(newName) != "" && m.pendingExtract != nil {
+		p := m.pendingExtract
 		m.pendingExtract = nil
-		if newName, ok := strings.CutPrefix(cmd, "rename "); ok && strings.TrimSpace(newName) != "" {
-			return m, m.doRenameSymbol(strings.TrimSpace(newName))
+		return m.doApplyExtractAndRename(p.edits, p.kind, strings.TrimSpace(newName))
+	}
+	m.pendingExtract = nil
+	if newName, ok := strings.CutPrefix(cmd, "rename "); ok && strings.TrimSpace(newName) != "" {
+		return m, m.doRenameSymbol(strings.TrimSpace(newName))
+	}
+	if destPath, ok := strings.CutPrefix(cmd, "move-to-file "); ok && strings.TrimSpace(destPath) != "" {
+		return m, m.doMoveFunctionToFile(strings.TrimSpace(destPath))
+	}
+	if rest, ok := strings.CutPrefix(cmd, "set ft="); ok {
+		lang := strings.ToLower(strings.TrimSpace(rest))
+		if lang == "" {
+			m = m.pushStatus("E: usage: set ft=<lang> (or set ft=auto to go back to the file's own type)")
+			return m, nil
 		}
-		if destPath, ok := strings.CutPrefix(cmd, "move-to-file "); ok && strings.TrimSpace(destPath) != "" {
-			return m, m.doMoveFunctionToFile(strings.TrimSpace(destPath))
-		}
-		if rest, ok := strings.CutPrefix(cmd, "set ft="); ok {
-			lang := strings.ToLower(strings.TrimSpace(rest))
-			if lang == "" {
-				m = m.pushStatus("E: usage: set ft=<lang> (or set ft=auto to go back to the file's own type)")
-				return m, nil
-			}
-			if lang == "auto" {
-				m.langOverride = ""
-				m.hlr = highlight.New(m.filePath)
-				m.hlSpans = nil
-				m = m.pushStatus(fmt.Sprintf("File type: %s (auto)", m.effectiveFileTypeName()))
-				return m, m.reparseHighlight()
-			}
-			hlr := highlight.NewForKey(lang)
-			if hlr == nil {
-				m = m.pushStatus(fmt.Sprintf("E: unknown file type: %s", lang))
-				return m, nil
-			}
-			m.langOverride = lang
-			m.hlr = hlr
+		if lang == "auto" {
+			m.langOverride = ""
+			m.hlr = highlight.New(m.filePath)
 			m.hlSpans = nil
-			m = m.pushStatus(fmt.Sprintf("File type: %s", m.effectiveFileTypeName()))
+			m = m.pushStatus(fmt.Sprintf("File type: %s (auto)", m.effectiveFileTypeName()))
 			return m, m.reparseHighlight()
 		}
-		m = m.pushStatus(fmt.Sprintf("E: unknown command: %s", cmd))
+		hlr := highlight.NewForKey(lang)
+		if hlr == nil {
+			m = m.pushStatus(fmt.Sprintf("E: unknown file type: %s", lang))
+			return m, nil
+		}
+		m.langOverride = lang
+		m.hlr = hlr
+		m.hlSpans = nil
+		m = m.pushStatus(fmt.Sprintf("File type: %s", m.effectiveFileTypeName()))
+		return m, m.reparseHighlight()
 	}
+	m = m.pushStatus(fmt.Sprintf("E: unknown command: %s", cmd))
 	return m, nil
 }
 

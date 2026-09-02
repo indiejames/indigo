@@ -168,7 +168,7 @@ var insertCmds = []command{
 	{key: "ctrl+space", name: "trigger-completion", label: "Trigger completion", execute: executeTriggerCompletion},
 	{key: "esc", name: "exit-insert-mode", label: "Exit insert mode", execute: executeInsertEsc},
 	// Escape to normal mode (vim convention) — never close from insert mode.
-	{key: "ctrl+c", name: "exit-insert-mode", label: "Exit insert mode", execute: executeInsertCtrlC},
+	{key: "ctrl+c", name: "cancel-insert-mode", label: "Cancel insert mode", execute: executeInsertCtrlC},
 	{key: "ctrl+s", name: "save", label: "Save", execute: executeSave},
 	{key: "ctrl+h", name: "prev-buffer", label: "Previous buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return PrevBufferMsg{} }

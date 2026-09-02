@@ -25,11 +25,31 @@ type command struct {
 	execute   func(m Model) (tea.Model, tea.Cmd)
 }
 
+// executeOpenFilePicker, executePrevBuffer, executeNextBuffer, and
+// executeOpenSymbolPicker are extracted (rather than left as inline
+// closures) because each is bound at more than one point in the tree
+// (a root key and a menu leaf) — giving both sites the same name only
+// means the same action once both actually point at the same function
+// value; see TestNoDuplicateActionNames.
+func executeOpenFilePicker(m Model) (tea.Model, tea.Cmd) {
+	return m, func() tea.Msg { return OpenPickerMsg{} }
+}
+
+func executePrevBuffer(m Model) (tea.Model, tea.Cmd) {
+	return m, func() tea.Msg { return PrevBufferMsg{} }
+}
+
+func executeNextBuffer(m Model) (tea.Model, tea.Cmd) {
+	return m, func() tea.Msg { return NextBufferMsg{} }
+}
+
+func executeOpenSymbolPicker(m Model) (tea.Model, tea.Cmd) {
+	return m, func() tea.Msg { return OpenSymbolPickerMsg{BufID: m.bufID} }
+}
+
 // prefixCmds is the root of the prefix-command tree for Normal mode.
 var prefixCmds = []command{
-	{key: "ctrl+p", name: "open-file-picker", label: "Open file picker", execute: func(m Model) (tea.Model, tea.Cmd) {
-		return m, func() tea.Msg { return OpenPickerMsg{} }
-	}},
+	{key: "ctrl+p", name: "open-file-picker", label: "Open file picker", execute: executeOpenFilePicker},
 	{key: "n", name: "search-next", label: "Search next", execute: func(m Model) (tea.Model, tea.Cmd) {
 		if len(m.searchMatches) > 0 {
 			m.searchIdx = (m.searchIdx + 1) % len(m.searchMatches)
@@ -58,12 +78,8 @@ var prefixCmds = []command{
 		return m, nil
 	}},
 	{key: "ctrl+c", name: "quit-hint", label: "Quit hint", execute: executeCancelHint},
-	{key: "ctrl+h", name: "prev-buffer", label: "Previous buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
-		return m, func() tea.Msg { return PrevBufferMsg{} }
-	}},
-	{key: "ctrl+l", name: "next-buffer", label: "Next buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
-		return m, func() tea.Msg { return NextBufferMsg{} }
-	}},
+	{key: "ctrl+h", name: "prev-buffer", label: "Previous buffer", execute: executePrevBuffer},
+	{key: "ctrl+l", name: "next-buffer", label: "Next buffer", execute: executeNextBuffer},
 	{key: ":", name: "command-mode", label: "Command mode", execute: executeEnterCommandMode},
 	{key: "/", name: "search", label: "Search", execute: executeEnterSearchMode},
 	{key: "esc", name: "cancel-selection", label: "Cancel selection", execute: executeEscNormal},
@@ -141,21 +157,19 @@ var prefixCmds = []command{
 		label:     "Go",
 		menuTitle: "Go",
 		children: []command{
-			{key: "g", label: "Go to top of file", execute: executeGoToTop},
-			{key: "e", label: "Go to end of file", execute: executeGoToEnd},
-			{key: "d", label: "Go to definition", execute: executeGoToDefinition},
-			{key: "h", label: "Go to line start", execute: executeGoToLineStart},
-			{key: "l", label: "Go to line end", execute: executeGoToLineEnd},
-			{key: "s", label: "Go to symbol in project", execute: func(m Model) (tea.Model, tea.Cmd) {
-				return m, func() tea.Msg { return OpenSymbolPickerMsg{BufID: m.bufID} }
-			}},
-			{key: "S", label: "Go to symbol in file", execute: func(m Model) (tea.Model, tea.Cmd) {
+			{key: "g", name: "go-to-top", label: "Go to top of file", execute: executeGoToTop},
+			{key: "e", name: "go-to-end", label: "Go to end of file", execute: executeGoToEnd},
+			{key: "d", name: "go-to-definition", label: "Go to definition", execute: executeGoToDefinition},
+			{key: "h", name: "go-to-line-start", label: "Go to line start", execute: executeGoToLineStart},
+			{key: "l", name: "go-to-line-end", label: "Go to line end", execute: executeGoToLineEnd},
+			{key: "s", name: "go-to-symbol-in-project", label: "Go to symbol in project", execute: executeOpenSymbolPicker},
+			{key: "S", name: "go-to-symbol-in-file", label: "Go to symbol in file", execute: func(m Model) (tea.Model, tea.Cmd) {
 				return m, m.fetchDocSymbols()
 			}},
-			{key: "r", label: "Find references", execute: func(m Model) (tea.Model, tea.Cmd) {
+			{key: "r", name: "find-references", label: "Find references", execute: func(m Model) (tea.Model, tea.Cmd) {
 				return m, m.fetchReferences()
 			}},
-			{key: "b", label: "Open buffer picker", execute: func(m Model) (tea.Model, tea.Cmd) {
+			{key: "b", name: "open-buffer-picker", label: "Open buffer picker", execute: func(m Model) (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg { return OpenBufPickerMsg{} }
 			}},
 		},
@@ -165,9 +179,7 @@ var prefixCmds = []command{
 		label:     "Next",
 		menuTitle: "Next",
 		children: []command{
-			{key: "b", label: "Next buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
-				return m, func() tea.Msg { return NextBufferMsg{} }
-			}},
+			{key: "b", name: "next-buffer", label: "Next buffer", execute: executeNextBuffer},
 		},
 	},
 	{
@@ -175,9 +187,7 @@ var prefixCmds = []command{
 		label:     "Prev",
 		menuTitle: "Prev",
 		children: []command{
-			{key: "b", label: "Previous buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
-				return m, func() tea.Msg { return PrevBufferMsg{} }
-			}},
+			{key: "b", name: "prev-buffer", label: "Previous buffer", execute: executePrevBuffer},
 		},
 	},
 	commandMenuRoot,
@@ -186,12 +196,12 @@ var prefixCmds = []command{
 		label:     "Case",
 		menuTitle: "Case",
 		children: []command{
-			{key: "s", label: "snake_case", execute: executeCaseConvertSnake},
-			{key: "S", label: "SCREAMING_SNAKE_CASE", execute: executeCaseConvertScreamingSnake},
-			{key: "c", label: "camelCase", execute: executeCaseConvertCamel},
-			{key: "p", label: "PascalCase", execute: executeCaseConvertPascal},
-			{key: "k", label: "kebab-case", execute: executeCaseConvertKebab},
-			{key: "d", label: "dot.case", execute: executeCaseConvertDot},
+			{key: "s", name: "case-to-snake", label: "snake_case", execute: executeCaseConvertSnake},
+			{key: "S", name: "case-to-screaming-snake", label: "SCREAMING_SNAKE_CASE", execute: executeCaseConvertScreamingSnake},
+			{key: "c", name: "case-to-camel", label: "camelCase", execute: executeCaseConvertCamel},
+			{key: "p", name: "case-to-pascal", label: "PascalCase", execute: executeCaseConvertPascal},
+			{key: "k", name: "case-to-kebab", label: "kebab-case", execute: executeCaseConvertKebab},
+			{key: "d", name: "case-to-dot", label: "dot.case", execute: executeCaseConvertDot},
 		},
 	},
 	{
@@ -199,8 +209,8 @@ var prefixCmds = []command{
 		label:     "Move",
 		menuTitle: "Move",
 		children: []command{
-			{key: "j", label: "Move line(s) down", execute: executeMoveLineDown},
-			{key: "k", label: "Move line(s) up", execute: executeMoveLineUp},
+			{key: "j", name: "move-line-down", label: "Move line(s) down", execute: executeMoveLineDown},
+			{key: "k", name: "move-line-up", label: "Move line(s) up", execute: executeMoveLineUp},
 		},
 	},
 	{
@@ -208,8 +218,8 @@ var prefixCmds = []command{
 		label:     "Sort",
 		menuTitle: "Sort",
 		children: []command{
-			{key: "a", label: "Sort lines ascending", execute: executeSortLinesAscending},
-			{key: "d", label: "Sort lines descending", execute: executeSortLinesDescending},
+			{key: "a", name: "sort-lines-ascending", label: "Sort lines ascending", execute: executeSortLinesAscending},
+			{key: "d", name: "sort-lines-descending", label: "Sort lines descending", execute: executeSortLinesDescending},
 		},
 	},
 	{
@@ -217,20 +227,20 @@ var prefixCmds = []command{
 		label:     "Match",
 		menuTitle: "Match",
 		children: []command{
-			{key: "m", label: "Go to matching bracket", execute: executeGotoMatchingBracket},
+			{key: "m", name: "go-to-matching-bracket", label: "Go to matching bracket", execute: executeGotoMatchingBracket},
 			{
 				key:       "i",
 				label:     "Select inside object",
 				menuTitle: "Match Inside",
 				children: []command{
-					{key: "w", label: "Word", execute: executeSelectInsideWord},
-					{key: "s", label: "Whitespace", execute: executeSelectInsideWhitespace},
-					{key: "m", label: "Closest surrounding pair", execute: executeSelectInsideBrackets},
-					{key: ".", label: "Quote/delimiter pair", execute: executeSelectInsideChar},
-					{key: "f", label: "Function", execute: executeSelectInsideFunction},
-					{key: "t", label: "Type definition", execute: executeSelectInsideType},
-					{key: "a", label: "Argument/parameter", execute: executeSelectInsideArgument},
-					{key: "c", label: "Comment", execute: executeSelectInsideComment},
+					{key: "w", name: "select-inside-word", label: "Word", execute: executeSelectInsideWord},
+					{key: "s", name: "select-inside-whitespace", label: "Whitespace", execute: executeSelectInsideWhitespace},
+					{key: "m", name: "select-inside-brackets", label: "Closest surrounding pair", execute: executeSelectInsideBrackets},
+					{key: ".", name: "select-inside-delimiter", label: "Quote/delimiter pair", execute: executeSelectInsideChar},
+					{key: "f", name: "select-inside-function", label: "Function", execute: executeSelectInsideFunction},
+					{key: "t", name: "select-inside-type", label: "Type definition", execute: executeSelectInsideType},
+					{key: "a", name: "select-inside-argument", label: "Argument/parameter", execute: executeSelectInsideArgument},
+					{key: "c", name: "select-inside-comment", label: "Comment", execute: executeSelectInsideComment},
 				},
 			},
 			{
@@ -238,14 +248,14 @@ var prefixCmds = []command{
 				label:     "Select around object",
 				menuTitle: "Match Around",
 				children: []command{
-					{key: "w", label: "Word", execute: executeSelectInsideWord},
-					{key: "s", label: "Whitespace", execute: executeSelectInsideWhitespace},
-					{key: "m", label: "Closest surrounding pair", execute: executeSelectAroundBrackets},
-					{key: ".", label: "Quote/delimiter pair", execute: executeSelectAroundChar},
-					{key: "f", label: "Function", execute: executeSelectAroundFunction},
-					{key: "t", label: "Type definition", execute: executeSelectAroundType},
-					{key: "a", label: "Argument/parameter", execute: executeSelectAroundArgument},
-					{key: "c", label: "Comment", execute: executeSelectAroundComment},
+					{key: "w", name: "select-around-word", label: "Word", execute: executeSelectInsideWord},
+					{key: "s", name: "select-around-whitespace", label: "Whitespace", execute: executeSelectInsideWhitespace},
+					{key: "m", name: "select-around-brackets", label: "Closest surrounding pair", execute: executeSelectAroundBrackets},
+					{key: ".", name: "select-around-delimiter", label: "Quote/delimiter pair", execute: executeSelectAroundChar},
+					{key: "f", name: "select-around-function", label: "Function", execute: executeSelectAroundFunction},
+					{key: "t", name: "select-around-type", label: "Type definition", execute: executeSelectAroundType},
+					{key: "a", name: "select-around-argument", label: "Argument/parameter", execute: executeSelectAroundArgument},
+					{key: "c", name: "select-around-comment", label: "Comment", execute: executeSelectAroundComment},
 				},
 			},
 		},
@@ -261,39 +271,35 @@ var commandMenuRoot = command{
 	label:     "Command",
 	menuTitle: "Command",
 	children: []command{
-		{key: "s", label: "Search & Replace", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "s", name: "search-and-replace", label: "Search & Replace", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return OpenSearchReplaceMsg{} }
 		}},
-		{key: "S", label: "Save As", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "S", name: "save-as", label: "Save As", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return saveAsPromptMsg{} }
 		}},
-		{key: "p", label: "Symbol picker", execute: func(m Model) (tea.Model, tea.Cmd) {
-			return m, func() tea.Msg { return OpenSymbolPickerMsg{BufID: m.bufID} }
-		}},
-		{key: "f", label: "File picker", execute: func(m Model) (tea.Model, tea.Cmd) {
-			return m, func() tea.Msg { return OpenPickerMsg{} }
-		}},
-		{key: "l", label: "Message Log", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "p", name: "go-to-symbol-in-project", label: "Symbol picker", execute: executeOpenSymbolPicker},
+		{key: "f", name: "open-file-picker", label: "File picker", execute: executeOpenFilePicker},
+		{key: "l", name: "show-message-log", label: "Message Log", execute: func(m Model) (tea.Model, tea.Cmd) {
 			m.msgLogVisible = true
 			m.msgLogScroll = messageLogMaxScroll(m.width, m.height, m.messageLog) // start on the last page (most recent)
 			return m, nil
 		}},
-		{key: "n", label: "New file", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "n", name: "new-file", label: "New file", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return OpenNewFileMsg{} }
 		}},
-		{key: "a", label: "Code Actions (fixes & refactors)", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "a", name: "code-actions", label: "Code Actions (fixes & refactors)", execute: func(m Model) (tea.Model, tea.Cmd) {
 			// Uses the current selection as the request range when one is
 			// active, so range refactors (Extract Function/Variable) are
 			// offered alongside point-based quick-fixes.
 			return m, m.fetchFixes()
 		}},
-		{key: "i", label: "Organize Imports", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "i", name: "organize-imports", label: "Organize Imports", execute: func(m Model) (tea.Model, tea.Cmd) {
 			// Applies the language server's source.organizeImports action
 			// directly (no picker) unlike "a" Code Actions — see
 			// doOrganizeImports / EditorService.lspOrganizeImports.
 			return m, m.doOrganizeImports()
 		}},
-		{key: "r", label: "Refactor: Rename Symbol", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "r", name: "start-rename-symbol", label: "Refactor: Rename Symbol", execute: func(m Model) (tea.Model, tea.Cmd) {
 			// Uses the language server if one is running for this buffer;
 			// see doRenameSymbol / EditorService.lspRename.
 			m.mode = ModeCommand
@@ -301,7 +307,7 @@ var commandMenuRoot = command{
 			m.cmdCompletionIdx = -1
 			return m, nil
 		}},
-		{key: "m", label: "Refactor: Move Function to File", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "m", name: "start-move-to-file", label: "Refactor: Move Function to File", execute: func(m Model) (tea.Model, tea.Cmd) {
 			// Tree-sitter based (no language server needed); see
 			// doMoveFunctionToFile / EditorService.moveTextToFile.
 			m.mode = ModeCommand

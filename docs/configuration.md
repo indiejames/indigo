@@ -391,6 +391,43 @@ Plugins can contribute their own entries (and submenus) to the Command menu via
 | `cursor-down` | `down` | `line-start` | `home` |
 | `line-end` | `end` | | |
 
+Every built-in action's name and default key(s) can also be dumped from the command line —
+`indigo --dump-keybinds` prints a commented-out `[[keybind]]` block per action, grouped the
+same way as the `?` help popup, generated from indigo's live keymap so it can't drift out of
+date the way this table can as actions get added.
+
+### User-defined menus
+
+Group your own actions under a new prefix key — a multi-key menu, like the built-in `g`
+(Go) or `~` (Case) menus — with `[[keymenu]]`:
+
+```toml
+[[keymenu]]
+key   = "ctrl+g"
+label = "My Menu"
+
+  [[keymenu.child]]
+  key    = "s"
+  action = "save"
+
+  [[keymenu.child]]
+  key    = "a"
+  action = "save-as"
+```
+
+Pressing `ctrl+g` then `s` runs `save`; `ctrl+g` then `a` runs `save-as`. Normal mode only —
+Insert mode has no menu concept. A `[[keymenu.child]]` can itself have further nested
+`[[keymenu.child]]` entries instead of an `action`, to build a deeper menu; there's no depth
+limit. Each node must be either a leaf (`action` set) or a branch (one or more `child`
+entries), never both — and never neither. `label` is optional on a leaf (it falls back to the
+action's own built-in label) but is what names the menu's section in the generated `?` popup
+when set on the top-level entry.
+
+A `[[keymenu]]`'s top-level `key` follows the same "config always wins" rule `[[keybind]]`
+already has: if it matches an existing key — built-in or otherwise — your menu fully replaces
+whatever was there, with a startup warning, rather than being silently rejected. Unlike
+`[[keybind]]`, a `[[keymenu]]` *can* take over a key that's currently a multi-key prefix menu.
+
 ## Themes
 
 Set the active theme by name:

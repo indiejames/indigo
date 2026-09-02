@@ -147,6 +147,45 @@ func TestGenerateHelpEntriesIncludesInsertModeAndCommands(t *testing.T) {
 	}
 }
 
+// TestGenerateHelpEntriesExcludesSystemFromInsertModeToo is the regression
+// test for a gap a review caught: exOnlyActions are valid [[keybind]]
+// targets in both modes (keybinds.go), so a System-categorized ex-only
+// action (e.g. "toggle-metrics") can be bound into insert mode — and
+// rebindRoot correctly stamps that node's category as "System" via
+// canonicalDisplayInfo. That must still be excluded from the popup, the
+// same as it is when reached from Normal mode, not leak in just because it
+// arrived via a different tree. (Note: the reviewer's originally-cited
+// example, "show-plugin-bindings" in insert mode, doesn't actually reach
+// this path — it's rejected outright as an unknown action for insert mode,
+// since normal- and insert-mode action namespaces are separate. This test
+// uses "toggle-metrics" instead, confirmed reachable.)
+func TestGenerateHelpEntriesExcludesSystemFromInsertModeToo(t *testing.T) {
+	resetKeybinds(t)
+	cfg := &config.Config{Keybinds: []config.Keybind{
+		{Mode: "insert", Key: "ctrl+m", Action: "toggle-metrics"},
+	}}
+	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+
+	entries := generateHelpEntries()
+	// Scope the check to the "Insert mode" section specifically: "Toggle
+	// metrics overlay" is also the legitimate, pre-existing description for
+	// the unrelated ":metrics" ex-command under "Commands (:)" (from
+	// completion.go's allCmds) — checking the whole popup would false-
+	// positive on that correct entry.
+	inSection := false
+	for _, e := range entries {
+		if e.desc == "" && e.key != "" {
+			inSection = e.key == "Insert mode"
+			continue
+		}
+		if inSection && e.desc == "Toggle metrics overlay" {
+			t.Errorf("found %q under Insert mode, want it excluded (System category)", e.desc)
+		}
+	}
+}
+
 // TestGenerateHelpEntriesReflectsOverride is the core bug fix this phase
 // closes: a [[keybind]] override must show up in the generated popup
 // immediately, unlike the old static helpEntries list which could never

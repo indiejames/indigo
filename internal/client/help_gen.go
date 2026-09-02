@@ -198,8 +198,27 @@ func generateHelpEntries() []helpEntry {
 	// (insertCmds) entirely — but folding it into the same map lets it
 	// participate in categoryOrder's positioning like any other section,
 	// instead of being hardcoded to always trail at the very end.
+	//
+	// Exclude rows whose own canonical category is "System" first: since
+	// exOnlyActions are merged into both modes' [[keybind]] action sets
+	// (keybinds.go), a user can bind an ex-only System action (e.g.
+	// "toggle-metrics") into insert mode, and rebindRoot correctly stamps
+	// that node's category as "System" via canonicalDisplayInfo — but
+	// unlike the Normal-mode categories below, rows here were being folded
+	// into "Insert mode" unconditionally, ignoring that category entirely.
+	// That let a System action bound into insert mode leak into the popup
+	// even though the same action is deliberately hidden when reached from
+	// Normal mode.
 	if insertRows := collectHelpRows(insertCmds); len(insertRows) > 0 {
-		byCategory["Insert mode"] = insertRows
+		var visible []*treeHelpRow
+		for _, row := range insertRows {
+			if row.category != "System" {
+				visible = append(visible, row)
+			}
+		}
+		if len(visible) > 0 {
+			byCategory["Insert mode"] = visible
+		}
 	}
 	// "System" (quit-hint, command-mode, show-plugin-bindings) is
 	// meta/self-referential or already a universally-known convention (":"),

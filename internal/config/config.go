@@ -43,6 +43,22 @@ type Keybind struct {
 	Action string `toml:"action"`
 }
 
+// KeymenuNode is one node in a user-defined [[keymenu]] tree: either a
+// branch (has Children, no Action) or a leaf (has Action, no Children).
+// The same type represents every depth — a top-level [[keymenu]] entry and
+// every nested [[keymenu.child]] entry alike. Normal mode only, matching
+// every built-in menu (g, m, ~, ...); structural validation (a node can't
+// have both Action and Children, no duplicate sibling keys) and collision
+// handling against built-in bindings happen in internal/client, which
+// owns the command tree and action registries this needs — see
+// internal/client/keymenus.go.
+type KeymenuNode struct {
+	Key      string        `toml:"key"`
+	Label    string        `toml:"label"`
+	Action   string        `toml:"action"`
+	Children []KeymenuNode `toml:"child"`
+}
+
 // LinterConfig maps file extensions to an external linter command whose
 // output is parsed into diagnostics alongside whatever the file's LSP server
 // already reports. Command may be a bare name (looked up in PATH) or a
@@ -233,6 +249,9 @@ type Config struct {
 	// Keybinds override or add Normal-/Insert-mode key bindings. See the
 	// Keybind type for the shape of each entry.
 	Keybinds []Keybind `toml:"keybind"`
+	// Keymenus define user-authored Normal-mode prefix menus. See the
+	// KeymenuNode type for the shape of each entry.
+	Keymenus []KeymenuNode `toml:"keymenu"`
 	// Linters override or add an external linter for a given set of file
 	// extensions, merged alongside the file's LSP-reported diagnostics.
 	Linters []LinterConfig `toml:"linter"`

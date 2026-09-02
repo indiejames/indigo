@@ -174,6 +174,16 @@ func applyKeybindOverrides(cfg *config.Config) []string {
 		}
 	}
 
+	// [[keymenu]] is applied after [[keybind]] finishes mutating normal, so
+	// a keymenu leaf's action can reference either a built-in action or one
+	// a [[keybind]] override just renamed/introduced — one consistent
+	// ordering. Normal mode only: Insert mode has no menu concept today.
+	if cfg != nil {
+		var kwarn []string
+		normal, kwarn = applyKeymenus(normal, cfg.Keymenus, normalDisplay, normalActions)
+		warnings = append(warnings, kwarn...)
+	}
+
 	prefixCmds = normal
 	insertCmds = insert
 	return warnings

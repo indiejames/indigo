@@ -114,17 +114,38 @@ func TestExecuteYankNoSelectionCopiesCharUnderCursor(t *testing.T) {
 	}
 }
 
-// TestExecuteDeleteSelectionCopiesToClipboard is a regression test: d used to
-// just delete the selection with no way to recover the text. It now cuts —
-// copying to the clipboard before deleting, matching Vim/Kakoune's default
-// register behavior.
-func TestExecuteDeleteSelectionCopiesToClipboard(t *testing.T) {
-	fakeClipboardContent = ""
+// TestExecuteDeleteSelectionDoesNotTouchClipboard is a regression test: d
+// briefly cut (copied to clipboard before deleting), matching Vim/Kakoune's
+// default register behavior, but that was reverted — d is plain delete with
+// no clipboard side effect; the equivalent cut behavior moved to the
+// separate executeCutSelection command (see TestExecuteCutSelectionCopiesToClipboard).
+func TestExecuteDeleteSelectionDoesNotTouchClipboard(t *testing.T) {
+	fakeClipboardContent = "unchanged"
 	m := newTestModel("hello world\n")
 	m.rpc = &RPC{} // zero-value RPC is safe: ClientID() just reads a field, no dial
 	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 4}}
 
 	m2, _ := executeDeleteSelection(m)
+	got := m2.(Model)
+
+	if fakeClipboardContent != "unchanged" {
+		t.Errorf("clipboard = %q, want unchanged", fakeClipboardContent)
+	}
+	if got.buf.Line(0) != " world" {
+		t.Errorf("Line(0) = %q, want %q", got.buf.Line(0), " world")
+	}
+}
+
+// TestExecuteCutSelectionCopiesToClipboard verifies the explicit cut command
+// (the behavior d used to have) deletes the selection and copies it to the
+// clipboard first.
+func TestExecuteCutSelectionCopiesToClipboard(t *testing.T) {
+	fakeClipboardContent = ""
+	m := newTestModel("hello world\n")
+	m.rpc = &RPC{}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 4}}
+
+	m2, _ := executeCutSelection(m)
 	got := m2.(Model)
 
 	if fakeClipboardContent != "hello" {
@@ -160,11 +181,11 @@ func TestExecuteDeleteSelectionNoSelectionDoesNotTouchClipboard(t *testing.T) {
 	}
 }
 
-// TestExecuteChangeSelectionCopiesToClipboard mirrors
-// TestExecuteDeleteSelectionCopiesToClipboard for c, which also deletes the
-// selection (before entering Insert mode) via the same deleteSelection path.
-func TestExecuteChangeSelectionCopiesToClipboard(t *testing.T) {
-	fakeClipboardContent = ""
+// TestExecuteChangeSelectionDoesNotTouchClipboard mirrors
+// TestExecuteDeleteSelectionDoesNotTouchClipboard for c, which also deletes
+// the selection (before entering Insert mode) via the same plain-delete path.
+func TestExecuteChangeSelectionDoesNotTouchClipboard(t *testing.T) {
+	fakeClipboardContent = "unchanged"
 	m := newTestModel("hello world\n")
 	m.rpc = &RPC{}
 	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 4}}
@@ -172,8 +193,11 @@ func TestExecuteChangeSelectionCopiesToClipboard(t *testing.T) {
 	m2, _ := executeChangeSelection(m)
 	got := m2.(Model)
 
-	if fakeClipboardContent != "hello" {
-		t.Errorf("clipboard = %q, want %q", fakeClipboardContent, "hello")
+	if fakeClipboardContent != "unchanged" {
+		t.Errorf("clipboard = %q, want unchanged", fakeClipboardContent)
+	}
+	if got.buf.Line(0) != " world" {
+		t.Errorf("Line(0) = %q, want %q", got.buf.Line(0), " world")
 	}
 	if got.mode != ModeInsert {
 		t.Errorf("mode = %v, want ModeInsert", got.mode)

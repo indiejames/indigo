@@ -245,7 +245,7 @@ func TestDeleteAllCursorSelectionsDeletesEachSelectionOnce(t *testing.T) {
 		sel: &Selection{Anchor: document.Pos{Line: 2, Col: 1}, Head: document.Pos{Line: 2, Col: 3}},
 	}}
 
-	m2, cmd := deleteAllCursorSelections(m)
+	m2, cmd := deleteAllCursorSelections(m, false)
 
 	if got := m2.buf.Line(0); got != "ab" {
 		t.Errorf("line 0 = %q, want %q (XXX deleted)", got, "ab")
@@ -274,7 +274,7 @@ func TestDeleteAllCursorSelectionsOpensOwnUndoGroupWhenNoneActive(t *testing.T) 
 	m.cursor = document.Pos{Line: 0, Col: 1}
 	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 1}}
 
-	m2, _ := deleteAllCursorSelections(m)
+	m2, _ := deleteAllCursorSelections(m, false)
 
 	if m2.currentGroup != nil {
 		t.Error("currentGroup should be nil again after a standalone delete closes its transient group")
@@ -284,13 +284,14 @@ func TestDeleteAllCursorSelectionsOpensOwnUndoGroupWhenNoneActive(t *testing.T) 
 	}
 }
 
-// TestDeleteAllCursorSelectionsCombinesClipboardText is a regression test:
-// deleteAllCursorSelections used to call plain deleteSelection per cursor,
-// and each call independently overwrote the clipboard with just its own
-// selection's text — since cursors are processed back-to-front, only the
-// first (topmost) cursor's text survived, silently dropping every other
-// cursor's cut text. The clipboard must instead hold every cursor's text,
-// combined in document order.
+// TestDeleteAllCursorSelectionsCombinesClipboardText is a regression test for
+// the cut path (copyToClipboard=true, used by the explicit cut command):
+// combining cuts used to call plain deleteSelection per cursor, and each call
+// independently overwrote the clipboard with just its own selection's text —
+// since cursors are processed back-to-front, only the first (topmost)
+// cursor's text survived, silently dropping every other cursor's cut text.
+// The clipboard must instead hold every cursor's text, combined in document
+// order.
 func TestDeleteAllCursorSelectionsCombinesClipboardText(t *testing.T) {
 	fakeClipboardContent = ""
 	m := newTestModel("aXXXb\nc\ndYYYe\n")
@@ -302,7 +303,7 @@ func TestDeleteAllCursorSelectionsCombinesClipboardText(t *testing.T) {
 		sel: &Selection{Anchor: document.Pos{Line: 2, Col: 1}, Head: document.Pos{Line: 2, Col: 3}},
 	}}
 
-	deleteAllCursorSelections(m)
+	deleteAllCursorSelections(m, true)
 
 	if fakeClipboardContent != "XXX\nYYY" {
 		t.Errorf("clipboard = %q, want %q (both cursors' text, in document order)", fakeClipboardContent, "XXX\nYYY")
@@ -311,10 +312,10 @@ func TestDeleteAllCursorSelectionsCombinesClipboardText(t *testing.T) {
 
 // TestDeleteAllCursorSelectionsNoSelectionDoesNotTouchClipboard is a
 // regression test mirroring TestExecuteDeleteSelectionNoSelectionDoesNotTouchClipboard
-// for the multi-cursor path: when no cursor has an explicit selection, each
-// cursor still deletes the character under it, but none of that text should
-// reach the clipboard (it used to combine and write it, flooding the
-// clipboard on a run of bare multi-cursor deletes just like the
+// for the multi-cursor cut path (copyToClipboard=true): when no cursor has an
+// explicit selection, each cursor still deletes the character under it, but
+// none of that text should reach the clipboard (it used to combine and write
+// it, flooding the clipboard on a run of bare multi-cursor cuts just like the
 // single-cursor case did).
 func TestDeleteAllCursorSelectionsNoSelectionDoesNotTouchClipboard(t *testing.T) {
 	fakeClipboardContent = "unchanged"
@@ -323,7 +324,7 @@ func TestDeleteAllCursorSelectionsNoSelectionDoesNotTouchClipboard(t *testing.T)
 	m.cursor = document.Pos{Line: 0, Col: 0}
 	m.extraCursors = []ExtraCursor{{pos: document.Pos{Line: 1, Col: 0}}}
 
-	m2, _ := deleteAllCursorSelections(m)
+	m2, _ := deleteAllCursorSelections(m, true)
 
 	if fakeClipboardContent != "unchanged" {
 		t.Errorf("clipboard = %q, want unchanged", fakeClipboardContent)
@@ -333,12 +334,13 @@ func TestDeleteAllCursorSelectionsNoSelectionDoesNotTouchClipboard(t *testing.T)
 	}
 }
 
-// TestExecuteChangeSelectionMultiCursorCombinesClipboardText verifies the
-// `c` (change) command shares the same fix as `d`: it also routes multi-cursor
-// cuts through deleteAllCursorSelections, so it must combine every cursor's
-// text into the clipboard rather than losing all but one.
-func TestExecuteChangeSelectionMultiCursorCombinesClipboardText(t *testing.T) {
-	fakeClipboardContent = ""
+// TestExecuteChangeSelectionMultiCursorDoesNotTouchClipboard verifies `c`
+// (change), like plain `d`, never touches the clipboard even with multiple
+// cursors — it routes through deleteAllCursorSelections with
+// copyToClipboard=false. Cut's multicursor clipboard-combining behavior is
+// covered by TestExecuteCutSelectionMultiCursorCombinesClipboardText.
+func TestExecuteChangeSelectionMultiCursorDoesNotTouchClipboard(t *testing.T) {
+	fakeClipboardContent = "unchanged"
 	m := newTestModel("aXXXb\nc\ndYYYe\n")
 	m.rpc = &RPC{}
 	m.cursor = document.Pos{Line: 0, Col: 1}
@@ -349,6 +351,28 @@ func TestExecuteChangeSelectionMultiCursorCombinesClipboardText(t *testing.T) {
 	}}
 
 	executeChangeSelection(m)
+
+	if fakeClipboardContent != "unchanged" {
+		t.Errorf("clipboard = %q, want unchanged", fakeClipboardContent)
+	}
+}
+
+// TestExecuteCutSelectionMultiCursorCombinesClipboardText verifies the
+// explicit cut command shares the same combining fix as deleteAllCursorSelections'
+// cut path: it must combine every cursor's text into the clipboard rather
+// than losing all but one.
+func TestExecuteCutSelectionMultiCursorCombinesClipboardText(t *testing.T) {
+	fakeClipboardContent = ""
+	m := newTestModel("aXXXb\nc\ndYYYe\n")
+	m.rpc = &RPC{}
+	m.cursor = document.Pos{Line: 0, Col: 1}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 3}}
+	m.extraCursors = []ExtraCursor{{
+		pos: document.Pos{Line: 2, Col: 1},
+		sel: &Selection{Anchor: document.Pos{Line: 2, Col: 1}, Head: document.Pos{Line: 2, Col: 3}},
+	}}
+
+	executeCutSelection(m)
 
 	if fakeClipboardContent != "XXX\nYYY" {
 		t.Errorf("clipboard = %q, want %q (both cursors' text, in document order)", fakeClipboardContent, "XXX\nYYY")

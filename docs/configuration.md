@@ -309,6 +309,7 @@ An unknown `mode` or `action` is likewise reported as a warning rather than sile
 | `indent` | `>` | `unindent` | `<` |
 | `move-line-up` | `shift+up` | `move-line-down` | `shift+down` |
 | `jump-back` | `-` | `jump-forward` | `=`, `+` |
+| `cut-selection` | `v` | | |
 
 Multi-key sequences (the `g`, `m`, `M`, `s`, `~`, `[`, `]`, and Space menus, plus any
 others added later) aren't individually overridable — only the single-key

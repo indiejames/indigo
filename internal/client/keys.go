@@ -87,6 +87,7 @@ var prefixCmds = []command{
 	{key: "d", name: "delete-selection", label: "Delete selection", execute: executeDeleteSelection},
 	{key: "c", name: "change-selection", label: "Change selection", execute: executeChangeSelection},
 	{key: "y", name: "yank", label: "Yank", execute: executeYank},
+	{key: "v", name: "cut-selection", label: "Cut selection", execute: executeCutSelection},
 	{key: "h", name: "cursor-left", label: "Cursor left", execute: executeCursorLeft},
 	{key: "left", name: "cursor-left", label: "Cursor left", execute: executeCursorLeft},
 	{key: "l", name: "cursor-right", label: "Cursor right", execute: executeCursorRight},

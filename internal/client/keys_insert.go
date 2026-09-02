@@ -123,7 +123,9 @@ func (m Model) snippetEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.sel != nil {
 		start, _ := m.sel.ordered()
 		editCol = start.Col
-		m2, delCmd := m.deleteSelection()
+		// Plain delete: typing over a snippet placeholder shouldn't clobber
+		// whatever the user has on their clipboard.
+		m2, delCmd := m.deleteSelectionRaw()
 		m = m2
 		if delCmd != nil {
 			cmds = append(cmds, delCmd)

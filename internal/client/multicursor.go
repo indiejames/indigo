@@ -308,7 +308,9 @@ func splitSelectionIntoCursors(m *Model) {
 // positions. When currentGroup is nil (normal-mode delete), a transient group
 // is opened so all deletions land in one undo entry. When currentGroup is
 // already set (inside an insert session, e.g. `c`), inverses accumulate there.
-func deleteAllCursorSelections(m Model) (Model, tea.Cmd) {
+// copyToClipboard selects cut vs. plain-delete semantics for all cursors at
+// once — d/c pass false, the explicit cut command passes true.
+func deleteAllCursorSelections(m Model, copyToClipboard bool) (Model, tea.Cmd) {
 	type entry struct {
 		cursor    document.Pos
 		sel       *Selection
@@ -320,31 +322,34 @@ func deleteAllCursorSelections(m Model) (Model, tea.Cmd) {
 		entries = append(entries, entry{ec.pos, ec.sel, false})
 	}
 
-	// Collect every cursor's cut text in document order and write it to the
-	// clipboard as one combined cut before any deletion happens. Each
-	// deleteSelectionRaw call below only removes its own cursor's text from
-	// the buffer — if it also wrote the clipboard individually (as plain
-	// deleteSelection does), every write but the last processed would be
-	// clobbered, silently losing all but one cursor's cut text.
-	docOrder := append([]entry(nil), entries...)
-	sort.Slice(docOrder, func(i, j int) bool {
-		ci, cj := docOrder[i].cursor, docOrder[j].cursor
-		if ci.Line != cj.Line {
-			return ci.Line < cj.Line
+	// For the cut path: collect every cursor's cut text in document order and
+	// write it to the clipboard as one combined cut before any deletion
+	// happens. Each deleteSelectionRaw call below only removes its own
+	// cursor's text from the buffer — if it also wrote the clipboard
+	// individually (as cutSelection does for a single cursor), every write
+	// but the last processed would be clobbered, silently losing all but one
+	// cursor's cut text.
+	if copyToClipboard {
+		docOrder := append([]entry(nil), entries...)
+		sort.Slice(docOrder, func(i, j int) bool {
+			ci, cj := docOrder[i].cursor, docOrder[j].cursor
+			if ci.Line != cj.Line {
+				return ci.Line < cj.Line
+			}
+			return ci.Col < cj.Col
+		})
+		var cutParts []string
+		for _, e := range docOrder {
+			cm := m
+			cm.cursor = e.cursor
+			cm.sel = e.sel
+			if text, ok := cm.cutText(); ok {
+				cutParts = append(cutParts, text)
+			}
 		}
-		return ci.Col < cj.Col
-	})
-	var cutParts []string
-	for _, e := range docOrder {
-		cm := m
-		cm.cursor = e.cursor
-		cm.sel = e.sel
-		if text, ok := cm.cutText(); ok {
-			cutParts = append(cutParts, text)
+		if len(cutParts) > 0 {
+			_ = clipboardWriter(strings.Join(cutParts, "\n")) // cut semantics; a failed copy must not block the delete
 		}
-	}
-	if len(cutParts) > 0 {
-		_ = clipboardWriter(strings.Join(cutParts, "\n")) // cut semantics; a failed copy must not block the delete
 	}
 
 	sort.Slice(entries, func(i, j int) bool {

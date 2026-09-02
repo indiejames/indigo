@@ -353,9 +353,9 @@ func executeFlipSelection(m Model) (tea.Model, tea.Cmd) {
 func executeDeleteSelection(m Model) (tea.Model, tea.Cmd) {
 	m = m.withClearedSearch()
 	if len(m.extraCursors) > 0 {
-		return deleteAllCursorSelections(m)
+		return deleteAllCursorSelections(m, false)
 	}
-	m2, cmd := m.deleteSelection()
+	m2, cmd := m.deleteSelectionRaw()
 	return m2, cmd
 }
 
@@ -365,12 +365,25 @@ func executeChangeSelection(m Model) (tea.Model, tea.Cmd) {
 	m.groupBefore = m.cursorSnap()
 	m.insertLineCount = m.buf.LineCount()
 	if len(m.extraCursors) > 0 {
-		m2, cmd := deleteAllCursorSelections(m)
+		m2, cmd := deleteAllCursorSelections(m, false)
 		m2.mode = ModeInsert
 		return m2, cmd
 	}
-	m2, cmd := m.deleteSelection()
+	m2, cmd := m.deleteSelectionRaw()
 	m2.mode = ModeInsert
+	return m2, cmd
+}
+
+// executeCutSelection is the explicit cut command: delete the selection (or,
+// with no selection, the character under the cursor) and copy it to the
+// clipboard first — the behavior d/c used to have before they became plain
+// delete/change with no clipboard side effect.
+func executeCutSelection(m Model) (tea.Model, tea.Cmd) {
+	m = m.withClearedSearch()
+	if len(m.extraCursors) > 0 {
+		return deleteAllCursorSelections(m, true)
+	}
+	m2, cmd := m.cutSelection()
 	return m2, cmd
 }
 

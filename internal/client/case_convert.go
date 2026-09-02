@@ -236,7 +236,9 @@ func convertCaseAllCursors(m Model, join func([]string) string) (Model, tea.Cmd)
 		m.cursor = e.cursor
 		m.sel = sel
 		var delCmd tea.Cmd
-		m, delCmd = m.deleteSelection()
+		// Plain delete: converting a selection's case shouldn't clobber
+		// whatever the user has on their clipboard.
+		m, delCmd = m.deleteSelectionRaw()
 		cmds = append(cmds, delCmd)
 
 		var insCmd tea.Cmd

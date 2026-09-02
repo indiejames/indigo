@@ -187,6 +187,34 @@ func TestExecuteCommandAliasesPinTrickyPairs(t *testing.T) {
 	}
 }
 
+// TestExecuteCommandSaveSurvivesCtrlSRebind is a regression test:
+// rebindRoot overrides a key by overwriting that tree node's name/execute
+// in place, so rebinding ctrl+s away from "save" (a single-location action
+// — no other node carries that name) used to erase "save" from the live
+// tree entirely, breaking ":save" purely as a side effect of an unrelated
+// key remap. exActionRegistry resolves against the immutable
+// defaultPrefixCmds specifically to prevent this.
+func TestExecuteCommandSaveSurvivesCtrlSRebind(t *testing.T) {
+	resetKeybinds(t)
+	cfg := &config.Config{Keybinds: []config.Keybind{
+		{Mode: "normal", Key: "ctrl+s", Action: "select-all"},
+	}}
+	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+
+	m := newTestModel("hello\n")
+	m.cmdBuf = "save"
+	m2, cmd := m.executeCommand()
+	got := m2.(Model)
+	if strings.Contains(got.status, "unknown command") {
+		t.Errorf(`":save" after ctrl+s rebind: status = %q, want no unknown-command error`, got.status)
+	}
+	if cmd == nil {
+		t.Error(`":save" after ctrl+s rebind: expected a non-nil cmd (doSave)`)
+	}
+}
+
 // TestExecuteCommandSetFileTypeAuto verifies ":set ft=auto" clears a
 // previously set override and reverts to filePath-derived language.
 func TestExecuteCommandSetFileTypeAuto(t *testing.T) {

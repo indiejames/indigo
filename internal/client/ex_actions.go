@@ -60,12 +60,21 @@ func executeExQuit(m Model) (tea.Model, tea.Cmd) {
 }
 
 // exActionRegistry returns the merged action registry: every named leaf in
-// the live prefixCmds tree (reflecting any [[keybind]] overrides currently
-// applied) plus exOnlyActions. Recomputed on each call rather than cached —
-// the tree is small and this keeps ":" dispatch trivially correct across
-// config hot-reload with no separate invalidation path to get wrong.
+// the pristine, default prefixCmds tree (not the live, override-mutated
+// one — see below) plus exOnlyActions.
+//
+// Built from defaultPrefixCmds rather than the live prefixCmds: rebindRoot
+// (keybinds.go) overrides a key by overwriting that tree node's name and
+// execute fields in place, rather than adding a new node. For a
+// single-location action like "save" (only ctrl+s carries that name), a
+// [[keybind]] that repoints ctrl+s at a different action erases "save" from
+// the live tree entirely — which would make ":save" report "unknown
+// command" purely because of an unrelated key rebind. A key override should
+// only change what triggers an action, never whether the action's name is
+// still resolvable from ":", so this resolves against the immutable
+// default set instead.
 func exActionRegistry() map[string]func(Model) (tea.Model, tea.Cmd) {
-	reg := actionRegistry(prefixCmds)
+	reg := actionRegistry(defaultPrefixCmds)
 	for name, fn := range exOnlyActions {
 		reg[name] = fn
 	}

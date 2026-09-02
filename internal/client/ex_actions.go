@@ -49,6 +49,22 @@ var exOnlyActions = map[string]func(Model) (tea.Model, tea.Cmd){
 	},
 }
 
+// exOnlyDisplay gives exOnlyActions' names a canonical label/category, for
+// when one is bound to a key via [[keybind]] (rebindRoot) or listed by the
+// generated help popup / --dump-keybinds — exOnlyActions itself only maps
+// to a bare execute func, with nothing human-readable to show.
+var exOnlyDisplay = map[string]displayInfo{
+	"quit":             {label: "Quit (fails if unsaved)", category: "Files & Buffers"},
+	"quit-force":       {label: "Quit, discarding changes", category: "Files & Buffers"},
+	"write-quit":       {label: "Save and quit", category: "Files & Buffers"},
+	"quit-all":         {label: "Quit all (fails if any unsaved)", category: "Files & Buffers"},
+	"quit-all-force":   {label: "Quit all, discarding changes", category: "Files & Buffers"},
+	"write-quit-all":   {label: "Save all and quit", category: "Files & Buffers"},
+	"format":           {label: "Format buffer", category: "Editing"},
+	"show-diagnostics": {label: "Open workspace diagnostic browser", category: "LSP / Diagnostics"},
+	"toggle-metrics":   {label: "Toggle metrics overlay", category: "System"},
+}
+
 // executeExQuit is ":q"/":quit": close the buffer unless it has unsaved
 // changes, matching the pre-unification switch's dirty-buffer guard.
 func executeExQuit(m Model) (tea.Model, tea.Cmd) {

@@ -29,6 +29,16 @@ func main() {
 		return
 	}
 
+	// --dump-keybinds prints every built-in action as a commented-out
+	// [[keybind]] TOML block, generated from the live keymap (see
+	// internal/client.DumpKeybindsTOML) — redirect to a file and uncomment
+	// what you want to change. No server/workspace needed: it's pure
+	// built-in data.
+	if len(os.Args) == 2 && os.Args[1] == "--dump-keybinds" {
+		fmt.Print(client.DumpKeybindsTOML())
+		return
+	}
+
 	// Handle --import-theme helix:<path> or --import-theme vscode:<path>.
 	if len(os.Args) == 3 && os.Args[1] == "--import-theme" {
 		cfgDir, _ := config.ConfigDir()

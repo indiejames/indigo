@@ -928,116 +928,6 @@ type helpEntry struct {
 	desc string // right column; empty = section header
 }
 
-// helpEntries is the complete reference displayed by the ? popup.
-var helpEntries = []helpEntry{
-	{key: "Navigation"},
-	{key: "h / ←", desc: "Move left"},
-	{key: "j / ↓", desc: "Move down"},
-	{key: "k / ↑", desc: "Move up"},
-	{key: "l / →", desc: "Move right"},
-	{key: "b", desc: "Move to previous word start"},
-	{key: "e", desc: "Move to word end"},
-	{key: "0 / Home", desc: "Line start"},
-	{key: "^", desc: "First non-blank character in line"},
-	{key: "$ / End", desc: "Line end"},
-	{key: "G", desc: "End of file"},
-	{key: "Ctrl+f / PgDn", desc: "Page down"},
-	{key: "Ctrl+b / PgUp", desc: "Page up"},
-	{key: "-", desc: "Jump to previous edit location"},
-	{key: "= / +", desc: "Jump to next edit location"},
-	{key: ""},
-	{key: "Go to (g…)"},
-	{key: "gg", desc: "Top of file"},
-	{key: "ge", desc: "End of file"},
-	{key: "gd", desc: "Go to definition"},
-	{key: "gh", desc: "Line start"},
-	{key: "gl", desc: "Line end"},
-	{key: "gs", desc: "First non-whitespace"},
-	{key: "gb", desc: "Open buffer picker"},
-	{key: ""},
-	{key: "Case conversion (~…)"},
-	{key: "~s", desc: "snake_case"},
-	{key: "~S", desc: "SCREAMING_SNAKE_CASE"},
-	{key: "~c", desc: "camelCase"},
-	{key: "~p", desc: "PascalCase"},
-	{key: "~k", desc: "kebab-case"},
-	{key: "~d", desc: "dot.case"},
-	{key: ""},
-	{key: "Editing"},
-	{key: "i", desc: "Insert before cursor"},
-	{key: "a", desc: "Insert after cursor"},
-	{key: "A", desc: "Insert at line end"},
-	{key: "o", desc: "New line below"},
-	{key: "O", desc: "New line above"},
-	{key: "d", desc: "Delete selection, or character under cursor if none"},
-	{key: "c", desc: "Change selection (delete + insert), or character under cursor if none"},
-	{key: "v", desc: "Cut selection (delete + copy), or character under cursor if none"},
-	{key: "J", desc: "Join line with the line below"},
-	{key: "y", desc: "Yank (copy) selection, or character under cursor if none"},
-	{key: "u", desc: "Undo"},
-	{key: "U", desc: "Redo"},
-	{key: "q", desc: "Start/stop recording a macro"},
-	{key: "@", desc: "Replay the last recorded macro"},
-	{key: ">", desc: "Indent selected line(s)"},
-	{key: "<", desc: "Unindent selected line(s)"},
-	{key: ""},
-	{key: "Selection"},
-	{key: "w", desc: "Next word start"},
-	{key: "W", desc: "Extend selection to next word start"},
-	{key: "E", desc: "Extend selection to end of word"},
-	{key: "x", desc: "Select line"},
-	{key: "X", desc: "Extend line backward"},
-	{key: "z", desc: "Set mark at cursor (Esc clears)"},
-	{key: "Z", desc: "Select from mark to cursor"},
-	{key: "ma", desc: "Select around matching object"},
-	{key: "mi", desc: "Select inside object / word"},
-	{key: "%", desc: "Select all"},
-	{key: ";", desc: "Clear selection"},
-	{key: "Alt+;", desc: "Flip selection (swap anchor/head)"},
-	{key: "shift+end", desc: "Select to end of line"},
-	{key: "shift+home", desc: "Select to beginning of line"},
-	{key: "shift+right", desc: "Extend selection right one character"},
-	{key: "shift+left", desc: "Extend selection left one character"},
-	{key: ""},
-	{key: "Search"},
-	{key: "/", desc: "Start search"},
-	{key: "/pat/repl", desc: "Live replace preview; Enter applies"},
-	{key: "n", desc: "Next match"},
-	{key: "N", desc: "Previous match"},
-	{key: ""},
-	{key: "Multi-cursor"},
-	{key: "Ctrl+d", desc: "Add cursor at next occurrence"},
-	{key: "C", desc: "Add cursor below"},
-	{key: "Alt+s", desc: "Split selection into cursors"},
-	{key: ""},
-	{key: "LSP / Diagnostics"},
-	{key: "K", desc: "Hover documentation"},
-	{key: "SPC a", desc: "Code actions (fixes & refactors)"},
-	{key: ""},
-	{key: "Completion (insert mode)"},
-	{key: "Ctrl+Space", desc: "Trigger completion"},
-	{key: "↑ / ↓", desc: "Select item"},
-	{key: "Tab / Enter", desc: "Accept selected item"},
-	{key: "Esc", desc: "Dismiss popup"},
-	{key: ""},
-	{key: "Sort (s…)"},
-	{key: "a", desc: "Sort selected lines ascending"},
-	{key: "d", desc: "Sort selected lines descending"},
-	{key: ""},
-	{key: "Files & Buffers"},
-	{key: "Ctrl+p", desc: "File picker"},
-	{key: "Ctrl+s", desc: "Save"},
-	{key: "]b / [b", desc: "Next / previous buffer"},
-	{key: "Ctrl+l / Ctrl+h", desc: "Next / previous buffer (Normal & Insert)"},
-	{key: ":"},
-	{key: "  w", desc: "Save"},
-	{key: "  q", desc: "Close buffer"},
-	{key: "  wq", desc: "Save and close"},
-	{key: "  e <path>", desc: "Open file"},
-	{key: "  themes", desc: "List available themes"},
-	{key: "  theme <name>", desc: "Switch theme"},
-}
-
 const helpKeyW = 18 // fixed left-column width for key strings
 
 // helpKeyColW is the total width (in columns) consumed by the left key
@@ -1072,10 +962,13 @@ func wrapToWidth(s string, width int) []string {
 // innerW so no row overflows the popup's right border. Called from both
 // handleKey (for scroll-clamping) and renderHelpPopup (for display); both
 // must pass the same innerW (via helpPopupInnerWidth) so their line counts
-// agree.
+// agree. The built-in entries are generated fresh from the live command
+// tree on every call (generateHelpEntries, help_gen.go) rather than read
+// from a static list, so a [[keybind]] override is always reflected here.
 func helpPopupLines(pluginBindings []ClientPluginBinding, innerW int) []string {
 	descAvail := innerW - helpKeyColW
 	blank := strings.Repeat(" ", helpKeyColW)
+	helpEntries := generateHelpEntries()
 	lines := make([]string, 0, len(helpEntries)+len(pluginBindings)+4)
 	for _, e := range helpEntries {
 		if e.desc == "" {

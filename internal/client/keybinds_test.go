@@ -180,6 +180,62 @@ func TestNoDuplicateActionNames(t *testing.T) {
 	}
 }
 
+// TestNoDuplicateActionLabels guards the invariant the generated help popup
+// depends on: every occurrence of a given name across the built-in trees
+// must agree on its label. This can't be enforced for arbitrary
+// [[keybind]] config at runtime (that's what rebindRoot's canonical-label
+// lookup is for instead), but our own static tree has no excuse — a
+// mismatch here (found and fixed this session: "open-file-picker" and
+// "go-to-symbol-in-project" each had two different labels) would make a
+// merged-by-name popup row show an arbitrary, unpredictable label.
+func TestNoDuplicateActionLabels(t *testing.T) {
+	check := func(t *testing.T, treeLabel string, cmds []command) {
+		seen := map[string]string{}
+		var walk func([]command)
+		walk = func(cs []command) {
+			for _, c := range cs {
+				if c.name != "" && c.execute != nil {
+					if prev, ok := seen[c.name]; ok && prev != c.label {
+						t.Errorf("%s: name %q has two different labels: %q and %q", treeLabel, c.name, prev, c.label)
+					}
+					seen[c.name] = c.label
+				}
+				if len(c.children) > 0 {
+					walk(c.children)
+				}
+			}
+		}
+		walk(cmds)
+	}
+	check(t, "prefixCmds", defaultPrefixCmds)
+	check(t, "insertCmds", defaultInsertCmds)
+}
+
+// TestRebindRootUsesCanonicalLabel is the regression test for the bug found
+// this session: rebindRoot used to stamp the bare action name (e.g.
+// "go-to-top") as label, rather than looking up the action's real display
+// label — every [[keybind]] a user ever writes hit this, not just an edge
+// case.
+func TestRebindRootUsesCanonicalLabel(t *testing.T) {
+	resetKeybinds(t)
+	cfg := &config.Config{Keybinds: []config.Keybind{
+		{Mode: "normal", Key: "ctrl+g", Action: "go-to-top"},
+	}}
+	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+	cmd, ok := findCommand([]string{"ctrl+g"})
+	if !ok {
+		t.Fatal("ctrl+g not found after override")
+	}
+	if cmd.label != "Go to top of file" {
+		t.Errorf("label = %q, want canonical label %q (not the bare action name)", cmd.label, "Go to top of file")
+	}
+	if cmd.category != "Go to (g)" {
+		t.Errorf("category = %q, want %q", cmd.category, "Go to (g)")
+	}
+}
+
 // TestApplyKeybindOverridesReachesFormerlyMenuOnlyAction proves that naming
 // a menu leaf (here, "go-to-top", previously reachable only via "g g") is
 // enough on its own to make it bindable to a bare key via config — no

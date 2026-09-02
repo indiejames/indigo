@@ -21,8 +21,14 @@ type command struct {
 	name      string
 	label     string
 	menuTitle string
-	children  []command
-	execute   func(m Model) (tea.Model, tea.Cmd)
+	// category is the generated help popup's display grouping (see
+	// help_gen.go). Set explicitly on root-level leaves and on a menu's own
+	// node (in which case every descendant inherits it, so a menu's leaves
+	// don't each need their own); left empty on a leaf to inherit from its
+	// nearest ancestor.
+	category string
+	children []command
+	execute  func(m Model) (tea.Model, tea.Cmd)
 }
 
 // executeOpenFilePicker, executePrevBuffer, executeNextBuffer, and
@@ -49,8 +55,8 @@ func executeOpenSymbolPicker(m Model) (tea.Model, tea.Cmd) {
 
 // prefixCmds is the root of the prefix-command tree for Normal mode.
 var prefixCmds = []command{
-	{key: "ctrl+p", name: "open-file-picker", label: "Open file picker", execute: executeOpenFilePicker},
-	{key: "n", name: "search-next", label: "Search next", execute: func(m Model) (tea.Model, tea.Cmd) {
+	{key: "ctrl+p", name: "open-file-picker", category: "Files & Buffers", label: "Open file picker", execute: executeOpenFilePicker},
+	{key: "n", name: "search-next", category: "Search", label: "Search next", execute: func(m Model) (tea.Model, tea.Cmd) {
 		if len(m.searchMatches) > 0 {
 			m.searchIdx = (m.searchIdx + 1) % len(m.searchMatches)
 			sm := m.searchMatches[m.searchIdx]
@@ -59,7 +65,7 @@ var prefixCmds = []command{
 		}
 		return m, nil
 	}},
-	{key: "N", name: "search-previous", label: "Search previous", execute: func(m Model) (tea.Model, tea.Cmd) {
+	{key: "N", name: "search-previous", category: "Search", label: "Search previous", execute: func(m Model) (tea.Model, tea.Cmd) {
 		if len(m.searchMatches) > 0 {
 			m.searchIdx = (m.searchIdx - 1 + len(m.searchMatches)) % len(m.searchMatches)
 			sm := m.searchMatches[m.searchIdx]
@@ -68,7 +74,7 @@ var prefixCmds = []command{
 		}
 		return m, nil
 	}},
-	{key: "i", name: "insert-before-cursor", label: "Insert before cursor", execute: func(m Model) (tea.Model, tea.Cmd) {
+	{key: "i", name: "insert-before-cursor", category: "Editing", label: "Insert before cursor", execute: func(m Model) (tea.Model, tea.Cmd) {
 		m = m.withClearedSearch()
 		m.sel = nil
 		m.currentGroup = []document.Op{}
@@ -77,85 +83,86 @@ var prefixCmds = []command{
 		m.mode = ModeInsert
 		return m, nil
 	}},
-	{key: "ctrl+c", name: "quit-hint", label: "Quit hint", execute: executeCancelHint},
-	{key: "ctrl+h", name: "prev-buffer", label: "Previous buffer", execute: executePrevBuffer},
-	{key: "ctrl+l", name: "next-buffer", label: "Next buffer", execute: executeNextBuffer},
-	{key: ":", name: "command-mode", label: "Command mode", execute: executeEnterCommandMode},
-	{key: "/", name: "search", label: "Search", execute: executeEnterSearchMode},
-	{key: "esc", name: "cancel-selection", label: "Cancel selection", execute: executeEscNormal},
-	{key: "a", name: "append-after-cursor", label: "Append after cursor", execute: executeAppendAfterCursor},
-	{key: "A", name: "append-line-end", label: "Append at line end", execute: executeAppendLineEnd},
-	{key: "o", name: "open-line-below", label: "Open line below", execute: executeOpenLineBelow},
-	{key: "O", name: "open-line-above", label: "Open line above", execute: executeOpenLineAbove},
-	{key: "ctrl+s", name: "save", label: "Save", execute: executeSave},
-	{key: "K", name: "hover-docs", label: "Hover docs", execute: executeHover},
-	{key: "J", name: "join-lines", label: "Join lines", execute: executeJoinLines},
-	{key: "D", name: "toggle-diagnostics-popup", label: "Toggle diagnostics popup", execute: executeToggleDiagPopup},
-	{key: "u", name: "undo", label: "Undo", execute: executeUndo},
-	{key: "U", name: "redo", label: "Redo", execute: executeRedo},
-	{key: "W", name: "extend-next-word-start", label: "Extend to next word start", execute: executeExtendNextWordStart},
-	{key: "E", name: "extend-word-forward", label: "Extend word forward", execute: executeExtendWordForward},
-	{key: "x", name: "select-line", label: "Select line", execute: executeSelectLine},
-	{key: "X", name: "extend-line-backward", label: "Extend line backward", execute: executeExtendLineBackward},
-	{key: "%", name: "select-all", label: "Select all", execute: executeSelectAll},
-	{key: ";", name: "clear-selections", label: "Clear selections", execute: executeClearSelections},
-	{key: "alt+;", name: "flip-selection", label: "Flip selection", execute: executeFlipSelection},
-	{key: "d", name: "delete-selection", label: "Delete selection", execute: executeDeleteSelection},
-	{key: "c", name: "change-selection", label: "Change selection", execute: executeChangeSelection},
-	{key: "y", name: "yank", label: "Yank", execute: executeYank},
-	{key: "v", name: "cut-selection", label: "Cut selection", execute: executeCutSelection},
-	{key: "h", name: "cursor-left", label: "Cursor left", execute: executeCursorLeft},
-	{key: "left", name: "cursor-left", label: "Cursor left", execute: executeCursorLeft},
-	{key: "l", name: "cursor-right", label: "Cursor right", execute: executeCursorRight},
-	{key: "right", name: "cursor-right", label: "Cursor right", execute: executeCursorRight},
-	{key: "j", name: "cursor-down", label: "Cursor down", execute: executeCursorDown},
-	{key: "down", name: "cursor-down", label: "Cursor down", execute: executeCursorDown},
-	{key: "k", name: "cursor-up", label: "Cursor up", execute: executeCursorUp},
-	{key: "up", name: "cursor-up", label: "Cursor up", execute: executeCursorUp},
-	{key: "ctrl+f", name: "page-down", label: "Page down", execute: executePageDown},
-	{key: "pgdown", name: "page-down", label: "Page down", execute: executePageDown},
-	{key: "ctrl+b", name: "page-up", label: "Page up", execute: executePageUp},
-	{key: "pgup", name: "page-up", label: "Page up", execute: executePageUp},
-	{key: "G", name: "go-to-last-line", label: "Go to last line", execute: executeGoToLastLine},
-	{key: "0", name: "go-to-line-start", label: "Go to line start", execute: executeGoToLineStart},
-	{key: "home", name: "go-to-line-start", label: "Go to line start", execute: executeGoToLineStart},
-	{key: "^", name: "go-to-first-non-blank", label: "Go to first non-blank", execute: executeFirstNonBlank},
-	{key: "$", name: "go-to-line-end", label: "Go to line end", execute: executeGoToLineEnd},
-	{key: "end", name: "go-to-line-end", label: "Go to line end", execute: executeGoToLineEnd},
-	{key: "shift+home", name: "extend-line-start", label: "Select to line start", execute: executeExtendLineStart},
-	{key: "shift+end", name: "extend-line-end", label: "Select to line end", execute: executeExtendLineEnd},
-	{key: "shift+right", name: "extend-char-forward", label: "Extend selection right", execute: executeExtendCharForward},
-	{key: "shift+left", name: "extend-char-backward", label: "Extend selection left", execute: executeExtendCharBackward},
-	{key: "w", name: "next-word-start", label: "Next word start", execute: executeNextWordStart},
-	{key: "b", name: "previous-word-start", label: "Previous word start", execute: executePrevWordStart},
-	{key: "e", name: "word-end", label: "Word end", execute: executeWordEnd},
-	{key: "p", name: "paste", label: "Paste", execute: executePaste},
-	{key: "B", name: "extend-word-backward", label: "Extend word backward", execute: executeExtendWordBackward},
-	{key: "ctrl+d", name: "select-next-occurrence", label: "Select next occurrence", execute: executeSelectNextOccurrence},
-	{key: "C", name: "add-cursor-below", label: "Add cursor below", execute: executeAddCursorBelow},
+	{key: "ctrl+c", name: "quit-hint", category: "System", label: "Quit hint", execute: executeCancelHint},
+	{key: "ctrl+h", name: "prev-buffer", category: "Files & Buffers", label: "Previous buffer", execute: executePrevBuffer},
+	{key: "ctrl+l", name: "next-buffer", category: "Files & Buffers", label: "Next buffer", execute: executeNextBuffer},
+	{key: ":", name: "command-mode", category: "System", label: "Command mode", execute: executeEnterCommandMode},
+	{key: "/", name: "search", category: "Search", label: "Search", execute: executeEnterSearchMode},
+	{key: "esc", name: "cancel-selection", category: "Selection", label: "Cancel selection", execute: executeEscNormal},
+	{key: "a", name: "append-after-cursor", category: "Editing", label: "Append after cursor", execute: executeAppendAfterCursor},
+	{key: "A", name: "append-line-end", category: "Editing", label: "Append at line end", execute: executeAppendLineEnd},
+	{key: "o", name: "open-line-below", category: "Editing", label: "Open line below", execute: executeOpenLineBelow},
+	{key: "O", name: "open-line-above", category: "Editing", label: "Open line above", execute: executeOpenLineAbove},
+	{key: "ctrl+s", name: "save", category: "Files & Buffers", label: "Save", execute: executeSave},
+	{key: "K", name: "hover-docs", category: "LSP / Diagnostics", label: "Hover docs", execute: executeHover},
+	{key: "J", name: "join-lines", category: "Editing", label: "Join lines", execute: executeJoinLines},
+	{key: "D", name: "toggle-diagnostics-popup", category: "LSP / Diagnostics", label: "Toggle diagnostics popup", execute: executeToggleDiagPopup},
+	{key: "u", name: "undo", category: "Editing", label: "Undo", execute: executeUndo},
+	{key: "U", name: "redo", category: "Editing", label: "Redo", execute: executeRedo},
+	{key: "W", name: "extend-next-word-start", category: "Selection", label: "Extend to next word start", execute: executeExtendNextWordStart},
+	{key: "E", name: "extend-word-forward", category: "Selection", label: "Extend word forward", execute: executeExtendWordForward},
+	{key: "x", name: "select-line", category: "Selection", label: "Select line", execute: executeSelectLine},
+	{key: "X", name: "extend-line-backward", category: "Selection", label: "Extend line backward", execute: executeExtendLineBackward},
+	{key: "%", name: "select-all", category: "Selection", label: "Select all", execute: executeSelectAll},
+	{key: ";", name: "clear-selections", category: "Selection", label: "Clear selections", execute: executeClearSelections},
+	{key: "alt+;", name: "flip-selection", category: "Selection", label: "Flip selection", execute: executeFlipSelection},
+	{key: "d", name: "delete-selection", category: "Editing", label: "Delete selection", execute: executeDeleteSelection},
+	{key: "c", name: "change-selection", category: "Editing", label: "Change selection", execute: executeChangeSelection},
+	{key: "y", name: "yank", category: "Editing", label: "Yank", execute: executeYank},
+	{key: "v", name: "cut-selection", category: "Editing", label: "Cut selection", execute: executeCutSelection},
+	{key: "h", name: "cursor-left", category: "Navigation", label: "Cursor left", execute: executeCursorLeft},
+	{key: "left", name: "cursor-left", category: "Navigation", label: "Cursor left", execute: executeCursorLeft},
+	{key: "l", name: "cursor-right", category: "Navigation", label: "Cursor right", execute: executeCursorRight},
+	{key: "right", name: "cursor-right", category: "Navigation", label: "Cursor right", execute: executeCursorRight},
+	{key: "j", name: "cursor-down", category: "Navigation", label: "Cursor down", execute: executeCursorDown},
+	{key: "down", name: "cursor-down", category: "Navigation", label: "Cursor down", execute: executeCursorDown},
+	{key: "k", name: "cursor-up", category: "Navigation", label: "Cursor up", execute: executeCursorUp},
+	{key: "up", name: "cursor-up", category: "Navigation", label: "Cursor up", execute: executeCursorUp},
+	{key: "ctrl+f", name: "page-down", category: "Navigation", label: "Page down", execute: executePageDown},
+	{key: "pgdown", name: "page-down", category: "Navigation", label: "Page down", execute: executePageDown},
+	{key: "ctrl+b", name: "page-up", category: "Navigation", label: "Page up", execute: executePageUp},
+	{key: "pgup", name: "page-up", category: "Navigation", label: "Page up", execute: executePageUp},
+	{key: "G", name: "go-to-last-line", category: "Navigation", label: "Go to last line", execute: executeGoToLastLine},
+	{key: "0", name: "go-to-line-start", category: "Navigation", label: "Go to line start", execute: executeGoToLineStart},
+	{key: "home", name: "go-to-line-start", category: "Navigation", label: "Go to line start", execute: executeGoToLineStart},
+	{key: "^", name: "go-to-first-non-blank", category: "Navigation", label: "Go to first non-blank", execute: executeFirstNonBlank},
+	{key: "$", name: "go-to-line-end", category: "Navigation", label: "Go to line end", execute: executeGoToLineEnd},
+	{key: "end", name: "go-to-line-end", category: "Navigation", label: "Go to line end", execute: executeGoToLineEnd},
+	{key: "shift+home", name: "extend-line-start", category: "Selection", label: "Select to line start", execute: executeExtendLineStart},
+	{key: "shift+end", name: "extend-line-end", category: "Selection", label: "Select to line end", execute: executeExtendLineEnd},
+	{key: "shift+right", name: "extend-char-forward", category: "Selection", label: "Extend selection right", execute: executeExtendCharForward},
+	{key: "shift+left", name: "extend-char-backward", category: "Selection", label: "Extend selection left", execute: executeExtendCharBackward},
+	{key: "w", name: "next-word-start", category: "Navigation", label: "Next word start", execute: executeNextWordStart},
+	{key: "b", name: "previous-word-start", category: "Navigation", label: "Previous word start", execute: executePrevWordStart},
+	{key: "e", name: "word-end", category: "Navigation", label: "Word end", execute: executeWordEnd},
+	{key: "p", name: "paste", category: "Editing", label: "Paste", execute: executePaste},
+	{key: "B", name: "extend-word-backward", category: "Selection", label: "Extend word backward", execute: executeExtendWordBackward},
+	{key: "ctrl+d", name: "select-next-occurrence", category: "Multi-cursor", label: "Select next occurrence", execute: executeSelectNextOccurrence},
+	{key: "C", name: "add-cursor-below", category: "Multi-cursor", label: "Add cursor below", execute: executeAddCursorBelow},
 	// ctrl+/ and ctrl+_ are the same byte (0x1F) in most terminals.
-	{key: "ctrl+/", name: "toggle-comment", label: "Toggle comment", execute: executeToggleComment},
-	{key: "ctrl+_", name: "toggle-comment", label: "Toggle comment", execute: executeToggleComment},
-	{key: "?", name: "show-plugin-bindings", label: "Show plugin bindings", execute: executeFetchPluginBindings},
-	{key: "alt+s", name: "split-selection-into-cursors", label: "Split selection into cursors", execute: executeSplitSelectionIntoCursors},
-	{key: "z", name: "set-mark", label: "Set mark", execute: executeSetMark},
-	{key: "Z", name: "select-to-mark", label: "Select to mark", execute: executeSelectToMark},
-	{key: "q", name: "macro-record-toggle", label: "Start/stop recording macro", execute: executeMacroRecordToggle},
-	{key: "@", name: "macro-replay", label: "Replay macro", execute: executeMacroReplay},
-	{key: ">", name: "indent", label: "Indent", execute: executeIndent},
-	{key: "<", name: "unindent", label: "Unindent", execute: executeUnindent},
+	{key: "ctrl+/", name: "toggle-comment", category: "Editing", label: "Toggle comment", execute: executeToggleComment},
+	{key: "ctrl+_", name: "toggle-comment", category: "Editing", label: "Toggle comment", execute: executeToggleComment},
+	{key: "?", name: "show-plugin-bindings", category: "System", label: "Show key bindings", execute: executeFetchPluginBindings},
+	{key: "alt+s", name: "split-selection-into-cursors", category: "Multi-cursor", label: "Split selection into cursors", execute: executeSplitSelectionIntoCursors},
+	{key: "z", name: "set-mark", category: "Marks & Macros", label: "Set mark", execute: executeSetMark},
+	{key: "Z", name: "select-to-mark", category: "Marks & Macros", label: "Select to mark", execute: executeSelectToMark},
+	{key: "q", name: "macro-record-toggle", category: "Marks & Macros", label: "Start/stop recording macro", execute: executeMacroRecordToggle},
+	{key: "@", name: "macro-replay", category: "Marks & Macros", label: "Replay macro", execute: executeMacroReplay},
+	{key: ">", name: "indent", category: "Editing", label: "Indent", execute: executeIndent},
+	{key: "<", name: "unindent", category: "Editing", label: "Unindent", execute: executeUnindent},
 	// Move current line (or selected lines) up/down, swapping with the
 	// neighbor. Bound to Shift+Arrow rather than Alt+Arrow: zellij's default
 	// pane-focus keymap claims Alt+Arrow even in "locked" interface mode.
-	{key: "shift+up", name: "move-line-up", label: "Move line up", execute: executeMoveLineUp},
-	{key: "shift+down", name: "move-line-down", label: "Move line down", execute: executeMoveLineDown},
-	{key: "-", name: "jump-back", label: "Jump back", execute: executeJumpBack},
-	{key: "=", name: "jump-forward", label: "Jump forward", execute: executeJumpForward},
-	{key: "+", name: "jump-forward", label: "Jump forward", execute: executeJumpForward},
+	{key: "shift+up", name: "move-line-up", category: "Editing", label: "Move line(s) up", execute: executeMoveLineUp},
+	{key: "shift+down", name: "move-line-down", category: "Editing", label: "Move line(s) down", execute: executeMoveLineDown},
+	{key: "-", name: "jump-back", category: "Navigation", label: "Jump back", execute: executeJumpBack},
+	{key: "=", name: "jump-forward", category: "Navigation", label: "Jump forward", execute: executeJumpForward},
+	{key: "+", name: "jump-forward", category: "Navigation", label: "Jump forward", execute: executeJumpForward},
 	{
 		key:       "g",
 		label:     "Go",
 		menuTitle: "Go",
+		category:  "Go to (g)",
 		children: []command{
 			{key: "g", name: "go-to-top", label: "Go to top of file", execute: executeGoToTop},
 			{key: "e", name: "go-to-end", label: "Go to end of file", execute: executeGoToEnd},
@@ -178,6 +185,7 @@ var prefixCmds = []command{
 		key:       "]",
 		label:     "Next",
 		menuTitle: "Next",
+		category:  "Files & Buffers",
 		children: []command{
 			{key: "b", name: "next-buffer", label: "Next buffer", execute: executeNextBuffer},
 		},
@@ -186,6 +194,7 @@ var prefixCmds = []command{
 		key:       "[",
 		label:     "Prev",
 		menuTitle: "Prev",
+		category:  "Files & Buffers",
 		children: []command{
 			{key: "b", name: "prev-buffer", label: "Previous buffer", execute: executePrevBuffer},
 		},
@@ -195,6 +204,7 @@ var prefixCmds = []command{
 		key:       "~",
 		label:     "Case",
 		menuTitle: "Case",
+		category:  "Case (~)",
 		children: []command{
 			{key: "s", name: "case-to-snake", label: "snake_case", execute: executeCaseConvertSnake},
 			{key: "S", name: "case-to-screaming-snake", label: "SCREAMING_SNAKE_CASE", execute: executeCaseConvertScreamingSnake},
@@ -208,6 +218,7 @@ var prefixCmds = []command{
 		key:       "M",
 		label:     "Move",
 		menuTitle: "Move",
+		category:  "Editing",
 		children: []command{
 			{key: "j", name: "move-line-down", label: "Move line(s) down", execute: executeMoveLineDown},
 			{key: "k", name: "move-line-up", label: "Move line(s) up", execute: executeMoveLineUp},
@@ -217,6 +228,7 @@ var prefixCmds = []command{
 		key:       "s",
 		label:     "Sort",
 		menuTitle: "Sort",
+		category:  "Sort (s)",
 		children: []command{
 			{key: "a", name: "sort-lines-ascending", label: "Sort lines ascending", execute: executeSortLinesAscending},
 			{key: "d", name: "sort-lines-descending", label: "Sort lines descending", execute: executeSortLinesDescending},
@@ -226,6 +238,7 @@ var prefixCmds = []command{
 		key:       "m",
 		label:     "Match",
 		menuTitle: "Match",
+		category:  "Match (m)",
 		children: []command{
 			{key: "m", name: "go-to-matching-bracket", label: "Go to matching bracket", execute: executeGotoMatchingBracket},
 			{
@@ -270,6 +283,7 @@ var commandMenuRoot = command{
 	key:       " ",
 	label:     "Command",
 	menuTitle: "Command",
+	category:  "Command (space)",
 	children: []command{
 		{key: "s", name: "search-and-replace", label: "Search & Replace", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return OpenSearchReplaceMsg{} }
@@ -277,8 +291,12 @@ var commandMenuRoot = command{
 		{key: "S", name: "save-as", label: "Save As", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return saveAsPromptMsg{} }
 		}},
-		{key: "p", name: "go-to-symbol-in-project", label: "Symbol picker", execute: executeOpenSymbolPicker},
-		{key: "f", name: "open-file-picker", label: "File picker", execute: executeOpenFilePicker},
+		// name/label reused verbatim from g's "s" child — same action, same
+		// canonical label, required by TestNoDuplicateActionLabels.
+		{key: "p", name: "go-to-symbol-in-project", label: "Go to symbol in project", execute: executeOpenSymbolPicker},
+		// name/label reused verbatim from root ctrl+p — same action, same
+		// canonical label, required by TestNoDuplicateActionLabels.
+		{key: "f", name: "open-file-picker", label: "Open file picker", execute: executeOpenFilePicker},
 		{key: "l", name: "show-message-log", label: "Message Log", execute: func(m Model) (tea.Model, tea.Cmd) {
 			m.msgLogVisible = true
 			m.msgLogScroll = messageLogMaxScroll(m.width, m.height, m.messageLog) // start on the last page (most recent)

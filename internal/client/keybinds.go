@@ -39,11 +39,69 @@ func actionRegistry(cmds []command) map[string]func(Model) (tea.Model, tea.Cmd) 
 	return reg
 }
 
+// displayInfo pairs a canonical label with the help-popup category an
+// action resolves to (see help_gen.go).
+type displayInfo struct {
+	label    string
+	category string
+}
+
+// canonicalDisplayInfo walks cmds (recursing into children, inheriting each
+// node's category down to descendants that don't set their own) and
+// returns every named leaf's canonical (label, category). The first
+// occurrence in tree order wins when a name appears more than once —
+// TestNoDuplicateActionLabels guarantees every occurrence agrees on label
+// anyway, so this is just a deterministic pick, not a real choice. Used by
+// rebindRoot (so a [[keybind]] override displays the action's real label,
+// not the bare action name) and by the generated help popup.
+func canonicalDisplayInfo(cmds []command) map[string]displayInfo {
+	reg := make(map[string]displayInfo)
+	var walk func([]command, string)
+	walk = func(cs []command, inherited string) {
+		for _, c := range cs {
+			cat := inherited
+			if c.category != "" {
+				cat = c.category
+			}
+			if c.execute != nil && c.name != "" {
+				if _, exists := reg[c.name]; !exists {
+					reg[c.name] = displayInfo{label: c.label, category: cat}
+				}
+			}
+			if len(c.children) > 0 {
+				walk(c.children, cat)
+			}
+		}
+	}
+	walk(cmds, "")
+	return reg
+}
+
+// mergeDisplayInfo returns a new map containing every entry of base plus
+// every entry of extra (extra wins on key collision).
+func mergeDisplayInfo(base, extra map[string]displayInfo) map[string]displayInfo {
+	out := make(map[string]displayInfo, len(base)+len(extra))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out
+}
+
 // rebindRoot finds key among root-level entries of cmds and points it at fn
-// (recording name so later lookups/overrides can find it too). A key that's
+// (recording name so later lookups/overrides can find it too), stamping the
+// canonical label/category resolved from display so the entry reads like a
+// built-in one rather than showing the bare action name. A key that's
 // currently a multi-key prefix menu is refused rather than silently
 // collapsed into a single action. A key not found is appended as a new leaf.
-func rebindRoot(cmds []command, key, name string, fn func(Model) (tea.Model, tea.Cmd)) ([]command, string) {
+func rebindRoot(cmds []command, key, name string, fn func(Model) (tea.Model, tea.Cmd), display map[string]displayInfo) ([]command, string) {
+	info, ok := display[name]
+	label, category := name, ""
+	if ok {
+		label, category = info.label, info.category
+	}
 	for i := range cmds {
 		if cmds[i].key != key {
 			continue
@@ -52,11 +110,12 @@ func rebindRoot(cmds []command, key, name string, fn func(Model) (tea.Model, tea
 			return cmds, fmt.Sprintf("keybind: key %q is already the %q prefix menu and can't be rebound to a single action", key, cmds[i].label)
 		}
 		cmds[i].name = name
-		cmds[i].label = name
+		cmds[i].label = label
+		cmds[i].category = category
 		cmds[i].execute = fn
 		return cmds, ""
 	}
-	return append(cmds, command{key: key, name: name, label: name, execute: fn}), ""
+	return append(cmds, command{key: key, name: name, label: label, category: category, execute: fn}), ""
 }
 
 // applyKeybindOverrides rebuilds prefixCmds and insertCmds from their
@@ -77,6 +136,8 @@ func applyKeybindOverrides(cfg *config.Config) []string {
 		normalActions[name] = fn
 		insertActions[name] = fn
 	}
+	normalDisplay := mergeDisplayInfo(canonicalDisplayInfo(defaultPrefixCmds), exOnlyDisplay)
+	insertDisplay := mergeDisplayInfo(canonicalDisplayInfo(defaultInsertCmds), exOnlyDisplay)
 
 	var warnings []string
 	if cfg != nil {
@@ -88,13 +149,14 @@ func applyKeybindOverrides(cfg *config.Config) []string {
 			var (
 				target    *[]command
 				actions   map[string]func(Model) (tea.Model, tea.Cmd)
+				display   map[string]displayInfo
 				modeLabel string
 			)
 			switch kb.Mode {
 			case "normal":
-				target, actions, modeLabel = &normal, normalActions, "normal"
+				target, actions, display, modeLabel = &normal, normalActions, normalDisplay, "normal"
 			case "insert":
-				target, actions, modeLabel = &insert, insertActions, "insert"
+				target, actions, display, modeLabel = &insert, insertActions, insertDisplay, "insert"
 			default:
 				warnings = append(warnings, fmt.Sprintf("keybind: unknown mode %q (must be \"normal\" or \"insert\")", kb.Mode))
 				continue
@@ -105,7 +167,7 @@ func applyKeybindOverrides(cfg *config.Config) []string {
 				continue
 			}
 			var warn string
-			*target, warn = rebindRoot(*target, kb.Key, kb.Action, fn)
+			*target, warn = rebindRoot(*target, kb.Key, kb.Action, fn, display)
 			if warn != "" {
 				warnings = append(warnings, warn)
 			}

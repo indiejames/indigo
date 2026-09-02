@@ -196,9 +196,12 @@ func (m *Model) extendLineBackward() {
 
 // cutSelection deletes the selected text, first copying it to the clipboard
 // (cut semantics), and returns the updated model + cmd. If there is no
-// selection the model is returned unchanged. This backs the explicit "cut"
-// command; plain delete/change (d/c) call deleteSelectionRaw directly and
-// never touch the clipboard.
+// selection it instead cuts the character under the cursor (see
+// deleteSelectionRaw), matching the `v` help entry in render_overlays.go; the
+// model is only left unchanged in deleteSelectionRaw's true-EOF case (cursor
+// on the buffer's final, empty line with no following line to join). This
+// backs the explicit "cut" command; plain delete/change (d/c) call
+// deleteSelectionRaw directly and never touch the clipboard.
 func (m Model) cutSelection() (Model, tea.Cmd) {
 	if text, ok := m.cutText(); ok {
 		_ = clipboardWriter(text) // cut semantics; a failed copy must not block the delete

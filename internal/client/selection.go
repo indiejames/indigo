@@ -194,10 +194,15 @@ func (m *Model) extendLineBackward() {
 	m.scrollToCursor()
 }
 
-// deleteSelection deletes the selected text (copying it to the clipboard
-// first, cut-style) and returns the updated model + cmd. If there is no
-// selection the model is returned unchanged.
-func (m Model) deleteSelection() (Model, tea.Cmd) {
+// cutSelection deletes the selected text, first copying it to the clipboard
+// (cut semantics), and returns the updated model + cmd. If there is no
+// selection it instead cuts the character under the cursor (see
+// deleteSelectionRaw), matching the `v` help entry in render_overlays.go; the
+// model is only left unchanged in deleteSelectionRaw's true-EOF case (cursor
+// on the buffer's final, empty line with no following line to join). This
+// backs the explicit "cut" command; plain delete/change (d/c) call
+// deleteSelectionRaw directly and never touch the clipboard.
+func (m Model) cutSelection() (Model, tea.Cmd) {
 	if text, ok := m.cutText(); ok {
 		_ = clipboardWriter(text) // cut semantics; a failed copy must not block the delete
 	}
@@ -206,18 +211,19 @@ func (m Model) deleteSelection() (Model, tea.Cmd) {
 
 // cutText returns the text that should be copied to the clipboard for the
 // current cursor/selection state, without mutating anything. Deliberately
-// returns ok=false when there is no explicit selection (m.sel == nil): d/c
-// with no selection still deletes the character under the cursor (see
-// deleteSelectionRaw), but repeatedly doing so — e.g. a run of bare `d`
-// presses to delete several characters — used to also flood the clipboard
-// with one single-character entry per keypress. Copying the character under
-// the cursor is still available on request via `y` (executeYank), which
-// keeps its own no-selection fallback since selecting a single character to
-// yank it is comparatively awkward. Shared by deleteSelection (single-cursor
-// cut, one clipboard write) and deleteAllCursorSelections (which must
-// combine every cursor's text into one clipboard write before any of them
-// delete, since each deleteSelectionRaw call changes the buffer other
-// cursors' text would otherwise still need).
+// returns ok=false when there is no explicit selection (m.sel == nil): the
+// explicit cut command with no selection still deletes the character under
+// the cursor (see deleteSelectionRaw), but repeatedly doing so — e.g. a run
+// of bare cut presses to remove several characters — would also flood the
+// clipboard with one single-character entry per keypress. Copying the
+// character under the cursor is still available on request via `y`
+// (executeYank), which keeps its own no-selection fallback since selecting a
+// single character to yank it is comparatively awkward. Shared by
+// cutSelection (single-cursor cut, one clipboard write) and
+// deleteAllCursorSelections's cut path (which must combine every cursor's
+// text into one clipboard write before any of them delete, since each
+// deleteSelectionRaw call changes the buffer other cursors' text would
+// otherwise still need).
 func (m Model) cutText() (string, bool) {
 	if m.sel == nil {
 		return "", false
@@ -227,7 +233,9 @@ func (m Model) cutText() (string, bool) {
 
 // deleteSelectionRaw performs the deletion cutText describes, without
 // touching the clipboard — callers are responsible for that (see
-// deleteSelection and deleteAllCursorSelections).
+// cutSelection and deleteAllCursorSelections). d/c (plain delete/change) call
+// this directly; only the explicit cut command and its multicursor
+// equivalent go through the clipboard-writing wrappers.
 func (m Model) deleteSelectionRaw() (Model, tea.Cmd) {
 	if m.sel == nil {
 		lineLen := m.buf.LineLen(m.cursor.Line)

@@ -47,15 +47,19 @@ func TestFilteredCmds(t *testing.T) {
 		input string
 		want  []string
 	}{
-		{"", []string{"edit", "find", "fmt", "format", "grep", "metrics", "move-to-file", "quit", "quit!", "quit-all", "quit-all!", "rename", "save", "set ft=", "wqa", "write", "write-quit"}},
+		{"", []string{"diag", "diagnostics", "edit", "extract-rename", "find", "fmt", "format", "grep", "metrics", "move-to-file", "quit", "quit!", "quit-all", "quit-all!", "rename", "save", "set ft=", "wqa", "write", "write-quit"}},
 		// "q" is a subsequence of quit*, wqa, write-quit
 		{"q", []string{"quit", "quit!", "quit-all", "quit-all!", "wqa", "write-quit"}},
 		{"q!", []string{"quit!", "quit-all!"}},
-		// "s" is a subsequence of "metrics" (last char), "save", and "set ft="
-		{"s", []string{"metrics", "save", "set ft="}},
+		// "s" is a subsequence of "diagnostics", "metrics" (last char), "save", and "set ft="
+		{"s", []string{"diagnostics", "metrics", "save", "set ft="}},
 		{"wq", []string{"wqa", "write-quit"}},
-		// "m" matches fmt, format, metrics, move-to-file, and rename (m is a subsequence of all five)
-		{"m", []string{"fmt", "format", "metrics", "move-to-file", "rename"}},
+		// "m" matches extract-rename ("rena-m-e"), fmt, format, metrics, move-to-file, and rename
+		{"m", []string{"extract-rename", "fmt", "format", "metrics", "move-to-file", "rename"}},
+		// "diag" matches both diag and diagnostics (prefix), nothing else
+		{"diag", []string{"diag", "diagnostics"}},
+		// "extract" is a subsequence of only extract-rename
+		{"extract", []string{"extract-rename"}},
 		{"z", nil},
 		{"123", nil},  // line number — no results
 		{"0abc", nil}, // starts with digit

@@ -11,29 +11,32 @@ import (
 // cmdDesc pairs a command name with its description and whether it takes arguments.
 // Must be kept in alphabetical order (filteredCmds relies on it).
 type cmdDesc struct {
-	name     string
-	desc     string
+	name      string
+	desc      string
 	needsArgs bool // if true, Tab+Enter fills the command line instead of executing immediately
 }
 
 var allCmds = []cmdDesc{
-	{"edit",         "Open file picker",                        false},
-	{"find",         "Workspace search (optional pattern)",     true},
-	{"fmt",          "Format current buffer",                   false},
-	{"format",       "Format current buffer",                   false},
-	{"grep",         "Workspace search (optional pattern)",     true},
-	{"metrics",      "Toggle metrics overlay",                  false},
+	{"diag", "Open workspace diagnostic browser", false},
+	{"diagnostics", "Open workspace diagnostic browser", false},
+	{"edit", "Open file picker", false},
+	{"extract-rename", "Name a just-extracted function/variable", true},
+	{"find", "Workspace search (optional pattern)", true},
+	{"fmt", "Format current buffer", false},
+	{"format", "Format current buffer", false},
+	{"grep", "Workspace search (optional pattern)", true},
+	{"metrics", "Toggle metrics overlay", false},
 	{"move-to-file", "Move function at cursor to another file", true},
-	{"quit",         "Close buffer (fails if unsaved)",         false},
-	{"quit!",        "Close buffer, discarding changes",        false},
-	{"quit-all",     "Quit all (fails if any unsaved)",         false},
-	{"quit-all!",    "Quit all, discarding changes",            false},
-	{"rename",       "Rename symbol via language server",       true},
-	{"save",         "Save file",                               false},
-	{"set ft=",      "Set this buffer's file type (ft=auto to revert)", true},
-	{"wqa",          "Save all and quit",                       false},
-	{"write",        "Save file",                               false},
-	{"write-quit",   "Save and close buffer",                   false},
+	{"quit", "Close buffer (fails if unsaved)", false},
+	{"quit!", "Close buffer, discarding changes", false},
+	{"quit-all", "Quit all (fails if any unsaved)", false},
+	{"quit-all!", "Quit all, discarding changes", false},
+	{"rename", "Rename symbol via language server", true},
+	{"save", "Save file", false},
+	{"set ft=", "Set this buffer's file type (ft=auto to revert)", true},
+	{"wqa", "Save all and quit", false},
+	{"write", "Save file", false},
+	{"write-quit", "Save and close buffer", false},
 }
 
 // fuzzyMatch reports whether every rune of pattern appears in s as a subsequence.

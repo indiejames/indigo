@@ -382,8 +382,9 @@ Plugins can contribute their own entries (and submenus) to the Command menu via
 
 | Action | Default key | Action | Default key |
 | --- | --- | --- | --- |
-| `trigger-completion` | `ctrl+@`, `ctrl+space` | `exit-insert-mode` | `esc`, `ctrl+c` |
-| `save` | `ctrl+s` | `backspace` | `backspace` |
+| `trigger-completion` | `ctrl+@`, `ctrl+space` | `exit-insert-mode` | `esc` |
+| `cancel-insert-mode` | `ctrl+c` | `save` | `ctrl+s` |
+| `backspace` | `backspace` | | |
 | `delete-forward` | `delete` | `newline` | `enter` |
 | `insert-tab` | `tab` | `cursor-left` | `left` |
 | `cursor-right` | `right` | `cursor-up` | `up` |

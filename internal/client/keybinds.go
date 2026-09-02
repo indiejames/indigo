@@ -69,6 +69,14 @@ func applyKeybindOverrides(cfg *config.Config) []string {
 	insert := append([]command(nil), defaultInsertCmds...)
 	normalActions := actionRegistry(defaultPrefixCmds)
 	insertActions := actionRegistry(defaultInsertCmds)
+	// Ex-only actions (no keypress/menu equivalent — see ex_actions.go) are
+	// valid [[keybind]] targets too, in both modes, for the same reason a
+	// tree-derived action is: there's no structural reason to forbid e.g.
+	// binding "quit-force" to a key from Insert mode.
+	for name, fn := range exOnlyActions {
+		normalActions[name] = fn
+		insertActions[name] = fn
+	}
 
 	var warnings []string
 	if cfg != nil {

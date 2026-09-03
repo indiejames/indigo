@@ -907,8 +907,20 @@ func (s *editorService) References(_ context.Context, call proto.EditorService_r
 		return nil
 	}
 
+	// Re-fetch rather than reuse the entry captured above: the LSP call
+	// just above can run for a while (that's the whole point of call.Go()
+	// not blocking other RPCs on it), during which the last client could
+	// disconnect and CloseBuffer could delete this bufID's entry entirely,
+	// or a wholesale buffer-swap (Format/SaveAs/DiscardRecovery) could
+	// replace entry.buf with a newer object — either way, indexing
+	// s.buffers[bufID] unconditionally would risk a nil-pointer dereference
+	// on a deleted entry. buf stays nil (previews skipped below) if the
+	// buffer is gone.
 	s.mu.Lock()
-	buf := s.buffers[bufID].buf
+	var buf *document.Buffer
+	if e, ok := s.buffers[bufID]; ok {
+		buf = e.buf
+	}
 	s.mu.Unlock()
 
 	list, err := res.NewLocations(int32(len(locs)))
@@ -922,7 +934,7 @@ func (s *editorService) References(_ context.Context, call proto.EditorService_r
 		fl.SetLine(uint32(loc.Range.Start.Line))
 		fl.SetCol(uint32(loc.Range.Start.Character))
 		// Preview: if it's the same file, read from buffer; otherwise leave empty.
-		if locPath == path && loc.Range.Start.Line < buf.LineCount() {
+		if buf != nil && locPath == path && loc.Range.Start.Line < buf.LineCount() {
 			fl.SetPreview(buf.Line(loc.Range.Start.Line)) //nolint:errcheck
 		}
 	}

@@ -1215,6 +1215,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// its copy dirty (server_buffer.go's compare-and-swap). Marking
 			// clean here would disagree with the server and falsely hide
 			// newer, unsaved edits as saved.
+			//
+			// Reset keepStatusOnNextSave here too: this superseded response
+			// never reaches the SetClean()/flag-consuming code below, so
+			// without this the flag would leak and incorrectly protect a
+			// later, unrelated save's status from being cleared — the same
+			// leak class saveFailedMsg's handler already guards against.
+			m.keepStatusOnNextSave = false
 			return m, nil
 		}
 		m.buf.SetClean()
@@ -1238,6 +1245,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// which arrives as saveFailedMsg instead of this message) — this
 			// covers the narrower window where the server's check passed but
 			// a local edit landed before the response reached the client.
+			//
+			// Reset keepStatusOnNextSave here too, for the same reason
+			// savedMsg's version-mismatch branch does: this superseded
+			// response never reaches the flag-consuming code below.
+			m.keepStatusOnNextSave = false
 			m = m.pushStatus("Save as skipped — buffer has changed since the request; try again")
 			return m, nil
 		}

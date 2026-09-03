@@ -220,6 +220,57 @@ func TestFormatResultKeepStatusFlagDoesNotLeakPastAFailedSave(t *testing.T) {
 	}
 }
 
+// TestFormatResultKeepStatusFlagDoesNotLeakPastAVersionMismatch guards
+// another leak path a review caught alongside the failed-save one above:
+// if the save following a no-formatter format-on-save is superseded by a
+// concurrent edit (savedMsg/savedAsMsg's own version-mismatch guard, which
+// returns early without ever reaching the flag-consuming code), the flag
+// must still be reset — otherwise it leaks into a later, unrelated save.
+func TestFormatResultKeepStatusFlagDoesNotLeakPastAVersionMismatch(t *testing.T) {
+	t.Run("savedMsg", func(t *testing.T) {
+		m := newTestModel("func foo() {}\n")
+		m.bufID = 1
+
+		m2, _ := m.Update(formatResultMsg{bufID: 1, changed: false, noFormatter: true, thenSave: true})
+		got := m2.(Model)
+
+		// A version that doesn't match the buffer's current version
+		// simulates a concurrent edit landing before the save's response
+		// arrived — savedMsg's staleness guard returns early.
+		m3, _ := got.Update(savedMsg{bufID: 1, version: got.buf.Version() + 1})
+		got3 := m3.(Model)
+		if got3.keepStatusOnNextSave {
+			t.Error("keepStatusOnNextSave should be reset after a superseded (version-mismatch) savedMsg")
+		}
+
+		m4, _ := got3.Update(savedMsg{bufID: 1, version: got3.buf.Version()})
+		got4 := m4.(Model)
+		if got4.status != "" {
+			t.Errorf("status after a later, unrelated successful save = %q, want cleared", got4.status)
+		}
+	})
+
+	t.Run("savedAsMsg", func(t *testing.T) {
+		m := newTestModel("func foo() {}\n")
+		m.bufID = 1
+
+		m2, _ := m.Update(formatResultMsg{bufID: 1, changed: false, noFormatter: true, thenSave: true})
+		got := m2.(Model)
+
+		m3, _ := got.Update(savedAsMsg{bufID: 1, version: got.buf.Version() + 1, newPath: "/tmp/x.go"})
+		got3 := m3.(Model)
+		if got3.keepStatusOnNextSave {
+			t.Error("keepStatusOnNextSave should be reset after a superseded (version-mismatch) savedAsMsg")
+		}
+
+		m4, _ := got3.Update(savedMsg{bufID: 1, version: got3.buf.Version()})
+		got4 := m4.(Model)
+		if got4.status != "" {
+			t.Errorf("status after a later, unrelated successful save = %q, want cleared", got4.status)
+		}
+	})
+}
+
 // TestFormatResultUnchangedDoesNotTouchHighlighting verifies the no-op case
 // (content already formatted) leaves caches alone — there's nothing to
 // refresh since the buffer didn't change.

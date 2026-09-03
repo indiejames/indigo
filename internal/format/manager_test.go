@@ -2,6 +2,8 @@ package format
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -324,5 +326,78 @@ func TestLSPFormattingOptionsDetectedContentOverridesConfigDefault(t *testing.T)
 	opts := m.lspFormattingOptions("ts", "function foo() {\n    bar();\n}\n")
 	if !opts.InsertSpaces || opts.TabSize != 4 {
 		t.Errorf("opts = %+v, want {TabSize:4 InsertSpaces:true}", opts)
+	}
+}
+
+// ---- monorepo node_modules/.bin resolution ----
+
+// TestFormatFindsFormatterInNestedPackageNodeModules is a regression test
+// for a live bug report: a monorepo package with its own non-hoisted
+// node_modules (a formatter installed only in
+// "services/cron-service/node_modules/.bin/", not at the workspace root)
+// used to never be found — NewManager only ever checked
+// "<workDir>/node_modules/.bin/" once at startup. Format must resolve the
+// nested binary by walking up from the file's own directory (see
+// internal/localbin.Resolve), matching this exact real-world path shape.
+func TestFormatFindsFormatterInNestedPackageNodeModules(t *testing.T) {
+	root := t.TempDir()
+	pkgDir := filepath.Join(root, "services", "cron-service")
+	binDir := filepath.Join(pkgDir, "node_modules", ".bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A fake "prettier" that uppercases stdin, so a changed/transformed
+	// result proves this specific binary actually ran.
+	script := "#!/bin/sh\ntr a-z A-Z\n"
+	fakePrettier := filepath.Join(binDir, "prettier")
+	if err := os.WriteFile(fakePrettier, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Constructed directly (not via NewManager) so autoFmts stays empty
+	// regardless of whether the test machine happens to have a real
+	// prettier on PATH — this test is specifically about the
+	// node_modules/.bin fallback, not PATH detection.
+	m := &Manager{
+		lsp:     &fakeLSP{},
+		cfg:     &config.Config{},
+		workDir: root,
+	}
+
+	filePath := filepath.Join(pkgDir, "app", "cronjobs", "update-user-work.ts")
+	got, changed, err := m.Format(filePath, "hello\n")
+	if err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+	if !changed || got != "HELLO\n" {
+		t.Errorf("Format = (%q, %v), want (%q, true) from the nested package's prettier", got, changed, "HELLO\n")
+	}
+}
+
+// TestFormatPrefersNodeModulesBinOverLSPWhenNotOnPath verifies the
+// resolved node_modules/.bin formatter wins over the generic LSP fallback,
+// the same priority PATH-detected auto formatters already have.
+func TestFormatPrefersNodeModulesBinOverLSPWhenNotOnPath(t *testing.T) {
+	root := t.TempDir()
+	binDir := filepath.Join(root, "node_modules", ".bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "prettier"), []byte("#!/bin/sh\ntr a-z A-Z\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	fl := &fakeLSP{formatted: "LSP OUTPUT\n", changed: true}
+	m := &Manager{lsp: fl, cfg: &config.Config{}, workDir: root}
+
+	got, changed, err := m.Format(filepath.Join(root, "foo.ts"), "hello\n")
+	if err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+	if !changed || got != "HELLO\n" {
+		t.Errorf("Format = (%q, %v), want (%q, true) from node_modules/.bin, not the LSP fallback", got, changed, "HELLO\n")
+	}
+	if fl.called {
+		t.Error("LSP formatter should not have been called — node_modules/.bin should win")
 	}
 }

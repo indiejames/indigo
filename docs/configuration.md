@@ -104,7 +104,9 @@ Formatters run on `:fmt` / `:format`, and automatically on `:w` when `format_on_
 | `.rb` | `rubocop --stdin {file} -a --format quiet` |
 | `.java` | `google-java-format -` |
 
-Only formatters whose command is found in PATH are used; missing tools are silently skipped.
+Only formatters whose command is found in PATH, or under a `node_modules/.bin/` between the
+file's own directory and the workspace root (whichever is closer — useful in a monorepo where
+a package has its own non-hoisted install), are used; missing tools are silently skipped.
 
 ### Custom formatters
 
@@ -145,8 +147,9 @@ to them directly, so indigo pipes the live buffer content to their stdin and rer
 every edit (coalesced: a burst of keystrokes collapses into one rerun after the linter
 finishes, not one process per keystroke).
 
-Only linters whose command is found in PATH (or `node_modules/.bin`) are used; missing
-tools are silently skipped, same as formatters.
+Only linters whose command is found in PATH, or under a `node_modules/.bin/` between the
+file's own directory and the workspace root (whichever is closer), are used; missing tools
+are silently skipped, same as formatters.
 
 ### Custom linters
 

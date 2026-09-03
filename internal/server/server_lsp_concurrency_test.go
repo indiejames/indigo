@@ -1,7 +1,10 @@
 package server
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -294,3 +297,159 @@ func TestFormatDiscardsStaleResultAfterBufferSwap(t *testing.T) {
 		t.Fatalf("buffer content = %q, want %q — Format A's stale result (from the pre-swap buffer) must not overwrite Format B's already-committed buffer", got, wantAfterB)
 	}
 }
+
+// TestLSPCallsDoNotBlockApplyOp is a regression test for a live bug report:
+// a burst of external file changes (e.g. `git rebase`) can make a language
+// server slow to respond. Without call.Go(), capnp serializes every other
+// RPC on the connection behind whichever call is currently running — so a
+// single slow LSP call would freeze a buffer switch's OpenFile, and (worse)
+// an edit's ApplyOp plus the resync it triggers on failure, exactly
+// matching the reported "loading..." hang followed by "resync failed."
+// Exercises Hover as a representative case — the fix (call.Go()) is
+// identical and mechanical across all 13 affected handlers in
+// server_lsp.go — against a real TCP-backed lsp.Client/lsp.Manager talking
+// to a fake, hand-framed LSP server that delays its hover response until
+// signaled. The Content-Length framing is hand-rolled here (rather than
+// reusing internal/lsp's own test helpers) because those are unexported in
+// a different package; see internal/lsp/format_method_not_found_test.go
+// for the sibling pattern this mirrors.
+func TestLSPCallsDoNotBlockApplyOp(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close() //nolint:errcheck
+
+	hoverRequested := make(chan struct{})
+	releaseHover := make(chan struct{})
+	go fakeSlowHoverServer(t, ln, hoverRequested, releaseHover)
+
+	lspMgr := lsp.NewManager(t.TempDir(), []lsp.ServerConfig{
+		{Extensions: []string{"slow"}, Address: ln.Addr().String()},
+	})
+
+	s := &editorService{
+		buffers: map[uint32]*bufferEntry{
+			1: {buf: document.New("/tmp/x.slow", "hello\n")},
+		},
+		fmtMgr:    format.NewManager(nil, &config.Config{}, t.TempDir()),
+		lspMgr:    lspMgr,
+		pluginMgr: &plugin.Manager{},
+	}
+	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
+
+	hoverDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		fut, rel := client.Hover(ctx, func(p proto.EditorService_hover_Params) error {
+			p.SetBufId(1)
+			p.SetLine(0)
+			p.SetCol(0)
+			return nil
+		})
+		defer rel()
+		_, err := fut.Struct()
+		hoverDone <- err
+	}()
+
+	select {
+	case <-hoverRequested:
+	case <-time.After(2 * time.Second):
+		t.Fatal("fake server never received the hover request")
+	}
+
+	// Hover is now genuinely blocked inside the fake server. Fire a
+	// concurrent ApplyOp on the same connection and confirm it isn't
+	// queued behind it.
+	start := time.Now()
+	fut, rel := client.ApplyOp(context.Background(), func(p proto.EditorService_applyOp_Params) error {
+		p.SetClientId(1)
+		p.SetBufferId(1)
+		op, err := p.NewOp()
+		if err != nil {
+			return err
+		}
+		op.SetType(proto.EditOp_OpType_insert)
+		op.SetInsertLine(0)
+		op.SetInsertCol(0)
+		return op.SetInsertText("x")
+	})
+	defer rel()
+	_, err = fut.Struct()
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("ApplyOp errored: %v", err)
+	}
+	// Fixed, this takes well under a millisecond; broken, it takes ~5s
+	// (blocked in the capnp call queue behind Hover's context timeout).
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("ApplyOp took %v — blocked behind the in-flight Hover call (call.Go() missing?)", elapsed)
+	}
+
+	close(releaseHover)
+	if err := <-hoverDone; err != nil {
+		t.Fatalf("Hover errored: %v", err)
+	}
+}
+
+// fakeSlowHoverServer accepts one TCP connection and speaks just enough LSP
+// to satisfy lsp.Client.Initialize and a single textDocument/hover request:
+// answers "initialize" immediately, ignores notifications (no "id" field,
+// e.g. "initialized"/"textDocument/didOpen" — no response expected), then
+// on "textDocument/hover" closes hoverRequested and blocks until
+// releaseHover is closed before answering with a null result (Client.Hover
+// treats a literal JSON null identically to "no hover info", so this
+// avoids needing to match the Hover/MarkupContent JSON shape exactly).
+func fakeSlowHoverServer(t *testing.T, ln net.Listener, hoverRequested, releaseHover chan struct{}) {
+	t.Helper()
+	conn, err := ln.Accept()
+	if err != nil {
+		return
+	}
+	defer conn.Close() //nolint:errcheck
+	br := bufio.NewReader(conn)
+	for {
+		body, err := readFramedLSPTestMessage(br)
+		if err != nil {
+			return
+		}
+		var msg struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.Unmarshal(body, &msg); err != nil {
+			t.Errorf("fake server: unmarshal request: %v", err)
+			return
+		}
+		if len(msg.ID) == 0 {
+			continue // notification, no response expected
+		}
+		switch msg.Method {
+		case "initialize":
+			err = writeFramedLSPTestMessage(conn, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      msg.ID,
+				"result":  map[string]any{"capabilities": map[string]any{}},
+			})
+		case "textDocument/hover":
+			close(hoverRequested)
+			<-releaseHover
+			err = writeFramedLSPTestMessage(conn, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      msg.ID,
+				"result":  nil,
+			})
+		default:
+			t.Errorf("fake server: unexpected request method %q", msg.Method)
+			return
+		}
+		if err != nil {
+			t.Errorf("fake server: write response: %v", err)
+			return
+		}
+	}
+}
+
+// readFramedLSPTestMessage/writeFramedLSPTestMessage are defined in
+// lsp_workspace_scan_diagnostics_test.go and shared package-wide.

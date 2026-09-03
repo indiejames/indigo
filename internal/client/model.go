@@ -877,7 +877,7 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 	if len(warnings) > 0 {
 		status = strings.Join(warnings, "; ")
 	}
-	return Model{
+	m := Model{
 		rpc:                 rpc,
 		buf:                 buf,
 		cfg:                 cfg,
@@ -899,6 +899,15 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 		lastReportedCol:     -1,
 		goalCol:             -1,
 	}
+	// filePath's extension didn't resolve to a language (most commonly an
+	// extension-less script) — fall back to sniffing a "#!" shebang, same
+	// as ":set ft=<key>" would apply manually.
+	if m.hlr == nil {
+		if key := highlight.ShebangKey(content); key != "" {
+			m = m.WithLangOverride(key)
+		}
+	}
+	return m
 }
 
 // Dirty reports whether the buffer has unsaved changes.
@@ -989,6 +998,32 @@ func (m Model) FilePath() string { return m.filePath }
 
 // BufID returns the server-assigned buffer identifier.
 func (m Model) BufID() uint32 { return m.bufID }
+
+// LangOverride returns the language key set by a prior ":set ft=<key>"
+// (see the langOverride field doc comment), or "" if the language is still
+// derived from filePath as usual. Used by app.doReloadBuffer to carry the
+// override across an external-change reload, which otherwise rebuilds the
+// Model from scratch via New and would silently lose it.
+func (m Model) LangOverride() string { return m.langOverride }
+
+// WithLangOverride reapplies a language override previously reported by
+// LangOverride to m, exactly as ":set ft=<lang>" would (see keys_command.go)
+// — used to restore it onto a Model rebuilt from scratch (see LangOverride's
+// doc comment). A no-op if lang is "" or no longer resolves to a known
+// highlighter (the latter shouldn't happen in practice: lang was already
+// validated once by the ":set ft=" command that produced it).
+func (m Model) WithLangOverride(lang string) Model {
+	if lang == "" {
+		return m
+	}
+	hlr := highlight.NewForKey(lang)
+	if hlr == nil {
+		return m
+	}
+	m.langOverride = lang
+	m.hlr = hlr
+	return m
+}
 
 // AtLine moves the initial cursor to the given 0-based line number.
 func (m Model) AtLine(line int) Model {
@@ -1163,6 +1198,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filePath = msg.path
 			if m.langOverride == "" {
 				m.hlr = highlight.New(msg.path)
+				if m.hlr == nil {
+					if key := highlight.ShebangKey(msg.content); key != "" {
+						m = m.WithLangOverride(key)
+					}
+				}
 			}
 		}
 		m.buf = document.New(m.filePath, msg.content)

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/highlight"
 )
 
 var errTest = errors.New("test error")
@@ -120,6 +121,36 @@ func TestBufferResyncMsgAdoptsRenamedPath(t *testing.T) {
 	}
 	if m2.buf.Path() != "/tmp/new.go" {
 		t.Errorf("buf.Path() = %q, want %q", m2.buf.Path(), "/tmp/new.go")
+	}
+}
+
+// TestBufferResyncMsgAdoptsRenamedPathDetectsShebang verifies a resync that
+// renames the buffer to an extension-less path (e.g. another client's
+// SaveAs) also runs the shebang fallback, exactly as New() does for a
+// freshly opened buffer — a rename shouldn't behave differently from an
+// initial open just because it goes through a different code path.
+func TestBufferResyncMsgAdoptsRenamedPathDetectsShebang(t *testing.T) {
+	if highlight.NewForKey("sh") == nil {
+		t.Skip("no bash highlighter registered; run with -tags lang_all (or lang_bash)")
+	}
+	m := newTestModel("old content\n")
+	m.bufID = 1
+	m.filePath = "/tmp/old.go"
+
+	msg := bufferResyncMsg{
+		bufID:   1,
+		content: "#!/usr/bin/env bash\necho hi\n",
+		version: 3,
+		path:    "/tmp/myscript",
+	}
+	updated, _ := m.Update(msg)
+	m2 := updated.(Model)
+
+	if m2.langOverride != "sh" {
+		t.Errorf("langOverride = %q, want %q (detected from shebang)", m2.langOverride, "sh")
+	}
+	if m2.hlr == nil {
+		t.Error("hlr = nil, want the bash highlighter detected from the shebang")
 	}
 }
 

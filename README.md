@@ -281,6 +281,8 @@ Type `:` in normal mode, then one of:
 
 `:set ft=<lang>` overrides syntax highlighting, indentation defaults, comment prefix (used by the comment-toggle command), and the status bar's file type label for the current buffer only — useful for a file with no extension, an unrecognized one, or content that's actually a different language than its name suggests. `<lang>` is a registered language key (an extension without the dot, e.g. `py`, `rs`, `dockerfile`; see `docs/language-support.md`) and is case-insensitive. The override doesn't survive closing and reopening the buffer, and doesn't affect which formatter, linter, or LSP server the server runs for it — those stay tied to the file's real path/extension.
 
+When a file's extension doesn't resolve to a language on its own (most commonly a script with no extension at all), opening it — and `:set ft=auto` — also tries sniffing a `#!` shebang line (`#!/bin/sh`, `#!/usr/bin/env python3`, and similar, for a small set of common interpreters) before falling back to plain text. A real extension always wins over this, and it never overrides an explicit `:set ft=<lang>`.
+
 **Save As dialog** — pressing `Ctrl+s` on a buffer with no file yet (a new, untitled buffer) opens a centered "Save As" prompt instead of saving directly. Type a path, `Enter` to save there, `Esc` to cancel, `Backspace` to edit. Same dialog and `:w <path>` command both end up writing via the same Save As path.
 
 ### Mouse

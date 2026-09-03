@@ -301,6 +301,11 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 			m.langOverride = ""
 			m.hlr = highlight.New(m.filePath)
 			m.hlSpans = nil
+			if m.hlr == nil {
+				if key := highlight.ShebangKey(m.buf.Line(0)); key != "" {
+					m = m.WithLangOverride(key)
+				}
+			}
 			m = m.pushStatus(fmt.Sprintf("File type: %s (auto)", m.effectiveFileTypeName()))
 			return m, m.reparseHighlight()
 		}

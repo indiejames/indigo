@@ -266,6 +266,7 @@ func (a App) doReloadBuffer(idx int) tea.Cmd {
 	m := a.buffers[idx]
 	path := m.FilePath()
 	oldBufID := m.BufID()
+	langOverride := m.LangOverride()
 	rpc := a.rpc
 	cfg := a.cfg
 	appLog("doReloadBuffer: queuing cmd for idx=%d path=%q oldBufID=%d", idx, path, oldBufID)
@@ -291,7 +292,8 @@ func (a App) doReloadBuffer(idx int) tea.Cmd {
 			return errorOpenMsg{err}
 		}
 		appLog("doReloadBuffer: OpenFile done, new bufID=%d contentLen=%d", bufID, len(content))
-		newModel := client.New(rpc, bufID, content, version, path, a.workDir, cfg, fromRecovery, generation)
+		newModel := client.New(rpc, bufID, content, version, path, a.workDir, cfg, fromRecovery, generation).
+			WithLangOverride(langOverride)
 		return bufferReloadedMsg{idx: idx, oldBufID: oldBufID, model: newModel}
 	}
 }

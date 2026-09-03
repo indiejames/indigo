@@ -237,3 +237,61 @@ func TestExecuteCommandSetFileTypeAuto(t *testing.T) {
 		t.Errorf("effectiveFileTypeName() = %q, want %q (back to filePath's own type)", name, "Go")
 	}
 }
+
+// TestWithLangOverrideSurvivesReload is a regression test for a live bug
+// report: setting ":set ft=sh" on an extension-less shell script correctly
+// switches to bash highlighting, but an external-change reload
+// (app.doReloadBuffer) rebuilds the Model from scratch via New, which
+// derives the language from filePath's extension alone and has no way to
+// know about a prior override — silently reverting to plain text. New's
+// caller must carry LangOverride() across to WithLangOverride on the fresh
+// Model, exactly as doReloadBuffer now does.
+func TestWithLangOverrideSurvivesReload(t *testing.T) {
+	if highlight.NewForKey("sh") == nil {
+		t.Skip("no bash highlighter registered; run with -tags lang_all (or lang_bash)")
+	}
+	m := newTestModel("")
+	m.filePath = "myscript" // no recognizable extension, matching the bug report
+	m.cfg = &config.Config{}
+
+	m.cmdBuf = "set ft=sh"
+	m2, _ := m.executeCommand()
+	before := m2.(Model)
+	if before.langOverride != "sh" {
+		t.Fatalf("langOverride = %q, want %q", before.langOverride, "sh")
+	}
+
+	// Simulate what New(filePath) alone produces on reload — the language
+	// override is lost since it derives purely from the (unrecognized)
+	// extension.
+	reloaded := New(&RPC{}, before.bufID, "", 0, before.filePath, before.workDir, before.cfg, false, 0)
+	if reloaded.langOverride != "" || reloaded.hlr != nil {
+		t.Fatalf("New() unexpectedly preserved the override on its own — test assumption is wrong")
+	}
+
+	// doReloadBuffer must reapply it via LangOverride/WithLangOverride.
+	restored := reloaded.WithLangOverride(before.LangOverride())
+	if restored.langOverride != "sh" {
+		t.Errorf("langOverride = %q after WithLangOverride, want %q", restored.langOverride, "sh")
+	}
+	if restored.hlr == nil {
+		t.Error("hlr = nil after WithLangOverride, want the bash highlighter restored")
+	}
+}
+
+// TestWithLangOverrideNoOpWhenUnset verifies WithLangOverride leaves a
+// freshly constructed Model untouched when there was nothing to restore
+// (the common case: no prior ":set ft=" override).
+func TestWithLangOverrideNoOpWhenUnset(t *testing.T) {
+	m := newTestModel("")
+	m.filePath = "test.go"
+	orig := m.hlr
+
+	got := m.WithLangOverride("")
+	if got.langOverride != "" {
+		t.Errorf("langOverride = %q, want empty", got.langOverride)
+	}
+	if got.hlr != orig {
+		t.Error("hlr changed on a no-op WithLangOverride(\"\")")
+	}
+}

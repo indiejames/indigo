@@ -272,7 +272,7 @@ action = "open-file-picker"
 ```
 
 `mode` is `"normal"` or `"insert"`. `key` follows the same names Bubble Tea reports
-(`"ctrl+p"`, `"shift+up"`, `"alt+s"`, plain characters like `"j"`, ...). `action` must be one
+(`"ctrl+p"`, `"shift+up"`, `"alt+s"`, plain characters like `"w"`, ...). `action` must be one
 of the built-in action names below. A key that's currently a multi-key prefix menu (like `g`
 or `m`) can't be overridden this way — indigo logs a startup warning and leaves it alone.
 An unknown `mode` or `action` is likewise reported as a warning rather than silently ignored.
@@ -309,7 +309,8 @@ An unknown `mode` or `action` is likewise reported as a warning rather than sile
 | `indent` | `>` | `unindent` | `<` |
 | `move-line-up` | `shift+up` | `move-line-down` | `shift+down` |
 | `jump-back` | `-` | `jump-forward` | `=`, `+` |
-| `cut-selection` | `v` | | |
+| `cut-selection` | `v` | `macro-record-toggle` | `q` |
+| `macro-replay` | `@` | | |
 
 Multi-key sequences (the `g`, `m`, `M`, `s`, `~`, `[`, `]`, and Space menus, plus any
 others added later) aren't individually overridable — only the single-key
@@ -366,7 +367,7 @@ Space — Command menu:
 | Key | Action | Key | Action |
 | --- | --- | --- | --- |
 | `s` | Search & Replace | `S` | Save As |
-| `p` | Symbol picker | `f` | File picker |
+| `p` | Go to symbol in project | `f` | Open file picker |
 | `l` | Message Log | `n` | New file |
 | `a` | Code Actions (fixes & refactors) | `r` | Refactor: Rename Symbol |
 | `m` | Refactor: Move Function to File | `i` | Organize Imports |
@@ -384,7 +385,8 @@ Plugins can contribute their own entries (and submenus) to the Command menu via
 | --- | --- | --- | --- |
 | `trigger-completion` | `ctrl+@`, `ctrl+space` | `exit-insert-mode` | `esc` |
 | `cancel-insert-mode` | `ctrl+c` | `save` | `ctrl+s` |
-| `backspace` | `backspace` | | |
+| `backspace` | `backspace` | `prev-buffer` | `ctrl+h` |
+| `next-buffer` | `ctrl+l` | | |
 | `delete-forward` | `delete` | `newline` | `enter` |
 | `insert-tab` | `tab` | `cursor-left` | `left` |
 | `cursor-right` | `right` | `cursor-up` | `up` |

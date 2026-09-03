@@ -105,12 +105,13 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 | `b`                 | Move to previous word start (crosses lines)     |
 | `e`                 | Move to end of current/next word (crosses lines)|
 | `0` `$`             | Start / end of line                             |
+| `^`                 | First non-blank character on line               |
 | `gg`                | Top of file                                     |
 | `G`                 | End of file                                     |
 | `Ctrl+f` / `Ctrl+b` | Page down / up                                  |
 | `gh`                | Go to line start                                |
 | `gl`                | Go to line end                                  |
-| `gs`                | Go to first non-whitespace character on line    |
+| `gs`                | Go to symbol in project                         |
 | `gd`                | Go to definition (LSP)                          |
 
 **Selection** — create or extend a selection; the cursor is always at the head.
@@ -119,6 +120,7 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 |----------|------------------------------------------------------------------|
 | `w`      | Select word at cursor; repeat to advance to the next word        |
 | `W`      | Extend selection head forward to end of next word                |
+| `E`      | Extend selection head forward to end of current/next word        |
 | `B`      | Extend selection head backward to start of previous word         |
 | `x`      | Select current line; repeat to extend selection to the next line |
 | `X`      | Extend line selection backward to include the previous line      |
@@ -150,12 +152,17 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 | `K`          | Show hover documentation (LSP)               |
 | `/`          | Enter search mode                            |
 | `n` / `N`    | Next / previous search match                 |
-| `s`          | Open the global search & replace dialog      |
+| `Space` `s`  | Open the global search & replace dialog      |
 | `Esc`        | Clear selection and search highlights        |
 | `Ctrl+s`     | Save                                         |
 | `Ctrl+p`     | Open file picker                             |
 | `]b` / `[b`  | Next / previous buffer                       |
 | `:`          | Enter command mode                           |
+| `?`          | Show all key bindings, including plugin-contributed ones |
+
+This is a curated list of the essentials, not the complete keymap — press `?` in the editor,
+or run `indigo --dump-keybinds`, for the full, always-current list (including the `g`/`~`/`M`/
+`s`/`m`/`Space` multi-key menus and every action's default key).
 
 ### Insert mode
 
@@ -225,7 +232,7 @@ When [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) is on your PATH it 
 
 ### Search & replace dialog
 
-Press `s` in normal mode to open a floating search & replace dialog for the whole workspace.
+Press `Space`, then `s`, in normal mode to open a floating search & replace dialog for the whole workspace.
 
 ```
  ╭────────────────────────────╮  [ ] Aa
@@ -262,6 +269,10 @@ Type `:` in normal mode, then one of:
 | `:fmt` `:format`           | Format current file        |
 | `:grep [pattern] [glob]`   | Workspace search           |
 | `:find [pattern] [glob]`   | Workspace search (alias)   |
+| `:diagnostics` `:diag`     | Open the workspace diagnostic browser |
+| `:metrics`                 | Toggle the metrics overlay |
+| `:rename <name>`           | Rename symbol at cursor (LSP) |
+| `:move-to-file <path>`     | Move function at cursor to another file |
 | `:set ft=<lang>`           | Set this buffer's file type |
 | `:set ft=auto`             | Revert to the file type derived from its path |
 | `:<n>`                     | Jump to line number        |

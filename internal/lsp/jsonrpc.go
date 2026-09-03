@@ -55,6 +55,15 @@ type jsonrpcConn struct {
 	handler    notificationHandler
 	reqHandler requestHandler
 	onClose    func() // called once, after readLoop exits (EOF/process died)
+
+	// writeSem admits at most one in-flight Call write-goroutine at a time
+	// (see Call below): against a permanently stuck connection, every
+	// timed-out Call would otherwise spawn its own goroutine that also
+	// blocks forever on wMu behind the first stuck write — an unbounded
+	// leak given automatic background polling (InlayHints,
+	// SemanticTokensRange) that calls Call every few seconds per open
+	// buffer against a hung language server.
+	writeSem chan struct{}
 }
 
 func newJSONRPCConn(r io.Reader, w io.Writer, handler notificationHandler, reqHandler requestHandler) *jsonrpcConn {
@@ -67,7 +76,7 @@ func newJSONRPCConn(r io.Reader, w io.Writer, handler notificationHandler, reqHa
 // a field assigned after construction could race a connection that closes
 // (or a process that crashes) fast enough to exit readLoop first.
 func newJSONRPCConnWithClose(r io.Reader, w io.Writer, handler notificationHandler, reqHandler requestHandler, onClose func()) *jsonrpcConn {
-	c := &jsonrpcConn{w: w, handler: handler, reqHandler: reqHandler, onClose: onClose}
+	c := &jsonrpcConn{w: w, handler: handler, reqHandler: reqHandler, onClose: onClose, writeSem: make(chan struct{}, 1)}
 	go c.readLoop(r)
 	return c
 }
@@ -98,8 +107,23 @@ func (c *jsonrpcConn) Call(ctx context.Context, method string, params any) (json
 	// process dies) rather than blocking the caller; see PLAN.md for why
 	// this tradeoff was chosen over the alternative (an OS write deadline,
 	// not reliably supported across every io.Writer this connects to).
+	//
+	// writeSem bounds how many such leaked goroutines can accumulate: it's
+	// acquired before spawning one and released once the write finishes, so
+	// at most one can ever be stuck at a time per connection. Acquiring it
+	// is itself ctx-aware — once one write-goroutine is stuck, every further
+	// timed-out Call against the same connection gives up here instead of
+	// piling on another goroutine that would also block forever.
+	select {
+	case c.writeSem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	writeErr := make(chan error, 1)
-	go func() { writeErr <- c.write(msg) }()
+	go func() {
+		defer func() { <-c.writeSem }()
+		writeErr <- c.write(msg)
+	}()
 
 	select {
 	case <-ctx.Done():

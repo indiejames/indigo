@@ -23,6 +23,13 @@ import (
 // workspaceRoot at all, it stops at the filesystem root. Returns ("",
 // false) if nothing is found.
 func Resolve(startDir, workspaceRoot, cmd string) (string, bool) {
+	// Normalize both so the dir == workspaceRoot boundary check below is a
+	// reliable string comparison — filepath.Dir never returns a trailing
+	// separator, so an uncleaned, trailing-separator workspaceRoot would
+	// otherwise never match, and the walk would silently continue past the
+	// intended workspace boundary into ancestor directories.
+	startDir = filepath.Clean(startDir)
+	workspaceRoot = filepath.Clean(workspaceRoot)
 	dir := startDir
 	for {
 		candidate := filepath.Join(dir, "node_modules", ".bin", cmd)

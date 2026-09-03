@@ -280,7 +280,11 @@ var workspaceScanTimeout = 120 * time.Second
 // configured/auto-detected linters that support a workspace scan, i.e.
 // have a non-empty WorkspaceArgs. User config takes precedence over
 // defaults for a given command, same as findLinter, achieved here simply by
-// visiting userLints first and skipping a command already seen.
+// visiting userLints first and skipping a command already seen. A default
+// linter absent from PATH is still tried under workDir's node_modules/.bin
+// (see internal/localbin.Resolve), same fallback findLinter applies
+// per-file — a scan has no single file to walk up from, so it's resolved
+// from the workspace root only.
 func (m *Manager) effectiveWorkspaceLinters() []config.LinterConfig {
 	seen := make(map[string]bool)
 	var out []config.LinterConfig
@@ -297,6 +301,20 @@ func (m *Manager) effectiveWorkspaceLinters() []config.LinterConfig {
 		}
 		seen[l.Command] = true
 		out = append(out, l)
+	}
+	for _, d := range config.DefaultLinters {
+		if len(d.WorkspaceArgs) == 0 || seen[d.Command] {
+			continue
+		}
+		cmd := expandPath(d.Command)
+		local, ok := localbin.Resolve(m.workDir, m.workDir, filepath.Base(cmd))
+		if !ok {
+			continue
+		}
+		seen[d.Command] = true
+		localLC := d
+		localLC.Command = local
+		out = append(out, localLC)
 	}
 	return out
 }

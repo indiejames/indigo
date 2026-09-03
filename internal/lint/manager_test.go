@@ -312,3 +312,37 @@ func TestFindLinterFindsLinterInNestedPackageNodeModules(t *testing.T) {
 		t.Errorf("findLinter Command = %q, want the nested binary %q", got.Command, fakeESLint)
 	}
 }
+
+// TestEffectiveWorkspaceLintersFindsWorkspaceRootNodeModulesBinary is a
+// regression test for a gap introduced alongside the node_modules/.bin fix
+// above: findLinter resolves a per-file linter under node_modules/.bin, but
+// effectiveWorkspaceLinters (used by ScanWorkspace) only ever consulted
+// autoLints, which is populated from PATH only. A default linter installed
+// solely under "<workDir>/node_modules/.bin/" — not even a monorepo nested
+// case, just the plain common one — used to be silently missing from
+// workspace-wide scans.
+func TestEffectiveWorkspaceLintersFindsWorkspaceRootNodeModulesBinary(t *testing.T) {
+	root := t.TempDir()
+	binDir := filepath.Join(root, "node_modules", ".bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeESLint := filepath.Join(binDir, "eslint")
+	if err := os.WriteFile(fakeESLint, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newTestManager()
+	m.workDir = root
+
+	linters := m.effectiveWorkspaceLinters()
+	var found *config.LinterConfig
+	for i := range linters {
+		if linters[i].Command == fakeESLint {
+			found = &linters[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("effectiveWorkspaceLinters() = %+v, want an entry for the workspace-root eslint at %q", linters, fakeESLint)
+	}
+}

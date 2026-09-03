@@ -107,3 +107,28 @@ func TestResolveNotFound(t *testing.T) {
 		t.Fatal("expected not found")
 	}
 }
+
+// TestResolveStopsAtWorkspaceRootWithTrailingSeparator is a regression test
+// for a boundary bug: dir == workspaceRoot is a raw string comparison, and
+// filepath.Dir never returns a trailing separator, so an uncleaned
+// workspaceRoot with one (e.g. passed straight from a config value or a
+// path a caller joined with "/") would never match it — the walk would
+// silently continue past the intended workspace root into ancestor
+// directories. Places a binary just *outside* the workspace (in root's
+// parent) and confirms Resolve, given workspaceRoot with a trailing
+// separator, still returns false rather than finding it.
+func TestResolveStopsAtWorkspaceRootWithTrailingSeparator(t *testing.T) {
+	parent := t.TempDir()
+	writeBin(t, parent, "prettier") // outside the workspace
+
+	root := filepath.Join(parent, "workspace")
+	fileDir := filepath.Join(root, "a", "b", "c")
+	if err := os.MkdirAll(fileDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, ok := Resolve(fileDir, root+string(filepath.Separator), "prettier")
+	if ok {
+		t.Fatal("expected the walk to stop at workspaceRoot despite its trailing separator, not find the binary just outside it")
+	}
+}

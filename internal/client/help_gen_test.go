@@ -8,27 +8,27 @@ import (
 )
 
 // TestCollectHelpRowsMergesSharedName verifies leaves sharing a name (e.g.
-// "cursor-left" bound at both "h" and "left") merge into one row with both
-// keys, in tree order — this is what reproduces the old hand-written
-// "h / ←" style entries without hand-authoring them.
+// "page-down" bound at both "ctrl+f" and "pgdown") merge into one row with
+// both keys, in tree order — this is what reproduces the old hand-written
+// "Ctrl+f / PgDn" style entries without hand-authoring them.
 func TestCollectHelpRowsMergesSharedName(t *testing.T) {
 	resetKeybinds(t)
 	rows := collectHelpRows(prefixCmds)
 	var row *treeHelpRow
 	for _, r := range rows {
-		if r.label == "Cursor left" {
+		if r.label == "Page down" {
 			row = r
 			break
 		}
 	}
 	if row == nil {
-		t.Fatal(`no row found for "Cursor left"`)
+		t.Fatal(`no row found for "Page down"`)
 	}
-	if got := row.rawKeys; len(got) != 2 || got[0] != "h" || got[1] != "left" {
-		t.Errorf("cursor-left raw keys = %v, want [h left]", got)
+	if got := row.rawKeys; len(got) != 2 || got[0] != "ctrl+f" || got[1] != "pgdown" {
+		t.Errorf("page-down raw keys = %v, want [ctrl+f pgdown]", got)
 	}
-	if got := strings.Join(row.seqs, " / "); got != "h / ←" {
-		t.Errorf("cursor-left seqs joined = %q, want %q", got, "h / ←")
+	if got := strings.Join(row.seqs, " / "); got != "Ctrl+f / PgDn" {
+		t.Errorf("page-down seqs joined = %q, want %q", got, "Ctrl+f / PgDn")
 	}
 }
 

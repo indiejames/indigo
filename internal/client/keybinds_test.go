@@ -20,7 +20,7 @@ func resetKeybinds(t *testing.T) {
 func TestApplyKeybindOverridesRebindsExistingKey(t *testing.T) {
 	resetKeybinds(t)
 	cfg := &config.Config{Keybinds: []config.Keybind{
-		{Mode: "normal", Key: "j", Action: "cursor-up"},
+		{Mode: "normal", Key: "w", Action: "cursor-up"},
 	}}
 	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)
@@ -28,10 +28,10 @@ func TestApplyKeybindOverridesRebindsExistingKey(t *testing.T) {
 
 	m := newTestModel("a\nb\nc\n")
 	m.cursor.Line = 1
-	m2, _ := m.handleNormal(fakeKey("j"))
+	m2, _ := m.handleNormal(fakeKey("w"))
 	got := m2.(Model)
 	if got.cursor.Line != 0 {
-		t.Errorf("j rebound to cursor-up: cursor.Line = %d, want 0", got.cursor.Line)
+		t.Errorf("w rebound to cursor-up: cursor.Line = %d, want 0", got.cursor.Line)
 	}
 }
 
@@ -103,17 +103,21 @@ func TestApplyKeybindOverridesRefusesPrefixMenuKey(t *testing.T) {
 func TestApplyKeybindOverridesRevertsOnReload(t *testing.T) {
 	resetKeybinds(t)
 	applyKeybindOverrides(&config.Config{Keybinds: []config.Keybind{
-		{Mode: "normal", Key: "j", Action: "cursor-up"},
+		{Mode: "normal", Key: "0", Action: "cursor-up"},
 	}})
 	// Simulate a config reload that drops the override.
 	applyKeybindOverrides(&config.Config{})
 
 	m := newTestModel("a\nb\nc\n")
 	m.cursor.Line = 1
-	m2, _ := m.handleNormal(fakeKey("j"))
+	m.cursor.Col = 3
+	m2, _ := m.handleNormal(fakeKey("0"))
 	got := m2.(Model)
-	if got.cursor.Line != 2 {
-		t.Errorf("after reload without override: cursor.Line = %d, want 2 (back to cursor-down)", got.cursor.Line)
+	// go-to-line-start (the default) resets Col to 0 without touching Line;
+	// cursor-up (the dropped override) would instead move Line to 0 and
+	// leave Col at 3 — these are unambiguous, distinguishable outcomes.
+	if got.cursor.Line != 1 || got.cursor.Col != 0 {
+		t.Errorf("after reload without override: cursor = %+v, want {Line:1 Col:0} (back to go-to-line-start)", got.cursor)
 	}
 }
 

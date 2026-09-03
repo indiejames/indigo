@@ -101,7 +101,7 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 
 | Key                 | Action                                          |
 |---------------------|-------------------------------------------------|
-| `h` `j` `k` `l`     | Move left / down / up / right                   |
+| Arrow keys          | Move left / down / up / right                   |
 | `b`                 | Move to previous word start (crosses lines)     |
 | `e`                 | Move to end of current/next word (crosses lines)|
 | `0` `$`             | Start / end of line                             |

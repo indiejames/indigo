@@ -514,10 +514,10 @@ func TestViewCommandModeShowsPopup(t *testing.T) {
 func TestHandleKeyDispatchesToNormal(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.mode = ModeNormal
-	m2, _ := m.handleKey(fakeKey("j"))
+	m2, _ := m.handleKey(fakeKey("down"))
 	got := m2.(Model)
 	if got.cursor.Line != 1 {
-		t.Errorf("handleKey normal 'j': cursor.Line = %d, want 1", got.cursor.Line)
+		t.Errorf("handleKey normal 'down': cursor.Line = %d, want 1", got.cursor.Line)
 	}
 }
 

@@ -308,6 +308,12 @@ func (s *editorService) RescanWorkspaceDiagnostics(ctx context.Context, call pro
 }
 
 func (s *editorService) Hover(_ context.Context, call proto.EditorService_hover) error {
+	// A slow LSP hover request can block for seconds; without call.Go()
+	// capnp serializes every other RPC on this connection behind it
+	// (buffer switches, edits, ...). See Format in this file for the
+	// precedent and TestLSPCallsDoNotBlockApplyOp for the regression test.
+	call.Go()
+
 	args := call.Args()
 	bufID := args.BufId()
 	line := int(args.Line())
@@ -347,6 +353,10 @@ func (s *editorService) Hover(_ context.Context, call proto.EditorService_hover)
 }
 
 func (s *editorService) SignatureHelp(_ context.Context, call proto.EditorService_signatureHelp) error {
+	// See Hover above: without call.Go() a slow LSP call here would freeze
+	// every other RPC on this connection.
+	call.Go()
+
 	args := call.Args()
 	bufID := args.BufId()
 	line := int(args.Line())
@@ -398,6 +408,12 @@ func (s *editorService) SignatureHelp(_ context.Context, call proto.EditorServic
 }
 
 func (s *editorService) Complete(ctx context.Context, call proto.EditorService_complete) error {
+	// See Hover above: without call.Go() a slow LSP call here would freeze
+	// every other RPC on this connection. Go() only acks the call to let
+	// the next queued one start — it doesn't affect or cancel ctx, which
+	// is still used below for pluginMgr.GetCompletions.
+	call.Go()
+
 	args := call.Args()
 	bufID := args.BufId()
 	line := int(args.Line())
@@ -449,6 +465,11 @@ func (s *editorService) Complete(ctx context.Context, call proto.EditorService_c
 // to resolve. On failure the item is returned unchanged so the client can still
 // apply the primary insert.
 func (s *editorService) ResolveCompletion(ctx context.Context, call proto.EditorService_resolveCompletion) error {
+	// See Hover above: without call.Go() a slow LSP call here would freeze
+	// every other RPC on this connection. Go() only acks the call to let
+	// the next queued one start — it doesn't affect or cancel ctx.
+	call.Go()
+
 	args := call.Args()
 	bufID := args.BufId()
 
@@ -667,6 +688,12 @@ func pluginCompletionFromProto(src proto.CompletionItem, pluginName string) plug
 // file, since servers can be slow on large files and hints outside the
 // viewport aren't rendered anyway.
 func (s *editorService) InlayHints(_ context.Context, call proto.EditorService_inlayHints) error {
+	// See Hover above: without call.Go() a slow LSP call here would freeze
+	// every other RPC on this connection. This one matters more than
+	// most — it's polled automatically on a timer for every open buffer,
+	// not just on user action.
+	call.Go()
+
 	args := call.Args()
 	bufID := args.BufId()
 
@@ -722,6 +749,12 @@ func (s *editorService) InlayHints(_ context.Context, call proto.EditorService_i
 // file, since servers can be slow on large files and tokens outside the
 // viewport aren't rendered anyway.
 func (s *editorService) SemanticTokensRange(_ context.Context, call proto.EditorService_semanticTokensRange) error {
+	// See Hover above: without call.Go() a slow LSP call here would freeze
+	// every other RPC on this connection. This one matters more than
+	// most — it's polled automatically on a timer for every open buffer,
+	// not just on user action.
+	call.Go()
+
 	args := call.Args()
 	bufID := args.BufId()
 
@@ -810,6 +843,10 @@ func utf16ColToRune(line []rune, col int) int {
 }
 
 func (s *editorService) Definition(_ context.Context, call proto.EditorService_definition) error {
+	// See Hover above: without call.Go() a slow LSP call here would freeze
+	// every other RPC on this connection.
+	call.Go()
+
 	args := call.Args()
 	bufID := args.BufId()
 	line := int(args.Line())
@@ -845,6 +882,10 @@ func (s *editorService) Definition(_ context.Context, call proto.EditorService_d
 }
 
 func (s *editorService) References(_ context.Context, call proto.EditorService_references) error {
+	// See Hover above: without call.Go() a slow LSP call here would freeze
+	// every other RPC on this connection.
+	call.Go()
+
 	args := call.Args()
 	bufID := args.BufId()
 
@@ -866,8 +907,20 @@ func (s *editorService) References(_ context.Context, call proto.EditorService_r
 		return nil
 	}
 
+	// Re-fetch rather than reuse the entry captured above: the LSP call
+	// just above can run for a while (that's the whole point of call.Go()
+	// not blocking other RPCs on it), during which the last client could
+	// disconnect and CloseBuffer could delete this bufID's entry entirely,
+	// or a wholesale buffer-swap (Format/SaveAs/DiscardRecovery) could
+	// replace entry.buf with a newer object — either way, indexing
+	// s.buffers[bufID] unconditionally would risk a nil-pointer dereference
+	// on a deleted entry. buf stays nil (previews skipped below) if the
+	// buffer is gone.
 	s.mu.Lock()
-	buf := s.buffers[bufID].buf
+	var buf *document.Buffer
+	if e, ok := s.buffers[bufID]; ok {
+		buf = e.buf
+	}
 	s.mu.Unlock()
 
 	list, err := res.NewLocations(int32(len(locs)))
@@ -881,7 +934,7 @@ func (s *editorService) References(_ context.Context, call proto.EditorService_r
 		fl.SetLine(uint32(loc.Range.Start.Line))
 		fl.SetCol(uint32(loc.Range.Start.Character))
 		// Preview: if it's the same file, read from buffer; otherwise leave empty.
-		if locPath == path && loc.Range.Start.Line < buf.LineCount() {
+		if buf != nil && locPath == path && loc.Range.Start.Line < buf.LineCount() {
 			fl.SetPreview(buf.Line(loc.Range.Start.Line)) //nolint:errcheck
 		}
 	}
@@ -889,6 +942,10 @@ func (s *editorService) References(_ context.Context, call proto.EditorService_r
 }
 
 func (s *editorService) WorkspaceSymbols(_ context.Context, call proto.EditorService_workspaceSymbols) error {
+	// See Hover above: without call.Go() a slow LSP call here would freeze
+	// every other RPC on this connection.
+	call.Go()
+
 	args := call.Args()
 	bufID := args.BufId()
 	query, err := args.Query()
@@ -931,6 +988,10 @@ func (s *editorService) WorkspaceSymbols(_ context.Context, call proto.EditorSer
 }
 
 func (s *editorService) DocumentSymbols(_ context.Context, call proto.EditorService_documentSymbols) error {
+	// See Hover above: without call.Go() a slow LSP call here would freeze
+	// every other RPC on this connection.
+	call.Go()
+
 	args := call.Args()
 	bufID := args.BufId()
 
@@ -1058,6 +1119,10 @@ func lspEditsForURI(edit *lsp.WorkspaceEdit, uri string) []lsp.TextEdit {
 }
 
 func (s *editorService) LspCodeActions(_ context.Context, call proto.EditorService_lspCodeActions) error {
+	// See Hover above: without call.Go() a slow LSP call here would freeze
+	// every other RPC on this connection.
+	call.Go()
+
 	args := call.Args()
 	bufID := args.BufId()
 	line := int(args.Line())
@@ -1139,6 +1204,10 @@ func (s *editorService) LspCodeActions(_ context.Context, call proto.EditorServi
 // goes through the client's normal undo-aware batch path like every other
 // LSP-edit-producing command.
 func (s *editorService) LspOrganizeImports(_ context.Context, call proto.EditorService_lspOrganizeImports) error {
+	// See Hover above: without call.Go() a slow LSP call here would freeze
+	// every other RPC on this connection.
+	call.Go()
+
 	bufID := call.Args().BufId()
 
 	s.mu.Lock()
@@ -1264,6 +1333,10 @@ func (s *editorService) workspaceEditItemsFromLSP(path string, edits []lsp.TextE
 // per-path apply logic as ApplyWorkspaceEdits (open buffers edited in place,
 // other files patched on disk).
 func (s *editorService) LspRename(_ context.Context, call proto.EditorService_lspRename) error {
+	// See Hover above: without call.Go() a slow LSP call here would freeze
+	// every other RPC on this connection.
+	call.Go()
+
 	args := call.Args()
 	clientID := args.ClientId()
 	bufID := args.BufId()

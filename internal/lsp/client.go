@@ -507,7 +507,21 @@ func (c *Client) References(path string, line, col int) ([]Location, error) {
 // OrganizeImports: send textDocument/codeAction with the given range and
 // context, decode the response (nil on a null result, not an error), and
 // resolve any actions the server returned without a populated edit.
+//
+// actionCtx.Diagnostics is normalized to a non-nil (possibly empty) slice
+// before sending: the LSP spec requires CodeActionContext.diagnostics to
+// always be an array, but a nil Go slice marshals to JSON `null`, not `[]`
+// — OrganizeImports never sets Diagnostics at all, and CodeActions leaves
+// it nil whenever no diagnostic overlaps the requested range, so both
+// paths could otherwise send `"diagnostics":null` on the wire. Real
+// clients (VS Code, coc.nvim, ...) always send `[]` in this case; at least
+// one real-world TypeScript language server doesn't guard against `null`
+// and crashes with "Cannot read properties of null (reading 'filter')" —
+// see TestCodeActionRequestNeverSendsNullDiagnostics.
 func (c *Client) codeActionRequest(path string, rng Range, actionCtx CodeActionContext) ([]CodeAction, error) {
+	if actionCtx.Diagnostics == nil {
+		actionCtx.Diagnostics = []Diagnostic{}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

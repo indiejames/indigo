@@ -678,50 +678,59 @@ type undoEntry struct {
 
 // Model is the Bubble Tea model for a single buffer view.
 type Model struct {
-	rpc                 *RPC
-	buf                 *document.Buffer
-	cfg                 *config.Config
-	bufID               uint32
-	version             uint64
-	generation          uint64 // last-known buffer generation; see updatesMsg's handler
-	generationKnown     bool   // false until the first updatesMsg/bufferResyncMsg establishes a baseline
-	mode                Mode
-	cursor              document.Pos
-	goalCol             int  // sticky column for consecutive Up/Down moves; -1 when unset
-	goalColActive       bool // set by moveCursor's vertical branch; tells the Update() dispatcher whether to keep goalCol
-	topLine             int  // first visible line
-	topChunk            int  // first visible wrap chunk of topLine (0-based)
-	width               int
-	height              int
-	filePath            string
-	workDir             string // project root, used for display-path shortening
-	status              string    // transient status/error message shown in modeline or, for error-class text, the toast overlay (see isErrMessage)
-	statusAt            time.Time // when status was last set; drives toast auto-dismiss
-	severeErr           string    // non-empty = must-dismiss error modal is visible (see handleKey); state-affecting failures only
-	sel                 *Selection
-	dragging            bool
-	lastClickAt         time.Time
-	lastClickPos        document.Pos
-	undoStack           []undoEntry    // each entry is inverse ops + pre-edit cursor snapshot
-	redoStack           []undoEntry    // mirrors undoStack; cleared on any new edit
-	currentGroup        []document.Op  // non-nil while accumulating ops for the current Insert session
-	groupBefore         cursorSnapshot // cursor state when currentGroup was opened
-	insertLineCount     int            // buf line count at the start of the insert session
-	savedUndoDepth      int            // len(undoStack) at the time of the last save
-	cmdBuf              string         // text typed after ':' while in ModeCommand
-	cmdCompletionIdx    int            // selected item in command completion popup (−1 = none)
-	diagPopup           bool           // when true, show diagnostic detail popup for cursor line
-	diagPopupSuppressed bool           // Escape pressed; don't re-show until cursor leaves the range
-	prefixSeq           []string       // keys typed so far for a multi-key Normal-mode command
-	searchQuery         string         // raw text typed after '/' (see splitSearchQuery)
-	searchReplace       string         // parsed replacement text, only meaningful when searchReplacing
-	searchReplacing     bool           // true once an unescaped '/' delimiter has been typed — live search-and-replace preview
-	searchMatches       []substituteMatch
-	searchIdx           int
-	searchOrigin        document.Pos
-	searchErr           string // non-empty when regex fails to compile
-	hlr                 *highlight.Highlighter
-	hlSpans             highlight.LineSpans
+	rpc             *RPC
+	buf             *document.Buffer
+	cfg             *config.Config
+	bufID           uint32
+	version         uint64
+	generation      uint64 // last-known buffer generation; see updatesMsg's handler
+	generationKnown bool   // false until the first updatesMsg/bufferResyncMsg establishes a baseline
+	mode            Mode
+	cursor          document.Pos
+	goalCol         int  // sticky column for consecutive Up/Down moves; -1 when unset
+	goalColActive   bool // set by moveCursor's vertical branch; tells the Update() dispatcher whether to keep goalCol
+	topLine         int  // first visible line
+	topChunk        int  // first visible wrap chunk of topLine (0-based)
+	width           int
+	height          int
+	filePath        string
+	workDir         string    // project root, used for display-path shortening
+	status          string    // transient status/error message shown in modeline or, for error-class text, the toast overlay (see isErrMessage)
+	statusAt        time.Time // when status was last set; drives toast auto-dismiss
+	// keepStatusOnNextSave, when true, tells the next savedMsg handler to
+	// skip its usual pushStatus("") clear once, then reset itself to false.
+	// Set by formatResultMsg when format-on-save (thenSave) found nothing
+	// to format: without this, the "No formatter available"/"Already
+	// formatted" status it pushes would be silently wiped out by the save
+	// that follows immediately after in the same flow, before the user
+	// could ever see it — an explicit flag rather than a timing check,
+	// matching this codebase's aversion to timing-based state.
+	keepStatusOnNextSave bool
+	severeErr            string // non-empty = must-dismiss error modal is visible (see handleKey); state-affecting failures only
+	sel                  *Selection
+	dragging             bool
+	lastClickAt          time.Time
+	lastClickPos         document.Pos
+	undoStack            []undoEntry    // each entry is inverse ops + pre-edit cursor snapshot
+	redoStack            []undoEntry    // mirrors undoStack; cleared on any new edit
+	currentGroup         []document.Op  // non-nil while accumulating ops for the current Insert session
+	groupBefore          cursorSnapshot // cursor state when currentGroup was opened
+	insertLineCount      int            // buf line count at the start of the insert session
+	savedUndoDepth       int            // len(undoStack) at the time of the last save
+	cmdBuf               string         // text typed after ':' while in ModeCommand
+	cmdCompletionIdx     int            // selected item in command completion popup (−1 = none)
+	diagPopup            bool           // when true, show diagnostic detail popup for cursor line
+	diagPopupSuppressed  bool           // Escape pressed; don't re-show until cursor leaves the range
+	prefixSeq            []string       // keys typed so far for a multi-key Normal-mode command
+	searchQuery          string         // raw text typed after '/' (see splitSearchQuery)
+	searchReplace        string         // parsed replacement text, only meaningful when searchReplacing
+	searchReplacing      bool           // true once an unescaped '/' delimiter has been typed — live search-and-replace preview
+	searchMatches        []substituteMatch
+	searchIdx            int
+	searchOrigin         document.Pos
+	searchErr            string // non-empty when regex fails to compile
+	hlr                  *highlight.Highlighter
+	hlSpans              highlight.LineSpans
 	// hlSeq is a pointer (like buf) so every value-copy of this buffer's
 	// Model shares one counter: reparseHighlight bumps it and stamps the new
 	// value onto the highlightMsg it schedules, so a highlightMsg superseded
@@ -731,11 +740,11 @@ type Model struct {
 	// build a Model{} literal directly rather than via New) disables the
 	// check rather than panicking — every highlightMsg is then treated as
 	// current, matching the pre-sequencing behavior.
-	hlSeq               *uint64
-	langOverride        string // set by ":set ft=<key>"; "" means derive language from filePath as usual
-	detectedIndent      *config.IndentSettings // sniffed from buffer content on open; nil if inconclusive
-	metrics             *metricsData
-	recoveryPrompt      bool // waiting for user to accept or discard recovery content
+	hlSeq          *uint64
+	langOverride   string                 // set by ":set ft=<key>"; "" means derive language from filePath as usual
+	detectedIndent *config.IndentSettings // sniffed from buffer content on open; nil if inconclusive
+	metrics        *metricsData
+	recoveryPrompt bool // waiting for user to accept or discard recovery content
 
 	// Plugin decorations
 	decorations         []ClientDecoration
@@ -763,9 +772,9 @@ type Model struct {
 	// above). Updated far less often than per-buffer diagnostics since it's
 	// driven by an infrequent workspace lint scan, not live edits.
 	workspaceDiagSummary WorkspaceDiagnosticsSummary
-	workspaceDiagTick    int // counter; fetch every 50 ticks (~6s)
-	helpVisible bool // true = help popup visible
-	helpScroll  int  // scroll offset within the help popup
+	workspaceDiagTick    int  // counter; fetch every 50 ticks (~6s)
+	helpVisible          bool // true = help popup visible
+	helpScroll           int  // scroll offset within the help popup
 
 	// Message log (space l): every status-bar message since the buffer was
 	// opened, so a message that scrolled off or got truncated in the status
@@ -1187,6 +1196,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.bufID != m.bufID {
 			return m, nil // stale result from a previous buffer switch; discard
 		}
+		// A save that fails never reaches savedMsg to consume this flag —
+		// reset it here too, so it can't leak and suppress an unrelated
+		// later save's status clear.
+		m.keepStatusOnNextSave = false
 		m = m.pushStatus("ERR: " + msg.err.Error())
 		return m, nil
 
@@ -1202,10 +1215,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// its copy dirty (server_buffer.go's compare-and-swap). Marking
 			// clean here would disagree with the server and falsely hide
 			// newer, unsaved edits as saved.
+			//
+			// Reset keepStatusOnNextSave here too: this superseded response
+			// never reaches the SetClean()/flag-consuming code below, so
+			// without this the flag would leak and incorrectly protect a
+			// later, unrelated save's status from being cleared — the same
+			// leak class saveFailedMsg's handler already guards against.
+			m.keepStatusOnNextSave = false
 			return m, nil
 		}
 		m.buf.SetClean()
-		m = m.pushStatus("")
+		if m.keepStatusOnNextSave {
+			m.keepStatusOnNextSave = false
+		} else {
+			m = m.pushStatus("")
+		}
 		m.savedUndoDepth = len(m.undoStack)
 		return m, nil
 
@@ -1221,13 +1245,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// which arrives as saveFailedMsg instead of this message) — this
 			// covers the narrower window where the server's check passed but
 			// a local edit landed before the response reached the client.
+			//
+			// Reset keepStatusOnNextSave here too, for the same reason
+			// savedMsg's version-mismatch branch does: this superseded
+			// response never reaches the flag-consuming code below.
+			m.keepStatusOnNextSave = false
 			m = m.pushStatus("Save as skipped — buffer has changed since the request; try again")
 			return m, nil
 		}
 		m.filePath = msg.newPath
 		m.saveAsThenClose = false
 		m.buf.SetClean()
-		m = m.pushStatus("")
+		if m.keepStatusOnNextSave {
+			m.keepStatusOnNextSave = false
+		} else {
+			m = m.pushStatus("")
+		}
 		m.savedUndoDepth = len(m.undoStack)
 		if msg.thenClose {
 			return m, m.doCloseBuffer()
@@ -1459,11 +1492,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detectedIndent = config.DetectIndentSettings(msg.content)
 			m, refreshCmd = m.scheduleLSPOverlayRefresh()
 			refreshCmd = tea.Batch(m.reparseHighlight(), refreshCmd)
-		} else if !msg.thenSave {
+		} else {
 			if msg.noFormatter {
 				m = m.pushStatus("No formatter available")
 			} else {
 				m = m.pushStatus("Already formatted")
+			}
+			// On format-on-save specifically, this status would otherwise be
+			// invisible: the save that runs right after (below) completes
+			// and clears it via savedMsg's own pushStatus("") before the
+			// user ever sees it. The manual ":format" path (thenSave false)
+			// needs no such protection — nothing clears its status right
+			// after.
+			if msg.thenSave {
+				m.keepStatusOnNextSave = true
 			}
 		}
 		if msg.thenSave {

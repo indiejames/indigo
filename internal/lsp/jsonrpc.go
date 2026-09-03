@@ -84,9 +84,32 @@ func (c *jsonrpcConn) Call(ctx context.Context, method string, params any) (json
 	c.pending.Store(id, ch)
 	defer c.pending.Delete(id)
 
-	if err := c.write(msg); err != nil {
-		return nil, err
+	// write runs in its own goroutine so ctx actually bounds this call's
+	// total wait time: write() can block indefinitely (an unbuffered pipe
+	// to a language server subprocess that isn't draining its stdin — e.g.
+	// busy re-indexing after a burst of external file changes — or waiting
+	// on wMu behind another in-flight write stuck the same way), and that
+	// block happens *before* the ctx-aware select below ever runs. Without
+	// this, a caller's configured timeout (e.g. Hover's 3s) is meaningless
+	// whenever the write itself is what's stuck, not the response.
+	// writeErr is buffered so this goroutine can always send and exit even
+	// if Call has already returned via ctx.Done() below — it deliberately
+	// leaks (keeps running until the write eventually completes or the
+	// process dies) rather than blocking the caller; see PLAN.md for why
+	// this tradeoff was chosen over the alternative (an OS write deadline,
+	// not reliably supported across every io.Writer this connects to).
+	writeErr := make(chan error, 1)
+	go func() { writeErr <- c.write(msg) }()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case err := <-writeErr:
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()

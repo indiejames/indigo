@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/indiejames/indigo/internal/config"
+	"github.com/indiejames/indigo/internal/localbin"
 	"github.com/indiejames/indigo/internal/lsp"
 	"github.com/indiejames/indigo/internal/procutil"
 )
@@ -38,8 +39,13 @@ type Manager struct {
 	workDir  string
 }
 
-// NewManager builds a Manager. autoFmts are detected once at startup by
-// scanning PATH and <workDir>/node_modules/.bin/.
+// NewManager builds a Manager. autoFmts are the DefaultFormatters found on
+// PATH at startup — a fixed, workspace-independent check. A locally
+// installed (node_modules/.bin) formatter is instead resolved lazily, per
+// file, in Format below: unlike PATH, which is the same for every file,
+// which node_modules/.bin actually applies can differ per file in a
+// monorepo with non-hoisted per-package installs, so it can't be decided
+// once at startup.
 func NewManager(lspMgr *lsp.Manager, cfg *config.Config, workDir string) *Manager {
 	m := &Manager{
 		lsp:      lspMgr,
@@ -47,22 +53,36 @@ func NewManager(lspMgr *lsp.Manager, cfg *config.Config, workDir string) *Manage
 		userFmts: cfg.Formatters,
 		workDir:  workDir,
 	}
-	localBin := filepath.Join(workDir, "node_modules", ".bin")
 	for _, d := range config.DefaultFormatters {
-		cmd := expandPath(d.Command)
-		if _, err := exec.LookPath(cmd); err == nil {
+		if _, err := exec.LookPath(expandPath(d.Command)); err == nil {
 			m.autoFmts = append(m.autoFmts, d)
-			continue
-		}
-		// Also check <workDir>/node_modules/.bin/<command> for locally-installed tools.
-		local := filepath.Join(localBin, filepath.Base(cmd))
-		if _, err := os.Stat(local); err == nil {
-			localFC := d
-			localFC.Command = local
-			m.autoFmts = append(m.autoFmts, localFC)
 		}
 	}
 	return m
+}
+
+// localFormatter checks for a DefaultFormatters entry matching ext
+// installed under node_modules/.bin somewhere between path's own directory
+// and the workspace root (see internal/localbin.Resolve) — the entry
+// closest to path wins, so a monorepo package with its own non-hoisted
+// node_modules is found even when nothing is installed at the workspace
+// root. Only consulted for extensions not already satisfied by a PATH
+// match in autoFmts.
+func (m *Manager) localFormatter(path, ext string) (config.FormatterConfig, bool) {
+	for _, d := range config.DefaultFormatters {
+		if !matchesExt(d.Extensions, ext) {
+			continue
+		}
+		cmd := expandPath(d.Command)
+		local, ok := localbin.Resolve(filepath.Dir(path), m.workDir, filepath.Base(cmd))
+		if !ok {
+			continue
+		}
+		localFC := d
+		localFC.Command = local
+		return localFC, true
+	}
+	return config.FormatterConfig{}, false
 }
 
 // Format returns the formatted content and whether it changed.
@@ -80,6 +100,10 @@ func (m *Manager) Format(path, content string) (string, bool, error) {
 		if matchesExt(f.Extensions, ext) {
 			return runExternal(f, path, content)
 		}
+	}
+
+	if f, ok := m.localFormatter(path, ext); ok {
+		return runExternal(f, path, content)
 	}
 
 	formatted, changed, err := m.lsp.Format(path, content, m.lspFormattingOptions(ext, content))

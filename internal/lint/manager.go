@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/indiejames/indigo/internal/config"
+	"github.com/indiejames/indigo/internal/localbin"
 	"github.com/indiejames/indigo/internal/lsp"
 	"github.com/indiejames/indigo/internal/procutil"
 )
@@ -58,8 +59,13 @@ type Manager struct {
 	cancelScan context.CancelFunc
 }
 
-// NewManager builds a Manager. autoLints are detected once at startup by
-// scanning PATH and <workDir>/node_modules/.bin/, mirroring format.Manager.
+// NewManager builds a Manager. autoLints are the DefaultLinters found on
+// PATH at startup — a fixed, workspace-independent check. A locally
+// installed (node_modules/.bin) linter is instead resolved lazily, per
+// file, in findLinter below: which node_modules/.bin actually applies can
+// differ per file in a monorepo with non-hoisted per-package installs, so
+// it can't be decided once at startup — see format.Manager's identically-
+// shaped fix for the same gap.
 func NewManager(cfg *config.Config, workDir string) *Manager {
 	scanCtx, cancelScan := context.WithCancel(context.Background())
 	m := &Manager{
@@ -76,26 +82,22 @@ func NewManager(cfg *config.Config, workDir string) *Manager {
 		scanCtx:        scanCtx,
 		cancelScan:     cancelScan,
 	}
-	localBin := filepath.Join(workDir, "node_modules", ".bin")
 	for _, d := range config.DefaultLinters {
-		cmd := expandPath(d.Command)
-		if _, err := exec.LookPath(cmd); err == nil {
+		if _, err := exec.LookPath(expandPath(d.Command)); err == nil {
 			m.autoLints = append(m.autoLints, d)
-			continue
-		}
-		local := filepath.Join(localBin, filepath.Base(cmd))
-		if _, err := os.Stat(local); err == nil {
-			localLC := d
-			localLC.Command = local
-			m.autoLints = append(m.autoLints, localLC)
 		}
 	}
 	return m
 }
 
-// findLinter returns the configured/auto-detected linter for ext, user
-// config taking precedence over the built-in defaults.
-func (m *Manager) findLinter(ext string) (config.LinterConfig, bool) {
+// findLinter returns the configured/auto-detected linter for path's
+// extension, user config taking precedence over the built-in defaults, and
+// a PATH match taking precedence over a node_modules/.bin one resolved by
+// walking up from path's own directory (see internal/localbin.Resolve) —
+// the entry closest to path wins, so a monorepo package with its own
+// non-hoisted node_modules is found even when nothing is installed at the
+// workspace root.
+func (m *Manager) findLinter(path, ext string) (config.LinterConfig, bool) {
 	for _, l := range m.userLints {
 		if matchesExt(l.Extensions, ext) {
 			return l, true
@@ -105,6 +107,19 @@ func (m *Manager) findLinter(ext string) (config.LinterConfig, bool) {
 		if matchesExt(l.Extensions, ext) {
 			return l, true
 		}
+	}
+	for _, d := range config.DefaultLinters {
+		if !matchesExt(d.Extensions, ext) {
+			continue
+		}
+		cmd := expandPath(d.Command)
+		local, ok := localbin.Resolve(filepath.Dir(path), m.workDir, filepath.Base(cmd))
+		if !ok {
+			continue
+		}
+		localLC := d
+		localLC.Command = local
+		return localLC, true
 	}
 	return config.LinterConfig{}, false
 }
@@ -120,7 +135,7 @@ func (m *Manager) findLinter(ext string) (config.LinterConfig, bool) {
 // request being dropped or a second process racing the first.
 func (m *Manager) RunAsync(path, content string) {
 	ext := strings.TrimPrefix(filepath.Ext(path), ".")
-	lc, ok := m.findLinter(ext)
+	lc, ok := m.findLinter(path, ext)
 	if !ok {
 		return
 	}
@@ -135,7 +150,7 @@ func (m *Manager) RunAsync(path, content string) {
 // benefit — those stay save-triggered via RunAsync.
 func (m *Manager) RunOnEdit(path, content string) {
 	ext := strings.TrimPrefix(filepath.Ext(path), ".")
-	lc, ok := m.findLinter(ext)
+	lc, ok := m.findLinter(path, ext)
 	if !ok || !lc.Stdin {
 		return
 	}

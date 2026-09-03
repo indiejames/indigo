@@ -105,39 +105,55 @@ func TestSaveAsPromptEmptyForUntitledBuffer(t *testing.T) {
 
 func TestHandleNormalMoveDown(t *testing.T) {
 	m := newTestModel("line1\nline2\nline3\n")
-	m2, _ := m.handleNormal(fakeKey("j"))
+	m2, _ := m.handleNormal(fakeKey("down"))
 	got := m2.(Model)
 	if got.cursor.Line != 1 {
-		t.Errorf("j: cursor.Line = %d, want 1", got.cursor.Line)
+		t.Errorf("down: cursor.Line = %d, want 1", got.cursor.Line)
 	}
 }
 
 func TestHandleNormalMoveUp(t *testing.T) {
 	m := newTestModel("line1\nline2\n")
 	m.cursor.Line = 1
-	m2, _ := m.handleNormal(fakeKey("k"))
+	m2, _ := m.handleNormal(fakeKey("up"))
 	got := m2.(Model)
 	if got.cursor.Line != 0 {
-		t.Errorf("k: cursor.Line = %d, want 0", got.cursor.Line)
+		t.Errorf("up: cursor.Line = %d, want 0", got.cursor.Line)
 	}
 }
 
 func TestHandleNormalMoveRight(t *testing.T) {
 	m := newTestModel("hello\n")
-	m2, _ := m.handleNormal(fakeKey("l"))
+	m2, _ := m.handleNormal(fakeKey("right"))
 	got := m2.(Model)
 	if got.cursor.Col != 1 {
-		t.Errorf("l: cursor.Col = %d, want 1", got.cursor.Col)
+		t.Errorf("right: cursor.Col = %d, want 1", got.cursor.Col)
 	}
 }
 
 func TestHandleNormalMoveLeft(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.cursor.Col = 2
-	m2, _ := m.handleNormal(fakeKey("h"))
+	m2, _ := m.handleNormal(fakeKey("left"))
 	got := m2.(Model)
 	if got.cursor.Col != 1 {
-		t.Errorf("h: cursor.Col = %d, want 1", got.cursor.Col)
+		t.Errorf("left: cursor.Col = %d, want 1", got.cursor.Col)
+	}
+}
+
+// TestHandleNormalHjklNotBoundByDefault is the regression test for the
+// deliberate removal of hjkl as default bindings: pressing any of them
+// should be a no-op (they're not in prefixCmds at all) unless a
+// [[keybind]] override adds one back.
+func TestHandleNormalHjklNotBoundByDefault(t *testing.T) {
+	for _, key := range []string{"h", "j", "k", "l"} {
+		m := newTestModel("line1\nline2\n")
+		m.cursor = document.Pos{Line: 0, Col: 2}
+		m2, _ := m.handleNormal(fakeKey(key))
+		got := m2.(Model)
+		if got.cursor != m.cursor {
+			t.Errorf("%s: cursor moved from %+v to %+v, want no-op (not bound by default)", key, m.cursor, got.cursor)
+		}
 	}
 }
 

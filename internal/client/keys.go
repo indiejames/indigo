@@ -110,13 +110,13 @@ var prefixCmds = []command{
 	{key: "c", name: "change-selection", category: "Editing", label: "Change selection", execute: executeChangeSelection},
 	{key: "y", name: "yank", category: "Editing", label: "Yank", execute: executeYank},
 	{key: "v", name: "cut-selection", category: "Editing", label: "Cut selection", execute: executeCutSelection},
-	{key: "h", name: "cursor-left", category: "Navigation", label: "Cursor left", execute: executeCursorLeft},
+	// hjkl are deliberately not bound by default (design decision: freed up
+	// as bare-key slots rather than kept as duplicate arrow-key aliases —
+	// see PLAN.md's keybinding-tiering doc). Still available via
+	// [[keybind]] for anyone who wants them back.
 	{key: "left", name: "cursor-left", category: "Navigation", label: "Cursor left", execute: executeCursorLeft},
-	{key: "l", name: "cursor-right", category: "Navigation", label: "Cursor right", execute: executeCursorRight},
 	{key: "right", name: "cursor-right", category: "Navigation", label: "Cursor right", execute: executeCursorRight},
-	{key: "j", name: "cursor-down", category: "Navigation", label: "Cursor down", execute: executeCursorDown},
 	{key: "down", name: "cursor-down", category: "Navigation", label: "Cursor down", execute: executeCursorDown},
-	{key: "k", name: "cursor-up", category: "Navigation", label: "Cursor up", execute: executeCursorUp},
 	{key: "up", name: "cursor-up", category: "Navigation", label: "Cursor up", execute: executeCursorUp},
 	{key: "ctrl+f", name: "page-down", category: "Navigation", label: "Page down", execute: executePageDown},
 	{key: "pgdown", name: "page-down", category: "Navigation", label: "Page down", execute: executePageDown},

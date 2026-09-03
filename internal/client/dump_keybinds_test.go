@@ -62,8 +62,8 @@ func TestDumpKeybindsTOMLUncommentedBlockParses(t *testing.T) {
 		t.Fatalf("expected exactly one [[keybind]] entry, got %d: %+v", len(cfg.Keybinds), cfg.Keybinds)
 	}
 	kb := cfg.Keybinds[0]
-	if kb.Mode != "normal" || kb.Key != "h" || kb.Action != "cursor-left" {
-		t.Errorf("parsed keybind = %+v, want {Mode:normal Key:h Action:cursor-left}", kb)
+	if kb.Mode != "normal" || kb.Key != "left" || kb.Action != "cursor-left" {
+		t.Errorf("parsed keybind = %+v, want {Mode:normal Key:left Action:cursor-left}", kb)
 	}
 
 	// And it must actually be accepted as a real override, closing the loop

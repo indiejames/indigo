@@ -76,7 +76,7 @@ func TestMacroReplayReproducesRecordedEdit(t *testing.T) {
 	}
 
 	// Move to line 1 ("two") and replay the recorded macro there.
-	m = runKeys(t, m, fakeKey("j"))
+	m = runKeys(t, m, fakeKey("down"))
 	if m.cursor.Line != 1 {
 		t.Fatalf("setup: cursor.Line = %d, want 1", m.cursor.Line)
 	}
@@ -202,7 +202,7 @@ func TestMacroExcludesRejectedReplayFromRecording(t *testing.T) {
 	// Replaying the finished macro on a fresh line must apply the recorded
 	// edit exactly once, not recurse — there's no @ left in the sequence to
 	// re-trigger executeMacroReplay.
-	m = runKeys(t, m, fakeKey("j")) // move to "two"
+	m = runKeys(t, m, fakeKey("down")) // move to "two"
 	m = runKeys(t, m, m.lastMacro...)
 	want2 := "xone\nxtwo\n"
 	if got := m.buf.Content(); got != want2 {

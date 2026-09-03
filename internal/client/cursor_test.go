@@ -744,22 +744,22 @@ func TestUpdateKeyMsgResetsGoalColumnOnNonVerticalKey(t *testing.T) {
 	m.mode = ModeNormal
 	m.cursor = document.Pos{Line: 0, Col: 8}
 
-	newModel, _ := m.Update(fakeKey("j")) // down onto "hi there": no clamping needed, goal (8) fits
+	newModel, _ := m.Update(fakeKey("down")) // down onto "hi there": no clamping needed, goal (8) fits
 	m = newModel.(Model)
 	if m.cursor != (document.Pos{Line: 1, Col: 8}) {
 		t.Fatalf("cursor = %+v, want {Line:1 Col:8}", m.cursor)
 	}
 
-	newModel, _ = m.Update(fakeKey("h")) // explicit left move: col 8 -> 7, becomes the new goal
+	newModel, _ = m.Update(fakeKey("left")) // explicit left move: col 8 -> 7, becomes the new goal
 	m = newModel.(Model)
 	if m.cursor != (document.Pos{Line: 1, Col: 7}) {
 		t.Fatalf("cursor = %+v, want {Line:1 Col:7}", m.cursor)
 	}
 
-	newModel, _ = m.Update(fakeKey("j")) // onto "second long line": should use 7, not the stale 8
+	newModel, _ = m.Update(fakeKey("down")) // onto "second long line": should use 7, not the stale 8
 	m = newModel.(Model)
 	if m.cursor != (document.Pos{Line: 2, Col: 7}) {
-		t.Errorf("cursor = %+v, want {Line:2 Col:7} (goal column reset by 'h')", m.cursor)
+		t.Errorf("cursor = %+v, want {Line:2 Col:7} (goal column reset by left)", m.cursor)
 	}
 }
 

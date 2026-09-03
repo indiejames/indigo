@@ -295,8 +295,8 @@ An unknown `mode` or `action` is likewise reported as a warning rather than sile
 | `select-all` | `%` | `clear-selections` | `;` |
 | `flip-selection` | `alt+;` | `delete-selection` | `d` |
 | `change-selection` | `c` | `yank` | `y` |
-| `cursor-left` | `h`, `left` | `cursor-right` | `l`, `right` |
-| `cursor-down` | `j`, `down` | `cursor-up` | `k`, `up` |
+| `cursor-left` | `left` | `cursor-right` | `right` |
+| `cursor-down` | `down` | `cursor-up` | `up` |
 | `page-down` | `ctrl+f`, `pgdown` | `page-up` | `ctrl+b`, `pgup` |
 | `go-to-last-line` | `G` | `go-to-line-start` | `0`, `home` |
 | `go-to-first-non-blank` | `^` | `go-to-line-end` | `$`, `end` |

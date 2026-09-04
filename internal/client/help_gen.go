@@ -181,8 +181,8 @@ func displaySequence(path []string) string {
 
 // generateHelpEntries builds the ? popup's built-in reference from the live
 // prefixCmds/insertCmds trees and the ":" command table (completion.go's
-// allCmds), replacing the old hand-maintained static helpEntries list. It
-// reflects [[keybind]] overrides applied via applyKeybindOverrides
+// generateExCommands), replacing the old hand-maintained static helpEntries
+// list. It reflects [[keybind]] overrides applied via applyKeybindOverrides
 // (prefixCmds/insertCmds are the live, post-override trees) — a rebound
 // key never shows a stale description, and a new ":" command or Insert-mode
 // binding can never drift out of sync since there's only one place either
@@ -236,8 +236,8 @@ func generateHelpEntries() []helpEntry {
 	}
 
 	out = append(out, helpEntry{key: "Commands (:)"})
-	for _, c := range allCmds {
-		out = append(out, helpEntry{key: "  " + c.name, desc: c.desc})
+	for _, c := range generateExCommands() {
+		out = append(out, helpEntry{key: "  " + c.displayName(), desc: c.desc})
 	}
 
 	return out

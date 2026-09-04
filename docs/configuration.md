@@ -368,15 +368,17 @@ Space — Command menu:
 
 | Key | Action | Key | Action |
 | --- | --- | --- | --- |
-| `s` | Search & Replace | `S` | Save As |
-| `p` | Go to symbol in project | `f` | Open file picker |
-| `l` | Message Log | `n` | New file |
-| `a` | Code Actions (fixes & refactors) | `r` | Refactor: Rename Symbol |
-| `m` | Refactor: Move Function to File | `i` | Organize Imports |
+| `s` | Search & Replace | `S` | Go to symbol in project |
+| `p` | Open file picker | `l` | Message Log |
+| `n` | New file | `a` | Code Actions (fixes & refactors) |
+| `r` | Refactor: Rename Symbol | `m` | Refactor: Move Function to File |
+| `i` | Organize Imports | | |
 
-`S` opens a dialog pre-filled with the buffer's current path (blank for an unsaved
-buffer) — edit it and press Enter to write the buffer to that path and switch the
-buffer to it, or Esc to cancel. `:w <path>` / `:wq <path>` do the same from command mode.
+Save As lives on the `:` command line instead of this menu — `:save-as` / `:sa` opens
+a dialog pre-filled with the buffer's current path (blank for an unsaved buffer);
+edit it and press Enter to write the buffer to that path and switch the buffer to
+it, or Esc to cancel. `:save-as <path>` / `:sa <path>` (and `:w <path>` / `:wq <path>`)
+write there directly instead of opening the dialog.
 
 Plugins can contribute their own entries (and submenus) to the Command menu via
 `plugin.toml`'s `menu_item`; these are merged in at runtime and aren't listed here.

@@ -86,6 +86,16 @@ var prefixCmds = []command{
 	{key: "ctrl+c", name: "quit-hint", category: "System", label: "Quit hint", execute: executeCancelHint},
 	{key: "ctrl+h", name: "prev-buffer", category: "Files & Buffers", label: "Previous buffer", execute: executePrevBuffer},
 	{key: "ctrl+l", name: "next-buffer", category: "Files & Buffers", label: "Next buffer", execute: executeNextBuffer},
+	// ctrl+shift+left/ctrl+shift+right: an arrow-based alias for the same
+	// two actions, added after Alt+Arrow proved unusable (see
+	// feedback_keybindings memory / PLAN.md) — Ctrl+Shift+Arrow is a real
+	// modified-CSI sequence (\x1b[1;6D / \x1b[1;6C), unlike Ctrl+Shift+
+	// <letter> which collapses to the same single control byte as plain
+	// Ctrl+<letter> and can't represent Shift at all. Confirmed reaching a
+	// raw-byte dumper intact through the user's Ghostty+zellij setup before
+	// this was added.
+	{key: "ctrl+shift+left", name: "prev-buffer", category: "Files & Buffers", label: "Previous buffer", execute: executePrevBuffer},
+	{key: "ctrl+shift+right", name: "next-buffer", category: "Files & Buffers", label: "Next buffer", execute: executeNextBuffer},
 	{key: ":", name: "command-mode", category: "System", label: "Command mode", execute: executeEnterCommandMode},
 	{key: "/", name: "search", category: "Search", label: "Search", execute: executeEnterSearchMode},
 	{key: "esc", name: "cancel-selection", category: "Selection", label: "Cancel selection", execute: executeEscNormal},
@@ -179,24 +189,6 @@ var prefixCmds = []command{
 			{key: "b", name: "open-buffer-picker", label: "Open buffer picker", execute: func(m Model) (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg { return OpenBufPickerMsg{} }
 			}},
-		},
-	},
-	{
-		key:       "]",
-		label:     "Next",
-		menuTitle: "Next",
-		category:  "Files & Buffers",
-		children: []command{
-			{key: "b", name: "next-buffer", label: "Next buffer", execute: executeNextBuffer},
-		},
-	},
-	{
-		key:       "[",
-		label:     "Prev",
-		menuTitle: "Prev",
-		category:  "Files & Buffers",
-		children: []command{
-			{key: "b", name: "prev-buffer", label: "Previous buffer", execute: executePrevBuffer},
 		},
 	},
 	commandMenuRoot,

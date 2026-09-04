@@ -348,16 +348,41 @@ func overlayCenter(base, popup string, termW, termH int) string {
 	return strings.Join(out, "\n")
 }
 
+// tabLabel returns buffer i's tab text (matching renderTabBar's format)
+// and its rendered width — shared between renderTabBar and tabAtColumn so
+// the two can never drift apart. None of tabActiveStyle/tabInactiveStyle
+// add padding/borders, so the label's own width equals the styled width.
+func (a App) tabLabel(i int) (label string, width int) {
+	m := a.buffers[i]
+	name := filepath.Base(m.FilePath())
+	dirty := ""
+	if m.Dirty() {
+		dirty = tabDirtyMark
+	}
+	label = fmt.Sprintf("  %s%s  ", dirty, name)
+	return label, lipgloss.Width(label)
+}
+
+// tabAtColumn returns the index of the buffer whose tab covers column x in
+// the rendered tab bar, or false if x falls past the last tab (the
+// fill/status area to its right).
+func (a App) tabAtColumn(x int) (int, bool) {
+	col := 0
+	for i := range a.buffers {
+		_, w := a.tabLabel(i)
+		if x < col+w {
+			return i, true
+		}
+		col += w
+	}
+	return -1, false
+}
+
 func (a App) renderTabBar() string {
 	var sb strings.Builder
 	used := 0
-	for i, m := range a.buffers {
-		name := filepath.Base(m.FilePath())
-		dirty := ""
-		if m.Dirty() {
-			dirty = tabDirtyMark
-		}
-		label := fmt.Sprintf("  %s%s  ", dirty, name)
+	for i := range a.buffers {
+		label, w := a.tabLabel(i)
 		var rendered string
 		if i == a.active {
 			rendered = tabActiveStyle.Render(label)
@@ -365,7 +390,7 @@ func (a App) renderTabBar() string {
 			rendered = tabInactiveStyle.Render(label)
 		}
 		sb.WriteString(rendered)
-		used += lipgloss.Width(rendered)
+		used += w
 	}
 	// Show app-level status at the right if set.
 	if a.status != "" {

@@ -313,9 +313,10 @@ An unknown `mode` or `action` is likewise reported as a warning rather than sile
 | `move-line-up` | `shift+up` | `move-line-down` | `shift+down` |
 | `jump-back` | `-` | `jump-forward` | `=`, `+` |
 | `cut-selection` | `v` | `macro-record-toggle` | `q` |
-| `macro-replay` | `@` | | |
+| `macro-replay` | `@` | `prev-buffer` | `ctrl+h`, `ctrl+shift+left` |
+| `next-buffer` | `ctrl+l`, `ctrl+shift+right` | | |
 
-Multi-key sequences (the `g`, `m`, `M`, `s`, `~`, `[`, `]`, and Space menus, plus any
+Multi-key sequences (the `g`, `m`, `M`, `s`, `~`, and Space menus, plus any
 others added later) aren't individually overridable — only the single-key
 actions listed above and in the table below.
 
@@ -333,8 +334,6 @@ above, these aren't config-rebindable.
 | `l` | Go to line end | `s` | Go to symbol in project |
 | `S` | Go to symbol in file | `r` | Find references |
 | `b` | Open buffer picker | | |
-
-`]` — Next: `b` Next buffer. `[` — Prev: `b` Previous buffer.
 
 `~` — Case conversion (acts on the current selection):
 

@@ -156,7 +156,7 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 | `Esc`        | Clear selection and search highlights        |
 | `Ctrl+s`     | Save                                         |
 | `Ctrl+p`     | Open file picker                             |
-| `]b` / `[b`  | Next / previous buffer                       |
+| `Ctrl+l` / `Ctrl+h` | Next / previous buffer (also `Ctrl+Shift+→` / `Ctrl+Shift+←`) |
 | `:`          | Enter command mode                           |
 | `?`          | Show all key bindings, including plugin-contributed ones |
 
@@ -292,6 +292,7 @@ When a file's extension doesn't resolve to a language on its own (most commonly 
 | Click        | Move cursor |
 | Click + drag | Select text |
 | Double-click | Select word |
+| Click a tab  | Switch to that buffer |
 
 ## Features
 
@@ -319,7 +320,7 @@ Use `:grep [pattern]` for workspace-wide search across all files.
 
 **Macros** — Press `q` to start recording, `q` again to stop, and `@` to replay the recorded keys. There's a single macro slot (no named registers) and it isn't persisted — it's gone when indigo exits, same as a Vim register would be without `viminfo`/`shada`.
 
-**Multi-buffer** — Open multiple files in the same session. A tab bar appears when more than one buffer is open. Use `]b` / `[b` or `Ctrl+P` to navigate.
+**Multi-buffer** — Open multiple files in the same session. A tab bar appears when more than one buffer is open. Use `Ctrl+l` / `Ctrl+h` (or `Ctrl+Shift+→` / `Ctrl+Shift+←`), `Ctrl+P`, or clicking a tab directly, to navigate.
 
 **Crash recovery** — File content is written to a recovery directory every 5 seconds. If indigo exits uncleanly, the next open will offer to restore your unsaved work.
 

@@ -56,6 +56,49 @@ func TestFindCommandEmpty(t *testing.T) {
 	}
 }
 
+// TestBufferNavPrefixMenusRemoved verifies the old "[b"/"]b" prefix-menu
+// bindings are gone. Alt+Left/Alt+Right were tried as their replacement but
+// reverted: Ghostty encodes Alt+Left/Alt+Right as the Emacs/readline
+// meta-b/meta-f "backward/forward word" escape sequences rather than
+// distinguishable modified-arrow sequences, so Alt+Left collided with
+// indigo-git's existing alt+b (toggle blame) binding and Alt+Right — no
+// alt+f binding exists — silently did nothing. ctrl+shift+left/
+// ctrl+shift+right (see TestBufferNavCtrlShiftArrowBindings) replaced it
+// instead, alongside ctrl+h/ctrl+l.
+func TestBufferNavPrefixMenusRemoved(t *testing.T) {
+	if _, ok := findCommand([]string{"["}); ok {
+		t.Error("findCommand('[') should return ok=false; the Prev-buffer prefix menu was removed")
+	}
+	if _, ok := findCommand([]string{"]"}); ok {
+		t.Error("findCommand(']') should return ok=false; the Next-buffer prefix menu was removed")
+	}
+}
+
+// TestBufferNavCtrlShiftArrowBindings is a regression test for the
+// eventual replacement chosen after Alt+Left/Alt+Right proved unusable
+// (see TestBufferNavPrefixMenusRemoved's doc comment): ctrl+shift+left/
+// ctrl+shift+right, confirmed via a raw-byte terminal capture to arrive as
+// a real modified-CSI sequence (unlike Ctrl+Shift+<letter>, which
+// collapses to a plain Ctrl+<letter> control byte and can't represent
+// Shift at all).
+func TestBufferNavCtrlShiftArrowBindings(t *testing.T) {
+	cmd, ok := findCommand([]string{"ctrl+shift+left"})
+	if !ok {
+		t.Fatal("findCommand('ctrl+shift+left') should return ok=true")
+	}
+	if cmd.name != "prev-buffer" {
+		t.Errorf("ctrl+shift+left name = %q, want %q", cmd.name, "prev-buffer")
+	}
+
+	cmd, ok = findCommand([]string{"ctrl+shift+right"})
+	if !ok {
+		t.Fatal("findCommand('ctrl+shift+right') should return ok=true")
+	}
+	if cmd.name != "next-buffer" {
+		t.Errorf("ctrl+shift+right name = %q, want %q", cmd.name, "next-buffer")
+	}
+}
+
 // --- Save As ---
 
 func TestSpaceMenuSaveAsPrefillsCurrentPath(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sahilm/fuzzy"
 )
@@ -74,6 +75,20 @@ type filePicker struct {
 
 	recentMode  bool     // showing recentFiles instead of the directory browser
 	recentFiles []string // workspace-relative paths, most-recently-opened first
+
+	// all is populated asynchronously (see App.startPickerFileScan) rather
+	// than by newFilePicker itself: a full recursive workspace walk can take
+	// a very long time on a large/slow directory tree (a real report: a
+	// home directory with no project-scoped root), and doing it synchronously
+	// inside Update blocked the whole UI — including the keypress meant to
+	// open a different picker or cancel. Browse mode (buildEntries, a single
+	// non-recursive os.ReadDir) is unaffected and works immediately either
+	// way; only the global fuzzy-search list depends on this. loadingAll is
+	// true until the scan for seq completes; seq guards against a stale scan
+	// (from a picker that's since closed, or been reopened for a different
+	// directory) overwriting a newer one's results — see pickerFilesMsg.
+	seq        int
+	loadingAll bool
 }
 
 // showingRecent reports whether the recent-files list is currently displayed.
@@ -85,8 +100,34 @@ type pickedMsg struct{ absPath string }
 // pickerCancelledMsg is sent when the user presses Esc.
 type pickerCancelledMsg struct{}
 
+// pickerFilesMsg carries the result of a background workspace file scan
+// (see App.startPickerFileScan). seq is checked against the current
+// picker's own seq before applying — a scan whose picker has since closed,
+// or been reopened for a different directory, is discarded rather than
+// clobbering a newer scan's results.
+type pickerFilesMsg struct {
+	seq   int
+	files []string
+}
+
+// startPickerFileScan bumps the picker-scan generation counter, stamps it
+// onto a.picker (which must already be set), and returns a command that
+// walks workDir for the global fuzzy-search file list in the background
+// (see filePicker.all's doc comment for why this can't run synchronously).
+// Call this right after newFilePicker/newDirectoryPicker.
+func (a *App) startPickerFileScan(workDir string) tea.Cmd {
+	a.pickerFilesSeq++
+	seq := a.pickerFilesSeq
+	a.picker.seq = seq
+	return func() tea.Msg {
+		return pickerFilesMsg{seq: seq, files: collectFiles(workDir)}
+	}
+}
+
 // startDir is the workspace-relative directory to browse into initially;
-// "" opens at the project root.
+// "" opens at the project root. The global (fuzzy-search) file list isn't
+// populated here — see the filePicker.all doc comment — callers must also
+// call App.startPickerFileScan to kick that off.
 func newFilePicker(workDir, startDir string, w, h int, fuzzySearch bool) *filePicker {
 	fp := &filePicker{
 		workDir:     workDir,
@@ -94,8 +135,8 @@ func newFilePicker(workDir, startDir string, w, h int, fuzzySearch bool) *filePi
 		width:       w,
 		height:      h,
 		fuzzySearch: fuzzySearch,
+		loadingAll:  true,
 	}
-	fp.all = collectFiles(workDir)
 	fp.entries = fp.buildEntries()
 	return fp
 }
@@ -376,7 +417,11 @@ func (fp *filePicker) View() string {
 	case fp.browseMode():
 		sb.WriteString(pickerTitleStyle.Render(clamp("  " + fp.breadcrumb())))
 	default:
-		sb.WriteString(pickerTitleStyle.Render(clamp("  Open File")))
+		title := "  Open File"
+		if fp.loadingAll {
+			title += "  [scanning files…]"
+		}
+		sb.WriteString(pickerTitleStyle.Render(clamp(title)))
 	}
 	sb.WriteByte('\n')
 

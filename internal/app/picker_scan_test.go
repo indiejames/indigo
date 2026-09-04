@@ -167,3 +167,33 @@ func TestPickerFilesMsgRefreshesActiveSearch(t *testing.T) {
 		t.Errorf("filtered = %v, want [cmd/indigo/main.go] (search refreshed once files arrived)", a2.picker.filtered)
 	}
 }
+
+// TestPickerFileScanDoesNotRaceWithIgnoredDirsReload is a regression test
+// (found in review) for a data race introduced by deferring collectFiles
+// into a background command: collectFiles used to read the shared
+// package-level ignoredDirs variable directly, but it now runs
+// concurrently with the rest of Update on its own goroutine — including a
+// config hot-reload's addIgnoredDirs, which reassigns ignoredDirs to a
+// brand-new map. Run with -race; confirmed to flag a real race (both on
+// the ignoredDirs variable itself and, more seriously, on the new map's
+// internal state during construction) before startPickerFileScan started
+// snapshotting ignoredDirs on the caller's goroutine and passing it into
+// collectFiles as a parameter.
+func TestPickerFileScanDoesNotRaceWithIgnoredDirsReload(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := App{width: 80, height: 24, cfg: &config.Config{}, workDir: dir}
+	a.picker = a.newDirectoryPicker()
+	cmd := a.startPickerFileScan(dir)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		cmd() // runs collectFiles, same as Bubble Tea would on its own goroutine
+	}()
+
+	addIgnoredDirs([]string{"some-dir"}) // concurrent config-reload-style reassignment
+	<-done
+}

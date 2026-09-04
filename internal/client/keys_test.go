@@ -167,6 +167,30 @@ func TestSpaceMenuGoToSymbolInProjectMovedToShiftS(t *testing.T) {
 	}
 }
 
+// TestGoMenuSymbolKeysSwappedForShiftSConsistency verifies the "g" menu's
+// "s"/"S" were swapped so shift+s consistently means "go to symbol in
+// project" in both the "g" menu and the Space menu (see
+// TestSpaceMenuGoToSymbolInProjectMovedToShiftS) — "gs" now means "in
+// file" (previously "in project"), and "gS" now means "in project"
+// (previously "in file").
+func TestGoMenuSymbolKeysSwappedForShiftSConsistency(t *testing.T) {
+	cmd, ok := findCommand([]string{"g", "s"})
+	if !ok {
+		t.Fatal("findCommand('g','s') should return ok=true")
+	}
+	if cmd.name != "go-to-symbol-in-file" {
+		t.Errorf("cmd.name = %q, want %q", cmd.name, "go-to-symbol-in-file")
+	}
+
+	cmd, ok = findCommand([]string{"g", "S"})
+	if !ok {
+		t.Fatal("findCommand('g','S') should return ok=true")
+	}
+	if cmd.name != "go-to-symbol-in-project" {
+		t.Errorf("cmd.name = %q, want %q", cmd.name, "go-to-symbol-in-project")
+	}
+}
+
 func TestSaveAsPromptEmptyForUntitledBuffer(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.filePath = ""

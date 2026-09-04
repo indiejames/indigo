@@ -179,10 +179,13 @@ var prefixCmds = []command{
 			{key: "d", name: "go-to-definition", label: "Go to definition", execute: executeGoToDefinition},
 			{key: "h", name: "go-to-line-start", label: "Go to line start", execute: executeGoToLineStart},
 			{key: "l", name: "go-to-line-end", label: "Go to line end", execute: executeGoToLineEnd},
-			{key: "s", name: "go-to-symbol-in-project", label: "Go to symbol in project", execute: executeOpenSymbolPicker},
-			{key: "S", name: "go-to-symbol-in-file", label: "Go to symbol in file", execute: func(m Model) (tea.Model, tea.Cmd) {
+			// s/S swapped from their original assignment so shift+s
+			// consistently means "in project" here and in the Space menu
+			// (where "S" is also go-to-symbol-in-project).
+			{key: "s", name: "go-to-symbol-in-file", label: "Go to symbol in file", execute: func(m Model) (tea.Model, tea.Cmd) {
 				return m, m.fetchDocSymbols()
 			}},
+			{key: "S", name: "go-to-symbol-in-project", label: "Go to symbol in project", execute: executeOpenSymbolPicker},
 			{key: "r", name: "find-references", label: "Find references", execute: func(m Model) (tea.Model, tea.Cmd) {
 				return m, m.fetchReferences()
 			}},

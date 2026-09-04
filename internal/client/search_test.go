@@ -628,3 +628,49 @@ func TestNAfterEscReactivatesLastSearch(t *testing.T) {
 		t.Errorf("searchMatches after reviving = %d, want 3", len(got.searchMatches))
 	}
 }
+
+// TestNDoesNotReactivateOnFailedLiveSearch is a regression test (found in
+// review) for a gap in reactivation: handleSearch's "enter" case commits a
+// plain search to Normal mode without clearing state even when it found
+// zero matches — searchQuery stays non-empty. Pressing n right after must
+// stay a no-op (respecting that the just-typed query genuinely found
+// nothing) rather than reactivating an older, unrelated successful search
+// still sitting in lastSearchQuery.
+func TestNDoesNotReactivateOnFailedLiveSearch(t *testing.T) {
+	m := newTestModel("hello world\nhello again\n")
+	got := typeInSearch(t, m, "hello")
+	m2, _ := got.handleKey(fakeKey("enter"))
+	got = m2.(Model)
+
+	m2, _ = got.handleNormal(fakeKey("esc")) // clears search; lastSearchQuery = "hello"
+	got = m2.(Model)
+	if got.lastSearchQuery != "hello" {
+		t.Fatalf("lastSearchQuery = %q, want %q", got.lastSearchQuery, "hello")
+	}
+
+	// Search for something with zero matches and commit — searchQuery stays
+	// "zzz" (non-empty), searchMatches stays empty, per handleSearch's
+	// actual "enter" behavior for a failed plain search.
+	got = typeInSearch(t, got, "zzz")
+	m2, _ = got.handleKey(fakeKey("enter"))
+	got = m2.(Model)
+	if got.searchQuery != "zzz" || len(got.searchMatches) != 0 {
+		t.Fatalf("precondition failed: searchQuery=%q searchMatches=%v, want \"zzz\" and empty", got.searchQuery, got.searchMatches)
+	}
+
+	// "hello"'s first match happens to also be at {0 0}, which wouldn't
+	// distinguish "correctly did nothing" from "incorrectly reactivated
+	// hello" — move the cursor elsewhere first so a wrong reactivation is
+	// actually observable.
+	got.cursor = document.Pos{Line: 1, Col: 3}
+
+	m2, _ = got.handleNormal(fakeKey("n"))
+	got = m2.(Model)
+
+	if len(got.searchMatches) != 0 {
+		t.Errorf("searchMatches = %v, want still empty (must not reactivate \"hello\")", got.searchMatches)
+	}
+	if got.cursor.Line != 1 || got.cursor.Col != 3 {
+		t.Errorf("cursor = %+v, want unchanged {1 3} (must not jump to \"hello\"'s first match)", got.cursor)
+	}
+}

@@ -57,21 +57,27 @@ func executeOpenSymbolPicker(m Model) (tea.Model, tea.Cmd) {
 var prefixCmds = []command{
 	{key: "ctrl+p", name: "open-file-picker", category: "Files & Buffers", label: "Open file picker", execute: executeOpenFilePicker},
 	{key: "n", name: "search-next", category: "Search", label: "Search next", execute: func(m Model) (tea.Model, tea.Cmd) {
-		if len(m.searchMatches) > 0 {
-			m.searchIdx = (m.searchIdx + 1) % len(m.searchMatches)
-			sm := m.searchMatches[m.searchIdx]
-			m.cursor = document.Pos{Line: sm.line, Col: sm.col}
-			m.scrollToCursor()
+		if len(m.searchMatches) == 0 {
+			m, _ = m.reactivateLastSearch()
+			return m, nil
 		}
+		m.searchIdx = (m.searchIdx + 1) % len(m.searchMatches)
+		sm := m.searchMatches[m.searchIdx]
+		m.cursor = document.Pos{Line: sm.line, Col: sm.col}
+		m.scrollToCursor()
 		return m, nil
 	}},
 	{key: "N", name: "search-previous", category: "Search", label: "Search previous", execute: func(m Model) (tea.Model, tea.Cmd) {
-		if len(m.searchMatches) > 0 {
-			m.searchIdx = (m.searchIdx - 1 + len(m.searchMatches)) % len(m.searchMatches)
-			sm := m.searchMatches[m.searchIdx]
-			m.cursor = document.Pos{Line: sm.line, Col: sm.col}
-			m.scrollToCursor()
+		if len(m.searchMatches) == 0 {
+			// Reactivating (rather than cycling an already-live search)
+			// always lands on the first match regardless of n vs N.
+			m, _ = m.reactivateLastSearch()
+			return m, nil
 		}
+		m.searchIdx = (m.searchIdx - 1 + len(m.searchMatches)) % len(m.searchMatches)
+		sm := m.searchMatches[m.searchIdx]
+		m.cursor = document.Pos{Line: sm.line, Col: sm.col}
+		m.scrollToCursor()
 		return m, nil
 	}},
 	{key: "i", name: "insert-before-cursor", category: "Editing", label: "Insert before cursor", execute: func(m Model) (tea.Model, tea.Cmd) {

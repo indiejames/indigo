@@ -729,8 +729,15 @@ type Model struct {
 	searchIdx            int
 	searchOrigin         document.Pos
 	searchErr            string // non-empty when regex fails to compile
-	hlr                  *highlight.Highlighter
-	hlSpans              highlight.LineSpans
+	// lastSearchQuery is the pattern half (see splitSearchQuery) of the most
+	// recently active search, kept even after withClearedSearch wipes
+	// searchQuery/searchMatches — so n/N in Normal mode can revive a search
+	// that's since been cleared (rather than being a no-op) by re-running
+	// this pattern against the buffer's current content and jumping to its
+	// first match. See withClearedSearch and reactivateLastSearch.
+	lastSearchQuery string
+	hlr             *highlight.Highlighter
+	hlSpans         highlight.LineSpans
 	// hlSeq is a pointer (like buf) so every value-copy of this buffer's
 	// Model shares one counter: reparseHighlight bumps it and stamps the new
 	// value onto the highlightMsg it schedules, so a highlightMsg superseded

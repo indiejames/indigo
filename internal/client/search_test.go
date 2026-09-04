@@ -500,3 +500,131 @@ func TestExtractGroupNameLargeNumericName(t *testing.T) {
 		}
 	}
 }
+
+// TestWithClearedSearchRemembersLastQuery is a regression test for the
+// user-requested "semi-persistent search" feature: clearing search state
+// (Esc in Normal mode, or any of withClearedSearch's other callers) must
+// preserve the pattern in lastSearchQuery rather than discarding it, so
+// n/N can revive it later (see reactivateLastSearch).
+func TestWithClearedSearchRemembersLastQuery(t *testing.T) {
+	m := newTestModel("hello world\n")
+	m.searchQuery = "hello"
+
+	got := m.withClearedSearch()
+
+	if got.searchQuery != "" {
+		t.Errorf("searchQuery = %q, want empty after clearing", got.searchQuery)
+	}
+	if got.lastSearchQuery != "hello" {
+		t.Errorf("lastSearchQuery = %q, want %q", got.lastSearchQuery, "hello")
+	}
+}
+
+// TestWithClearedSearchKeepsPriorLastQueryWhenAlreadyEmpty verifies a
+// second, redundant clear (searchQuery already "") doesn't stomp a
+// previously remembered lastSearchQuery back to empty.
+func TestWithClearedSearchKeepsPriorLastQueryWhenAlreadyEmpty(t *testing.T) {
+	m := newTestModel("hello world\n")
+	m.lastSearchQuery = "hello"
+	m.searchQuery = ""
+
+	got := m.withClearedSearch()
+
+	if got.lastSearchQuery != "hello" {
+		t.Errorf("lastSearchQuery = %q, want unchanged %q", got.lastSearchQuery, "hello")
+	}
+}
+
+// TestReactivateLastSearchNoQuery verifies a no-op (ok=false, m unchanged)
+// when nothing has ever been searched for.
+func TestReactivateLastSearchNoQuery(t *testing.T) {
+	m := newTestModel("hello world\n")
+
+	got, ok := m.reactivateLastSearch()
+	if ok {
+		t.Fatal("expected ok=false with no lastSearchQuery")
+	}
+	if len(got.searchMatches) != 0 {
+		t.Errorf("searchMatches = %v, want empty", got.searchMatches)
+	}
+}
+
+// TestReactivateLastSearchNoMatches verifies a remembered query that no
+// longer matches anything (e.g. the buffer changed since) reports an error
+// status instead of jumping anywhere.
+func TestReactivateLastSearchNoMatches(t *testing.T) {
+	m := newTestModel("goodbye world\n")
+	m.lastSearchQuery = "hello"
+
+	got, ok := m.reactivateLastSearch()
+	if ok {
+		t.Fatal("expected ok=false when the pattern no longer matches")
+	}
+	if !isErrMessage(got.status) {
+		t.Errorf("status = %q, want an error status", got.status)
+	}
+}
+
+// TestReactivateLastSearchJumpsToFirstMatch verifies the happy path: a
+// remembered query that still matches populates searchMatches fresh and
+// moves the cursor to the first match, regardless of where the cursor
+// currently sits.
+func TestReactivateLastSearchJumpsToFirstMatch(t *testing.T) {
+	m := newTestModel("hello world\nhello again\nhello once more\n")
+	m.lastSearchQuery = "hello"
+	m.cursor = document.Pos{Line: 2, Col: 5} // far from the first match
+
+	got, ok := m.reactivateLastSearch()
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if len(got.searchMatches) != 3 {
+		t.Fatalf("searchMatches = %d, want 3", len(got.searchMatches))
+	}
+	if got.searchIdx != 0 {
+		t.Errorf("searchIdx = %d, want 0", got.searchIdx)
+	}
+	if got.cursor.Line != 0 || got.cursor.Col != 0 {
+		t.Errorf("cursor = %+v, want {0 0} (first match)", got.cursor)
+	}
+}
+
+// TestNAfterEscReactivatesLastSearch is the full end-to-end scenario from
+// the user's request: search, use n to jump around, Esc to clear
+// (highlighting/state gone), then later pressing n again should revive the
+// same search and land on its first match rather than doing nothing.
+func TestNAfterEscReactivatesLastSearch(t *testing.T) {
+	m := newTestModel("hello world\nhello again\nhello once more\n")
+	got := typeInSearch(t, m, "hello")
+
+	m2, _ := got.handleKey(fakeKey("enter")) // commit the plain search
+	got = m2.(Model)
+	if len(got.searchMatches) == 0 {
+		t.Fatal("expected matches after committing the search")
+	}
+
+	m2, _ = got.handleNormal(fakeKey("n")) // jump around a bit, as described
+	got = m2.(Model)
+
+	m2, _ = got.handleNormal(fakeKey("esc")) // "break out"
+	got = m2.(Model)
+	if len(got.searchMatches) != 0 {
+		t.Fatal("expected search state cleared after Esc")
+	}
+	if got.lastSearchQuery != "hello" {
+		t.Fatalf("lastSearchQuery = %q, want %q", got.lastSearchQuery, "hello")
+	}
+
+	// "At some later date" — move the cursor away first, to prove this
+	// isn't just relying on the cursor already sitting on a match.
+	got.cursor = document.Pos{Line: 2, Col: 5}
+	m2, _ = got.handleNormal(fakeKey("n"))
+	got = m2.(Model)
+
+	if got.cursor.Line != 0 || got.cursor.Col != 0 {
+		t.Errorf("cursor after reviving n = %+v, want {0 0} (first match)", got.cursor)
+	}
+	if len(got.searchMatches) != 3 {
+		t.Errorf("searchMatches after reviving = %d, want 3", len(got.searchMatches))
+	}
+}

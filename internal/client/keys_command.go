@@ -343,8 +343,13 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 }
 
 // withClearedSearch resets all within-buffer search state, removing match
-// highlights and disabling n/N navigation until the next search.
+// highlights and disabling n/N's normal cycling until the next search — but
+// first remembers the pattern (if any) in lastSearchQuery, so n/N can still
+// revive it later instead of being a dead no-op (see reactivateLastSearch).
 func (m Model) withClearedSearch() Model {
+	if pattern, _, _ := splitSearchQuery(m.searchQuery); pattern != "" {
+		m.lastSearchQuery = pattern
+	}
 	m.searchQuery = ""
 	m.searchReplace = ""
 	m.searchReplacing = false
@@ -352,6 +357,35 @@ func (m Model) withClearedSearch() Model {
 	m.searchIdx = -1
 	m.searchErr = ""
 	return m
+}
+
+// reactivateLastSearch re-runs lastSearchQuery (the pattern from the most
+// recently active search, preserved across withClearedSearch) against the
+// buffer's current content and jumps to its first match — used by n/N in
+// Normal mode when there's no active search to cycle through, so a search
+// the user explicitly cleared (rather than one that was never run) is a
+// "go back to it" action instead of permanently dead. Always searches the
+// whole buffer, not a selection: by the time this fires there's no
+// meaningful "current" scope left over from whenever the search was live.
+// ok is false (m returned unchanged but for the status message) if there's
+// no remembered query, it's now invalid, or it no longer matches anything.
+func (m Model) reactivateLastSearch() (Model, bool) {
+	if m.lastSearchQuery == "" {
+		return m, false
+	}
+	matches, err := findMatches(m.buf, m.lastSearchQuery)
+	if err != nil {
+		return m.pushStatus("E: " + err.Error()), false
+	}
+	if len(matches) == 0 {
+		return m.pushStatus("E: pattern not found"), false
+	}
+	m.searchMatches = matches
+	m.searchIdx = 0
+	first := matches[0]
+	m.cursor = document.Pos{Line: first.line, Col: first.col}
+	m.scrollToCursor()
+	return m, true
 }
 
 // parseGrepArgs splits a grep command argument into a pattern and optional

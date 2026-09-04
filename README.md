@@ -200,7 +200,7 @@ Type `/` in normal mode to open the search bar at the bottom of the screen.
 
 The match count `[N/total]` is shown at the right of the search bar while typing, and in the status bar centre while navigating results. If the regex is invalid, `[invalid]` is shown instead.
 
-After confirming, use `n` / `N` in normal mode to move to the next / previous match. Pressing `Esc`, entering insert mode, or performing an edit clears the highlights and stops `n` / `N` navigation.
+After confirming, use `n` / `N` in normal mode to move to the next / previous match. Pressing `Esc`, entering insert mode, or performing an edit clears the highlights and the active match list — but the pattern itself is remembered: pressing `n` or `N` again later (even after other edits) re-runs that pattern against the buffer's current content and jumps to its first match, rather than doing nothing.
 
 ### Workspace search
 

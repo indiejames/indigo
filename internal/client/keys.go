@@ -57,21 +57,39 @@ func executeOpenSymbolPicker(m Model) (tea.Model, tea.Cmd) {
 var prefixCmds = []command{
 	{key: "ctrl+p", name: "open-file-picker", category: "Files & Buffers", label: "Open file picker", execute: executeOpenFilePicker},
 	{key: "n", name: "search-next", category: "Search", label: "Search next", execute: func(m Model) (tea.Model, tea.Cmd) {
-		if len(m.searchMatches) > 0 {
-			m.searchIdx = (m.searchIdx + 1) % len(m.searchMatches)
-			sm := m.searchMatches[m.searchIdx]
-			m.cursor = document.Pos{Line: sm.line, Col: sm.col}
-			m.scrollToCursor()
+		if len(m.searchMatches) == 0 {
+			// searchQuery == "" means the search was actually cleared (see
+			// withClearedSearch) — reactivate the last one. A non-empty
+			// searchQuery with zero matches instead means the user's
+			// currently-typed query itself just found nothing (handleSearch's
+			// "enter" commits to Normal mode without clearing on a failed
+			// search) — that's a distinct case from "cleared", and must stay
+			// a no-op rather than jumping to an older, unrelated search.
+			if m.searchQuery == "" {
+				m, _ = m.reactivateLastSearch()
+			}
+			return m, nil
 		}
+		m.searchIdx = (m.searchIdx + 1) % len(m.searchMatches)
+		sm := m.searchMatches[m.searchIdx]
+		m.cursor = document.Pos{Line: sm.line, Col: sm.col}
+		m.scrollToCursor()
 		return m, nil
 	}},
 	{key: "N", name: "search-previous", category: "Search", label: "Search previous", execute: func(m Model) (tea.Model, tea.Cmd) {
-		if len(m.searchMatches) > 0 {
-			m.searchIdx = (m.searchIdx - 1 + len(m.searchMatches)) % len(m.searchMatches)
-			sm := m.searchMatches[m.searchIdx]
-			m.cursor = document.Pos{Line: sm.line, Col: sm.col}
-			m.scrollToCursor()
+		if len(m.searchMatches) == 0 {
+			// See "n" above for why this is conditioned on searchQuery=="".
+			// Reactivating (rather than cycling an already-live search)
+			// always lands on the first match regardless of n vs N.
+			if m.searchQuery == "" {
+				m, _ = m.reactivateLastSearch()
+			}
+			return m, nil
 		}
+		m.searchIdx = (m.searchIdx - 1 + len(m.searchMatches)) % len(m.searchMatches)
+		sm := m.searchMatches[m.searchIdx]
+		m.cursor = document.Pos{Line: sm.line, Col: sm.col}
+		m.scrollToCursor()
 		return m, nil
 	}},
 	{key: "i", name: "insert-before-cursor", category: "Editing", label: "Insert before cursor", execute: func(m Model) (tea.Model, tea.Cmd) {

@@ -111,7 +111,8 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 | `Ctrl+f` / `Ctrl+b` | Page down / up                                  |
 | `gh`                | Go to line start                                |
 | `gl`                | Go to line end                                  |
-| `gs`                | Go to symbol in project                         |
+| `gs`                | Go to symbol in file                            |
+| `gS`                | Go to symbol in project                         |
 | `gd`                | Go to definition (LSP)                          |
 
 **Selection** — create or extend a selection; the cursor is always at the head.

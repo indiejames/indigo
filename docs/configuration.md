@@ -331,8 +331,8 @@ above, these aren't config-rebindable.
 | --- | --- | --- | --- |
 | `g` | Go to top of file | `e` | Go to end of file |
 | `d` | Go to definition | `h` | Go to line start |
-| `l` | Go to line end | `s` | Go to symbol in project |
-| `S` | Go to symbol in file | `r` | Find references |
+| `l` | Go to line end | `s` | Go to symbol in file |
+| `S` | Go to symbol in project | `r` | Find references |
 | `b` | Open buffer picker | | |
 
 `~` — Case conversion (acts on the current selection):

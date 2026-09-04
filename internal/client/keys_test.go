@@ -101,31 +101,69 @@ func TestBufferNavCtrlShiftArrowBindings(t *testing.T) {
 
 // --- Save As ---
 
-func TestSpaceMenuSaveAsPrefillsCurrentPath(t *testing.T) {
-	m := newTestModel("hello\n")
-	m.filePath = "/tmp/existing.go"
+// TestSaveAsExCommandPrefillsCurrentPath covers ":save-as" (and its "sa"
+// alias) with no path argument, which now opens the same prompt the
+// Space-menu "S" entry used to before Save As moved out to the ":" menu
+// (see PLAN.md) to free that key for "Go to symbol in project".
+func TestSaveAsExCommandPrefillsCurrentPath(t *testing.T) {
+	for _, tok := range []string{"save-as", "sa"} {
+		m := newTestModel("hello\n")
+		m.filePath = "/tmp/existing.go"
 
+		m.cmdBuf = tok
+		m2, tcmd := m.executeCommand()
+		if tcmd == nil {
+			t.Fatalf(":%s should return a command", tok)
+		}
+		msg := tcmd()
+		m3, _ := m2.Update(msg)
+		got := m3.(Model)
+
+		if got.saveAsInput == nil {
+			t.Fatalf(":%s: saveAsInput should be set after saveAsPromptMsg", tok)
+		}
+		if *got.saveAsInput != "/tmp/existing.go" {
+			t.Errorf(":%s: saveAsInput = %q, want %q", tok, *got.saveAsInput, "/tmp/existing.go")
+		}
+	}
+}
+
+// TestSaveAsExCommandWithPathSavesDirectly verifies ":save-as <path>"/
+// ":sa <path>" saves straight to that path instead of opening the prompt,
+// same as the pre-existing ":w <path>" mechanism.
+func TestSaveAsExCommandWithPathSavesDirectly(t *testing.T) {
+	for _, prefix := range []string{"save-as ", "sa "} {
+		m := newTestModel("hello\n")
+		m.filePath = "/tmp/existing.go"
+		m.rpc = &RPC{}
+
+		m.cmdBuf = prefix + "/tmp/new-name.go"
+		_, tcmd := m.executeCommand()
+		if tcmd == nil {
+			t.Fatalf("%q should return a save-as command", prefix)
+		}
+	}
+}
+
+// TestSpaceMenuGoToSymbolInProjectMovedToShiftS verifies the Space-menu key
+// rotation: "Go to symbol in project" now lives at "S" (freed up by moving
+// Save As out to the ":" menu), and "p" (formerly that action's key) now
+// opens the file picker.
+func TestSpaceMenuGoToSymbolInProjectMovedToShiftS(t *testing.T) {
 	cmd, ok := findCommand([]string{" ", "S"})
 	if !ok {
 		t.Fatal("findCommand(' ','S') should return ok=true")
 	}
-	if cmd.label != "Save As" {
-		t.Errorf("cmd.label = %q, want %q", cmd.label, "Save As")
+	if cmd.name != "go-to-symbol-in-project" {
+		t.Errorf("cmd.name = %q, want %q", cmd.name, "go-to-symbol-in-project")
 	}
 
-	m2, tcmd := cmd.execute(m)
-	if tcmd == nil {
-		t.Fatal("Save As execute should return a command")
+	cmd, ok = findCommand([]string{" ", "p"})
+	if !ok {
+		t.Fatal("findCommand(' ','p') should return ok=true")
 	}
-	msg := tcmd()
-	m3, _ := m2.Update(msg)
-	got := m3.(Model)
-
-	if got.saveAsInput == nil {
-		t.Fatal("saveAsInput should be set after saveAsPromptMsg")
-	}
-	if *got.saveAsInput != "/tmp/existing.go" {
-		t.Errorf("saveAsInput = %q, want %q", *got.saveAsInput, "/tmp/existing.go")
+	if cmd.name != "open-file-picker" {
+		t.Errorf("cmd.name = %q, want %q", cmd.name, "open-file-picker")
 	}
 }
 

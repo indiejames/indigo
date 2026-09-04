@@ -265,7 +265,9 @@ Type `:` in normal mode, then one of:
 | `:qa` `:quit-all`          | Close all buffers and quit |
 | `:qa!` `:quit-all!`        | Force close all and quit   |
 | `:wqa`                     | Save all and quit          |
-| `:e` `:edit`               | Open file picker           |
+| `:o` `:open`               | Open file picker           |
+| `:sa` `:save-as`           | Open Save As dialog (pre-filled with the current path) |
+| `:sa <path>` `:save-as <path>` | Save As — write to `<path>` and continue editing there |
 | `:fmt` `:format`           | Format current file        |
 | `:grep [pattern] [glob]`   | Workspace search           |
 | `:find [pattern] [glob]`   | Workspace search (alias)   |

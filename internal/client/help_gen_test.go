@@ -119,20 +119,24 @@ func TestGenerateHelpEntriesCategoryOrder(t *testing.T) {
 }
 
 // TestGenerateHelpEntriesIncludesInsertModeAndCommands verifies the two
-// non-Normal-mode sections (generated from insertCmds and allCmds
-// respectively) are present, rather than the old hand-copied text.
+// non-Normal-mode sections (generated from insertCmds and
+// generateExCommands respectively) are present, rather than the old
+// hand-copied text.
 func TestGenerateHelpEntriesIncludesInsertModeAndCommands(t *testing.T) {
 	resetKeybinds(t)
 	entries := generateHelpEntries()
 
 	var sawInsertHeader, sawCommandsHeader, sawSaveCmd bool
 	for _, e := range entries {
-		switch e.key {
-		case "Insert mode":
+		switch {
+		case e.key == "Insert mode":
 			sawInsertHeader = true
-		case "Commands (:)":
+		case e.key == "Commands (:)":
 			sawCommandsHeader = true
-		case "  save":
+		case strings.Contains(e.key, "save"):
+			// "save" is grouped with its other aliases (s/save/w/write) into
+			// one row — see generateExCommands — so the literal key is the
+			// joined "s / save / w / write" form, not a bare "  save".
 			sawSaveCmd = true
 		}
 	}
@@ -143,7 +147,7 @@ func TestGenerateHelpEntriesIncludesInsertModeAndCommands(t *testing.T) {
 		t.Error(`missing "Commands (:)" section header`)
 	}
 	if !sawSaveCmd {
-		t.Error(`missing "save" entry under Commands (:) (from allCmds)`)
+		t.Error(`missing "save" entry under Commands (:) (from generateExCommands)`)
 	}
 }
 
@@ -172,8 +176,8 @@ func TestGenerateHelpEntriesExcludesSystemFromInsertModeToo(t *testing.T) {
 	// Scope the check to the "Insert mode" section specifically: "Toggle
 	// metrics overlay" is also the legitimate, pre-existing description for
 	// the unrelated ":metrics" ex-command under "Commands (:)" (from
-	// completion.go's allCmds) — checking the whole popup would false-
-	// positive on that correct entry.
+	// completion.go's generateExCommands) — checking the whole popup would
+	// false-positive on that correct entry.
 	inSection := false
 	for _, e := range entries {
 		if e.desc == "" && e.key != "" {

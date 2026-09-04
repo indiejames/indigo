@@ -14,11 +14,12 @@ var exCommandAliases = map[string]string{
 	"qa": "quit-all", "quit-all": "quit-all",
 	"qa!": "quit-all-force", "quit-all!": "quit-all-force",
 	"wqa": "write-quit-all",
-	"e":   "open-file-picker", "edit": "open-file-picker",
+	"o":   "open-file-picker", "open": "open-file-picker",
 	"new": "new-file",
 	"fmt": "format", "format": "format",
 	"diagnostics": "show-diagnostics", "diag": "show-diagnostics",
 	"metrics": "toggle-metrics",
+	"sa":      "save-as", "save-as": "save-as",
 }
 
 // exOnlyActions are zero-argument actions reachable only via ":" today —
@@ -47,6 +48,12 @@ var exOnlyActions = map[string]func(Model) (tea.Model, tea.Cmd){
 		}
 		return m, nil
 	},
+	// save-as with no path opens the prompt (see executeCommand's
+	// "save-as "/"sa " prefix handling, in keys_command.go, for the
+	// with-a-path form that saves directly instead).
+	"save-as": func(m Model) (tea.Model, tea.Cmd) {
+		return m, func() tea.Msg { return saveAsPromptMsg{} }
+	},
 }
 
 // exOnlyDisplay gives exOnlyActions' names a canonical label/category, for
@@ -63,6 +70,7 @@ var exOnlyDisplay = map[string]displayInfo{
 	"format":           {label: "Format buffer", category: "Editing"},
 	"show-diagnostics": {label: "Open workspace diagnostic browser", category: "LSP / Diagnostics"},
 	"toggle-metrics":   {label: "Toggle metrics overlay", category: "System"},
+	"save-as":          {label: "Save As", category: "Files & Buffers"},
 }
 
 // executeExQuit is ":q"/":quit": close the buffer unless it has unsaved

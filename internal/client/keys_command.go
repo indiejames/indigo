@@ -279,6 +279,24 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		}
 		return m, m.doSaveAsNow(newPath, true)
 	}
+	// :save-as/:sa with a path saves directly, same as :w <path>; bare
+	// ":save-as"/":sa" (no trailing space+path, so not matched here) instead
+	// opens the prompt via exOnlyActions above.
+	var saveAsPath string
+	var hasSaveAsPath bool
+	if path, ok := strings.CutPrefix(cmd, "save-as "); ok {
+		saveAsPath, hasSaveAsPath = path, true
+	} else if path, ok := strings.CutPrefix(cmd, "sa "); ok {
+		saveAsPath, hasSaveAsPath = path, true
+	}
+	if hasSaveAsPath && strings.TrimSpace(saveAsPath) != "" {
+		newPath, err := filepath.Abs(strings.TrimSpace(saveAsPath))
+		if err != nil {
+			m = m.pushStatus(fmt.Sprintf("E: bad path: %v", err))
+			return m, nil
+		}
+		return m, m.doSaveAsNow(newPath, false)
+	}
 	if newName, ok := strings.CutPrefix(cmd, "extract-rename "); ok && strings.TrimSpace(newName) != "" && m.pendingExtract != nil {
 		p := m.pendingExtract
 		m.pendingExtract = nil

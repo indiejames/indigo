@@ -280,15 +280,15 @@ var commandMenuRoot = command{
 		{key: "s", name: "search-and-replace", label: "Search & Replace", execute: func(m Model) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return OpenSearchReplaceMsg{} }
 		}},
-		{key: "S", name: "save-as", label: "Save As", execute: func(m Model) (tea.Model, tea.Cmd) {
-			return m, func() tea.Msg { return saveAsPromptMsg{} }
-		}},
 		// name/label reused verbatim from g's "s" child — same action, same
-		// canonical label, required by TestNoDuplicateActionLabels.
-		{key: "p", name: "go-to-symbol-in-project", label: "Go to symbol in project", execute: executeOpenSymbolPicker},
+		// canonical label, required by TestNoDuplicateActionLabels. Moved
+		// here from "p" so "p" can host open-file-picker instead (Save As,
+		// formerly at "S", moved out to the ":save-as"/":sa" command).
+		{key: "S", name: "go-to-symbol-in-project", label: "Go to symbol in project", execute: executeOpenSymbolPicker},
 		// name/label reused verbatim from root ctrl+p — same action, same
-		// canonical label, required by TestNoDuplicateActionLabels.
-		{key: "f", name: "open-file-picker", label: "Open file picker", execute: executeOpenFilePicker},
+		// canonical label, required by TestNoDuplicateActionLabels. Moved
+		// here from "f".
+		{key: "p", name: "open-file-picker", label: "Open file picker", execute: executeOpenFilePicker},
 		{key: "l", name: "show-message-log", label: "Message Log", execute: func(m Model) (tea.Model, tea.Cmd) {
 			m.msgLogVisible = true
 			m.msgLogScroll = messageLogMaxScroll(m.width, m.height, m.messageLog) // start on the last page (most recent)

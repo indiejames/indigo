@@ -133,10 +133,13 @@ func TestGenerateHelpEntriesIncludesInsertModeAndCommands(t *testing.T) {
 			sawInsertHeader = true
 		case e.key == "Commands (:)":
 			sawCommandsHeader = true
-		case strings.Contains(e.key, "save"):
+		case strings.Contains(e.key, "save") && strings.Contains(e.key, "write"):
 			// "save" is grouped with its other aliases (s/save/w/write) into
 			// one row — see generateExCommands — so the literal key is the
-			// joined "s / save / w / write" form, not a bare "  save".
+			// joined "s / save / w / write" form, not a bare "  save". Also
+			// requiring "write" (rather than just "save") keeps this from
+			// false-matching the separate "sa / save-as" row, which also
+			// contains "save" as a substring but never "write".
 			sawSaveCmd = true
 		}
 	}

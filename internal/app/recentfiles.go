@@ -99,8 +99,9 @@ func dropString(rels []string, s string) []string {
 // already treats as non-project noise (.git, vendor, node_modules, ...) —
 // same ignoredDirs set filepicker.go uses to hide them from Browse/search.
 func isInIgnoredDir(rel string) bool {
+	ignored := ignoredDirsSnapshot()
 	for _, part := range strings.Split(rel, string(filepath.Separator)) {
-		if ignoredDirs[part] {
+		if ignored[part] {
 			return true
 		}
 	}

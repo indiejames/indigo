@@ -52,7 +52,11 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	}
 	serverLog("OpenFile: clientID=%d path=%q", clientID, path)
 
-	content, fromRecovery := s.loadContent(path)
+	content, fromRecovery, err := s.loadContent(path)
+	if err != nil {
+		serverLog("OpenFile: reading %q failed: %v", path, err)
+		return fmt.Errorf("read %s: %w", path, err)
+	}
 
 	s.mu.Lock()
 	// Check if file is already open (skip dedup for untitled buffers).
@@ -181,25 +185,38 @@ func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorServ
 	return res.SetContent(content)
 }
 
-// loadContent reads a file's content, preferring a newer recovery file if one exists.
-func (s *editorService) loadContent(path string) (content string, fromRecovery bool) {
+// loadContent reads a file's content, preferring a newer recovery file if one
+// exists.
+//
+// A read failure other than "no such file" is reported rather than swallowed:
+// falling through with empty content would open an empty buffer for a file
+// that actually has content — misrepresenting the file, and risking
+// overwriting it wholesale on the next save. "No such file" is not an error
+// here: that's the ordinary new-file case (and a file that's since been
+// deleted may still have a recovery file worth replaying), so it keeps
+// falling through to the recovery check with empty content.
+func (s *editorService) loadContent(path string) (content string, fromRecovery bool, err error) {
 	if path == "" {
-		return "", false // untitled buffer: no content, no recovery
+		return "", false, nil // untitled buffer: no content, no recovery
 	}
 	var origModTime time.Time
-	if info, err := os.Stat(path); err == nil {
+	if info, statErr := os.Stat(path); statErr == nil {
 		origModTime = info.ModTime()
 	}
-	if data, err := os.ReadFile(path); err == nil {
+	data, readErr := os.ReadFile(path)
+	switch {
+	case readErr == nil:
 		content = string(data)
+	case !os.IsNotExist(readErr):
+		return "", false, readErr
 	}
 	rp := recoveryFilePath(s.recDir, path)
-	if recInfo, err := os.Stat(rp); err == nil && recInfo.ModTime().After(origModTime) {
-		if recData, err := os.ReadFile(rp); err == nil {
-			return string(recData), true
+	if recInfo, statErr := os.Stat(rp); statErr == nil && recInfo.ModTime().After(origModTime) {
+		if recData, recErr := os.ReadFile(rp); recErr == nil {
+			return string(recData), true, nil
 		}
 	}
-	return content, false
+	return content, false, nil
 }
 
 func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_getUpdates) error {

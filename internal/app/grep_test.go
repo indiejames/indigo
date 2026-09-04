@@ -513,3 +513,72 @@ func containsStr(s, sub string) bool {
 	}
 	return false
 }
+
+// TestSearchBuiltinFindsMatchesAfterVeryLongLine is a regression test: the
+// built-in backend used a default bufio.Scanner, whose 64KB token limit
+// made one over-long line (a minified bundle, single-line JSON, generated
+// code) silently end the scan of that file — every later match dropped,
+// with no error surfaced anywhere. The 5MB maxFileBytes cap doesn't
+// protect against it: a 200KB minified file passes the size check and then
+// trips the line limit. An oversized line must now be skipped on its own
+// while the rest of the file is still searched.
+func TestSearchBuiltinFindsMatchesAfterVeryLongLine(t *testing.T) {
+	longLine := strings.Repeat("x", 100_000) // well past bufio.Scanner's 64KB default
+	dir := writeTree(t, map[string]string{
+		"min.js": longLine + "\nvar NEEDLE = 1;\n",
+	})
+
+	results, err := searchBuiltin(dir, "NEEDLE", "", "", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %+v, want exactly 1 match after the long line", results)
+	}
+	// The skipped line must still consume a line number, so the match's
+	// reported position stays correct.
+	if results[0].Line != 1 {
+		t.Errorf("Line = %d, want 1 (the oversized line still counts as line 0)", results[0].Line)
+	}
+	if results[0].RelPath != "min.js" {
+		t.Errorf("RelPath = %q, want min.js", results[0].RelPath)
+	}
+}
+
+// TestGrepFileSkipsOnlyTheOversizedLine verifies that a line genuinely past
+// the cap is skipped on its own while normal lines on both sides of it are
+// still matched — i.e. the file is not abandoned at the first over-long
+// record, and the skip is surgical (and still consumes a line number, so
+// later matches report correct positions). Mirrors the rg backend's
+// TestSearchWithRgSkipsOversizedRecordWithoutLosingOtherMatches.
+//
+// Exercises grepFile directly rather than searchBuiltin: maxFileBytes is
+// both the per-line cap and the candidate-file size filter, so shrinking it
+// enough to make a short line "oversized" would make searchBuiltin skip the
+// whole fixture file before grepFile ever saw it.
+func TestGrepFileSkipsOnlyTheOversizedLine(t *testing.T) {
+	withMaxFileBytes(t, 64)                // tiny cap so a short line counts as oversized
+	long := strings.Repeat("NEEDLE ", 100) // 700 bytes: past the cap above
+	dir := writeTree(t, map[string]string{
+		"f.txt": "NEEDLE before\n" + long + "\nNEEDLE after\n",
+	})
+
+	matchLine := func(line string) (int, int, bool) {
+		i := strings.Index(line, "NEEDLE")
+		if i < 0 {
+			return 0, 0, false
+		}
+		return i, len("NEEDLE"), true
+	}
+
+	var results []GrepResult
+	grepFile("f.txt", filepath.Join(dir, "f.txt"), matchLine, &results)
+
+	var lines []int
+	for _, r := range results {
+		lines = append(lines, r.Line)
+	}
+	if len(lines) != 2 || lines[0] != 0 || lines[1] != 2 {
+		t.Errorf("matched lines = %v, want [0 2] (line 1 oversized and skipped)", lines)
+	}
+}

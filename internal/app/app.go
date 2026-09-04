@@ -92,13 +92,14 @@ type App struct {
 	// screen is already torn down by then, so there's no in-TUI message to show.
 	serverGone bool
 
-	picker        *filePicker          // non-nil when file picker is open
-	grep          *grepPicker          // non-nil when workspace search picker is open
-	grepSeq       int                  // bumped on every new grep request; see grepResultsMsg
-	diagBrowser   *diagBrowser         // non-nil when the workspace diagnostic browser is open
-	diagSeq       int                  // bumped on every new diagnostic-browser request; see diagBrowserResultsMsg
-	bufPicker     *bufPicker           // non-nil when buffer picker popup is open
-	searchReplace *searchReplaceDialog // non-nil when the global search & replace dialog is open
+	picker         *filePicker          // non-nil when file picker is open
+	pickerFilesSeq int                  // bumped on every new picker file scan; see pickerFilesMsg
+	grep           *grepPicker          // non-nil when workspace search picker is open
+	grepSeq        int                  // bumped on every new grep request; see grepResultsMsg
+	diagBrowser    *diagBrowser         // non-nil when the workspace diagnostic browser is open
+	diagSeq        int                  // bumped on every new diagnostic-browser request; see diagBrowserResultsMsg
+	bufPicker      *bufPicker           // non-nil when buffer picker popup is open
+	searchReplace  *searchReplaceDialog // non-nil when the global search & replace dialog is open
 
 	symbolPicker    *symbolPickerState    // non-nil when workspace symbol picker is open
 	docSymbolPicker *docSymbolPickerState // non-nil when document symbol picker is open
@@ -293,8 +294,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		// Auto-open picker when started with a directory (no buffers yet).
+		var pickerScanCmd tea.Cmd
 		if len(a.buffers) == 0 && a.picker == nil {
 			a.picker = a.newDirectoryPicker()
+			pickerScanCmd = a.startPickerFileScan(a.workDir)
 		}
 		if a.picker != nil {
 			a.picker.width = msg.Width
@@ -349,7 +352,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Resize all buffers with the correct height (minus tab bar if shown).
 		bufMsg := tea.WindowSizeMsg{Width: msg.Width, Height: a.bufHeight()}
-		var cmds []tea.Cmd
+		cmds := []tea.Cmd{pickerScanCmd}
 		for i, m := range a.buffers {
 			updated, cmd := m.Update(bufMsg)
 			a.buffers[i] = updated.(client.Model)
@@ -360,7 +363,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ---- picker open ----
 	case client.OpenPickerMsg:
 		a.picker = newFilePicker(a.workDir, a.activeFileDir(), a.width, a.height, a.cfg.FuzzySearch)
-		return a, nil
+		return a, a.startPickerFileScan(a.workDir)
 
 	// ---- new file prompt open ----
 	case client.OpenNewFileMsg:
@@ -409,6 +412,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			results, err := searchWorkspace(workDir, pattern, include, exclude)
 			return grepResultsMsg{seq: seq, results: results, err: err}
 		}
+
+	case pickerFilesMsg:
+		if a.picker != nil && msg.seq == a.picker.seq {
+			a.picker.all = msg.files
+			a.picker.loadingAll = false
+			if a.picker.query != "" {
+				a.picker.setQuery(a.picker.query) // refresh a search already in progress
+			}
+		}
+		return a, nil
 
 	case grepResultsMsg:
 		if a.grep != nil && msg.seq == a.grep.seq {
@@ -871,6 +884,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch km.String() {
 			case "ctrl+p":
 				a.picker = a.newDirectoryPicker()
+				return a, a.startPickerFileScan(a.workDir)
 			case "ctrl+c", "q":
 				return a, a.doDisconnectAndQuit()
 			}

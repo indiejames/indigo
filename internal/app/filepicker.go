@@ -115,12 +115,19 @@ type pickerFilesMsg struct {
 // walks workDir for the global fuzzy-search file list in the background
 // (see filePicker.all's doc comment for why this can't run synchronously).
 // Call this right after newFilePicker/newDirectoryPicker.
+//
+// ignoredDirs is snapshotted here, on the caller's goroutine, rather than
+// read from inside the returned command: the command runs concurrently
+// with the rest of Update, including a config hot-reload's addIgnoredDirs,
+// so collectFiles reading the shared package-level variable directly would
+// race with that reassignment (see collectFiles' doc comment).
 func (a *App) startPickerFileScan(workDir string) tea.Cmd {
 	a.pickerFilesSeq++
 	seq := a.pickerFilesSeq
 	a.picker.seq = seq
+	ignored := ignoredDirs
 	return func() tea.Msg {
-		return pickerFilesMsg{seq: seq, files: collectFiles(workDir)}
+		return pickerFilesMsg{seq: seq, files: collectFiles(workDir, ignored)}
 	}
 }
 
@@ -208,14 +215,24 @@ func (fp *filePicker) navigateUp() {
 }
 
 // collectFiles walks root and returns all workspace-relative file paths.
-func collectFiles(root string) []string {
+// ignored is a snapshot of the ignoredDirs set, taken by the caller before
+// starting this scan (see startPickerFileScan) rather than read from the
+// shared package-level variable here: collectFiles runs in its own
+// goroutine (the tea.Cmd startPickerFileScan returns), and ignoredDirs can
+// be concurrently reassigned by addIgnoredDirs on the main goroutine (e.g.
+// a config hot-reload) — a genuine, race-detector-confirmed data race
+// before this parameter was added. addIgnoredDirs always builds a whole
+// new map rather than mutating the existing one in place, so a snapshot
+// taken once, before the goroutine starts, is safe to read for the rest of
+// this scan with no further synchronization.
+func collectFiles(root string, ignored map[string]bool) []string {
 	var paths []string
 	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error { //nolint:errcheck
 		if err != nil {
 			return nil
 		}
 		if d.IsDir() {
-			if ignoredDirs[d.Name()] {
+			if ignored[d.Name()] {
 				return filepath.SkipDir
 			}
 			return nil

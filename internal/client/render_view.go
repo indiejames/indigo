@@ -120,16 +120,33 @@ func truncateFrontCells(s string, width int) string {
 	return string(r[start:])
 }
 
+// cursorStyleForMode picks the buffer cursor's style from the current mode
+// and the configured cursor_shape. Shape and mode are independent: the shape
+// is the user's choice, while the color still distinguishes normal from
+// insert, so switching shape never costs that modal feedback.
+//
+// Any cursor_shape other than "underline" means "block", matching how
+// cursor_column_style treats an unrecognized value (see Config).
+func (m Model) cursorStyleForMode() lipgloss.Style {
+	underline := m.cfg != nil && m.cfg.CursorShape == "underline"
+	switch {
+	case m.mode == ModeInsert && underline:
+		return insertCursorUnderlineStyle
+	case m.mode == ModeInsert:
+		return insertCursorStyle
+	case underline:
+		return normalCursorUnderlineStyle
+	default:
+		return normalCursorStyle
+	}
+}
+
 func (m Model) View() string {
 	if m.width == 0 {
 		return "loading…"
 	}
 
-	if m.mode == ModeInsert {
-		cursorStyle = insertCursorStyle
-	} else {
-		cursorStyle = normalCursorStyle
-	}
+	cursorStyle = m.cursorStyleForMode()
 
 	// Record timing via the shared pointer so the value receiver can write back.
 	if m.metrics != nil {

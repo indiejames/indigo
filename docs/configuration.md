@@ -19,6 +19,25 @@ Config file location: `~/.config/indigo/config.toml` (created automatically on f
 | `recovery_max_bytes` | int | `104857600` | Maximum file size (bytes) eligible for crash recovery (default 100 MB); `0` disables recovery |
 | `theme` | string | `"default-dark"` | Color theme name — see [Themes](#themes) below |
 | `cursor_column_style` | string | `"view"` | Status bar column number: `"view"` shows the on-screen visual column (tabs count for their visual width, VS Code-style); `"buffer"` shows the raw rune offset (a tab counts as one column, Helix-style) |
+| `cursor_shape` | string | `"block"` | How the buffer cursor is drawn: `"block"` fills the character cell, `"underline"` draws a line under the character. Any other value is treated as `"block"`. See the note below |
+
+### Cursor shape
+
+`cursor_shape` picks between two shapes:
+
+```toml
+cursor_shape = "underline"
+```
+
+Indigo draws the cursor itself — it restyles the character cell the cursor is
+on and leaves the terminal's own cursor hidden — so the available shapes are
+the ones expressible as a cell style. A vertical bar isn't one of them: a bar
+sits *between* two cells, and faking it in a cell would mean replacing the
+character underneath, hiding your text.
+
+The shape is independent of the mode colouring. Normal and insert mode keep
+their distinct cursor colours (insert uses the theme's `insert_cursor_bg`) in
+both shapes, so changing shape never costs that modal feedback.
 
 ## File picker
 

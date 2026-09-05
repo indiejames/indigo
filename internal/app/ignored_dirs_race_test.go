@@ -40,6 +40,20 @@ func TestIgnoredDirsConcurrentAccess(t *testing.T) {
 		{"isInIgnoredDir", func() { isInIgnoredDir("pkg/a.go") }},
 	}
 
+	// addIgnoredDirs below replaces package-level state that every later test
+	// in this package shares. Snapshot it and put it back afterwards so this
+	// test's configured directory can't leak out and quietly change what an
+	// unrelated test sees as ignored. Restored under the same lock the
+	// accessor uses, and by direct assignment rather than via addIgnoredDirs,
+	// which rebuilds from names and so couldn't reproduce an arbitrary
+	// pre-existing set.
+	origIgnored := ignoredDirsSnapshot()
+	t.Cleanup(func() {
+		ignoredDirsMu.Lock()
+		ignoredDirs = origIgnored
+		ignoredDirsMu.Unlock()
+	})
+
 	var wg sync.WaitGroup
 	for _, r := range readers {
 		wg.Add(2)

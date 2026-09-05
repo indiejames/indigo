@@ -83,7 +83,6 @@ func TestSearchWithRgKillsProcessEarlyOnceMaxResultsReached(t *testing.T) {
 	}
 }
 
-
 // TestSearchWithRgHandlesLongMatchLine is a regression test for
 // bufio.Scanner's default 64KB max token size: rg embeds the *entire*
 // matching line in each --json message, so a long line (e.g. a minified or
@@ -116,8 +115,6 @@ func TestSearchWithRgHandlesLongMatchLine(t *testing.T) {
 		t.Errorf("LineText length = %d, want %d", len(results[0].LineText), len(longText))
 	}
 }
-
-
 
 // withMaxFileBytes temporarily overrides maxFileBytes for the duration of a
 // test.

@@ -1,6 +1,6 @@
 package client
 
-import tea "github.com/charmbracelet/bubbletea"
+import tea "charm.land/bubbletea/v2"
 
 // exCommandAliases maps every literal, argument-free ":" command token to
 // the stable action name it resolves to in exActionRegistry. Multiple

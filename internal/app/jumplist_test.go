@@ -142,7 +142,7 @@ func TestJumpListReactivateOnUndo(t *testing.T) {
 	a := newJumpApp()
 	rec(a, "f", 20, 1)
 	recDelta(a, "f", 15, 2, 15, -10) // suspends entry at 20
-	undoOp(a, "f", 1, 15, +10)        // undo delete
+	undoOp(a, "f", 1, 15, +10)       // undo delete
 
 	lines := activeLines(a)
 	if len(lines) != 1 || lines[0] != 20 {
@@ -157,7 +157,7 @@ func TestJumpListUndoRestoresShiftedEntry(t *testing.T) {
 	rec(a, "f", 5, 1)
 	rec(a, "f", 30, 2)
 	recDelta(a, "f", 10, 3, 10, -10) // delete lines 10-19; B shifts 30→20
-	undoOp(a, "f", 2, 10, +10)        // undo delete
+	undoOp(a, "f", 2, 10, +10)       // undo delete
 
 	lines := activeLines(a)
 	found5, found30 := false, false
@@ -313,8 +313,8 @@ func TestJumpListUserScenarioWithNavBeforeUndo(t *testing.T) {
 	recDelta(a, "f", 15, 3, 15, -10) // delete; B shifts to 25
 
 	// User presses - twice before undoing.
-	a1 := back(*a)  // → delete entry (depth 3)
-	a2 := back(a1)  // → B entry (depth 2, line 25)
+	a1 := back(*a) // → delete entry (depth 3)
+	a2 := back(a1) // → B entry (depth 2, line 25)
 
 	undoOp(&a2, "f", 2, 15, +10) // undo delete
 	undoOp(&a2, "f", 1, B, 0)    // undo insert B

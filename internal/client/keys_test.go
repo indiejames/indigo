@@ -150,7 +150,7 @@ func TestSaveAsExCommandWithPathSavesDirectly(t *testing.T) {
 // Save As out to the ":" menu), and "p" (formerly that action's key) now
 // opens the file picker.
 func TestSpaceMenuGoToSymbolInProjectMovedToShiftS(t *testing.T) {
-	cmd, ok := findCommand([]string{" ", "S"})
+	cmd, ok := findCommand([]string{"space", "S"})
 	if !ok {
 		t.Fatal("findCommand(' ','S') should return ok=true")
 	}
@@ -158,7 +158,7 @@ func TestSpaceMenuGoToSymbolInProjectMovedToShiftS(t *testing.T) {
 		t.Errorf("cmd.name = %q, want %q", cmd.name, "go-to-symbol-in-project")
 	}
 
-	cmd, ok = findCommand([]string{" ", "p"})
+	cmd, ok = findCommand([]string{"space", "p"})
 	if !ok {
 		t.Fatal("findCommand(' ','p') should return ok=true")
 	}

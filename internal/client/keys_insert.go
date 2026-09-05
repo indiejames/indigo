@@ -5,8 +5,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/document"
 )
@@ -48,7 +49,7 @@ func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "backspace":
 			return m.snippetEdit(msg)
 		default:
-			if len(msg.Runes) > 0 {
+			if msg.Key().Text != "" {
 				return m.snippetEdit(msg)
 			}
 			// Esc, cursor movement, Enter, etc. leave snippet mode and are then
@@ -390,16 +391,16 @@ func (m Model) insertHookCmd(r rune) tea.Cmd {
 // typed rune(s) into the buffer, applying auto-pairing, signature-help, and
 // completion triggers along the way.
 func (m Model) insertSelfInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if len(msg.Runes) == 0 {
+	if msg.Key().Text == "" {
 		return m, nil
 	}
-	text := string(msg.Runes)
+	text := msg.Key().Text
 	if len(m.extraCursors) == 0 && strings.Contains(text, "\n") {
 		return m.insertPastedText(text)
 	}
 	if len(m.extraCursors) > 0 {
 		m2, cmd := applyInsertToAllCursors(m, text)
-		r := msg.Runes[0]
+		r := []rune(msg.Key().Text)[0]
 		if r == '(' || r == ',' {
 			return m2, tea.Batch(cmd, m2.fetchSignatureHelp())
 		}
@@ -409,14 +410,14 @@ func (m Model) insertSelfInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m2, cmd
 	}
 
-	r := msg.Runes[0]
+	r := []rune(msg.Key().Text)[0]
 
 	// Typing a closer that's already the next character just moves past
 	// it, instead of inserting a duplicate. For quotes (self-symmetric,
 	// so the next char being r doesn't by itself mean it's "the closer")
 	// this only applies when the cursor is inside a string already open
 	// on this line; otherwise it's a stray quote to pair with below.
-	if len(msg.Runes) == 1 && autoPairClosers[r] && m.charAfterCursor() == r &&
+	if utf8.RuneCountInString(msg.Key().Text) == 1 && autoPairClosers[r] && m.charAfterCursor() == r &&
 		(!autoPairQuotes[r] || m.insideOpenQuote(r)) {
 		m.cursor.Col++
 		if r == ')' {
@@ -428,7 +429,7 @@ func (m Model) insertSelfInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Typing an opener auto-inserts its closer, leaving the cursor
 	// between the two. '{' additionally expands onto its own
 	// indented line, since braces almost always open a block.
-	if len(msg.Runes) == 1 {
+	if utf8.RuneCountInString(msg.Key().Text) == 1 {
 		if closer, ok := autoPairs[r]; ok && m.shouldAutoPair(r) {
 			if r == '{' && m.shouldExpandBraceBlock() {
 				return m.insertBraceBlock()
@@ -456,7 +457,7 @@ func (m Model) insertSelfInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		InsertCol:  m.cursor.Col,
 		InsertText: text,
 	}
-	m.cursor.Col += len(msg.Runes)
+	m.cursor.Col += utf8.RuneCountInString(msg.Key().Text)
 	m2, cmd := applyOp(m, op)
 	// Auto-trigger sig help on '(' or ','.
 	if r == '(' || r == ',' {
@@ -518,7 +519,7 @@ func completionContinues(msg tea.KeyMsg) bool {
 	if msg.String() == "backspace" {
 		return true
 	}
-	return len(msg.Runes) == 1 && isWordChar(msg.Runes[0])
+	return utf8.RuneCountInString(msg.Key().Text) == 1 && isWordChar([]rune(msg.Key().Text)[0])
 }
 
 // completionAddsParens reports whether accepting a completion of the given LSP
@@ -798,4 +799,35 @@ func (m Model) applyCompletionEdits(edits []ClientLspEdit) (Model, tea.Cmd) {
 		}
 	}
 	return m, tea.Sequence(cmds...)
+}
+
+// handlePaste delivers bracketed-paste content to whatever is taking text
+// input right now.
+//
+// This exists because of a Bubble Tea v1 → v2 difference that is easy to
+// miss: v1 delivered a paste as an ordinary KeyMsg (with Paste set and the
+// text in Runes), so it fell through the same "append the typed text" branch
+// as normal typing and needed no handling of its own. v2 emits a separate
+// tea.PasteMsg, which matches no KeyMsg case at all — so without this,
+// pasting silently does nothing anywhere in the editor.
+//
+// Normal mode ignores a paste, which is also what v1 did: the whole pasted
+// string arrived as one key event, matched no binding, and was dropped.
+func (m Model) handlePaste(text string) (tea.Model, tea.Cmd) {
+	if text == "" {
+		return m, nil
+	}
+	switch m.mode {
+	case ModeInsert:
+		return m.insertPastedText(text)
+	case ModeCommand:
+		m.cmdBuf += text
+		m.cmdCompletionIdx = -1 // reset selection whenever the filter changes
+		return m, nil
+	case ModeSearch:
+		m.searchQuery += text
+		m.updateSearch()
+		return m, nil
+	}
+	return m, nil
 }

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/app"
 	"github.com/indiejames/indigo/internal/client"
@@ -137,7 +137,7 @@ func main() {
 		a = app.New(rpc, bufID, content, version, absTarget, cfg, fromRecovery, workDir, startLine, generation)
 	}
 
-	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus(), tea.WithoutSignalHandler())
+	p := tea.NewProgram(a, tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
 	finalModel, err := p.Run()
 	if err != nil {
@@ -248,7 +248,7 @@ func openUntitled(startLine int) {
 	}
 
 	a := app.New(rpc, bufID, content, version, "", cfg, false, workDir, startLine, generation)
-	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus(), tea.WithoutSignalHandler())
+	p := tea.NewProgram(a, tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
 	finalModel, err := p.Run()
 	if err != nil {

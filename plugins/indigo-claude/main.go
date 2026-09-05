@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,10 +12,11 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/indiejames/indigo/internal/client"
@@ -207,7 +209,9 @@ func newModel(rpc *client.RPC, prog *programLink, apiKey, workDir string) Model 
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{scheduleTick(), m.cmdPollActiveCtx()}
+	// RequestBackgroundColor so light terminals get the light palette: v2
+	// dropped lipgloss's AdaptiveColor, which used to make this query itself.
+	cmds := []tea.Cmd{scheduleTick(), m.cmdPollActiveCtx(), tea.RequestBackgroundColor}
 	if m.apiKey == "" {
 		// CLI mode runs on a subscription — check plan limits at startup.
 		cmds = append(cmds, fetchPlanUsageCmd())
@@ -219,6 +223,13 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.BackgroundColorMsg:
+		if dark := msg.IsDark(); dark != adaptiveDark {
+			adaptiveDark = dark
+			refreshAdaptiveColors()
+		}
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -360,11 +371,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.MouseMsg:
-		switch msg.Button {
-		case tea.MouseButtonWheelUp:
+	case tea.MouseWheelMsg:
+		switch msg.Mouse().Button {
+		case tea.MouseWheelUp:
 			m.scroll += m.convHeight() / 4
-		case tea.MouseButtonWheelDown:
+		case tea.MouseWheelDown:
 			m.scroll -= m.convHeight() / 4
 			if m.scroll < 0 {
 				m.scroll = 0
@@ -397,8 +408,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// These work regardless of which control has focus.
-	switch msg.Type {
-	case tea.KeyCtrlC:
+	switch msg.String() {
+	case "ctrl+c":
 		if m.agentRunning {
 			m.prog.cancelAgent()
 			m.agentRunning = false
@@ -409,17 +420,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyCtrlQ:
+	case "ctrl+q":
 		return m, tea.Quit
 
-	case tea.KeyTab:
+	case "tab":
 		// Tab has no other use in the main input, so it's free to cycle
 		// focus into the control bar — including mid-turn, unlike slash
 		// commands, since autoapprove/model are read fresh by consumers.
 		m.focus = (m.focus + 1) % numFocusTargets
 		return m, nil
 
-	case tea.KeyShiftTab:
+	case "shift+tab":
 		m.focus = (m.focus - 1 + numFocusTargets) % numFocusTargets
 		return m, nil
 	}
@@ -428,16 +439,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleBarFocusKey(msg)
 	}
 
-	switch msg.Type {
-	case tea.KeyEnter:
-		if msg.Alt {
-			// Alt+Enter: insert newline in multi-line input.
-			m.input = append(m.input[:m.inputPos], append([]rune{'\n'}, m.input[m.inputPos:]...)...)
-			m.inputPos++
-			m.historyIdx = -1
-			return m, nil
-		}
+	switch msg.String() {
+	case "alt+enter":
+		// Alt+Enter: insert newline in multi-line input. v2 folds the alt
+		// modifier into the key string, so this is its own case rather than
+		// a msg.Alt branch inside "enter".
+		m.input = append(m.input[:m.inputPos], append([]rune{'\n'}, m.input[m.inputPos:]...)...)
+		m.inputPos++
+		m.historyIdx = -1
+		return m, nil
 
+	case "enter":
 		text := strings.TrimSpace(string(m.input))
 		if text == "" || m.agentRunning {
 			return m, nil
@@ -578,7 +590,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyBackspace, tea.KeyDelete:
+	case "backspace", "delete":
 		if m.inputPos > 0 {
 			m.input = append(m.input[:m.inputPos-1], m.input[m.inputPos:]...)
 			m.inputPos--
@@ -586,95 +598,101 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyLeft:
+	case "left":
 		if m.inputPos > 0 {
 			m.inputPos--
 		}
 		return m, nil
 
-	case tea.KeyRight:
+	case "right":
 		if m.inputPos < len(m.input) {
 			m.inputPos++
 		}
 		return m, nil
 
-	case tea.KeyHome, tea.KeyCtrlA:
+	case "home", "ctrl+a":
 		m.inputPos = inputLineStart(m.input, m.inputPos)
 		return m, nil
 
-	case tea.KeyEnd, tea.KeyCtrlE:
+	case "end", "ctrl+e":
 		m.inputPos = inputLineEnd(m.input, m.inputPos)
 		return m, nil
 
-	case tea.KeyUp:
-		if msg.Alt {
-			// Alt+Up: step back through input history.
-			if len(m.inputHistory) == 0 {
-				return m, nil
-			}
-			if m.historyIdx == -1 {
-				m.savedInput = string(m.input)
-				m.historyIdx = len(m.inputHistory) - 1
-			} else if m.historyIdx > 0 {
-				m.historyIdx--
-			}
-			m.input = []rune(m.inputHistory[m.historyIdx])
-			m.inputPos = len(m.input)
+	case "alt+up":
+		// Alt+Up: step back through input history.
+		if len(m.inputHistory) == 0 {
 			return m, nil
 		}
+		if m.historyIdx == -1 {
+			m.savedInput = string(m.input)
+			m.historyIdx = len(m.inputHistory) - 1
+		} else if m.historyIdx > 0 {
+			m.historyIdx--
+		}
+		m.input = []rune(m.inputHistory[m.historyIdx])
+		m.inputPos = len(m.input)
+		return m, nil
+
+	case "up":
 		m.inputPos = inputCursorUp(m.input, m.inputPos)
 		return m, nil
 
-	case tea.KeyDown:
-		if msg.Alt {
-			// Alt+Down: step forward through input history.
-			if m.historyIdx == -1 {
-				return m, nil
-			}
-			if m.historyIdx >= len(m.inputHistory)-1 {
-				m.input = []rune(m.savedInput)
-				m.inputPos = len(m.input)
-				m.historyIdx = -1
-				return m, nil
-			}
-			m.historyIdx++
-			m.input = []rune(m.inputHistory[m.historyIdx])
-			m.inputPos = len(m.input)
+	case "alt+down":
+		// Alt+Down: step forward through input history.
+		if m.historyIdx == -1 {
 			return m, nil
 		}
+		if m.historyIdx >= len(m.inputHistory)-1 {
+			m.input = []rune(m.savedInput)
+			m.inputPos = len(m.input)
+			m.historyIdx = -1
+			return m, nil
+		}
+		m.historyIdx++
+		m.input = []rune(m.inputHistory[m.historyIdx])
+		m.inputPos = len(m.input)
+		return m, nil
+
+	case "down":
 		m.inputPos = inputCursorDown(m.input, m.inputPos)
 		return m, nil
 
-	case tea.KeyPgUp:
+	case "pgup":
 		m.scroll += m.convHeight() / 2
 		return m, nil
 
-	case tea.KeyPgDown:
+	case "pgdown":
 		m.scroll -= m.convHeight() / 2
 		if m.scroll < 0 {
 			m.scroll = 0
 		}
 		return m, nil
 
-	case tea.KeySpace:
+	case "space":
 		m.input = append(m.input[:m.inputPos], append([]rune{' '}, m.input[m.inputPos:]...)...)
 		m.inputPos++
 		m.historyIdx = -1
 		return m, nil
 
-	case tea.KeyRunes:
-		if msg.Alt {
-			// Alt+e: toggle expand/collapse of the topmost visible user message.
-			if len(msg.Runes) == 1 && msg.Runes[0] == 'e' {
-				m.toggleTopUserMsg()
-			}
+	case "alt+e":
+		// Alt+e: toggle expand/collapse of the topmost visible user message.
+		m.toggleTopUserMsg()
+		return m, nil
+
+	default:
+		// Any remaining key that produces text is literal input. v1 matched
+		// tea.KeyRunes here; v2 has no such catch-all key type, so this is
+		// the default branch gated on the key actually carrying text.
+		s := msg.Key().Text
+		if s == "" {
 			return m, nil
 		}
-		s := msg.String()
 		// Fast wheel scrolling can overwhelm the terminal parser and leak SGR
-		// mouse sequences ("<65;70;21M") into the rune stream. Strip them from
-		// typed input; pasted text is left untouched.
-		if !msg.Paste && len(msg.Runes) > 1 {
+		// mouse sequences ("<65;70;21M") into the typed-input stream. Strip
+		// them. v1 also had to exclude pastes here; v2 delivers those as a
+		// separate PasteMsg (handled above), so anything reaching this branch
+		// is genuinely typed.
+		if utf8.RuneCountInString(s) > 1 {
 			s = stripMouseArtifacts(s)
 			if s == "" {
 				return m, nil
@@ -686,7 +704,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.historyIdx = -1
 		return m, nil
 	}
-	return m, nil
 }
 
 // mouseSeqRe matches fragments of SGR mouse escape sequences that survive when
@@ -699,11 +716,11 @@ func stripMouseArtifacts(s string) string {
 }
 
 func (m Model) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyLeft, tea.KeyRight:
+	switch msg.String() {
+	case "left", "right":
 		m.permChoice = !m.permChoice
 		return m, nil
-	case tea.KeyEnter:
+	case "enter":
 		// fall through to confirm
 	default:
 		// y/n shortcuts still work.
@@ -730,11 +747,11 @@ func (m Model) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleShellPermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyLeft, tea.KeyRight:
+	switch msg.String() {
+	case "left", "right":
 		m.permChoice = !m.permChoice
 		return m, nil
-	case tea.KeyEnter:
+	case "enter":
 		// fall through to confirm
 	default:
 		switch msg.String() {
@@ -770,11 +787,11 @@ type autoApproveRestoreState struct {
 }
 
 func (m Model) handleAutoApproveRestoreKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyLeft, tea.KeyRight:
+	switch msg.String() {
+	case "left", "right":
 		m.autoApproveRestoreChoice = !m.autoApproveRestoreChoice
 		return m, nil
-	case tea.KeyEnter:
+	case "enter":
 		// fall through to confirm
 	default:
 		switch msg.String() {
@@ -856,13 +873,13 @@ func (m Model) adjustFocusedControl(dir int) (tea.Model, tea.Cmd) {
 // the text input) has focus. Tab/Shift+Tab/Ctrl+C/Ctrl+Q are handled by the
 // caller before this is reached, so they still work from here too.
 func (m Model) handleBarFocusKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEsc:
+	switch msg.String() {
+	case "esc":
 		m.focus = focusTextInput
 		return m, nil
-	case tea.KeyLeft:
+	case "left":
 		return m.adjustFocusedControl(-1)
-	case tea.KeyRight, tea.KeyEnter, tea.KeySpace:
+	case "right", "enter", "space":
 		return m.adjustFocusedControl(1)
 	}
 	return m, nil
@@ -883,17 +900,20 @@ var (
 	inputTextDimSty     = lipgloss.NewStyle().Foreground(lipgloss.Color("#667788"))            // unfocused
 	cursorStyle         = lipgloss.NewStyle().Reverse(true)
 
-	// User message bubble — slightly elevated surface colour.
-	bubbleBg = lipgloss.AdaptiveColor{Dark: "#1B2939", Light: "#DDE8F4"}
+	// User message bubble — slightly elevated surface colour. These are
+	// rebuilt by refreshAdaptiveColors once the terminal reports its real
+	// background, since adaptive() bakes in adaptiveDark at the moment it
+	// is called.
+	bubbleBg = adaptive("#1B2939", "#DDE8F4")
 	// Progressive foreground dimming for collapsed bubbles (bright → dim).
-	bubbleFg  = lipgloss.AdaptiveColor{Dark: "#C8D8E8", Light: "#2A3A4A"}
-	bubbleDim = []lipgloss.TerminalColor{
-		lipgloss.AdaptiveColor{Dark: "#C8D8E8", Light: "#2A3A4A"}, // line 1: full
-		lipgloss.AdaptiveColor{Dark: "#8898A8", Light: "#627282"}, // line 2: medium
-		lipgloss.AdaptiveColor{Dark: "#4A5A6A", Light: "#96A6B6"}, // line 3: dim
+	bubbleFg  = adaptive("#C8D8E8", "#2A3A4A")
+	bubbleDim = []color.Color{
+		adaptive("#C8D8E8", "#2A3A4A"), // line 1: full
+		adaptive("#8898A8", "#627282"), // line 2: medium
+		adaptive("#4A5A6A", "#96A6B6"), // line 3: dim
 	}
-	bubbleBorderColor = lipgloss.AdaptiveColor{Dark: "#3D5472", Light: "#7A9DC0"}
-	bubbleHintColor   = lipgloss.AdaptiveColor{Dark: "#445566", Light: "#8899AA"}
+	bubbleBorderColor = adaptive("#3D5472", "#7A9DC0")
+	bubbleHintColor   = adaptive("#445566", "#8899AA")
 
 	// Permission popup — matches the indigo editor popup palette.
 	ppBg     = lipgloss.Color("#1E2A38")
@@ -905,7 +925,19 @@ var (
 	ppNew    = lipgloss.NewStyle().Background(ppBg).Foreground(lipgloss.Color("#55FF55"))
 )
 
-func (m Model) View() string {
+// View returns the frame plus the terminal modes this plugin needs. Bubble
+// Tea v2 moved these off tea.NewProgram's options and onto the View, so they
+// are declared per-frame here — the direct equivalents of the
+// WithAltScreen()/WithMouseCellMotion() this program passed under v1.
+// Without MouseMode, mouse-wheel scrolling of the conversation stops working.
+func (m Model) View() tea.View {
+	v := tea.NewView(m.render())
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
+
+func (m Model) render() string {
 	if !m.ready {
 		return ""
 	}
@@ -1496,7 +1528,7 @@ func (m Model) renderUserMsg(convIdx int, msg ConvMsg, w int) []string {
 	hintSty := lipgloss.NewStyle().Background(bubbleBg).Foreground(bubbleHintColor).Italic(true)
 
 	// Render one content line with the given foreground colour and bubble background.
-	renderLine := func(text string, fg lipgloss.TerminalColor) string {
+	renderLine := func(text string, fg color.Color) string {
 		sty := lipgloss.NewStyle().Background(bubbleBg).Foreground(fg)
 		pad := strings.Repeat(" ", max(0, contentW-lipgloss.Width(text)))
 		// " " + text + padding + " " fills the full inner area including padding cols.
@@ -2116,7 +2148,7 @@ func main() {
 
 	model := newModel(rpc, prog, apiKey, workDir)
 	model = model.restoreState(loadState(workDir, apiKey))
-	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithoutSignalHandler())
+	p := tea.NewProgram(model, tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
 
 	prog.mu.Lock()
@@ -2142,4 +2174,42 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	rpc.Disconnect(ctx) //nolint:errcheck
+}
+
+// adaptiveDark reports whether the terminal background is dark. lipgloss v2
+// dropped AdaptiveColor (a value that resolved itself lazily against a
+// globally-detected background) in favour of LightDark(isDark), which
+// resolves explicitly — so the background has to be known here rather than
+// discovered inside lipgloss.
+//
+// Defaults to dark, matching indigo's own default-dark theme, and is
+// corrected at startup: Init requests the terminal background and Update
+// handles BackgroundColorMsg, rebuilding the palette via
+// refreshAdaptiveColors if the terminal turns out to be light.
+var adaptiveDark = true
+
+// adaptive picks between a dark- and light-background colour, replacing
+// lipgloss v1's AdaptiveColor{Dark:..., Light:...} literals.
+func adaptive(dark, light string) color.Color {
+	return lipgloss.LightDark(adaptiveDark)(lipgloss.Color(light), lipgloss.Color(dark))
+}
+
+// refreshAdaptiveColors recomputes every adaptive palette value for the
+// current adaptiveDark. adaptive() resolves eagerly — it returns a concrete
+// color, not something that re-reads adaptiveDark later — so the package
+// vars built at init time hold dark-theme colors until this runs.
+//
+// Called when the terminal answers RequestBackgroundColor (see Init), which
+// is the v2 replacement for lipgloss v1's AdaptiveColor, where the library
+// did the terminal query itself.
+func refreshAdaptiveColors() {
+	bubbleBg = adaptive("#1B2939", "#DDE8F4")
+	bubbleFg = adaptive("#C8D8E8", "#2A3A4A")
+	bubbleDim = []color.Color{
+		adaptive("#C8D8E8", "#2A3A4A"),
+		adaptive("#8898A8", "#627282"),
+		adaptive("#4A5A6A", "#96A6B6"),
+	}
+	bubbleBorderColor = adaptive("#3D5472", "#7A9DC0")
+	bubbleHintColor = adaptive("#445566", "#8899AA")
 }

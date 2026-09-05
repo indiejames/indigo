@@ -3,9 +3,8 @@ package client
 import (
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
@@ -166,14 +165,6 @@ func TestApplyRulerColumnSkipsCursorCell(t *testing.T) {
 // under the ruler's fixed background even though the primary cursor
 // elsewhere was correctly protected.
 func TestApplyRulerColumnSkipsExtraCursorCell(t *testing.T) {
-	// overlayRulerColumn's styling is a no-op without a color profile (as in
-	// a normal `go test` run with no tty), which would make "the ruler drew
-	// here" and "it didn't" produce identical plain-text output. Force real
-	// ANSI output so the two are actually distinguishable.
-	orig := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(orig)
-
 	m := newTestModel("0123456789\nabcdefghij\n")
 	m.cfg = &config.Config{RulerColumn: 8} // 0-based col 7
 	m.cursor = document.Pos{Line: 0, Col: 0}

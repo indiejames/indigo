@@ -3,11 +3,12 @@ package client
 import (
 	"crypto/sha256"
 	"fmt"
+	"image/color"
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
@@ -493,7 +494,7 @@ var (
 	normalCursorUnderlineStyle lipgloss.Style
 	insertCursorUnderlineStyle lipgloss.Style
 
-	popupBg          lipgloss.Color
+	popupBg          color.Color
 	popupBorderStyle lipgloss.Style
 	popupKeyStyle    lipgloss.Style
 	popupTextStyle   lipgloss.Style
@@ -1099,7 +1100,19 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// See the matching guard in app.Update: tea.KeyMsg is an interface that
+	// KeyReleaseMsg also satisfies, so the `case tea.KeyMsg` below would
+	// otherwise run every binding a second time on release. Guarded here too
+	// because Model.Update is driven directly (tests, and any embedding that
+	// doesn't route through App).
+	if _, isRelease := msg.(tea.KeyReleaseMsg); isRelease {
+		return m, nil
+	}
+
 	switch msg := msg.(type) {
+
+	case tea.PasteMsg:
+		return m.handlePaste(msg.Content)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -1623,20 +1636,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		prevTopLine := m.topLine
 		prevCursor := m.cursor
 		prevSel := copySel(m.sel)
-		switch {
-		case msg.Button == tea.MouseButtonWheelUp:
-			m.scrollWheel(-wheelScrollLines)
-		case msg.Button == tea.MouseButtonWheelDown:
-			m.scrollWheel(wheelScrollLines)
-		case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
-			m.handleMousePress(msg.X, msg.Y)
-		case msg.Action == tea.MouseActionMotion && m.dragging:
-			m.handleMouseDrag(msg.X, msg.Y)
-		case msg.Action == tea.MouseActionRelease && msg.Button == tea.MouseButtonLeft:
-			m.dragging = false
-			// A press+release on the same spot is just a cursor move; clear selection.
-			if m.sel != nil && m.sel.Anchor == m.sel.Head {
-				m.sel = nil
+		// v2 encodes the action in the message type rather than an Action
+		// field, so this is a type switch over the concrete event types
+		// behind the tea.MouseMsg interface. mouse carries the shared
+		// {X, Y, Button, Mod} payload.
+		mouse := msg.Mouse()
+		switch msg.(type) {
+		case tea.MouseWheelMsg:
+			switch mouse.Button {
+			case tea.MouseWheelUp:
+				m.scrollWheel(-wheelScrollLines)
+			case tea.MouseWheelDown:
+				m.scrollWheel(wheelScrollLines)
+			}
+		case tea.MouseClickMsg:
+			if mouse.Button == tea.MouseLeft {
+				m.handleMousePress(mouse.X, mouse.Y)
+			}
+		case tea.MouseMotionMsg:
+			if m.dragging {
+				m.handleMouseDrag(mouse.X, mouse.Y)
+			}
+		case tea.MouseReleaseMsg:
+			if mouse.Button == tea.MouseLeft {
+				m.dragging = false
+				// A press+release on the same spot is just a cursor move; clear selection.
+				if m.sel != nil && m.sel.Anchor == m.sel.Head {
+					m.sel = nil
+				}
 			}
 		}
 		var cmds []tea.Cmd

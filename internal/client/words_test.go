@@ -25,13 +25,13 @@ func TestFindWordAt(t *testing.T) {
 		wantEnd   int
 		wantFound bool
 	}{
-		{"hello world", 0, 0, 4, true},  // start of "hello"
-		{"hello world", 3, 3, 4, true},  // mid-word: starts from col 3
-		{"hello world", 4, 4, 4, true},  // last char of "hello"
-		{"hello world", 5, 6, 10, true}, // on space → skips to "world"
-		{"hello world", 6, 6, 10, true}, // start of "world"
+		{"hello world", 0, 0, 4, true},    // start of "hello"
+		{"hello world", 3, 3, 4, true},    // mid-word: starts from col 3
+		{"hello world", 4, 4, 4, true},    // last char of "hello"
+		{"hello world", 5, 6, 10, true},   // on space → skips to "world"
+		{"hello world", 6, 6, 10, true},   // start of "world"
 		{"hello world", 10, 10, 10, true}, // last char of "world"
-		{"   spaces", 0, 3, 8, true},    // leading spaces → skips to "spaces"
+		{"   spaces", 0, 3, 8, true},      // leading spaces → skips to "spaces"
 		{"", 0, -1, -1, false},
 		{"   ", 0, -1, -1, false}, // only spaces
 	}
@@ -53,10 +53,10 @@ func TestFindNextWordFrom(t *testing.T) {
 		wantEnd   int
 		wantFound bool
 	}{
-		{"hello world", 4, 6, 10, true},      // after "hello" → finds "world"
+		{"hello world", 4, 6, 10, true},       // after "hello" → finds "world"
 		{"hello world foo", 10, 12, 14, true}, // after "world" → finds "foo"
-		{"hello world", 10, -1, -1, false},   // after last word → not found
-		{"hello   world", 4, 8, 12, true},    // gap between words
+		{"hello world", 10, -1, -1, false},    // after last word → not found
+		{"hello   world", 4, 8, 12, true},     // gap between words
 		{"hello", 4, -1, -1, false},
 	}
 	for _, tt := range tests {
@@ -77,9 +77,9 @@ func TestFindPrevWordStart(t *testing.T) {
 		wantStart int
 		wantFound bool
 	}{
-		{"hello world", 6, 0, true},  // 'w' → start of "hello" (crosses space)
-		{"hello world", 8, 6, true},  // mid "world" → start of "world"
-		{"hello world", 5, 0, true},  // space → start of "hello"
+		{"hello world", 6, 0, true},   // 'w' → start of "hello" (crosses space)
+		{"hello world", 8, 6, true},   // mid "world" → start of "world"
+		{"hello world", 5, 0, true},   // space → start of "hello"
 		{"hello world", 0, -1, false}, // col 0 → nothing before
 		{"hello", 3, 0, true},         // mid "hello" → col 0
 		{"", 0, -1, false},
@@ -102,12 +102,12 @@ func TestFindWordEnd(t *testing.T) {
 		wantEnd   int
 		wantFound bool
 	}{
-		{"hello world", 0, 4, true},  // start of "hello" → end of "hello"
-		{"hello world", 4, 10, true}, // at end of "hello" → end of "world"
-		{"hello world", 5, 10, true}, // on space → end of "world"
-		{"hello world", 6, 10, true}, // start of "world" → end of "world"
+		{"hello world", 0, 4, true},    // start of "hello" → end of "hello"
+		{"hello world", 4, 10, true},   // at end of "hello" → end of "world"
+		{"hello world", 5, 10, true},   // on space → end of "world"
+		{"hello world", 6, 10, true},   // start of "world" → end of "world"
 		{"hello world", 10, -1, false}, // at last word end → no next word
-		{"   hello", 0, 7, true},      // leading spaces → end of "hello"
+		{"   hello", 0, 7, true},       // leading spaces → end of "hello"
 		{"", 0, -1, false},
 	}
 	for _, tt := range tests {

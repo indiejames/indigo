@@ -19,25 +19,82 @@ Config file location: `~/.config/indigo/config.toml` (created automatically on f
 | `recovery_max_bytes` | int | `104857600` | Maximum file size (bytes) eligible for crash recovery (default 100 MB); `0` disables recovery |
 | `theme` | string | `"default-dark"` | Color theme name — see [Themes](#themes) below |
 | `cursor_column_style` | string | `"view"` | Status bar column number: `"view"` shows the on-screen visual column (tabs count for their visual width, VS Code-style); `"buffer"` shows the raw rune offset (a tab counts as one column, Helix-style) |
-| `cursor_shape` | string | `"block"` | How the buffer cursor is drawn: `"block"` fills the character cell, `"underline"` draws a line under the character. Any other value is treated as `"block"`. See the note below |
+| `cursor_shape` | string | `"block"` | How the buffer cursor is drawn: `"block"`, `"underline"`, or `"bar"`. Any other value is treated as `"block"` |
+| `cursor_blink` | bool | `false` | Whether the cursor blinks |
 
-### Cursor shape
-
-`cursor_shape` picks between two shapes:
+### Cursor shape and blink
 
 ```toml
-cursor_shape = "underline"
+cursor_shape = "bar"
+cursor_blink = true
 ```
 
-Indigo draws the cursor itself — it restyles the character cell the cursor is
-on and leaves the terminal's own cursor hidden — so the available shapes are
-the ones expressible as a cell style. A vertical bar isn't one of them: a bar
-sits *between* two cells, and faking it in a cell would mean replacing the
-character underneath, hiding your text.
+Three shapes are available:
 
-The shape is independent of the mode colouring. Normal and insert mode keep
-their distinct cursor colours (insert uses the theme's `insert_cursor_bg`) in
-both shapes, so changing shape never costs that modal feedback.
+| value | appearance |
+|---|---|
+| `block` | fills the whole character cell (default) |
+| `underline` | a line under the character |
+| `bar` | a vertical bar between cells — the I-beam most GUI editors use |
+
+Indigo positions the terminal's own cursor rather than painting a character
+cell, so the shape and the blinking are both done by the terminal itself.
+(Insert mode is the exception — see below.)
+That's what makes `bar` possible at all: a bar sits *between* two cells, so it
+can't be expressed as a cell style without replacing the character underneath
+and hiding your text. It also means blinking costs nothing — the terminal
+blinks the cursor on its own, with no redrawing on a timer.
+
+Blinking is off by default; a steady cursor is the less distracting choice for
+an editor, so it's something to opt into rather than have to turn off.
+
+Both settings apply to normal mode. Insert mode signals itself with colour
+instead, and is drawn differently for reasons worth knowing about:
+
+#### Cursor colour, and why insert mode is different
+
+The cursor turns green in insert mode. The colour comes from the active
+theme's `insert_cursor_bg`, so to change it, set that key in a theme file:
+
+```toml
+# ~/.config/indigo/themes/mine.toml
+[ui]
+insert_cursor_bg = "#00FF88"
+```
+
+The same key also colours the `INSERT` label in the status bar, so the two
+always agree.
+
+Insert mode is the one mode where indigo draws the cursor itself, by painting
+the character cell, rather than positioning the terminal's cursor. That's
+deliberate. A terminal cursor's colour is set with OSC 12, and terminal
+multiplexers can silently discard it — zellij 0.45.1 drops OSC 12 entirely
+(it has passthrough settings for OSC 52, 133 and 8, but none for 12), so a
+themed insert cursor never changed colour under zellij at all. Cursor
+*shape* uses a different sequence (DECSCUSR) that does survive, which is why
+every other mode can still use the real cursor.
+
+`cursor_blink` still works in insert mode: since indigo is drawing the cell
+itself, it blinks it by simply not drawing it on alternate phases. That costs
+nothing — the editor already redraws every 120ms to poll the server, so the
+blink rides along on frames that were happening anyway.
+
+The one trade-off: **`cursor_shape` doesn't apply in insert mode**, because a
+painted cell can't be a bar or an underline. Insert mode is always a filled
+cell; the shape applies in normal mode.
+
+In normal mode the cursor colour is left unset, so your terminal's own
+configured cursor colour applies — which keeps a cursor you've already themed
+at the terminal level looking the way you expect.
+
+Two details worth knowing:
+
+- **Multiple cursors.** A terminal has exactly one real cursor, so in a
+  multi-cursor selection only the primary cursor takes the configured shape
+  in normal mode. The others are always drawn as highlighted cells.
+- **Command and search mode.** The real cursor moves to the `:` or `/` prompt
+  on the bottom line, where you're actually typing. Your position in the
+  buffer stays marked with a highlighted cell while it's there.
 
 ## File picker
 
@@ -503,7 +560,7 @@ bar_fg          = "#FFFFFF"   # status bar text
 bar_dark_bg     = "#065A96"   # file type / LSP segments in the status bar
 normal_mode_fg  = "#AAFFAA"   # "NORMAL" mode label color
 insert_mode_fg  = "#AADDFF"   # "INSERT" mode label color
-insert_cursor_bg = "#AAFFAA"  # insert-mode cursor fill color (normal mode's cursor is reverse-video, no fixed color)
+insert_cursor_bg = "#AAFFAA"  # insert-mode cursor color (normal mode uses the terminal's own cursor color)
 selection_bg    = "#2D5F8A"
 selection_fg    = "#FFFFFF"
 gutter_fg       = "#606060"   # line numbers

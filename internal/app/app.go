@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
 
 	"github.com/indiejames/indigo/internal/client"
@@ -253,7 +253,37 @@ func (a App) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// withMousePos rebuilds a mouse message with a new payload, preserving its
+// concrete type. v2 encodes the action in the type (click/release/wheel/
+// motion) rather than an Action field, so a coordinate shift can't just
+// mutate a struct field the way it could under v1 — the event has to be
+// reconstructed as the same variant it arrived as, or the receiving buffer
+// would see a click become a motion.
+func withMousePos(msg tea.Msg, mouse tea.Mouse) tea.Msg {
+	switch msg.(type) {
+	case tea.MouseClickMsg:
+		return tea.MouseClickMsg(mouse)
+	case tea.MouseReleaseMsg:
+		return tea.MouseReleaseMsg(mouse)
+	case tea.MouseWheelMsg:
+		return tea.MouseWheelMsg(mouse)
+	case tea.MouseMotionMsg:
+		return tea.MouseMotionMsg(mouse)
+	}
+	return msg
+}
+
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Bubble Tea v2's tea.KeyMsg is an interface satisfied by both
+	// KeyPressMsg and KeyReleaseMsg, and every `msg.(tea.KeyMsg)` dispatch
+	// below (and throughout client.Model) matches either one. Releases are
+	// only emitted once the Kitty keyboard protocol is negotiated, which we
+	// don't currently request — but if that ever changes, every keystroke
+	// would silently fire its binding twice. Drop them at the root instead.
+	if _, isRelease := msg.(tea.KeyReleaseMsg); isRelease {
+		return a, nil
+	}
+
 	// client.RoutableMsg (applyOpFailedMsg, savedMsg, savedAsMsg,
 	// discardRecoveryMsg, saveFailedMsg, discardRecoveryFailedMsg — see
 	// their doc comments) must reach the specific buffer they're about, even
@@ -318,6 +348,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.searchReplace != nil {
 			a.searchReplace.width = msg.Width
 			a.searchReplace.height = msg.Height
+			a.searchReplace.resizeInputs()
 			// refreshResultsView (not just poking viewport.Width) so
 			// existing result lines are rebuilt at the new resultsW():
 			// the viewport only re-wraps/pads its stored content lazily on
@@ -814,6 +845,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Paste is its own message type in Bubble Tea v2, so it matches none of
+	// the KeyMsg routing below; route it to whichever modal takes text first.
+	if pm, ok := msg.(tea.PasteMsg); ok {
+		if m, cmd, handled := a.handlePaste(pm); handled {
+			return m, cmd
+		}
+	}
+
 	if a.picker != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handlePickerKey(km)
@@ -897,21 +936,23 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// click there is swallowed (wheel events pass through — scrolling
 	// should work wherever the pointer is).
 	if mm, ok := msg.(tea.MouseMsg); ok && a.showTabBar() {
-		wheel := mm.Button == tea.MouseButtonWheelUp || mm.Button == tea.MouseButtonWheelDown
-		if mm.Y == 0 {
-			if mm.Action == tea.MouseActionPress && mm.Button == tea.MouseButtonLeft {
-				if idx, ok := a.tabAtColumn(mm.X); ok && idx != a.active {
+		mouse := mm.Mouse()
+		_, isWheel := msg.(tea.MouseWheelMsg)
+		_, isClick := msg.(tea.MouseClickMsg)
+		if mouse.Y == 0 {
+			if isClick && mouse.Button == tea.MouseLeft {
+				if idx, ok := a.tabAtColumn(mouse.X); ok && idx != a.active {
 					a.active = idx
 					a.status = ""
 					return a, a.buffers[a.active].ReportActiveContextCmd()
 				}
 			}
-			if !wheel {
+			if !isWheel {
 				return a, nil
 			}
 		}
-		mm.Y--
-		msg = mm
+		mouse.Y--
+		msg = withMousePos(msg, mouse)
 	}
 	updated, cmd := a.buffers[a.active].Update(msg)
 	a.buffers[a.active] = updated.(client.Model)

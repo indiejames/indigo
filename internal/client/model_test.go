@@ -3,7 +3,7 @@ package client
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/document"
 )
@@ -13,17 +13,17 @@ import (
 func fakeKey(s string) tea.KeyMsg {
 	switch s {
 	case "backspace":
-		return tea.KeyMsg{Type: tea.KeyBackspace}
+		return tea.KeyPressMsg{Code: tea.KeyBackspace}
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEsc}
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
 	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "shift+up":
-		return tea.KeyMsg{Type: tea.KeyShiftUp}
+		return tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift}
 	case "shift+down":
-		return tea.KeyMsg{Type: tea.KeyShiftDown}
+		return tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModShift}
 	default:
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+		return tea.KeyPressMsg{Text: string([]rune(s)), Code: []rune(string([]rune(s)))[0]}
 	}
 }
 
@@ -275,7 +275,7 @@ func TestMessageLogPopupOpenScrollClose(t *testing.T) {
 		m = m.pushStatus("msg")
 	}
 
-	m2, _ := findCommand([]string{" ", "l"})
+	m2, _ := findCommand([]string{"space", "l"})
 	if m2 == nil || m2.execute == nil {
 		t.Fatal("space-l command not found in commandMenuRoot")
 	}
@@ -310,7 +310,7 @@ func TestMessageLogPopupOpensScrolledToLastPage(t *testing.T) {
 		m = m.pushStatus("msg")
 	}
 
-	cmd, _ := findCommand([]string{" ", "l"})
+	cmd, _ := findCommand([]string{"space", "l"})
 	if cmd == nil || cmd.execute == nil {
 		t.Fatal("space-l command not found in commandMenuRoot")
 	}

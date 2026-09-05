@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
@@ -68,7 +68,7 @@ func TestRoutableMsgReachesInactiveBuffer(t *testing.T) {
 	// RPC{}, so the underlying capnp call fails immediately — this produces
 	// a genuine saveFailedMsg{bufID: 2, ...} via the same production code
 	// path (doSave -> doSaveNow) a real failed save takes.
-	_, cmd := inactive.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	_, cmd := inactive.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("expected a non-nil command from ctrl+s (doSaveNow)")
 	}
@@ -87,8 +87,8 @@ func TestRoutableMsgReachesInactiveBuffer(t *testing.T) {
 		t.Fatalf("len(buffers) = %d, want unchanged 2", len(a2.buffers))
 	}
 
-	view0 := a2.buffers[0].View()
-	view1 := a2.buffers[1].View()
+	view0 := a2.buffers[0].View().Content
+	view1 := a2.buffers[1].View().Content
 	if strings.Contains(view0, "ERR:") {
 		t.Errorf("active buffer's (bufID 1) view shows the save error — it should have landed on bufID 2 instead:\n%s", view0)
 	}
@@ -112,7 +112,7 @@ func TestRoutableMsgDroppedWhenBufferGone(t *testing.T) {
 
 	// bufID 99 doesn't exist in a.buffers.
 	closed := sizedTestModel(99, "/tmp/gone.go")
-	_, cmd := closed.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	_, cmd := closed.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("expected a non-nil command from ctrl+s")
 	}
@@ -130,7 +130,7 @@ func TestRoutableMsgDroppedWhenBufferGone(t *testing.T) {
 	if len(a2.buffers) != 1 || a2.buffers[0].BufID() != 1 {
 		t.Errorf("buffers mutated on an unmatched bufID: %+v", a2.buffers)
 	}
-	if strings.Contains(a2.buffers[0].View(), "ERR:") {
+	if strings.Contains(a2.buffers[0].View().Content, "ERR:") {
 		t.Error("unrelated buffer should not show an error for a message about a closed buffer")
 	}
 }

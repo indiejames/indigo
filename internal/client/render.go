@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/indiejames/indigo/internal/highlight"
@@ -804,7 +804,7 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 		}
 		selA, selB := m.selectionCols(lineNum, 0)
 		switch {
-		case lineNum == m.cursor.Line && chunk == 0:
+		case m.paintsBufferCursor() && lineNum == m.cursor.Line && chunk == 0:
 			sb.WriteString(cursorStyle.Render(" "))
 		case selA >= 0 && selA <= selB:
 			sb.WriteString(selectionStyle.Render(" "))
@@ -902,8 +902,14 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 	}
 
 	// Remap cursor column to chunk-relative visual col.
+	//
+	// Only in command/search mode. Everywhere else the terminal's own cursor
+	// marks the position (set in View — see cursor.go), and painting a cell
+	// as well would draw the cursor twice. In command/search the real cursor
+	// moves to the prompt on the bottom line, so the painted cell stays on as
+	// the reminder of where in the buffer you'll land on Esc/Enter.
 	curCol := -1
-	if lineNum == m.cursor.Line {
+	if m.paintsBufferCursor() && lineNum == m.cursor.Line {
 		c := min(m.cursor.Col, len(runes))
 		absVisCol := colMap[c]
 		if absVisCol >= chunkStart && absVisCol < chunkStart+cw {

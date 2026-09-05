@@ -3,7 +3,7 @@ package client
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/document"
 )
@@ -21,7 +21,7 @@ func TestHandleSearchAltEnterSelectsAllMatches(t *testing.T) {
 		t.Fatalf("updateSearch found %d matches, want 3", len(m.searchMatches))
 	}
 
-	res, cmd := m.handleSearch(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	res, cmd := m.handleSearch(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	if cmd != nil {
 		t.Errorf("handleSearch(alt+enter) returned a non-nil cmd, want nil")
 	}
@@ -57,7 +57,7 @@ func TestHandleSearchAltEnterNoMatchesShowsError(t *testing.T) {
 		t.Fatalf("updateSearch found %d matches, want 0", len(m.searchMatches))
 	}
 
-	res, _ := m.handleSearch(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	res, _ := m.handleSearch(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	m2 := res.(Model)
 
 	if m2.mode != ModeSearch {

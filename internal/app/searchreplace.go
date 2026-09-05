@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
@@ -97,10 +97,38 @@ func newSearchReplaceDialog(workDir string, w, h int) *searchReplaceDialog {
 		includeInput: ii,
 		excludeInput: ei,
 		spinner:      sp,
-		viewport:     viewport.New(dialogInnerW(w), 8),
+		viewport:     viewport.New(viewport.WithWidth(dialogInnerW(w)), viewport.WithHeight(8)),
 		focus:        sraFocusSearch,
 	}
+	d.resizeInputs()
 	return d
+}
+
+// resizeInputs sizes the four text inputs to the box they render into. It
+// must be called whenever d.width changes, not just at construction.
+//
+// This is load-bearing, not cosmetic: bubbles v2's textinput truncates its
+// placeholder to Width()+1 runes (placeholderView builds a
+// make([]rune, Width()+1) buffer and copies the placeholder into it), so at
+// the zero-value width every placeholder rendered as a single character —
+// "Search" showed up as just "S". bubbles v1 special-cased an unset width
+// and rendered the placeholder in full, which is why these inputs never
+// needed an explicit width before the v2 upgrade.
+//
+// The -1 accounts for the cursor cell: v2's textinput renders Width()+1
+// columns in both branches (placeholder and value), treating Width as the
+// text capacity with the cursor sitting one column past it. Sizing to the
+// full innerW would overflow the surrounding border by one column and wrap.
+//
+// Setting a real width also enables the horizontal scrolling that an
+// unbounded input never did, so a long pattern now scrolls inside its box
+// instead of overflowing it.
+func (d *searchReplaceDialog) resizeInputs() {
+	w := max(1, dialogInnerW(d.width)-1)
+	d.searchInput.SetWidth(w)
+	d.replaceInput.SetWidth(w)
+	d.includeInput.SetWidth(w)
+	d.excludeInput.SetWidth(w)
 }
 
 func dialogInnerW(termW int) int {
@@ -286,14 +314,14 @@ func (d *searchReplaceDialog) refreshResultsView() {
 		}
 	}
 	d.resultsMaxContentW = maxW
-	d.viewport.Width = d.resultsW()
+	d.viewport.SetWidth(d.resultsW())
 
 	lines := make([]string, len(d.results))
 	for i, r := range d.results {
 		lines[i] = d.renderResultLine(r, i == d.cursor && d.focus == sraFocusResults)
 	}
 	d.viewport.SetContent(strings.Join(lines, "\n"))
-	top, vh := d.viewport.YOffset, d.viewport.Height
+	top, vh := d.viewport.YOffset(), d.viewport.Height()
 	if vh <= 0 {
 		return
 	}

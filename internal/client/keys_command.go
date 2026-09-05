@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/highlight"
@@ -69,8 +69,8 @@ func (m Model) handleCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	default:
-		if len(msg.Runes) > 0 {
-			m.cmdBuf += string(msg.Runes)
+		if msg.Key().Text != "" {
+			m.cmdBuf += msg.Key().Text
 			m.cmdCompletionIdx = -1 // reset selection whenever the filter changes
 		}
 	}
@@ -120,8 +120,8 @@ func (m Model) handleSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m = m.withClearedSearch()
 		}
 	default:
-		if len(msg.Runes) > 0 {
-			m.searchQuery += string(msg.Runes)
+		if msg.Key().Text != "" {
+			m.searchQuery += msg.Key().Text
 			m.updateSearch()
 		}
 	}

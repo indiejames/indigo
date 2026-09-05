@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func TestIsErrMessage(t *testing.T) {
@@ -223,7 +223,7 @@ func TestMouseMsgBlockedBySevereError(t *testing.T) {
 	prevCursor := m.cursor
 	prevTopLine := m.topLine
 
-	updated, cmd := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 0, Y: 1})
+	updated, cmd := m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 0, Y: 1})
 	m2 := updated.(Model)
 
 	if cmd != nil {

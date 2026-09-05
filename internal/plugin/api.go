@@ -116,13 +116,23 @@ func (s *editorApiServer) RegisterBufferHandler(_ context.Context, call pluginpr
 	s.reg.mu.Unlock()
 
 	// Fire OnOpen for any buffers that were opened before this plugin started.
+	//
+	// Each dispatch is bounded and releases its own reference: without the
+	// timeout a plugin that never answers parks this goroutine forever (the
+	// same fire-and-forget hazard the popup/prompt callbacks below and
+	// manager.go's Dispatch* calls are already bounded against), and without
+	// the Release the AddRef'd handler leaks one reference per already-open
+	// buffer — rel() only releases the call, not the capability. See
+	// manager.go's GetActionsAt for the same AddRef/Release pairing.
 	if s.bridge != nil {
 		refs := s.bridge.PluginOpenBuffers()
 		for _, ref := range refs {
 			bufID := ref.BufID
 			path := ref.Path
 			go func(h pluginproto.BufferEventHandler) {
-				ctx := context.Background()
+				defer h.Release()
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
 				fut, rel := h.OnOpen(ctx, func(ps pluginproto.BufferEventHandler_onOpen_Params) error {
 					ev, err := ps.NewEvent()
 					if err != nil {

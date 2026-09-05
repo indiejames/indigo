@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -22,7 +23,31 @@ var builtInIgnoredDirs = []string{
 // builtInIgnoredDirs so it's always non-empty even if addIgnoredDirs is
 // never called, and rebuilt on each configuration load to fold in
 // Config.PickerIgnoreDirs.
-var ignoredDirs = newIgnoredDirsSet(nil)
+//
+// Guarded by ignoredDirsMu and reachable only through ignoredDirsSnapshot /
+// addIgnoredDirs, never read directly: addIgnoredDirs runs on the main
+// goroutine on every config hot-reload (polled every 2s by watchConfig),
+// while readers run on background goroutines — the file picker's scan
+// (startPickerFileScan) and both workspace-grep backends. Reading the bare
+// variable from those goroutines is a genuine, race-detector-confirmed data
+// race, and one that's bitten twice now (the picker path, then both grep
+// paths), so the unsafe spelling is removed entirely rather than left
+// available for the next reader to trip over.
+var (
+	ignoredDirsMu sync.RWMutex
+	ignoredDirs   = newIgnoredDirsSet(nil)
+)
+
+// ignoredDirsSnapshot returns the current ignore set for reading. The
+// returned map must be treated as read-only: addIgnoredDirs always installs
+// a whole new map rather than mutating the existing one, so a snapshot taken
+// here stays valid (and unchanging) for as long as the caller holds it, with
+// no further synchronization needed.
+func ignoredDirsSnapshot() map[string]bool {
+	ignoredDirsMu.RLock()
+	defer ignoredDirsMu.RUnlock()
+	return ignoredDirs
+}
 
 // newIgnoredDirsSet builds an ignore set from builtInIgnoredDirs plus extra.
 func newIgnoredDirsSet(extra []string) map[string]bool {
@@ -43,7 +68,10 @@ func newIgnoredDirsSet(extra []string) map[string]bool {
 // file picker, recent files, and workspace grep. Removed entries no longer
 // persist across configuration reloads.
 func addIgnoredDirs(names []string) {
-	ignoredDirs = newIgnoredDirsSet(names)
+	set := newIgnoredDirsSet(names)
+	ignoredDirsMu.Lock()
+	ignoredDirs = set
+	ignoredDirsMu.Unlock()
 }
 
 // pickerEntry is one row in the directory browser.
@@ -125,7 +153,7 @@ func (a *App) startPickerFileScan(workDir string) tea.Cmd {
 	a.pickerFilesSeq++
 	seq := a.pickerFilesSeq
 	a.picker.seq = seq
-	ignored := ignoredDirs
+	ignored := ignoredDirsSnapshot()
 	return func() tea.Msg {
 		return pickerFilesMsg{seq: seq, files: collectFiles(workDir, ignored)}
 	}
@@ -165,9 +193,10 @@ func (fp *filePicker) buildEntries() []pickerEntry {
 		return nil
 	}
 
+	ignored := ignoredDirsSnapshot()
 	var dirs, files []pickerEntry
 	for _, de := range des {
-		if ignoredDirs[de.Name()] {
+		if ignored[de.Name()] {
 			continue
 		}
 		if de.IsDir() {

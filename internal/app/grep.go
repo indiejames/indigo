@@ -178,7 +178,7 @@ func searchWithRg(workDir, pattern, include, exclude string, caseSensitive, isRe
 		return nil, nil
 	}
 	args := []string{"--json"}
-	for dir := range ignoredDirs {
+	for dir := range ignoredDirsSnapshot() {
 		args = append(args, "--glob", "!"+dir)
 	}
 	for _, g := range splitGlobs(include) {
@@ -375,12 +375,13 @@ func cachedCandidateFiles(workDir string) (paths, rels []string, err error) {
 // separately by the caller against this (potentially cached) list.
 func walkCandidateFiles(workDir string) (paths, rels []string, err error) {
 	atomic.AddInt64(&candidateWalkCount, 1)
+	ignored := ignoredDirsSnapshot()
 	walkErr := filepath.WalkDir(workDir, func(path string, d fs.DirEntry, werr error) error {
 		if werr != nil {
 			return nil
 		}
 		if d.IsDir() {
-			if ignoredDirs[d.Name()] {
+			if ignored[d.Name()] {
 				return filepath.SkipDir
 			}
 			return nil
@@ -587,10 +588,29 @@ func grepFile(rel, absPath string, matchLine func(string) (int, int, bool), resu
 	}
 	defer f.Close() //nolint:errcheck
 
-	scanner := bufio.NewScanner(f)
+	// readCappedLine rather than bufio.Scanner: a Scanner's fixed 64KB token
+	// limit turns one over-long line (a minified bundle, single-line JSON,
+	// generated code) into a silent, unreported stop — every match in the
+	// rest of that file was simply dropped, with nothing surfaced anywhere.
+	// This mirrors what the rg backend above already does with the same
+	// helper: skip just the oversized record, keep reading the file, and
+	// never buffer more than a bounded amount for it. maxFileBytes is the
+	// same cap that path uses, and candidate files are already filtered to
+	// that size, so no line in a legitimately-searched file can exceed it.
+	reader := bufio.NewReader(f)
 	lineNum := 0
-	for scanner.Scan() {
-		raw := scanner.Bytes()
+	for {
+		raw, oversized, err := readCappedLine(reader, maxFileBytes)
+		if err != nil {
+			return // io.EOF (clean end) or a genuine read error
+		}
+		// lineNum still advances for a skipped oversized line, so matches
+		// after it keep reporting the right line numbers.
+		if oversized {
+			lineNum++
+			continue
+		}
+		raw = bytes.TrimRight(raw, "\n\r")
 		// Skip binary files: check first line for null bytes.
 		if lineNum == 0 {
 			for _, b := range raw {

@@ -52,36 +52,34 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	}
 	serverLog("OpenFile: clientID=%d path=%q", clientID, path)
 
-	content, fromRecovery := s.loadContent(path)
+	// Attach to an already-open buffer before touching the filesystem: that
+	// path serves the in-memory content and never uses what's on disk, so a
+	// file that has since become unreadable must not stop a second client
+	// (another window, a plugin's RequestOpenFile, a reload) from joining a
+	// buffer that is open and perfectly usable.
+	s.mu.Lock()
+	if bufID, content, ver, gen, ok := s.attachToOpenBufferLocked(path, clientID); ok {
+		s.mu.Unlock()
+		return setOpenFileResults(call, bufID, content, ver, gen, false)
+	}
+	s.mu.Unlock()
+
+	// Read outside the lock — a slow or hung filesystem must not block every
+	// other RPC on this connection.
+	content, fromRecovery, err := s.loadContent(path)
+	if err != nil {
+		serverLog("OpenFile: reading %q failed: %v", path, err)
+		return fmt.Errorf("read %s: %w", path, err)
+	}
 
 	s.mu.Lock()
-	// Check if file is already open (skip dedup for untitled buffers).
-	if path != "" {
-		canonPath := canonicalPath(path)
-		for id, e := range s.buffers {
-			if e.canonPath == canonPath {
-				e.clients[clientID] = struct{}{}
-				ver := e.buf.Version()
-				gen := e.generation
-				if e.sinceByClient == nil {
-					e.sinceByClient = make(map[uint64]uint64)
-				}
-				e.sinceByClient[clientID] = ver
-				s.mu.Unlock()
-
-				res, err := call.AllocResults()
-				if err != nil {
-					return err
-				}
-				res.SetBufferId(id)
-				if err := res.SetContent(e.buf.Content()); err != nil {
-					return err
-				}
-				res.SetVersion(ver)
-				res.SetGeneration(gen)
-				return nil
-			}
-		}
+	// Re-check before inserting: the lookup above and this insert are no
+	// longer one critical section (the read sits between them), so another
+	// client opening the same path concurrently could otherwise leave two
+	// buffer entries for one file.
+	if bufID, existing, ver, gen, ok := s.attachToOpenBufferLocked(path, clientID); ok {
+		s.mu.Unlock()
+		return setOpenFileResults(call, bufID, existing, ver, gen, false)
 	}
 
 	s.nextBuf++
@@ -99,6 +97,51 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	ver := buf.Version()
 	s.mu.Unlock()
 
+	if err := setOpenFileResults(call, bufID, content, ver, 0, fromRecovery); err != nil {
+		return err
+	}
+	if path != "" {
+		go s.lspMgr.DidOpen(path, content)
+		go s.pluginMgr.DispatchBufferOpen(context.Background(), bufID, path)
+		s.addPathWatch(path)
+	}
+	return nil
+}
+
+// attachToOpenBufferLocked registers clientID as a client of the buffer
+// already open for path, if there is one, and returns everything OpenFile
+// needs to answer from it. s.mu must be held; the caller unlocks. ok is
+// false when nothing is open for path — including always for an untitled
+// buffer (path ""), which never dedups.
+//
+// Content is read here, under the lock, rather than after unlocking as the
+// previous inline version did: it costs nothing and closes the window where
+// a concurrent wholesale swap of entry.buf (Save's format-on-save branch,
+// SaveAs, DiscardRecovery, Format) could be observed mid-swap.
+func (s *editorService) attachToOpenBufferLocked(path string, clientID uint64) (
+	bufID uint32, content string, ver, gen uint64, ok bool,
+) {
+	if path == "" {
+		return 0, "", 0, 0, false
+	}
+	canonPath := canonicalPath(path)
+	for id, e := range s.buffers {
+		if e.canonPath != canonPath {
+			continue
+		}
+		e.clients[clientID] = struct{}{}
+		ver = e.buf.Version()
+		if e.sinceByClient == nil {
+			e.sinceByClient = make(map[uint64]uint64)
+		}
+		e.sinceByClient[clientID] = ver
+		return id, e.buf.Content(), ver, e.generation, true
+	}
+	return 0, "", 0, 0, false
+}
+
+// setOpenFileResults fills in an openFile response.
+func setOpenFileResults(call proto.EditorService_openFile, bufID uint32, content string, ver, gen uint64, fromRecovery bool) error {
 	res, err := call.AllocResults()
 	if err != nil {
 		return err
@@ -109,12 +152,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	}
 	res.SetVersion(ver)
 	res.SetFromRecovery(fromRecovery)
-	res.SetGeneration(0)
-	if path != "" {
-		go s.lspMgr.DidOpen(path, content)
-		go s.pluginMgr.DispatchBufferOpen(context.Background(), bufID, path)
-		s.addPathWatch(path)
-	}
+	res.SetGeneration(gen)
 	return nil
 }
 
@@ -181,25 +219,38 @@ func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorServ
 	return res.SetContent(content)
 }
 
-// loadContent reads a file's content, preferring a newer recovery file if one exists.
-func (s *editorService) loadContent(path string) (content string, fromRecovery bool) {
+// loadContent reads a file's content, preferring a newer recovery file if one
+// exists.
+//
+// A read failure other than "no such file" is reported rather than swallowed:
+// falling through with empty content would open an empty buffer for a file
+// that actually has content — misrepresenting the file, and risking
+// overwriting it wholesale on the next save. "No such file" is not an error
+// here: that's the ordinary new-file case (and a file that's since been
+// deleted may still have a recovery file worth replaying), so it keeps
+// falling through to the recovery check with empty content.
+func (s *editorService) loadContent(path string) (content string, fromRecovery bool, err error) {
 	if path == "" {
-		return "", false // untitled buffer: no content, no recovery
+		return "", false, nil // untitled buffer: no content, no recovery
 	}
 	var origModTime time.Time
-	if info, err := os.Stat(path); err == nil {
+	if info, statErr := os.Stat(path); statErr == nil {
 		origModTime = info.ModTime()
 	}
-	if data, err := os.ReadFile(path); err == nil {
+	data, readErr := os.ReadFile(path)
+	switch {
+	case readErr == nil:
 		content = string(data)
+	case !os.IsNotExist(readErr):
+		return "", false, readErr
 	}
 	rp := recoveryFilePath(s.recDir, path)
-	if recInfo, err := os.Stat(rp); err == nil && recInfo.ModTime().After(origModTime) {
-		if recData, err := os.ReadFile(rp); err == nil {
-			return string(recData), true
+	if recInfo, statErr := os.Stat(rp); statErr == nil && recInfo.ModTime().After(origModTime) {
+		if recData, recErr := os.ReadFile(rp); recErr == nil {
+			return string(recData), true, nil
 		}
 	}
-	return content, false
+	return content, false, nil
 }
 
 func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_getUpdates) error {

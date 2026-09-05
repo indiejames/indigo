@@ -572,3 +572,107 @@ func ansiStrip(s string) string {
 	}
 	return out.String()
 }
+
+// TestCursorShapeConfigSelectsUnderline verifies the cursor_shape config
+// option switches the buffer cursor between the default block (reverse
+// video / filled cell) and an underline, in both modes — and that picking a
+// shape doesn't cost the per-mode color distinction, which is separate
+// modal feedback.
+func TestCursorShapeConfigSelectsUnderline(t *testing.T) {
+	m := newTestModel("hello\n")
+
+	t.Run("default is block", func(t *testing.T) {
+		m.cfg = &config.Config{} // no cursor_shape set
+		m.mode = ModeNormal
+		if got := m.cursorStyleForMode(); !got.GetReverse() {
+			t.Error("normal mode with unset cursor_shape: want the reverse-video block cursor")
+		}
+		if got := m.cursorStyleForMode(); got.GetUnderline() {
+			t.Error("normal mode with unset cursor_shape: cursor must not be underlined")
+		}
+	})
+
+	t.Run("unrecognized value falls back to block", func(t *testing.T) {
+		m.cfg = &config.Config{CursorShape: "banana"}
+		m.mode = ModeNormal
+		if got := m.cursorStyleForMode(); !got.GetReverse() || got.GetUnderline() {
+			t.Error(`cursor_shape="banana": want the block cursor, matching cursor_column_style's fallback behavior`)
+		}
+	})
+
+	t.Run("underline in normal mode", func(t *testing.T) {
+		m.cfg = &config.Config{CursorShape: "underline"}
+		m.mode = ModeNormal
+		got := m.cursorStyleForMode()
+		if !got.GetUnderline() {
+			t.Error("normal mode: want an underlined cursor")
+		}
+		if got.GetReverse() {
+			t.Error("normal mode: underline cursor must not also be reverse-video (that's the block shape)")
+		}
+	})
+
+	t.Run("underline in insert mode keeps the mode color", func(t *testing.T) {
+		m.cfg = &config.Config{CursorShape: "underline"}
+		m.mode = ModeInsert
+		insert := m.cursorStyleForMode()
+		if !insert.GetUnderline() {
+			t.Error("insert mode: want an underlined cursor")
+		}
+		m.mode = ModeNormal
+		normal := m.cursorStyleForMode()
+		if insert.GetForeground() == normal.GetForeground() {
+			t.Errorf("insert and normal underline cursors share foreground %v; the shape must not "+
+				"collapse the per-mode color distinction", insert.GetForeground())
+		}
+	})
+}
+
+// TestCursorShapeUnderlineReachesRenderedFrame checks the choice actually
+// reaches rendered output, not just the style object — a styled cell is the
+// only cursor indigo draws (the terminal's own stays hidden), so if the
+// underline isn't in the frame the option does nothing on screen.
+//
+// Asserts against what the styles themselves render rather than a literal
+// escape sequence: lipgloss emits one combined SGR per cell (underline and
+// foreground together, e.g. "\x1b[4;38;2;255;255;255;4m"), so searching for a
+// standalone "\x1b[4m" would report a false failure.
+func TestCursorShapeUnderlineReachesRenderedFrame(t *testing.T) {
+	// Render() is a no-op without a color profile (a normal `go test` run has
+	// no tty), which would strip every SGR — including the existing block
+	// cursor's — and make this assertion vacuous. Same forcing the
+	// split-styling test above uses.
+	origProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(origProfile) })
+	// The cursor styles are built at init/ApplyTheme time, before the profile
+	// change above, so rebuild them under the forced profile.
+	applyDefaultDark()
+	t.Cleanup(applyDefaultDark)
+
+	// Cursor starts at line 0, col 0, so the styled cell is "hello"'s "h".
+	underlinedCell := normalCursorUnderlineStyle.Render("h")
+	blockCell := normalCursorStyle.Render("h")
+
+	m := newTestModel("hello\n")
+	m.width, m.height = 40, 6
+	m.mode = ModeNormal
+
+	m.cfg = &config.Config{CursorShape: "underline"}
+	out := m.View()
+	if !strings.Contains(out, underlinedCell) {
+		t.Errorf("cursor_shape=underline: frame does not contain the underlined cursor cell %q", underlinedCell)
+	}
+	if strings.Contains(out, blockCell) {
+		t.Errorf("cursor_shape=underline: frame still contains the block cursor cell %q", blockCell)
+	}
+
+	m.cfg = &config.Config{} // default: block
+	out = m.View()
+	if !strings.Contains(out, blockCell) {
+		t.Errorf("default cursor_shape: frame does not contain the block cursor cell %q", blockCell)
+	}
+	if strings.Contains(out, underlinedCell) {
+		t.Errorf("default cursor_shape: frame unexpectedly contains the underlined cursor cell %q", underlinedCell)
+	}
+}

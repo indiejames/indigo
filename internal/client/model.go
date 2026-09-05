@@ -485,6 +485,13 @@ var (
 	cursorStyle       lipgloss.Style
 	normalCursorStyle lipgloss.Style
 	insertCursorStyle lipgloss.Style
+	// Underline variants of the two above, used when config's cursor_shape is
+	// "underline". Built here rather than derived at render time because the
+	// accent colors they need come from the theme, which only ApplyTheme sees.
+	// The per-mode color distinction is deliberately preserved across both
+	// shapes, so picking a shape never costs the modal feedback.
+	normalCursorUnderlineStyle lipgloss.Style
+	insertCursorUnderlineStyle lipgloss.Style
 
 	popupBg          lipgloss.Color
 	popupBorderStyle lipgloss.Style
@@ -548,6 +555,8 @@ func ApplyTheme(t *theme.Theme) {
 	insertModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(t.UI.InsertCursorBg)).Bold(true)
 	normalCursorStyle = lipgloss.NewStyle().Reverse(true)
 	insertCursorStyle = lipgloss.NewStyle().Background(lipgloss.Color(t.UI.InsertCursorBg)).Foreground(lipgloss.Color("#000000"))
+	normalCursorUnderlineStyle = lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Color(normalAccentColor))
+	insertCursorUnderlineStyle = lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Color(t.UI.InsertCursorBg))
 	cursorStyle = normalCursorStyle
 
 	popupBg = pb
@@ -607,6 +616,8 @@ func applyDefaultDark() {
 	insertModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(insertAccentColor)).Bold(true)
 	normalCursorStyle = lipgloss.NewStyle().Reverse(true)
 	insertCursorStyle = lipgloss.NewStyle().Background(lipgloss.Color(insertAccentColor)).Foreground(lipgloss.Color("#000000"))
+	normalCursorUnderlineStyle = lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Color(normalAccentColor))
+	insertCursorUnderlineStyle = lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Color(insertAccentColor))
 	cursorStyle = normalCursorStyle
 
 	popupBg = pb

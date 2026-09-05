@@ -229,6 +229,17 @@ type Config struct {
 	// regardless of its visual width (Helix-style). Any value other than
 	// "buffer" is treated as "view".
 	CursorColumnStyle string `toml:"cursor_column_style"`
+	// CursorShape selects how the buffer cursor is drawn: "block" (default)
+	// fills the whole cell, "underline" draws a line under the character
+	// instead. Any value other than "underline" is treated as "block".
+	//
+	// Only these two: indigo paints the cursor itself by restyling the
+	// character cell (the real terminal cursor stays hidden — see
+	// internal/client/render.go), so a shape has to be expressible as a cell
+	// style. A true vertical bar sits *between* cells and can't be drawn that
+	// way without replacing the character under it, which would hide the
+	// user's own text.
+	CursorShape string `toml:"cursor_shape"`
 	// FileTypes maps file extensions or filenames to a syntax language key.
 	// Keys are extensions (with or without leading dot) or bare filenames.
 	// Values are a registered language key such as "sh", "go", ".md", etc.
@@ -275,6 +286,7 @@ func defaults() *Config {
 		SemanticTokens:       false,
 		ScrollOff:            5,
 		CursorColumnStyle:    "view",
+		CursorShape:          "block",
 	}
 }
 
@@ -428,6 +440,12 @@ const defaultConfigTemplate = `# Indigo editor configuration
 # Code-style); "buffer" shows the raw rune offset into the line (a tab
 # counts as one column, Helix-style).
 # cursor_column_style = "view"
+
+# How the buffer cursor is drawn: "block" fills the whole character cell,
+# "underline" draws a line under the character instead. Indigo paints the
+# cursor itself rather than using the terminal's own, so a vertical-bar
+# shape isn't available — it would sit between cells.
+# cursor_shape = "block"
 
 # Default indent style/width for languages with no built-in or per-language
 # setting below. style is "tabs" or "spaces". Indigo also auto-detects the

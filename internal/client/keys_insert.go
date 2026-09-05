@@ -800,3 +800,34 @@ func (m Model) applyCompletionEdits(edits []ClientLspEdit) (Model, tea.Cmd) {
 	}
 	return m, tea.Sequence(cmds...)
 }
+
+// handlePaste delivers bracketed-paste content to whatever is taking text
+// input right now.
+//
+// This exists because of a Bubble Tea v1 → v2 difference that is easy to
+// miss: v1 delivered a paste as an ordinary KeyMsg (with Paste set and the
+// text in Runes), so it fell through the same "append the typed text" branch
+// as normal typing and needed no handling of its own. v2 emits a separate
+// tea.PasteMsg, which matches no KeyMsg case at all — so without this,
+// pasting silently does nothing anywhere in the editor.
+//
+// Normal mode ignores a paste, which is also what v1 did: the whole pasted
+// string arrived as one key event, matched no binding, and was dropped.
+func (m Model) handlePaste(text string) (tea.Model, tea.Cmd) {
+	if text == "" {
+		return m, nil
+	}
+	switch m.mode {
+	case ModeInsert:
+		return m.insertPastedText(text)
+	case ModeCommand:
+		m.cmdBuf += text
+		m.cmdCompletionIdx = -1 // reset selection whenever the filter changes
+		return m, nil
+	case ModeSearch:
+		m.searchQuery += text
+		m.updateSearch()
+		return m, nil
+	}
+	return m, nil
+}

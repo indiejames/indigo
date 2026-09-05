@@ -308,8 +308,30 @@ func TestNoCursorWhenOffScreen(t *testing.T) {
 	m := cursorTestModel(t, strings.Repeat("line\n", 200), &config.Config{})
 	m.cursor.Line = 150 // far below the viewport, which is still scrolled to the top
 
-	if c := m.View().Cursor; c != nil && c.Y >= m.visibleLines() {
-		t.Errorf("cursor at row %d is outside the %d visible rows; it should have been dropped",
-			c.Y, m.visibleLines())
+	if c := m.View().Cursor; c != nil {
+		t.Errorf("cursor emitted at (%d,%d) for a line outside the %d visible rows; "+
+			"it should be dropped, not clamped to an edge cell", c.X, c.Y, m.visibleLines())
 	}
+}
+
+// TestNoCursorUnderClientModals covers the two overlays the client draws
+// itself, rather than App: both are rendered over the buffer, so a cursor
+// left at the buffer position would sit behind the popup.
+func TestNoCursorUnderClientModals(t *testing.T) {
+	t.Run("save as dialog", func(t *testing.T) {
+		m := cursorTestModel(t, "hello\n", &config.Config{})
+		path := "/tmp/a.go"
+		m.saveAsInput = &path
+		if c := m.View().Cursor; c != nil {
+			t.Errorf("cursor shown at (%d,%d) behind the Save As dialog", c.X, c.Y)
+		}
+	})
+
+	t.Run("severe error modal", func(t *testing.T) {
+		m := cursorTestModel(t, "hello\n", &config.Config{})
+		m.severeErr = "something went wrong"
+		if c := m.View().Cursor; c != nil {
+			t.Errorf("cursor shown at (%d,%d) behind the severe-error modal", c.X, c.Y)
+		}
+	})
 }

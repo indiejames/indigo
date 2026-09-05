@@ -845,6 +845,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Paste is its own message type in Bubble Tea v2, so it matches none of
+	// the KeyMsg routing below; route it to whichever modal takes text first.
+	if pm, ok := msg.(tea.PasteMsg); ok {
+		if m, cmd, handled := a.handlePaste(pm); handled {
+			return m, cmd
+		}
+	}
+
 	if a.picker != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handlePickerKey(km)

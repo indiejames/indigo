@@ -170,7 +170,10 @@ func displaySequence(path []string) string {
 	}
 	var b strings.Builder
 	for _, tok := range path {
-		if tok == "space" {
+		// Accept both spellings: the built-in tree uses "space" (what v2's
+		// Key.String() produces), but a user keymenu in config.toml can spell
+		// the same key " " — buildKeymenuCommand passes Key through verbatim.
+		if tok == "space" || tok == " " {
 			b.WriteString("SPC ")
 			continue
 		}

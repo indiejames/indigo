@@ -175,11 +175,6 @@ func TestRenderLineRunesTrailingOverlayInSelectionUsesSelectionStyle(t *testing.
 // selectionStyle, the rest of the gap must stay unselected instead of the
 // whole span (keyed off just the gap's start column) rendering as selected.
 func TestRenderLineRunesTrailingOverlayPaddingSplitsAtSelectionBoundary(t *testing.T) {
-	// Render() is a no-op without a color profile (as in a normal `go test`
-	// run with no tty), which would make the old all-or-nothing styling and
-	// the fixed split-at-boundary styling produce identical plain-text
-	// output. Force real ANSI output so the two are actually distinguishable.
-
 	guide := lineOverlay{col: 4, text: indentGuideStyle.Render("▏"), w: 1, plain: "▏"}
 
 	var sb strings.Builder

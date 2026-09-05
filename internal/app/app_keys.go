@@ -362,6 +362,14 @@ func (a App) handleSearchReplaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
+	return a.forwardToFocusedSraInput(d, msg)
+}
+
+// forwardToFocusedSraInput hands msg to whichever of the dialog's four text
+// inputs currently has focus. Split out of handleSearchReplaceKey so a
+// tea.PasteMsg can be forwarded the same way a key is: bubbles' textinput
+// handles PasteMsg itself, but only if the message actually reaches it.
+func (a App) forwardToFocusedSraInput(d *searchReplaceDialog, msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch d.focus {
 	case sraFocusSearch:
@@ -376,6 +384,34 @@ func (a App) handleSearchReplaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	a.searchReplace = d
 	return a, cmd
+}
+
+// handlePaste delivers bracketed-paste content to whichever modal owns text
+// input, using that modal's own text mechanism. ok is false when no modal
+// wants it, so the caller can let the message fall through to the buffer.
+//
+// Needed because Bubble Tea v2 emits paste as a separate tea.PasteMsg rather
+// than v1's KeyMsg-with-Paste-set. The KeyMsg routing below matches none of
+// it, so without this, pasting into any of these dialogs does nothing.
+func (a App) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd, bool) {
+	if msg.Content == "" {
+		return a, nil, false
+	}
+	switch {
+	case a.picker != nil:
+		a.picker.setQuery(a.picker.query + msg.Content)
+		return a, nil, true
+	case a.searchReplace != nil:
+		m, cmd := a.forwardToFocusedSraInput(a.searchReplace, msg)
+		return m, cmd, true
+	case a.pluginInput != nil:
+		a.pluginInput.text += msg.Content
+		return a, nil, true
+	case a.newFileInput != nil:
+		a.newFileInput.text += msg.Content
+		return a, nil, true
+	}
+	return a, nil, false
 }
 
 // handleGrepKey routes key events to the workspace search picker.

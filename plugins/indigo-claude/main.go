@@ -209,7 +209,9 @@ func newModel(rpc *client.RPC, prog *programLink, apiKey, workDir string) Model 
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{scheduleTick(), m.cmdPollActiveCtx()}
+	// RequestBackgroundColor so light terminals get the light palette: v2
+	// dropped lipgloss's AdaptiveColor, which used to make this query itself.
+	cmds := []tea.Cmd{scheduleTick(), m.cmdPollActiveCtx(), tea.RequestBackgroundColor}
 	if m.apiKey == "" {
 		// CLI mode runs on a subscription — check plan limits at startup.
 		cmds = append(cmds, fetchPlanUsageCmd())
@@ -221,6 +223,13 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.BackgroundColorMsg:
+		if dark := msg.IsDark(); dark != adaptiveDark {
+			adaptiveDark = dark
+			refreshAdaptiveColors()
+		}
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -891,7 +900,10 @@ var (
 	inputTextDimSty     = lipgloss.NewStyle().Foreground(lipgloss.Color("#667788"))            // unfocused
 	cursorStyle         = lipgloss.NewStyle().Reverse(true)
 
-	// User message bubble — slightly elevated surface colour.
+	// User message bubble — slightly elevated surface colour. These are
+	// rebuilt by refreshAdaptiveColors once the terminal reports its real
+	// background, since adaptive() bakes in adaptiveDark at the moment it
+	// is called.
 	bubbleBg = adaptive("#1B2939", "#DDE8F4")
 	// Progressive foreground dimming for collapsed bubbles (bright → dim).
 	bubbleFg  = adaptive("#C8D8E8", "#2A3A4A")
@@ -913,7 +925,17 @@ var (
 	ppNew    = lipgloss.NewStyle().Background(ppBg).Foreground(lipgloss.Color("#55FF55"))
 )
 
-func (m Model) View() tea.View { return tea.NewView(m.render()) }
+// View returns the frame plus the terminal modes this plugin needs. Bubble
+// Tea v2 moved these off tea.NewProgram's options and onto the View, so they
+// are declared per-frame here — the direct equivalents of the
+// WithAltScreen()/WithMouseCellMotion() this program passed under v1.
+// Without MouseMode, mouse-wheel scrolling of the conversation stops working.
+func (m Model) View() tea.View {
+	v := tea.NewView(m.render())
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
 
 func (m Model) render() string {
 	if !m.ready {
@@ -2160,14 +2182,34 @@ func main() {
 // resolves explicitly — so the background has to be known here rather than
 // discovered inside lipgloss.
 //
-// Defaults to dark, matching indigo's own default-dark theme. Bubble Tea v2
-// reports the real value via BackgroundColorMsg at startup; wiring that
-// through is the remaining step to restore full v1 parity for light
-// terminals.
+// Defaults to dark, matching indigo's own default-dark theme, and is
+// corrected at startup: Init requests the terminal background and Update
+// handles BackgroundColorMsg, rebuilding the palette via
+// refreshAdaptiveColors if the terminal turns out to be light.
 var adaptiveDark = true
 
 // adaptive picks between a dark- and light-background colour, replacing
 // lipgloss v1's AdaptiveColor{Dark:..., Light:...} literals.
 func adaptive(dark, light string) color.Color {
 	return lipgloss.LightDark(adaptiveDark)(lipgloss.Color(light), lipgloss.Color(dark))
+}
+
+// refreshAdaptiveColors recomputes every adaptive palette value for the
+// current adaptiveDark. adaptive() resolves eagerly — it returns a concrete
+// color, not something that re-reads adaptiveDark later — so the package
+// vars built at init time hold dark-theme colors until this runs.
+//
+// Called when the terminal answers RequestBackgroundColor (see Init), which
+// is the v2 replacement for lipgloss v1's AdaptiveColor, where the library
+// did the terminal query itself.
+func refreshAdaptiveColors() {
+	bubbleBg = adaptive("#1B2939", "#DDE8F4")
+	bubbleFg = adaptive("#C8D8E8", "#2A3A4A")
+	bubbleDim = []color.Color{
+		adaptive("#C8D8E8", "#2A3A4A"),
+		adaptive("#8898A8", "#627282"),
+		adaptive("#4A5A6A", "#96A6B6"),
+	}
+	bubbleBorderColor = adaptive("#3D5472", "#7A9DC0")
+	bubbleHintColor = adaptive("#445566", "#8899AA")
 }

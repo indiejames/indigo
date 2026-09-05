@@ -495,8 +495,13 @@ func (m Model) renderFrame() (string, *tea.Cursor) {
 		// (see paintsBufferCursor), so the terminal cursor stays hidden
 		// rather than being drawn on top of it.
 	default:
-		if x, y, ok := m.bufferCursorPos(layout, cw, vis); ok {
-			cur = m.newCursor(x, y)
+		// Save As and the severe-error modal are drawn over the buffer just
+		// above, so a cursor left at the buffer position would be stranded
+		// behind the popup. App suppresses its own dialogs the same way.
+		if m.saveAsInput == nil && m.severeErr == "" {
+			if x, y, ok := m.bufferCursorPos(layout, cw, vis); ok {
+				cur = m.newCursor(x, y)
+			}
 		}
 	}
 	return sb.String(), cur
@@ -730,7 +735,7 @@ func (m Model) renderStatusBar() string {
 			promptRunes = promptRunes[len(promptRunes)-maxPromptW:]
 		}
 		padW := max(0, m.width-len(promptRunes)-1-countW)
-		return barStyle.Render(string(promptRunes)) + cursorStyle.Render(" ") + barStyle.Width(padW).Render("") + barStyle.Render(countStr)
+		return barStyle.Render(string(promptRunes)) + barStyle.Render(" ") + barStyle.Width(padW).Render("") + barStyle.Render(countStr)
 	}
 
 	if m.mode == ModeCommand {
@@ -741,7 +746,7 @@ func (m Model) renderStatusBar() string {
 			promptRunes = promptRunes[len(promptRunes)-maxPromptW:]
 		}
 		padW := max(0, m.width-len(promptRunes)-1)
-		return barStyle.Render(string(promptRunes)) + cursorStyle.Render(" ") + barStyle.Width(padW).Render("")
+		return barStyle.Render(string(promptRunes)) + barStyle.Render(" ") + barStyle.Width(padW).Render("")
 	}
 
 	modeLabel := "NORMAL"

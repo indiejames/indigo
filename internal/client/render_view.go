@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+
+	"charm.land/lipgloss/v2"
 )
 
 // displayPath returns a project-relative path for status bar display.
@@ -141,9 +143,19 @@ func (m Model) cursorStyleForMode() lipgloss.Style {
 	}
 }
 
-func (m Model) View() string {
+// View returns the frame together with the terminal cursor's position,
+// shape, and blink (see cursor.go). App lifts the cursor out of here,
+// offsets it for the tab bar, and drops it whenever a dialog is on top.
+func (m Model) View() tea.View {
+	content, cur := m.renderFrame()
+	v := tea.NewView(content)
+	v.Cursor = cur
+	return v
+}
+
+func (m Model) renderFrame() (string, *tea.Cursor) {
 	if m.width == 0 {
-		return "loading…"
+		return "loading…", nil
 	}
 
 	cursorStyle = m.cursorStyleForMode()
@@ -467,7 +479,27 @@ func (m Model) View() string {
 		sb.WriteByte('\n')
 	}
 	sb.WriteString(m.renderStatusBar())
-	return sb.String()
+
+	// The frame is `vis` content rows followed by the status/prompt bar, so
+	// the bar is row `vis`. In command and search mode the cursor belongs on
+	// that prompt rather than in the buffer, matching where renderStatusBar
+	// draws it.
+	var cur *tea.Cursor
+	switch m.mode {
+	case ModeCommand:
+		cur = m.newCursor(promptCursorX(":"+m.cmdBuf, m.width), vis)
+	case ModeSearch:
+		cur = m.newCursor(promptCursorX("/"+m.searchQuery, m.width), vis)
+	case ModeInsert:
+		// Left nil on purpose: insert mode's cursor is the green painted cell
+		// (see paintsBufferCursor), so the terminal cursor stays hidden
+		// rather than being drawn on top of it.
+	default:
+		if x, y, ok := m.bufferCursorPos(layout, cw, vis); ok {
+			cur = m.newCursor(x, y)
+		}
+	}
+	return sb.String(), cur
 }
 
 // renderSaveAsDialog renders a centered "Save As" input dialog.

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/indiejames/indigo/internal/client"
 )
@@ -95,8 +95,8 @@ func (a App) handleSymbolPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, a.fetchWorkspaceSymbols()
 		}
 	default:
-		if len(msg.Runes) > 0 && p != nil {
-			p.query += string(msg.Runes)
+		if msg.Key().Text != "" && p != nil {
+			p.query += msg.Key().Text
 			p.loading = true
 			return a, a.fetchWorkspaceSymbols()
 		}
@@ -154,8 +154,8 @@ func (a App) handleDocSymbolPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			p.applyFilter(string(runes[:len(runes)-1]))
 		}
 	default:
-		if len(msg.Runes) > 0 && p != nil {
-			p.applyFilter(p.filter + string(msg.Runes))
+		if msg.Key().Text != "" && p != nil {
+			p.applyFilter(p.filter + msg.Key().Text)
 		}
 	}
 	return a, nil

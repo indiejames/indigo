@@ -170,7 +170,7 @@ func displaySequence(path []string) string {
 	}
 	var b strings.Builder
 	for _, tok := range path {
-		if tok == " " {
+		if tok == "space" {
 			b.WriteString("SPC ")
 			continue
 		}

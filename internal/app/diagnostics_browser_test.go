@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/indiejames/indigo/internal/client"
 )
 
@@ -60,7 +60,7 @@ func TestHandleDiagBrowserKeyEnterEmitsPickedMsg(t *testing.T) {
 		},
 		cursor: 1,
 	}}
-	_, cmd := a.handleDiagBrowserKey(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := a.handleDiagBrowserKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected a command, got nil")
 	}

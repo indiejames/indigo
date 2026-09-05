@@ -230,16 +230,24 @@ type Config struct {
 	// "buffer" is treated as "view".
 	CursorColumnStyle string `toml:"cursor_column_style"`
 	// CursorShape selects how the buffer cursor is drawn: "block" (default)
-	// fills the whole cell, "underline" draws a line under the character
-	// instead. Any value other than "underline" is treated as "block".
+	// fills the whole cell, "underline" draws a line under the character, and
+	// "bar" draws a vertical bar between cells. Any unrecognized value is
+	// treated as "block".
 	//
-	// Only these two: indigo paints the cursor itself by restyling the
-	// character cell (the real terminal cursor stays hidden — see
-	// internal/client/render.go), so a shape has to be expressible as a cell
-	// style. A true vertical bar sits *between* cells and can't be drawn that
-	// way without replacing the character under it, which would hide the
-	// user's own text.
+	// All three are the terminal's own cursor, positioned via the Bubble Tea
+	// v2 View.Cursor field (see internal/client/cursor.go). "bar" in
+	// particular is only possible that way: a bar sits *between* cells, so
+	// the old approach of restyling the character cell couldn't express it
+	// without replacing the character underneath and hiding the user's text.
 	CursorShape string `toml:"cursor_shape"`
+	// CursorBlink makes the cursor blink. Off by default: a steady cursor is
+	// the less distracting choice for a text editor, and blink is the kind of
+	// thing a user should opt into rather than have to turn off.
+	//
+	// The blinking is done by the terminal itself (it's part of the same
+	// DECSCUSR escape that sets the shape), not by redrawing on a timer, so
+	// enabling it costs no extra renders.
+	CursorBlink bool `toml:"cursor_blink"`
 	// FileTypes maps file extensions or filenames to a syntax language key.
 	// Keys are extensions (with or without leading dot) or bare filenames.
 	// Values are a registered language key such as "sh", "go", ".md", etc.
@@ -442,10 +450,13 @@ const defaultConfigTemplate = `# Indigo editor configuration
 # cursor_column_style = "view"
 
 # How the buffer cursor is drawn: "block" fills the whole character cell,
-# "underline" draws a line under the character instead. Indigo paints the
-# cursor itself rather than using the terminal's own, so a vertical-bar
-# shape isn't available — it would sit between cells.
+# "underline" draws a line under the character, "bar" draws a vertical bar
+# between cells (the I-beam most GUI editors use).
 # cursor_shape = "block"
+
+# Whether the cursor blinks. Off by default. The terminal does the blinking
+# itself, so turning it on costs nothing in redraws.
+# cursor_blink = false
 
 # Default indent style/width for languages with no built-in or per-language
 # setting below. style is "tabs" or "spaces". Indigo also auto-detects the

@@ -3,7 +3,7 @@ package client
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // runKeys feeds each key through the full Update dispatch, in order — the

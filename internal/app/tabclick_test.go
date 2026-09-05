@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
@@ -64,7 +64,7 @@ func TestMouseClickOnTabSwitchesActiveBuffer(t *testing.T) {
 	a := newTabClickTestApp()
 
 	// Column 8 is the first column of tab 1 (see TestTabAtColumn).
-	msg := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 8, Y: 0}
+	msg := tea.MouseClickMsg{Button: tea.MouseLeft, X: 8, Y: 0}
 	updated, cmd := a.Update(msg)
 	a2 := updated.(App)
 
@@ -82,7 +82,7 @@ func TestMouseClickOnActiveTabIsNoOp(t *testing.T) {
 	a := newTabClickTestApp()
 	a.status = "some status"
 
-	msg := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 0, Y: 0}
+	msg := tea.MouseClickMsg{Button: tea.MouseLeft, X: 0, Y: 0}
 	updated, _ := a.Update(msg)
 	a2 := updated.(App)
 
@@ -100,7 +100,7 @@ func TestMouseClickOnActiveTabIsNoOp(t *testing.T) {
 func TestMouseClickPastLastTabIsSwallowed(t *testing.T) {
 	a := newTabClickTestApp()
 
-	msg := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 79, Y: 0}
+	msg := tea.MouseClickMsg{Button: tea.MouseLeft, X: 79, Y: 0}
 	updated, _ := a.Update(msg)
 	a2 := updated.(App)
 
@@ -115,7 +115,7 @@ func TestMouseClickPastLastTabIsSwallowed(t *testing.T) {
 func TestMouseWheelOnTabRowStillScrollsActiveBuffer(t *testing.T) {
 	a := newTabClickTestApp()
 
-	msg := tea.MouseMsg{Button: tea.MouseButtonWheelDown, X: 0, Y: 0}
+	msg := tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 0, Y: 0}
 	// Must not panic and must still route to the active buffer's Update
 	// (Y shifted to -1 → 0 buffer-relative, same as before this change).
 	updated, _ := a.Update(msg)

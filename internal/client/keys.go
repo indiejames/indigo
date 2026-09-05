@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/document"
 )
@@ -293,7 +293,7 @@ var prefixCmds = []command{
 // (declared via plugin.toml menu_item and invoked through OnMenuAction) are
 // merged in at lookup time by resolveCommand, not listed here.
 var commandMenuRoot = command{
-	key:       " ",
+	key:       "space",
 	label:     "Command",
 	menuTitle: "Command",
 	category:  "Command (space)",
@@ -380,7 +380,7 @@ func findIn(cmds []command, seq []string) (*command, bool) {
 // resolving the rest of seq against it. This lets plugins add entries (and
 // submenus) without the core prefixCmds tree knowing about them ahead of time.
 func (m Model) resolveCommand(seq []string) (*command, bool) {
-	if len(seq) == 0 || seq[0] != " " {
+	if len(seq) == 0 || seq[0] != "space" {
 		return findCommand(seq)
 	}
 	node := commandMenuRoot
@@ -608,8 +608,8 @@ func (m Model) handleSaveAsDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	default:
 		// Append printable characters.
-		if msg.Type == tea.KeyRunes {
-			s := *m.saveAsInput + string(msg.Runes)
+		if msg.Key().Text != "" {
+			s := *m.saveAsInput + msg.Key().Text
 			m.saveAsInput = &s
 		}
 		return m, nil

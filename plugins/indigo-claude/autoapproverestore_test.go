@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestRestoreStateStagesAutoApproveWithoutApplyingIt(t *testing.T) {
@@ -56,9 +56,9 @@ func TestAutoApproveRestoreConfirmApplies(t *testing.T) {
 	m.pendingAutoApproveRestore = &autoApproveRestoreState{edits: true, shell: false}
 
 	// Move selection to "Yes" then confirm.
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	m = m2.(Model)
-	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(Model)
 
 	if m.pendingAutoApproveRestore != nil {
@@ -101,7 +101,7 @@ func TestAutoApproveRestoreDeclineDoesNotApplyAndPersistsOff(t *testing.T) {
 	m.pendingAutoApproveRestore = &autoApproveRestoreState{edits: true, shell: true}
 
 	// Default choice is "No" — bare Enter should decline.
-	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(Model)
 
 	if m.pendingAutoApproveRestore != nil {
@@ -133,7 +133,7 @@ func TestAutoApproveRestoreModalBlocksOtherKeys(t *testing.T) {
 	m.pendingAutoApproveRestore = &autoApproveRestoreState{edits: true}
 	convLenBefore := len(m.conv)
 
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = m2.(Model)
 	if m.focus != focusTextInput {
 		t.Errorf("Tab changed focus while the restore modal was pending: focus = %v", m.focus)
@@ -144,7 +144,7 @@ func TestAutoApproveRestoreModalBlocksOtherKeys(t *testing.T) {
 
 	m.input = []rune("hello")
 	m.inputPos = len(m.input)
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m2, _ = m.Update(tea.KeyPressMsg{Text: string([]rune("x")), Code: []rune(string([]rune("x")))[0]})
 	m = m2.(Model)
 	if string(m.input) != "hello" {
 		t.Errorf("typing leaked through to the text input while the restore modal was pending: %q", string(m.input))

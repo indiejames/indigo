@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func TestNextModelChoiceCyclesAndWraps(t *testing.T) {
@@ -49,7 +49,7 @@ func TestTabEntersControlBarEvenWhileAgentRunning(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
 	m.agentRunning = true // the case that matters: mid-turn
 
-	m = pressKey(m, tea.KeyMsg{Type: tea.KeyTab})
+	m = pressKey(m, tea.KeyPressMsg{Code: tea.KeyTab})
 
 	if m.focus != focusAutoApproveEdits {
 		t.Fatalf("focus = %v, want focusAutoApproveEdits, even while agentRunning", m.focus)
@@ -61,7 +61,7 @@ func TestTabCyclesThroughAllFociAndWrapsToTextInput(t *testing.T) {
 
 	want := []inputFocus{focusAutoApproveEdits, focusAutoApproveShell, focusModel, focusTextInput}
 	for i, w := range want {
-		m = pressKey(m, tea.KeyMsg{Type: tea.KeyTab})
+		m = pressKey(m, tea.KeyPressMsg{Code: tea.KeyTab})
 		if m.focus != w {
 			t.Fatalf("after %d Tabs: focus = %v, want %v", i+1, m.focus, w)
 		}
@@ -71,7 +71,7 @@ func TestTabCyclesThroughAllFociAndWrapsToTextInput(t *testing.T) {
 func TestShiftTabFromTextInputWrapsToLastField(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
 
-	m = pressKey(m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = pressKey(m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 
 	if m.focus != focusModel {
 		t.Errorf("focus after shift+tab from text input = %v, want focusModel (wrap backward)", m.focus)
@@ -82,7 +82,7 @@ func TestEscFromBarFieldReturnsFocusToTextInput(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
 	m.focus = focusAutoApproveShell
 
-	m = pressKey(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = pressKey(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	if m.focus != focusTextInput {
 		t.Errorf("focus after Esc = %v, want focusTextInput", m.focus)
@@ -93,7 +93,7 @@ func TestControlBarTogglesAutoApproveEdits(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
 	m.focus = focusAutoApproveEdits
 
-	m = pressKey(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = pressKey(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	edits, shell := m.prog.autoApprove()
 	if !edits {
 		t.Error("Enter on focusAutoApproveEdits did not turn auto-approve edits on")
@@ -102,7 +102,7 @@ func TestControlBarTogglesAutoApproveEdits(t *testing.T) {
 		t.Error("focusAutoApproveEdits unexpectedly affected auto-approve shell")
 	}
 
-	m = pressKey(m, tea.KeyMsg{Type: tea.KeySpace})
+	m = pressKey(m, tea.KeyPressMsg{Code: tea.KeySpace})
 	edits, _ = m.prog.autoApprove()
 	if edits {
 		t.Error("second activation did not toggle auto-approve edits back off")
@@ -113,7 +113,7 @@ func TestControlBarTogglesAutoApproveShell(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
 	m.focus = focusAutoApproveShell
 
-	m = pressKey(m, tea.KeyMsg{Type: tea.KeyRight})
+	m = pressKey(m, tea.KeyPressMsg{Code: tea.KeyRight})
 	_, shell := m.prog.autoApprove()
 	if !shell {
 		t.Error("Right on focusAutoApproveShell did not turn auto-approve shell on")
@@ -124,12 +124,12 @@ func TestControlBarModelFieldCyclesWithLeftRight(t *testing.T) {
 	m := newModel(nil, &programLink{}, "", t.TempDir())
 	m.focus = focusModel
 
-	m = pressKey(m, tea.KeyMsg{Type: tea.KeyRight})
+	m = pressKey(m, tea.KeyPressMsg{Code: tea.KeyRight})
 	if m.model != modelAliasOrder[0] {
 		t.Errorf("model after one Right = %q, want %q", m.model, modelAliasOrder[0])
 	}
 
-	m = pressKey(m, tea.KeyMsg{Type: tea.KeyLeft})
+	m = pressKey(m, tea.KeyPressMsg{Code: tea.KeyLeft})
 	if m.model != "" {
 		t.Errorf("model after Left back = %q, want \"\" (default)", m.model)
 	}
@@ -145,7 +145,7 @@ func TestControlBarKeysDoNotReachTextInput(t *testing.T) {
 	m.focus = focusAutoApproveEdits
 	convLenBefore := len(m.conv)
 
-	m = pressKey(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = pressKey(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if len(m.conv) != convLenBefore {
 		t.Errorf("conv grew from %d to %d — Enter leaked through to message submission", convLenBefore, len(m.conv))
@@ -160,7 +160,7 @@ func TestCtrlCStillCancelsAgentWhileBarFieldFocused(t *testing.T) {
 	m.focus = focusModel
 	m.agentRunning = true
 
-	m = pressKey(m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = pressKey(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 
 	if m.agentRunning {
 		t.Error("Ctrl+C did not cancel the running agent while a control-bar field had focus")

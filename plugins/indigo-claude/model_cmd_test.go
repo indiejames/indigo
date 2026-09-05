@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestResolveModel(t *testing.T) {
@@ -29,7 +29,7 @@ func TestResolveModel(t *testing.T) {
 func submitText(m Model, text string) Model {
 	m.input = []rune(text)
 	m.inputPos = len(m.input)
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	return m2.(Model)
 }
 

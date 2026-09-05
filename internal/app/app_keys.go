@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func (a App) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -79,8 +79,8 @@ func (a App) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	default:
-		if len(msg.Runes) > 0 {
-			a.picker.setQuery(a.picker.query + string(msg.Runes))
+		if msg.Key().Text != "" {
+			a.picker.setQuery(a.picker.query + msg.Key().Text)
 		}
 	}
 	return a, nil
@@ -170,8 +170,8 @@ func (a App) handlePluginInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	default:
-		if len(msg.Runes) > 0 && a.pluginInput != nil {
-			a.pluginInput.text += string(msg.Runes)
+		if msg.Key().Text != "" && a.pluginInput != nil {
+			a.pluginInput.text += msg.Key().Text
 		}
 	}
 	return a, nil
@@ -219,8 +219,8 @@ func (a App) handleNewFileInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	default:
-		if len(msg.Runes) > 0 && a.newFileInput != nil {
-			a.newFileInput.text += string(msg.Runes)
+		if msg.Key().Text != "" && a.newFileInput != nil {
+			a.newFileInput.text += msg.Key().Text
 		}
 	}
 	return a, nil
@@ -309,7 +309,7 @@ func (a App) handleSearchReplaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		d.advanceFocus(-1)
 		a.searchReplace = d
 		return a, nil
-	case " ":
+	case "space":
 		switch d.focus {
 		case sraFocusCase:
 			d.caseSensitive = !d.caseSensitive

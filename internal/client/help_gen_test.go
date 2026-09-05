@@ -79,7 +79,7 @@ func TestDisplaySequence(t *testing.T) {
 	if got := displaySequence([]string{"m", "i", "w"}); got != "miw" {
 		t.Errorf("displaySequence([m i w]) = %q, want %q", got, "miw")
 	}
-	if got := displaySequence([]string{" ", "a"}); got != "SPC a" {
+	if got := displaySequence([]string{"space", "a"}); got != "SPC a" {
 		t.Errorf(`displaySequence([" " a]) = %q, want %q`, got, "SPC a")
 	}
 }

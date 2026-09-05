@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/indiejames/indigo/internal/client"
@@ -117,9 +117,12 @@ func TestRenderResultLineKeepsMatchVisibleWhenLineIsLong(t *testing.T) {
 	}
 	// The match sits in the middle of a very long line on both sides, so a
 	// best-effort centered window should show context on both sides, not
-	// just up to the match.
-	if !strings.Contains(line, "x…NEEDLEy") && !strings.Contains(line, "xNEEDLEy") {
-		t.Errorf("expected trailing context after the match, got %q", line)
+	// just up to the match. Strip ANSI first: the match is bold-wrapped, so
+	// the styled string has an SGR reset sitting between "NEEDLE" and the
+	// trailing context that would defeat a literal adjacency check.
+	stripped := ansi.Strip(line)
+	if !strings.Contains(stripped, "x…NEEDLEy") && !strings.Contains(stripped, "xNEEDLEy") {
+		t.Errorf("expected trailing context after the match, got %q (stripped: %q)", line, stripped)
 	}
 }
 
@@ -218,8 +221,8 @@ func TestSearchReplaceResizeRefreshesResultsView(t *testing.T) {
 	if a2.searchReplace.resultsMaxContentW != correctW {
 		t.Errorf("resultsMaxContentW = %d after resize, want %d recomputed — refreshResultsView must rerun on resize, not just viewport.Width", a2.searchReplace.resultsMaxContentW, correctW)
 	}
-	if a2.searchReplace.viewport.Width != a2.searchReplace.resultsW() {
-		t.Errorf("viewport.Width = %d, want %d (resultsW() after resize)", a2.searchReplace.viewport.Width, a2.searchReplace.resultsW())
+	if a2.searchReplace.viewport.Width() != a2.searchReplace.resultsW() {
+		t.Errorf("viewport.Width = %d, want %d (resultsW() after resize)", a2.searchReplace.viewport.Width(), a2.searchReplace.resultsW())
 	}
 }
 
@@ -238,8 +241,8 @@ func TestSearchReplaceResultsWShrinksToFitContent(t *testing.T) {
 	if got, want := d.resultsW(), dialogInnerW(d.width); got != want {
 		t.Errorf("short result: resultsW() = %d, want floor %d", got, want)
 	}
-	if d.viewport.Width != d.resultsW() {
-		t.Errorf("viewport.Width = %d, want %d to match resultsW()", d.viewport.Width, d.resultsW())
+	if d.viewport.Width() != d.resultsW() {
+		t.Errorf("viewport.Width = %d, want %d to match resultsW()", d.viewport.Width(), d.resultsW())
 	}
 
 	// A very long result line should widen the box, but never past
@@ -365,7 +368,7 @@ func TestSearchReplaceEnterOpensMatchWhenReplaceClosed(t *testing.T) {
 	// d.replaceOpen is false by default.
 
 	a := App{searchReplace: d}
-	updated, cmd := a.handleSearchReplaceKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := a.handleSearchReplaceKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	a2 := updated.(App)
 
 	if a2.searchReplace != nil {
@@ -387,7 +390,7 @@ func TestSearchReplaceEnterKeepsDialogOpenWhenReplaceOpen(t *testing.T) {
 	d.cursor = 0
 
 	a := App{searchReplace: d}
-	updated, cmd := a.handleSearchReplaceKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := a.handleSearchReplaceKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	a2 := updated.(App)
 
 	if a2.searchReplace == nil {
@@ -546,13 +549,13 @@ func TestSpaceTogglesFilterOpen(t *testing.T) {
 	d.setFocus(sraFocusFilterToggle)
 	a := App{searchReplace: d}
 
-	updated, _ := a.handleSearchReplaceKey(tea.KeyMsg{Type: tea.KeySpace})
+	updated, _ := a.handleSearchReplaceKey(tea.KeyPressMsg{Code: tea.KeySpace})
 	a2 := updated.(App)
 	if !a2.searchReplace.filterOpen {
 		t.Fatal("filterOpen should be true after space on Filter toggle")
 	}
 
-	updated, _ = a2.handleSearchReplaceKey(tea.KeyMsg{Type: tea.KeySpace})
+	updated, _ = a2.handleSearchReplaceKey(tea.KeyPressMsg{Code: tea.KeySpace})
 	a3 := updated.(App)
 	if a3.searchReplace.filterOpen {
 		t.Fatal("filterOpen should be false after a second space on Filter toggle")

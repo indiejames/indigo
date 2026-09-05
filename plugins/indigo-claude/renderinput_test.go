@@ -4,8 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/lipgloss/v2"
 )
 
 // renderInput's focus indicator is purely a color change, which lipgloss
@@ -14,7 +13,6 @@ import (
 // byte-identical). Force a color-capable profile so these tests actually
 // exercise the styling instead of passing vacuously.
 func init() {
-	lipgloss.SetColorProfile(termenv.TrueColor)
 }
 
 // ansiFor renders s and extracts the escape sequence preceding it, for

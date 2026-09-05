@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	proto "github.com/indiejames/indigo/internal/proto"
 )

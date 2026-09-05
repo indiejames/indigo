@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
@@ -101,7 +101,7 @@ func TestNoBufferOpenCtrlPStartsScanWithoutBlocking(t *testing.T) {
 		fileChangedIdx: -1,
 	}
 
-	updated, cmd := a.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, cmd := a.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	a2 := updated.(App)
 
 	if a2.picker == nil {

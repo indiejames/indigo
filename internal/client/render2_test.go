@@ -5,9 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
@@ -137,9 +136,16 @@ func TestRenderLineRunesOverlayInSelectionUsesSelectionStyle(t *testing.T) {
 
 	var selected strings.Builder
 	renderLineRunes(&selected, []rune("  x"), 0, 2, -1, nil, []lineOverlay{guideOverlay}, nil)
-	want := selectionStyle.Render("▏") + selectionStyle.Render(" ") + selectionStyle.Render("x")
-	if got := selected.String(); got != want {
-		t.Errorf("overlay inside selection = %q, want %q", got, want)
+	// Assert the styling of the glyph rather than exact span boundaries:
+	// adjacent runes sharing a style may be emitted as one styled span or
+	// several, which is a rendering detail that says nothing about whether
+	// the overlay picked up selectionStyle.
+	got := selected.String()
+	if !strings.Contains(got, selectionStyle.Render("▏")) {
+		t.Errorf("overlay glyph inside selection should render with selectionStyle, got %q", got)
+	}
+	if strings.Contains(got, guideOverlay.text) {
+		t.Errorf("overlay inside selection kept its own indentGuideStyle instead of selectionStyle: %q", got)
 	}
 
 	var unselected strings.Builder
@@ -173,9 +179,6 @@ func TestRenderLineRunesTrailingOverlayPaddingSplitsAtSelectionBoundary(t *testi
 	// run with no tty), which would make the old all-or-nothing styling and
 	// the fixed split-at-boundary styling produce identical plain-text
 	// output. Force real ANSI output so the two are actually distinguishable.
-	orig := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(orig)
 
 	guide := lineOverlay{col: 4, text: indentGuideStyle.Render("▏"), w: 1, plain: "▏"}
 
@@ -312,8 +315,10 @@ func TestRenderLineNormal(t *testing.T) {
 	if lipgloss.Width(line) != m.width {
 		t.Errorf("renderLine width = %d, want %d", lipgloss.Width(line), m.width)
 	}
-	if !strings.Contains(line, "hello") {
-		t.Errorf("renderLine should contain 'hello', got: %q", line)
+	// Strip ANSI: the cursor cell styles the first character on its own, so
+	// the styled string has an SGR reset sitting inside the word.
+	if stripped := ansi.Strip(line); !strings.Contains(stripped, "hello") {
+		t.Errorf("renderLine should contain 'hello', got: %q (stripped: %q)", line, stripped)
 	}
 }
 
@@ -480,14 +485,14 @@ func TestRenderStatusBarZeroWidth(t *testing.T) {
 func TestViewZeroWidth(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.width = 0
-	if got := m.View(); got != "loading…" {
+	if got := m.View().Content; got != "loading…" {
 		t.Errorf("View() with zero width = %q, want 'loading…'", got)
 	}
 }
 
 func TestViewNormal(t *testing.T) {
 	m := newTestModel("hello\nworld\n")
-	out := m.View()
+	out := m.View().Content
 	if out == "" {
 		t.Error("View() should return non-empty output")
 	}
@@ -501,7 +506,7 @@ func TestViewCommandModeShowsPopup(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.mode = ModeCommand
 	m.cmdBuf = ""
-	out := m.View()
+	out := m.View().Content
 	stripped := ansiStrip(out)
 	// The popup title "Commands" should appear
 	if !strings.Contains(stripped, "Commands") {
@@ -628,51 +633,32 @@ func TestCursorShapeConfigSelectsUnderline(t *testing.T) {
 	})
 }
 
-// TestCursorShapeUnderlineReachesRenderedFrame checks the choice actually
-// reaches rendered output, not just the style object — a styled cell is the
-// only cursor indigo draws (the terminal's own stays hidden), so if the
-// underline isn't in the frame the option does nothing on screen.
+// TestBufferCursorIsNotPaintedInNormalMode is the counterpart to the cursor
+// tests in cursor_test.go: the shape now reaches the screen through the
+// terminal's own cursor (View.Cursor), so the frame must NOT also contain a
+// painted cursor cell. Two cursors would otherwise be visible at once.
 //
-// Asserts against what the styles themselves render rather than a literal
-// escape sequence: lipgloss emits one combined SGR per cell (underline and
-// foreground together, e.g. "\x1b[4;38;2;255;255;255;4m"), so searching for a
-// standalone "\x1b[4m" would report a false failure.
-func TestCursorShapeUnderlineReachesRenderedFrame(t *testing.T) {
-	// Render() is a no-op without a color profile (a normal `go test` run has
-	// no tty), which would strip every SGR — including the existing block
-	// cursor's — and make this assertion vacuous. Same forcing the
-	// split-styling test above uses.
-	origProfile := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(origProfile) })
-	// The cursor styles are built at init/ApplyTheme time, before the profile
-	// change above, so rebuild them under the forced profile.
+// This replaced an earlier test that asserted the painted cell *was* present
+// — correct for the pre-v2 implementation, where restyling a cell was the
+// only cursor indigo could draw.
+func TestBufferCursorIsNotPaintedInNormalMode(t *testing.T) {
 	applyDefaultDark()
 	t.Cleanup(applyDefaultDark)
 
-	// Cursor starts at line 0, col 0, so the styled cell is "hello"'s "h".
-	underlinedCell := normalCursorUnderlineStyle.Render("h")
+	// Cursor starts at line 0, col 0, so the painted cell would be "hello"'s "h".
 	blockCell := normalCursorStyle.Render("h")
+	underlinedCell := normalCursorUnderlineStyle.Render("h")
 
-	m := newTestModel("hello\n")
-	m.width, m.height = 40, 6
-	m.mode = ModeNormal
+	for _, shape := range []string{"block", "underline", "bar"} {
+		m := newTestModel("hello\n")
+		m.width, m.height = 40, 6
+		m.mode = ModeNormal
+		m.cfg = &config.Config{CursorShape: shape}
 
-	m.cfg = &config.Config{CursorShape: "underline"}
-	out := m.View()
-	if !strings.Contains(out, underlinedCell) {
-		t.Errorf("cursor_shape=underline: frame does not contain the underlined cursor cell %q", underlinedCell)
-	}
-	if strings.Contains(out, blockCell) {
-		t.Errorf("cursor_shape=underline: frame still contains the block cursor cell %q", blockCell)
-	}
-
-	m.cfg = &config.Config{} // default: block
-	out = m.View()
-	if !strings.Contains(out, blockCell) {
-		t.Errorf("default cursor_shape: frame does not contain the block cursor cell %q", blockCell)
-	}
-	if strings.Contains(out, underlinedCell) {
-		t.Errorf("default cursor_shape: frame unexpectedly contains the underlined cursor cell %q", underlinedCell)
+		out := m.View().Content
+		if strings.Contains(out, blockCell) || strings.Contains(out, underlinedCell) {
+			t.Errorf("cursor_shape=%s: frame still paints a cursor cell; the terminal cursor "+
+				"already draws it, so this shows two cursors at once:\n%q", shape, out)
+		}
 	}
 }

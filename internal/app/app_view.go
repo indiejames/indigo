@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -22,60 +24,97 @@ var (
 	tabBarFill   = lipgloss.NewStyle().Background(tabBarBg)
 )
 
-func (a App) View() string {
+// View returns the frame plus the terminal modes indigo needs. v2 moved
+// these out of tea.NewProgram options and onto the View itself, so they're
+// declared per-frame here rather than once at startup: alt screen, focus
+// reporting, and cell-motion mouse tracking (clicks, wheel, and drag) —
+// the direct equivalents of v1's WithAltScreen/WithReportFocus/
+// WithMouseCellMotion.
+func (a App) View() tea.View {
+	content, cur := a.renderFrame()
+	v := tea.NewView(content)
+	v.Cursor = cur
+	v.AltScreen = true
+	v.ReportFocus = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
+
+// renderFrame returns the composed frame and the terminal cursor to draw on
+// it, if any.
+//
+// The cursor comes from the active buffer, shifted down by the tab bar, and
+// is dropped entirely whenever something is layered on top: a full-screen
+// picker replaces the buffer view outright, and every centered dialog has
+// its own text input drawing its own cursor, so leaving the buffer's real
+// cursor visible would strand it behind the dialog.
+func (a App) renderFrame() (string, *tea.Cursor) {
 	if a.picker != nil {
-		return a.picker.View()
+		return a.picker.View(), nil
 	}
 	if a.grep != nil {
-		return a.grep.View()
+		return a.grep.View(), nil
 	}
 	if a.diagBrowser != nil {
-		return a.diagBrowser.View()
+		return a.diagBrowser.View(), nil
 	}
 	if len(a.buffers) == 0 {
-		return "No buffer open. Press ctrl+p to open a file."
+		return "No buffer open. Press ctrl+p to open a file.", nil
 	}
 
 	var sb strings.Builder
+	tabRows := 0
 	if a.showTabBar() {
 		sb.WriteString(a.renderTabBar())
 		sb.WriteByte('\n')
+		tabRows = 1
 	}
-	sb.WriteString(a.buffers[a.active].View())
+	bufView := a.buffers[a.active].View()
+	sb.WriteString(bufView.Content)
 	base := sb.String()
 
 	if a.fileChangedIdx >= 0 {
-		return overlayCenter(base, renderFileChangedPrompt(a.width, a.fileChangedSel), a.width, a.height)
+		return overlayCenter(base, renderFileChangedPrompt(a.width, a.fileChangedSel), a.width, a.height), nil
 	}
 	if a.bufPicker != nil {
-		return overlayCenter(base, a.bufPicker.render(), a.width, a.height)
+		return overlayCenter(base, a.bufPicker.render(), a.width, a.height), nil
 	}
 	if a.searchReplace != nil {
-		return overlayCenter(base, a.searchReplace.render(), a.width, a.height)
+		return overlayCenter(base, a.searchReplace.render(), a.width, a.height), nil
 	}
 	if a.pluginPopup != nil {
-		return overlayCenter(base, a.pluginPopup.render(), a.width, a.height)
+		return overlayCenter(base, a.pluginPopup.render(), a.width, a.height), nil
 	}
 	if a.pluginInput != nil {
-		return overlayCenter(base, a.pluginInput.render(), a.width, a.height)
+		return overlayCenter(base, a.pluginInput.render(), a.width, a.height), nil
 	}
 	if a.newFileInput != nil {
-		return overlayCenter(base, a.newFileInput.render(), a.width, a.height)
+		return overlayCenter(base, a.newFileInput.render(), a.width, a.height), nil
 	}
 	if a.newFileMkdirConfirm != nil {
 		popup := renderNewFileMkdirConfirm(filepath.Dir(*a.newFileMkdirConfirm), a.width)
-		return overlayCenter(base, popup, a.width, a.height)
+		return overlayCenter(base, popup, a.width, a.height), nil
 	}
 	if a.symbolPicker != nil {
-		return overlayCenter(base, a.symbolPicker.render(), a.width, a.height)
+		return overlayCenter(base, a.symbolPicker.render(), a.width, a.height), nil
 	}
 	if a.docSymbolPicker != nil {
-		return overlayCenter(base, a.docSymbolPicker.render(), a.width, a.height)
+		return overlayCenter(base, a.docSymbolPicker.render(), a.width, a.height), nil
 	}
 	if a.refPicker != nil {
-		return overlayCenter(base, a.refPicker.render(), a.width, a.height)
+		return overlayCenter(base, a.refPicker.render(), a.width, a.height), nil
 	}
-	return base
+
+	// Copy rather than shifting the buffer's own cursor in place: View()
+	// hands back a pointer into the value it just built, and nothing here
+	// should depend on that being safe to mutate.
+	var cur *tea.Cursor
+	if bufView.Cursor != nil {
+		c := *bufView.Cursor
+		c.Y += tabRows
+		cur = &c
+	}
+	return base, cur
 }
 
 const pluginPopupMaxVisible = 14

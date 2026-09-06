@@ -236,11 +236,13 @@ struct LspCodeAction {
 }
 
 enum PluginDecorationKind {
-  gutter     @0;
-  overlay    @1;
-  statusBar  @2;
-  underline  @3;
-  leftGutter @4;
+  gutter      @0;
+  overlay     @1;
+  statusBar   @2;
+  underline   @3;
+  leftGutter  @4;
+  removedLine @5; # extra screen row above `line`; [col,endCol) = intra-line emphasis
+  lineTint    @6; # background behind [col,endCol) of `line`; textColor = background hex
 }
 
 struct PopupItem {
@@ -266,7 +268,8 @@ struct PluginDecoration {
   fixable        @7 :Bool;
   fixData        @8 :Text;
   pluginName     @9 :Text;
-  textColor      @10 :Text;  # hex foreground color for gutter/overlay text; empty = default
+  textColor      @10 :Text;  # hex colour: foreground for gutter/overlay, background for lineTint
+  oldLine        @11 :UInt32; # for removedLine: this content's line number in the pre-change file
 }
 
 struct PluginFixItem {

@@ -112,6 +112,7 @@ func (s *editorService) GetPluginDecorations(ctx context.Context, call proto.Edi
 		if err := item.SetTextColor(d.TextColor); err != nil {
 			return err
 		}
+		item.SetOldLine(d.OldLine)
 	}
 	return nil
 }

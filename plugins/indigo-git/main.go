@@ -2,8 +2,12 @@
 //
 // Features:
 //   - Current branch name in the status bar
-//   - Gutter decorations showing git diff output:
-//     green │ for added lines, blue │ for changed lines, red ▾ for deletion points
+//   - Gutter decorations showing git diff output, in git's own colours: green
+//     for added lines, red for deletion points. There is no "modified line"
+//     state — like git, a change is a removal plus an addition. The editor
+//     draws these two ways: an unobtrusive colour block during ordinary
+//     editing, switching to git's own +/- signs (with the line numbers tinted
+//     to match) while the inline diff is on.
 //   - Fixed-width gutter: always emits a decoration for every visible line so
 //     layout never shifts when a file gains or loses diff markers
 //   - Immediate updates: polls .git/HEAD and .git/index every 500ms for branch
@@ -13,7 +17,11 @@
 //   - Blame details: a popup with the full commit (hash/author/date/summary)
 //     for the line under the cursor, reachable from the Command menu; selecting
 //     it opens the full commit diff
-//   - Diff view: opens `git diff HEAD` for the current file in a new tab
+//   - Inline diff (toggled by the git.diff action): removed lines are drawn in
+//     place as extra red rows labelled with their pre-change line numbers, and
+//     added lines are tinted green, with the runes that actually differ picked
+//     out brighter on both sides. Driven by the same live-buffer diff as the
+//     gutter markers, so it works on unsaved changes.
 //   - Hunk navigation: alt+n / alt+p jump the cursor to the next/previous
 //     changed hunk, using the same diff data that drives the gutter markers
 package main
@@ -39,8 +47,7 @@ type lineKind int
 
 const (
 	lineUnchanged lineKind = iota
-	lineAdded              // new line not in HEAD (green │)
-	lineChanged            // line that replaced a deleted line (blue │)
+	lineAdded              // new line relative to HEAD (green │)
 	lineDeleted            // deletion point: a red ▾ marker on this line
 )
 
@@ -49,6 +56,13 @@ type bufState struct {
 	path       string
 	lines      map[int]lineKind // 1-indexed line number → kind
 	hunkStarts []int            // 1-indexed first line of each hunk, ascending
+
+	// Inline diff (toggled by the git.diff action). removed/emph come from
+	// the same diff run that drives the gutter markers, so the inline view is
+	// always consistent with them and costs no extra git invocation.
+	inlineDiff bool
+	removed    map[int][]removedLine // 1-indexed anchor line → lines deleted above it
+	emph       map[int][2]int        // 1-indexed line → rune range that differs
 
 	blaming bool
 	blame   map[int]blameLine // 1-indexed line number → blame info
@@ -331,13 +345,17 @@ func (g *GitPlugin) updateDiffFromBuffer(bufID uint32, path, root string) {
 
 	out := stdout.String()
 	gitLog("updateDiffFromBuffer bufID=%d relPath=%s outputLen=%d", bufID, relPath, len(out))
-	lines, hunkStarts := parseDiff(out)
+	detail := parseDiff(out)
+	lines, hunkStarts := detail.lines, detail.hunkStarts
+	removedByLine, emphByLine := detail.removed, detail.emph
 	gitLog("updateDiffFromBuffer bufID=%d parsed %d changed lines", bufID, len(lines))
 
 	g.mu.Lock()
 	if bs, ok := g.bufs[bufID]; ok {
 		bs.lines = lines
 		bs.hunkStarts = hunkStarts
+		bs.removed = removedByLine
+		bs.emph = emphByLine
 		g.bufs[bufID] = bs
 	}
 	g.mu.Unlock()
@@ -360,12 +378,16 @@ func (g *GitPlugin) updateDiff(bufID uint32, path, root string) {
 			return
 		}
 	}
-	lines, hunkStarts := parseDiff(out)
+	detail := parseDiff(out)
+	lines, hunkStarts := detail.lines, detail.hunkStarts
+	removedByLine, emphByLine := detail.removed, detail.emph
 	gitLog("updateDiff bufID=%d parsed %d changed lines", bufID, len(lines))
 	g.mu.Lock()
 	if bs, ok := g.bufs[bufID]; ok {
 		bs.lines = lines
 		bs.hunkStarts = hunkStarts
+		bs.removed = removedByLine
+		bs.emph = emphByLine
 		g.bufs[bufID] = bs
 	}
 	g.mu.Unlock()
@@ -559,55 +581,41 @@ func (g *GitPlugin) jumpHunk(ctx sdk.KeyContext, forward bool) sdk.KeyResponse {
 
 // -- Diff view --
 
-// onDiff opens `git diff HEAD` for the current file in a new tab (a scratch
-// temp file, not a real repo file) so the user can review changes without
-// leaving the editor.
+// onDiff toggles the inline diff for the current buffer: lines removed
+// relative to HEAD are shown in place as extra rows, and added/changed lines
+// are tinted, instead of opening `git diff HEAD` in a separate tab.
+//
+// It reuses the diff data already computed for the gutter markers, which is
+// produced from the *live buffer* (see updateDiffFromBuffer) rather than from
+// disk — so the inline view is correct with unsaved changes and needs no
+// save first.
 func (g *GitPlugin) onDiff(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
 	if ctx.Mode != "normal" {
 		return sdk.KeyResponse{Handled: false}
 	}
 
-	path, _, _, _, _, err := g.api.BufferInfo(ctx.BufID)
-	if err != nil || path == "" {
+	g.mu.Lock()
+	bs, ok := g.bufs[ctx.BufID]
+	if !ok {
+		g.mu.Unlock()
 		return sdk.KeyResponse{Handled: true}
 	}
-	g.mu.RLock()
-	root := g.repoRoot
-	g.mu.RUnlock()
-	if root == "" {
-		root = findRepoRoot(path)
-	}
-	if root == "" {
-		g.api.ShowMessageTo(ctx.ClientID, "Not a git repository") //nolint:errcheck
-		return sdk.KeyResponse{Handled: true}
-	}
+	bs.inlineDiff = !bs.inlineDiff
+	on, changed := bs.inlineDiff, len(bs.lines) > 0
+	g.bufs[ctx.BufID] = bs
+	g.mu.Unlock()
 
-	clientID := ctx.ClientID
-	go func() {
-		relPath, err := filepath.Rel(root, path)
-		if err != nil {
-			relPath = path
-		}
-		out, err := runGit(root, "diff", "HEAD", "--", relPath)
-		if err != nil {
-			// Staged new file not yet in HEAD — diff against empty to show added lines.
-			out, err = runGit(root, "diff", "--cached", "--", relPath)
-			if err != nil {
-				g.api.ShowMessageTo(clientID, "git diff failed: "+err.Error()) //nolint:errcheck
-				return
-			}
-		}
-		if strings.TrimSpace(out) == "" {
-			g.api.ShowMessageTo(clientID, "No changes in "+filepath.Base(path)) //nolint:errcheck
-			return
-		}
-		tmpPath, err := writeTemp(fmt.Sprintf("indigo-diff-%s-*.diff", filepath.Base(path)), out)
-		if err != nil {
-			g.api.ShowMessageTo(clientID, "failed to write diff: "+err.Error()) //nolint:errcheck
-			return
-		}
-		g.api.OpenFile(tmpPath, 0) //nolint:errcheck
-	}()
+	switch {
+	case on && !changed:
+		g.api.ShowMessageTo(ctx.ClientID, "No changes vs HEAD") //nolint:errcheck
+	case on:
+		g.api.ShowMessageTo(ctx.ClientID, "Inline diff on") //nolint:errcheck
+	default:
+		g.api.ShowMessageTo(ctx.ClientID, "Inline diff off") //nolint:errcheck
+	}
+	// Push rather than waiting for the next poll, so the toggle feels
+	// immediate instead of up to ~360ms late.
+	g.api.RefreshDecorations(ctx.BufID)
 
 	return sdk.KeyResponse{Handled: true}
 }
@@ -727,11 +735,16 @@ func (g *GitPlugin) decorations(bufID uint32, _ uint64, r sdk.Range) []sdk.Decor
 	bs, hasBuf := g.bufs[bufID]
 	var lineDiff map[int]lineKind
 	var blameData map[int]blameLine
-	blaming := false
+	var removedData map[int][]removedLine
+	var emphData map[int][2]int
+	blaming, inlineDiff := false, false
 	if hasBuf {
 		lineDiff = bs.lines
 		blameData = bs.blame
 		blaming = bs.blaming
+		inlineDiff = bs.inlineDiff
+		removedData = bs.removed
+		emphData = bs.emph
 	}
 	g.mu.RUnlock()
 
@@ -754,6 +767,43 @@ func (g *GitPlugin) decorations(bufID uint32, _ uint64, r sdk.Range) []sdk.Decor
 		}
 		dec := gutterDecoration(line, kind)
 		out = append(out, dec)
+
+		if !inlineDiff {
+			continue
+		}
+		// Removed lines are anchored above the line that replaced them, and
+		// are emitted only for visible rows so a file with a huge deletion
+		// doesn't ship its whole history to the client every refresh.
+		for _, rl := range removedData[ln] {
+			out = append(out, sdk.Decoration{
+				Kind:    sdk.DecorationRemovedLine,
+				Line:    line,
+				Text:    rl.Text,
+				Col:     uint32(rl.EmphStart),
+				EndCol:  uint32(rl.EmphEnd),
+				OldLine: uint32(rl.OldLine),
+			})
+		}
+		// Whole-line tint for added/changed lines, then the narrower
+		// intra-line emphasis on top of it where we know what changed.
+		if bg := tintForKind(kind); bg != "" {
+			out = append(out, sdk.Decoration{
+				Kind:      sdk.DecorationLineTint,
+				Line:      line,
+				Col:       0,
+				EndCol:    ^uint32(0), // whole line; the client clamps to its length
+				TextColor: bg,
+			})
+			if e, ok := emphData[ln]; ok && e[0] < e[1] {
+				out = append(out, sdk.Decoration{
+					Kind:      sdk.DecorationLineTint,
+					Line:      line,
+					Col:       uint32(e[0]),
+					EndCol:    uint32(e[1]),
+					TextColor: emphTintForKind(kind),
+				})
+			}
+		}
 	}
 
 	if blaming && len(blameData) > 0 {
@@ -843,11 +893,9 @@ func pluralAgo(n int, unit string) string {
 func gutterDecoration(line uint32, kind lineKind) sdk.Decoration {
 	switch kind {
 	case lineAdded:
-		return sdk.Decoration{Kind: sdk.DecorationGutter, Line: line, Text: "│", TextColor: "#44BB44"}
-	case lineChanged:
-		return sdk.Decoration{Kind: sdk.DecorationGutter, Line: line, Text: "│", TextColor: "#4488FF"}
+		return sdk.Decoration{Kind: sdk.DecorationGutter, Line: line, Text: "+", TextColor: gitAddedFg}
 	case lineDeleted:
-		return sdk.Decoration{Kind: sdk.DecorationGutter, Line: line, Text: "▾", TextColor: "#FF5555"}
+		return sdk.Decoration{Kind: sdk.DecorationGutter, Line: line, Text: "-", TextColor: gitRemovedFg}
 	default:
 		return sdk.Decoration{Kind: sdk.DecorationGutter, Line: line, Text: ""}
 	}
@@ -856,17 +904,101 @@ func gutterDecoration(line uint32, kind lineKind) sdk.Decoration {
 // parseDiff parses the output of `git diff --unified=0` and returns a map of
 // 1-indexed new-file line numbers to their lineKind, plus the 1-indexed first
 // line of each hunk in file order (for hunk-navigation commands).
-func parseDiff(output string) (map[int]lineKind, []int) {
-	result := map[int]lineKind{}
-	var hunkStarts []int
+// removedLine is a line present in HEAD but not in the buffer, along with the
+// rune range within it that actually differs from the line that replaced it
+// (empty for a pure deletion, which has no counterpart).
+type removedLine struct {
+	Text      string
+	EmphStart int
+	EmphEnd   int
+	// OldLine is this content's 1-based line number in the pre-change file,
+	// shown in the gutter beside it the way `git diff` numbers removals.
+	OldLine int
+}
+
+// diffDetail is everything parseDiff extracts from one diff run.
+//
+// lines/hunkStarts drive the gutter markers and hunk navigation, and are what
+// this parser produced originally. removed and emph were added for the inline
+// diff: the `-`/`+` content lines were previously skipped entirely (only the
+// @@ headers were read), so the removed text and the intra-line ranges had to
+// be recovered before anything could be shown in place.
+type diffDetail struct {
+	lines      map[int]lineKind
+	hunkStarts []int
+	// removed maps a 1-based new-file line to the lines deleted immediately
+	// above it, in order.
+	removed map[int][]removedLine
+	// emph maps a 1-based new-file line to the rune range on it that differs
+	// from the line it replaced.
+	emph map[int][2]int
+}
+
+// parseDiff extracts gutter kinds, hunk starts, removed content, and
+// intra-line ranges from `diff --unified=0` output.
+//
+// --unified=0 means a hunk body is exactly its `-` lines followed by its `+`
+// lines, with no context, so the two sides can be paired positionally.
+func parseDiff(output string) diffDetail {
+	d := diffDetail{
+		lines:   map[int]lineKind{},
+		removed: map[int][]removedLine{},
+		emph:    map[int][2]int{},
+	}
+
+	var (
+		curMark  int      // anchor line for the hunk's removed rows
+		curOld   int      // pre-change line number of the hunk's first removed line
+		oldTexts []string // `-` lines of the current hunk
+		newTexts []string // `+` lines of the current hunk
+		inHunk   bool
+	)
+
+	// flush pairs up the current hunk's removed and added lines. Positional
+	// pairing: the Nth removed line corresponds to the Nth added line, which
+	// is what a --unified=0 hunk gives us and is right for the common case of
+	// an edit in place. Surplus removed lines have no counterpart and carry
+	// no emphasis.
+	flush := func() {
+		if !inHunk {
+			return
+		}
+		for i, oldText := range oldTexts {
+			rl := removedLine{Text: oldText, OldLine: curOld + i}
+			if i < len(newTexts) {
+				oldR, newR := intraLineDiff(oldText, newTexts[i])
+				rl.EmphStart, rl.EmphEnd = oldR[0], oldR[1]
+				if newR[0] < newR[1] {
+					d.emph[curMark+i] = newR
+				}
+			}
+			d.removed[curMark] = append(d.removed[curMark], rl)
+		}
+		oldTexts, newTexts, inHunk = nil, nil, false
+	}
+
 	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), maxDiffLineBytes)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if !strings.HasPrefix(line, "@@") {
+
+		switch {
+		case strings.HasPrefix(line, "@@"):
+			flush()
+		case strings.HasPrefix(line, "---"), strings.HasPrefix(line, "+++"):
+			continue // file headers, not content
+		case inHunk && strings.HasPrefix(line, "-"):
+			oldTexts = append(oldTexts, line[1:])
+			continue
+		case inHunk && strings.HasPrefix(line, "+"):
+			newTexts = append(newTexts, line[1:])
+			continue
+		default:
 			continue
 		}
+
 		// Parse: @@ -oldStart[,oldCount] +newStart[,newCount] @@
-		oldCount, newStart, newCount := parseHunkHeader(line)
+		oldStart, oldCount, newStart, newCount := parseHunkHeader(line)
 		if newCount == 0 && oldCount == 0 {
 			continue
 		}
@@ -876,31 +1008,88 @@ func parseDiff(output string) (map[int]lineKind, []int) {
 		if mark < 1 {
 			mark = 1
 		}
-		hunkStarts = append(hunkStarts, mark)
+		d.hunkStarts = append(d.hunkStarts, mark)
+		// Removed rows render *above* the line they anchor to, which is not
+		// the same line the gutter marker goes on:
+		//
+		//   - Mixed hunk: newStart is the line that replaced the removed
+		//     content, so the removed rows belong directly above it.
+		//   - Pure deletion: "@@ -2 +1,0 @@" means zero lines at new-file
+		//     position 1 — the removed content sat *after* new line 1, so it
+		//     belongs above line newStart+1. Anchoring at newStart put it a
+		//     line too high, above the deletion point rather than at it.
+		//
+		// newStart can be 0 for a deletion at the very start of the file,
+		// which lands correctly on line 1 here.
+		curMark = mark
+		if newCount == 0 {
+			curMark = newStart + 1
+		}
+		curOld = oldStart
+		inHunk = true
 		switch {
 		case oldCount == 0:
 			// Pure addition: newStart..newStart+newCount are ADDED.
 			for i := 0; i < newCount; i++ {
-				result[newStart+i] = lineAdded
+				d.lines[newStart+i] = lineAdded
 			}
 		case newCount == 0:
 			// Pure deletion: mark the line at newStart as a deletion point.
 			// Only mark if not already a stronger decoration.
-			if result[mark] == lineUnchanged {
-				result[mark] = lineDeleted
+			if d.lines[mark] == lineUnchanged {
+				d.lines[mark] = lineDeleted
 			}
 		default:
-			// Mixed hunk: newStart..newStart+newCount are CHANGED.
+			// Mixed hunk: every new line is an ADDITION, and the lines it
+			// replaced are shown separately as removed rows.
+			//
+			// This is git's model, deliberately: git has no "modified line"
+			// concept at all, only `-` and `+`. Earlier versions marked these
+			// lines CHANGED and rendered them blue, which made a real edit
+			// ("@@ -1,2 +1,6 @@") show six blue lines where git showed two
+			// removals and six additions.
+			//
+			// The -/+ pairing still happens in flush() for *intra-line*
+			// emphasis — the one place indigo is more precise than git, since
+			// it can point at the runes that actually differ. It just no
+			// longer changes the line's colour.
 			for i := 0; i < newCount; i++ {
-				result[newStart+i] = lineChanged
+				d.lines[newStart+i] = lineAdded
 			}
 		}
 	}
-	return result, hunkStarts
+	flush()
+	return d
+}
+
+// maxDiffLineBytes caps a single diff line so a minified or generated file
+// can't make the scanner allocate without bound.
+const maxDiffLineBytes = 1 << 20
+
+// intraLineDiff returns the rune ranges of oldS and newS that actually
+// differ, found by trimming the common prefix and the common suffix.
+//
+// This is deliberately not a full LCS. The dominant real edit is a change
+// somewhere inside an otherwise-identical line, which prefix/suffix trimming
+// isolates exactly; multi-region edits degrade to one span covering all of
+// them, which is still far better than tinting the whole line. Both returned
+// ranges are half-open [start, end) in runes, and are empty when the strings
+// are identical.
+func intraLineDiff(oldS, newS string) (oldRange, newRange [2]int) {
+	o, n := []rune(oldS), []rune(newS)
+	p := 0
+	for p < len(o) && p < len(n) && o[p] == n[p] {
+		p++
+	}
+	suf := 0
+	for suf < len(o)-p && suf < len(n)-p && o[len(o)-1-suf] == n[len(n)-1-suf] {
+		suf++
+	}
+	return [2]int{p, len(o) - suf}, [2]int{p, len(n) - suf}
 }
 
 // parseHunkHeader extracts oldCount, newStart, newCount from a @@ line.
-func parseHunkHeader(line string) (oldCount, newStart, newCount int) {
+func parseHunkHeader(line string) (oldStart, oldCount, newStart, newCount int) {
 	// Format: @@ -A[,B] +C[,D] @@ ...
 	end := strings.Index(line[2:], "@@")
 	if end < 0 {
@@ -911,7 +1100,7 @@ func parseHunkHeader(line string) (oldCount, newStart, newCount int) {
 	if len(parts) < 2 {
 		return
 	}
-	_, oldCount = parseRange(parts[0]) // parts[0] starts with '-'
+	oldStart, oldCount = parseRange(parts[0]) // parts[0] starts with '-'
 	newStart, newCount = parseRange(parts[1])
 	return
 }
@@ -964,3 +1153,35 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+// tintForKind returns the whole-line background for a diff kind, or "" for
+// kinds that get no tint. Deliberately dark: the tint sits behind syntax
+// highlighting, so it has to read as a wash rather than compete with the
+// foreground colours on top of it.
+func tintForKind(k lineKind) string {
+	switch k {
+	case lineAdded:
+		return "#16301C"
+	default:
+		return ""
+	}
+}
+
+// emphTintForKind returns the brighter background marking the runes that
+// actually changed within a line, layered over tintForKind's wash.
+func emphTintForKind(k lineKind) string {
+	switch k {
+	case lineAdded:
+		return "#245C31"
+	default:
+		return ""
+	}
+}
+
+// Accent colours for the diff gutter, matching git's own red/green. These are
+// foregrounds for the +/- signs and the line numbers beside them, distinct
+// from the darker line backgrounds in tintForKind.
+const (
+	gitAddedFg   = "#44BB44"
+	gitRemovedFg = "#FF5555"
+)

@@ -257,7 +257,10 @@ struct Decoration {
   underlineColor @6 :Text;            # hex color e.g. "#FF8C00"; empty = default
   fixable        @7 :Bool;            # true = Shift+F can offer fixes here
   fixData        @8 :Text;            # opaque token passed back to getFixes/applyFix
-  textColor      @9 :Text;            # hex foreground color for gutter/overlay text; empty = default
+  textColor      @9 :Text;            # hex colour for this decoration: foreground for
+                                      # gutter/overlay text, background for lineTint; empty = default
+  oldLine        @10 :UInt32;         # for removedLine: the line number this content had in the
+                                      # pre-change file, shown in the gutter beside it (1-based; 0 = unknown)
 }
 
 # FixItem is one option presented to the user in the fix popup.
@@ -269,11 +272,21 @@ struct FixItem {
 }
 
 enum DecorationKind {
-  gutter     @0;
-  overlay    @1;
-  statusBar  @2;
-  underline  @3; # applies underlineStyle/underlineColor to the span [col, endCol)
-  leftGutter @4; # 2-cell left gutter slot (left of line numbers); text = single char
+  gutter      @0;
+  overlay     @1;
+  statusBar   @2;
+  underline   @3; # applies underlineStyle/underlineColor to the span [col, endCol)
+  leftGutter  @4; # 2-cell left gutter slot (left of line numbers); text = single char
+  # removedLine renders `text` as a whole extra screen row immediately above
+  # `line`, for content that is not in the buffer at all (a line deleted
+  # relative to HEAD). [col, endCol) marks the runes within `text` that differ
+  # from the line that replaced it; an empty range means no emphasis.
+  removedLine @5;
+  # lineTint paints a background colour behind [col, endCol) of `line`,
+  # underneath its syntax highlighting. textColor carries the background hex
+  # for this kind. A tint reaching endCol >= the line length extends across
+  # the row's trailing padding.
+  lineTint    @6;
 }
 
 enum UnderlineStyle {

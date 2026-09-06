@@ -19,7 +19,7 @@ import (
 func TestRenderLineRunesPlain(t *testing.T) {
 	var sb strings.Builder
 	runes := []rune("hello")
-	renderLineRunes(&sb, runes, -1, -1, -1, nil, nil, nil)
+	renderLineRunes(&sb, runes, -1, -1, -1, nil, nil, nil, nil)
 	if got := sb.String(); got != "hello" {
 		t.Errorf("plain = %q, want %q", got, "hello")
 	}
@@ -29,7 +29,7 @@ func TestRenderLineRunesCursorAtEnd(t *testing.T) {
 	var sb strings.Builder
 	runes := []rune("hi")
 	// curCol == len(runes): cursor rendered as trailing space
-	renderLineRunes(&sb, runes, -1, -1, 2, nil, nil, nil)
+	renderLineRunes(&sb, runes, -1, -1, 2, nil, nil, nil, nil)
 	got := sb.String()
 	if got == "" {
 		t.Error("cursor beyond line should append styled space")
@@ -38,7 +38,7 @@ func TestRenderLineRunesCursorAtEnd(t *testing.T) {
 
 func TestRenderLineRunesEmpty(t *testing.T) {
 	var sb strings.Builder
-	renderLineRunes(&sb, []rune{}, -1, -1, -1, nil, nil, nil)
+	renderLineRunes(&sb, []rune{}, -1, -1, -1, nil, nil, nil, nil)
 	if sb.String() != "" {
 		t.Errorf("empty runes: got %q, want empty", sb.String())
 	}
@@ -73,7 +73,7 @@ func TestRenderLineRunesNestedSpanWinsOverEnclosingSpan(t *testing.T) {
 	}
 
 	var sb strings.Builder
-	renderLineRunes(&sb, line, -1, -1, -1, spans, nil, nil)
+	renderLineRunes(&sb, line, -1, -1, -1, spans, nil, nil, nil)
 	got := sb.String()
 
 	nestedText := outerANSI + "main"
@@ -102,7 +102,7 @@ func TestRenderLineRunesTrailingOverlaysAreSpacedByColumn(t *testing.T) {
 	renderLineRunes(&sb, []rune{}, -1, -1, -1, nil, []lineOverlay{
 		{col: 0, text: "|", w: 1},
 		{col: 2, text: "|", w: 1},
-	}, nil)
+	}, nil, nil)
 	if got, want := sb.String(), "| |"; got != want {
 		t.Errorf("trailing overlays = %q, want %q", got, want)
 	}
@@ -119,7 +119,7 @@ func TestRenderLineRunesTrailingOverlayColumnWithCursorOnEmptyLine(t *testing.T)
 	var sb strings.Builder
 	renderLineRunes(&sb, []rune{}, -1, -1, 0, nil, []lineOverlay{
 		{col: 2, text: "|", w: 1},
-	}, nil)
+	}, nil, nil)
 	// cursor cell (col 0) + 1 col of padding (col 1) + the overlay at col 2.
 	if got, want := ansi.Strip(sb.String()), "  |"; got != want {
 		t.Errorf("trailing overlay with cursor on empty line = %q, want %q", got, want)
@@ -135,7 +135,7 @@ func TestRenderLineRunesOverlayInSelectionUsesSelectionStyle(t *testing.T) {
 	guideOverlay := lineOverlay{col: 0, text: indentGuideStyle.Render("▏"), w: 1, plain: "▏"}
 
 	var selected strings.Builder
-	renderLineRunes(&selected, []rune("  x"), 0, 2, -1, nil, []lineOverlay{guideOverlay}, nil)
+	renderLineRunes(&selected, []rune("  x"), 0, 2, -1, nil, []lineOverlay{guideOverlay}, nil, nil)
 	// Assert the styling of the glyph rather than exact span boundaries:
 	// adjacent runes sharing a style may be emitted as one styled span or
 	// several, which is a rendering detail that says nothing about whether
@@ -149,7 +149,7 @@ func TestRenderLineRunesOverlayInSelectionUsesSelectionStyle(t *testing.T) {
 	}
 
 	var unselected strings.Builder
-	renderLineRunes(&unselected, []rune("  x"), -1, -1, -1, nil, []lineOverlay{guideOverlay}, nil)
+	renderLineRunes(&unselected, []rune("  x"), -1, -1, -1, nil, []lineOverlay{guideOverlay}, nil, nil)
 	if got := unselected.String(); !strings.Contains(got, guideOverlay.text) {
 		t.Errorf("overlay outside selection = %q, want it to keep its own style %q", got, guideOverlay.text)
 	}
@@ -163,7 +163,7 @@ func TestRenderLineRunesTrailingOverlayInSelectionUsesSelectionStyle(t *testing.
 	guide := lineOverlay{col: 0, text: indentGuideStyle.Render("▏"), w: 1, plain: "▏"}
 
 	var sb strings.Builder
-	renderLineRunes(&sb, []rune{}, 0, 0, -1, nil, []lineOverlay{guide}, nil)
+	renderLineRunes(&sb, []rune{}, 0, 0, -1, nil, []lineOverlay{guide}, nil, nil)
 	if got, want := sb.String(), selectionStyle.Render("▏"); got != want {
 		t.Errorf("blank selected line overlay = %q, want %q", got, want)
 	}
@@ -178,7 +178,7 @@ func TestRenderLineRunesTrailingOverlayPaddingSplitsAtSelectionBoundary(t *testi
 	guide := lineOverlay{col: 4, text: indentGuideStyle.Render("▏"), w: 1, plain: "▏"}
 
 	var sb strings.Builder
-	renderLineRunes(&sb, []rune{}, 0, 1, -1, nil, []lineOverlay{guide}, nil)
+	renderLineRunes(&sb, []rune{}, 0, 1, -1, nil, []lineOverlay{guide}, nil, nil)
 	want := selectionStyle.Render("  ") + "  " + guide.text
 	if got := sb.String(); got != want {
 		t.Errorf("blank selected line padding before overlay = %q, want %q", got, want)
@@ -227,7 +227,7 @@ func TestRenderLineRunesEmptyLineSelected(t *testing.T) {
 	// Empty line covered by a selection (selA=0, selB=0, no cursor here):
 	// should still render a styled padding cell, not nothing, so the line
 	// visibly shows as selected.
-	renderLineRunes(&sb, []rune{}, 0, 0, -1, nil, nil, nil)
+	renderLineRunes(&sb, []rune{}, 0, 0, -1, nil, nil, nil, nil)
 	if sb.String() == "" {
 		t.Error("empty selected line should render a styled space, got empty output")
 	}

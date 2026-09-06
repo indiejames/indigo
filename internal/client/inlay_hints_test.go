@@ -54,7 +54,7 @@ func TestInlayHintOverlayDoesNotConsumeRealContent(t *testing.T) {
 
 	var withHint strings.Builder
 	renderLineRunes(&withHint, line, -1, -1, -1, nil,
-		[]lineOverlay{{col: 5, text: ": number", w: 0}}, nil)
+		[]lineOverlay{{col: 5, text: ": number", w: 0}}, nil, nil)
 	got := ansi.Strip(withHint.String())
 	want := "let x: number = 1"
 	if got != want {
@@ -66,7 +66,7 @@ func TestInlayHintOverlayDoesNotConsumeRealContent(t *testing.T) {
 	// is the deliberate, correct choice for inlay hints, not an oversight.
 	var eating strings.Builder
 	renderLineRunes(&eating, line, -1, -1, -1, nil,
-		[]lineOverlay{{col: 5, text: "XXXXXXXX", w: 2}}, nil)
+		[]lineOverlay{{col: 5, text: "XXXXXXXX", w: 2}}, nil, nil)
 	gotEating := ansi.Strip(eating.String())
 	wantEating := "let xXXXXXXXX 1" // " =" (2 runes at col 5..7) replaced
 	if gotEating != wantEating {

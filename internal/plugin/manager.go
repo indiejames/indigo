@@ -85,6 +85,9 @@ const (
 	DecorationKindStatusBar  PluginDecorationKind = 2
 	DecorationKindUnderline  PluginDecorationKind = 3
 	DecorationKindLeftGutter PluginDecorationKind = 4
+	// See sdk.DecorationRemovedLine / sdk.DecorationLineTint.
+	DecorationKindRemovedLine PluginDecorationKind = 5
+	DecorationKindLineTint    PluginDecorationKind = 6
 )
 
 // PluginPopupItem is one entry in a plugin-driven list popup.
@@ -122,6 +125,10 @@ type PluginDecoration struct {
 
 	// TextColor is the hex foreground color for gutter/overlay text; empty = default.
 	TextColor string
+
+	// OldLine is only set for the removed-line kind: the 1-based line number
+	// this content had before the change, for the gutter beside it.
+	OldLine uint32
 }
 
 // TextEdit is a plain-Go representation of a capnp TextEdit, used in ServerBridge.
@@ -673,6 +680,7 @@ func (m *Manager) GetDecorations(ctx context.Context, clientID uint64, bufID, st
 				FixData:        fixData,
 				PluginName:     p.name,
 				TextColor:      textColor,
+				OldLine:        item.OldLine(),
 			})
 		}
 		rel()

@@ -155,6 +155,16 @@ const (
 	DecorationStatusBar  DecorationKind = 2 // rendered in the status bar center
 	DecorationUnderline  DecorationKind = 3 // underlines the span [Col, EndCol) on Line
 	DecorationLeftGutter DecorationKind = 4 // rendered in the 2-cell left gutter (before line numbers)
+	// DecorationRemovedLine renders Text as a whole extra screen row above
+	// Line — content not in the buffer at all, such as a line deleted
+	// relative to HEAD. Col/EndCol mark the runes within Text that differ
+	// from the line that replaced it; an empty range means no emphasis.
+	DecorationRemovedLine DecorationKind = 5
+	// DecorationLineTint paints a background behind [Col, EndCol) of Line,
+	// underneath its syntax highlighting, with TextColor as the background
+	// hex. A tint whose EndCol reaches the end of the line extends across the
+	// row's trailing padding.
+	DecorationLineTint DecorationKind = 6
 )
 
 // UnderlineStyle selects the underline rendering mode.
@@ -182,9 +192,16 @@ type Decoration struct {
 	Fixable bool
 	FixData string // opaque token passed back to GetFixes / ApplyFix
 
-	// TextColor is the hex foreground color for gutter or overlay text (e.g. "#44BB44").
-	// Empty means the terminal's default foreground color.
+	// TextColor is the hex colour for this decoration: the foreground for
+	// gutter and overlay text (e.g. "#44BB44"), or the background for
+	// DecorationLineTint. Empty means the terminal default.
 	TextColor string
+
+	// OldLine is only used by DecorationRemovedLine: the 1-based line number
+	// this content had in the pre-change file, shown in the gutter beside it
+	// the way `git diff` numbers its removed lines. 0 means unknown, and the
+	// gutter is left blank.
+	OldLine uint32
 }
 
 // FixItem is one option presented in the fix popup.
@@ -1067,6 +1084,7 @@ func (s *decorProviderServer) GetDecorations(_ context.Context, call pluginproto
 		if err := item.SetTextColor(d.TextColor); err != nil {
 			return err
 		}
+		item.SetOldLine(d.OldLine)
 	}
 	return nil
 }

@@ -527,6 +527,29 @@ var (
 	// Hex color for the matching-bracket/quote underline (updated by ApplyTheme).
 	activeMatchPair = "#AAAAAA"
 
+	// Inline git diff (see virtual_lines.go). virtualRemovedStyle renders a
+	// line that exists in HEAD but not the buffer; virtualGutterStyle blanks
+	// the gutter beside it, since a virtual row has no line number.
+	virtualRemovedStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#4A1E1E")).
+				Foreground(lipgloss.Color("#FFAAAA"))
+	virtualGutterStyle = lipgloss.NewStyle().Background(lipgloss.Color("#2A1414"))
+	// The removed row's own gutter: its pre-change line number and the "-"
+	// sign, both in git's red on the same dark ground as the row.
+	virtualNumStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#2A1414")).
+			Foreground(lipgloss.Color("#FF5555"))
+	virtualSignStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#2A1414")).
+				Foreground(lipgloss.Color("#FF5555")).
+				Bold(true)
+	// virtualRemovedEmphStyle marks the runes on a removed line that differ
+	// from the line replacing it — a brighter red on the same base, so the
+	// row still reads as one deletion rather than two colours.
+	virtualRemovedEmphStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#7A2A2A")).
+				Foreground(lipgloss.Color("#FFFFFF"))
+
 	// Popup border characters (updated by ApplyTheme).
 	bdrTL       = "╭"
 	bdrTR       = "╮"
@@ -764,6 +787,22 @@ type Model struct {
 	detectedIndent *config.IndentSettings // sniffed from buffer content on open; nil if inconclusive
 	metrics        *metricsData
 	recoveryPrompt bool // waiting for user to accept or discard recovery content
+
+	// virtualLines maps a buffer line to screen rows rendered immediately
+	// above it that hold supplied text rather than buffer content (removed
+	// lines in the inline git diff). See virtual_lines.go.
+	virtualLines map[int][]virtualLine
+
+	// lineTints maps a buffer line to background colour ranges layered under
+	// its syntax highlighting (added/changed lines and intra-line diff
+	// spans). See virtual_lines.go.
+	lineTints map[int][]tintRange
+
+	// inlineDiffOn is true while the git plugin is sending inline-diff state
+	// (removed rows and/or tints). It selects between the two gutter looks:
+	// +/- signs with coloured line numbers when on, plain coloured blocks
+	// when off. Derived in rebuildDiffDecorations.
+	inlineDiffOn bool
 
 	// Plugin decorations
 	decorations         []ClientDecoration
@@ -1689,6 +1728,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // stale result from a previous buffer switch; discard
 		}
 		m.decorations = msg.items
+		m = m.rebuildDiffDecorations()
 		if !m.reservePluginGutter {
 			for _, d := range msg.items {
 				if d.Kind == ClientDecorationGutter || d.Kind == ClientDecorationLeftGutter {

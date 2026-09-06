@@ -197,6 +197,13 @@ type layoutEntry struct {
 	bufLine    int // buffer line index
 	chunk      int // 0-based wrap segment within bufLine
 	chunkStart int // visual column where this chunk begins (chunk * cw)
+
+	// isVirtual marks a row that renders virtual text anchored above
+	// bufLine rather than the buffer's own content; virtualIdx selects
+	// which one. bufLine is then the anchor, not a line to render. See
+	// virtual_lines.go.
+	isVirtual  bool
+	virtualIdx int
 }
 
 // buildScreenLayout returns a slice mapping each visible screen row to its
@@ -215,11 +222,23 @@ func (m Model) buildScreenLayout(vis, cw int) []layoutEntry {
 		runes := []rune(m.buf.Line(bufLine))
 		exp, _ := expandTabsRemap(runes)
 		chunks := visualChunks(len(exp), cw)
-		// For the first line (topLine), start from topChunk instead of 0
+		// Virtual rows sit above the line they are anchored to, and count
+		// as leading chunks of it for scroll purposes: topChunk may land
+		// partway through them, which is what lets a viewport scroll into
+		// the middle of a large removal.
+		virt := m.virtualLinesBefore(bufLine)
 		firstChunk := 0
 		if bufLine == m.topLine {
-			firstChunk = min(startChunk, max(0, chunks-1))
+			firstChunk = min(startChunk, max(0, len(virt)+chunks-1))
 		}
+		for vi := firstChunk; vi < len(virt) && len(layout) < vis; vi++ {
+			layout = append(layout, layoutEntry{
+				bufLine:    bufLine,
+				isVirtual:  true,
+				virtualIdx: vi,
+			})
+		}
+		firstChunk = max(0, firstChunk-len(virt))
 		for chunk := firstChunk; chunk < chunks && len(layout) < vis; chunk++ {
 			layout = append(layout, layoutEntry{
 				bufLine:    bufLine,
@@ -240,6 +259,9 @@ func screenRowOf(layout []layoutEntry, bufLine, visCol, cw int) int {
 		chunk = visCol / cw
 	}
 	for i, e := range layout {
+		if e.isVirtual {
+			continue // not an addressable buffer position
+		}
 		if e.bufLine == bufLine && e.chunk == chunk {
 			return i
 		}
@@ -252,9 +274,7 @@ func screenRowOf(layout []layoutEntry, bufLine, visCol, cw int) int {
 func (m Model) cursorVisualRowFromTop(cw int) int {
 	row := 0
 	for l := m.topLine; l < m.cursor.Line && l < m.buf.LineCount(); l++ {
-		runes := []rune(m.buf.Line(l))
-		exp, _ := expandTabsRemap(runes)
-		chunks := visualChunks(len(exp), cw)
+		chunks := m.rowsForLine(l, cw)
 		// For topLine, skip topChunk chunks since they're above the viewport
 		if l == m.topLine {
 			row += max(0, chunks-m.topChunk)
@@ -273,11 +293,17 @@ func (m Model) cursorVisualRowFromTop(cw int) int {
 		if cw > 0 {
 			curChunk = curVisCol / cw
 		}
+		// Rows consumed above the cursor within its own line: first the
+		// virtual rows anchored above the line, then the cursor's own wrap
+		// chunk. Folded into one term so the topChunk adjustment below
+		// applies to both — a viewport scrolled into the middle of a large
+		// removal has topChunk landing among the virtual rows.
+		inLine := len(m.virtualLinesBefore(m.cursor.Line)) + curChunk
 		// If cursor is on topLine, adjust for topChunk
 		if m.cursor.Line == m.topLine {
-			row += max(0, curChunk-m.topChunk)
+			row += max(0, inLine-m.topChunk)
 		} else {
-			row += curChunk
+			row += inLine
 		}
 	}
 	return row
@@ -327,9 +353,7 @@ func (m Model) findTopLineForRow(line, chunk, cw, targetRow int) (int, int) {
 	}
 	l := line - 1
 	for l >= 0 {
-		runes := []rune(m.buf.Line(l))
-		exp, _ := expandTabsRemap(runes)
-		chunks := visualChunks(len(exp), cw)
+		chunks := m.rowsForLine(l, cw)
 		if chunks == rowsAbove {
 			return l, 0
 		}
@@ -359,9 +383,7 @@ func (m *Model) scrollToShowLineTail(line int) {
 	}
 	cw := m.contentWidth()
 	vis := m.visibleLines()
-	runes := []rune(m.buf.Line(line))
-	exp, _ := expandTabsRemap(runes)
-	lastChunk := visualChunks(len(exp), cw) - 1
+	lastChunk := m.rowsForLine(line, cw) - 1
 	topLine, topChunk := m.findTopLineForRow(line, lastChunk, cw, vis-1)
 	// Showing the tail must never scroll the cursor's own chunk out of
 	// view: if the line has more chunks than fit in the viewport at all,
@@ -369,7 +391,13 @@ func (m *Model) scrollToShowLineTail(line int) {
 	// satisfied, and cursor visibility wins. When the anchor line is the
 	// cursor's own line, cap topChunk at the cursor's chunk.
 	if topLine == m.cursor.Line {
-		if cursorChunk := m.chunkOfCol(m.cursor.Line, m.cursor.Col, cw); topChunk > cursorChunk {
+		// topChunk indexes the line's *combined* span — its virtual rows
+		// first, then its wrap chunks (see buildScreenLayout) — but
+		// chunkOfCol only counts wrap chunks, so the virtual rows have to be
+		// added back or the two are in different coordinate systems and the
+		// cap fires too early, cutting the tail short.
+		cursorChunk := len(m.virtualLinesBefore(m.cursor.Line)) + m.chunkOfCol(m.cursor.Line, m.cursor.Col, cw)
+		if topChunk > cursorChunk {
 			topChunk = cursorChunk
 		}
 	}
@@ -597,12 +625,16 @@ type underlineRange struct {
 	StartSeq string
 }
 
-// renderLineRunes writes runes with selection, cursor, highlight-span, underline,
-// and overlay label rendering applied in a single pass.
+// renderLineRunes writes runes with selection, cursor, highlight-span, tint,
+// underline, and overlay label rendering applied in a single pass.
 // overlays must be sorted by col ascending.
 // selA/selB are inclusive selected column bounds (-1,-1 for no selection).
 // curCol is the cursor column (-1 if cursor is not on this line).
-func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, spans []highlight.Span, overlays []lineOverlay, underlines []underlineRange) {
+// tints are diff background ranges layered *under* the syntax spans, so a
+// tinted line keeps its syntax colours (see tintRange). Selection and the
+// cursor still win outright over a tint, since both are transient user state
+// and need to stay legible against it.
+func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, spans []highlight.Span, overlays []lineOverlay, underlines []underlineRange, tints []tintRange) {
 	n := len(runes)
 	hasCursor := curCol >= 0
 	hasSel := selA >= 0
@@ -624,6 +656,18 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 			}
 		}
 		return -1
+	}
+
+	// Later tints win, so a narrow intra-line emphasis can be layered on top
+	// of the whole-line tint it sits inside.
+	tintIdxAt := func(col int) int {
+		idx := -1
+		for i, t := range tints {
+			if col >= t.StartCol && col < t.EndCol {
+				idx = i
+			}
+		}
+		return idx
 	}
 
 	nextOvlCol := func() int {
@@ -684,6 +728,7 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 		default:
 			si := spanIdxAt(i)
 			ui := underlineIdxAt(i)
+			ti := tintIdxAt(i)
 			j := i + 1
 			for j < n && j < noc {
 				if hasCursor && j == curCol {
@@ -698,10 +743,17 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 				if underlineIdxAt(j) != ui {
 					break
 				}
+				if tintIdxAt(j) != ti {
+					break
+				}
 				j++
 			}
 			text := string(runes[i:j])
-			// Emit syntax color first, then underline on top (additive).
+			// Background first so the syntax foreground paints over it, then
+			// underline on top (additive).
+			if ti >= 0 {
+				sb.WriteString(tints[ti].BG)
+			}
 			if si >= 0 {
 				sb.WriteString(spans[si].ANSI)
 			}
@@ -709,11 +761,13 @@ func renderLineRunes(sb *strings.Builder, runes []rune, selA, selB, curCol int, 
 				sb.WriteString(underlines[ui].StartSeq)
 			}
 			sb.WriteString(text)
-			// Close underline first (preserves color), then reset color.
+			// Close underline first (preserves color), then reset. The reset
+			// is a full SGR reset, so it clears the tint background too —
+			// which is why it must also fire when only a tint was emitted.
 			if ui >= 0 {
 				sb.WriteString("\x1b[24m") // underline off only
 			}
-			if si >= 0 {
+			if si >= 0 || ti >= 0 {
 				sb.WriteString(highlight.ANSIReset)
 			}
 			i = j
@@ -775,6 +829,16 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 
 	isFlash := lineNum == m.cursor.Line && m.flashTick > 0
 
+	// A whole-line diff tint carries across the trailing padding so the row
+	// reads as a solid bar out to the window edge rather than stopping
+	// ragged at end-of-text.
+	padBG := ""
+	for _, t := range m.lineTintsFor(lineNum) {
+		if t.ToEOL {
+			padBG = t.BG
+		}
+	}
+
 	padToWidth := func(s string) string {
 		if m.width <= 0 {
 			return s
@@ -785,9 +849,73 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 			if isFlash {
 				return s + flashPadStyle.Render(pad)
 			}
+			if padBG != "" {
+				return s + padBG + pad + highlight.ANSIReset
+			}
 			return s + pad
 		}
 		return s
+	}
+
+	// Virtual rows render supplied text (a line removed relative to HEAD)
+	// rather than buffer content: blank gutter, since they have no line
+	// number, and no syntax parse, since the text is not in the buffer for
+	// tree-sitter to have parsed.
+	if entry.isVirtual {
+		virt := m.virtualLinesBefore(lineNum)
+		if entry.virtualIdx >= len(virt) {
+			// The virtual set is recomputed on a debounce and can shrink
+			// between the layout being built and this row rendering.
+			return padToWidth("")
+		}
+		vl := virt[entry.virtualIdx]
+		if gutterW > 0 {
+			// Mirror the real gutter's column layout so numbers and signs line
+			// up between removed rows and buffer lines: [left 2][number][ -].
+			// The number shown is the line's position in the *pre-change*
+			// file, which is what `git diff` labels a removed line with; 0
+			// means the plugin didn't supply one, so the slot stays blank.
+			const leftW = 2
+			numW := gutterW - leftW
+			if m.reservePluginGutter || m.hasGutterDecorations() {
+				numW -= 2
+			}
+			sb.WriteString(virtualGutterStyle.Render("  "))
+			if numW > 0 {
+				num := "  "
+				if vl.oldLine > 0 {
+					num = fmt.Sprintf("%*d ", numW-1, vl.oldLine)
+				}
+				sb.WriteString(virtualNumStyle.Width(numW).Render(num))
+			}
+			if gutterW-leftW-numW >= 2 {
+				// Sign then space, matching the real gutter above, so the "-"
+				// on a removed row lines up with the "+" on an added one.
+				sb.WriteString(virtualSignStyle.Render("-"))
+				sb.WriteString(virtualGutterStyle.Render(" "))
+			}
+		}
+		if avail := m.width - gutterW; avail > 0 {
+			text := truncateBackCells(vl.text, avail)
+			// Emphasise the runes that actually differ from the line that
+			// replaced this one, so a one-word edit doesn't read as a wholly
+			// rewritten line. Skipped when truncation has cut into the
+			// emphasis range, since the columns no longer line up.
+			runes := []rune(text)
+			if vl.emphStart < vl.emphEnd && vl.emphEnd <= len(runes) {
+				sb.WriteString(virtualRemovedStyle.Render(string(runes[:vl.emphStart])))
+				sb.WriteString(virtualRemovedEmphStyle.Render(string(runes[vl.emphStart:vl.emphEnd])))
+				rest := virtualRemovedStyle.Render(string(runes[vl.emphEnd:]))
+				pad := avail - lipgloss.Width(text)
+				if pad > 0 {
+					rest += virtualRemovedStyle.Render(strings.Repeat(" ", pad))
+				}
+				sb.WriteString(rest)
+			} else {
+				sb.WriteString(virtualRemovedStyle.Width(avail).Render(text))
+			}
+		}
+		return sb.String()
 	}
 
 	if lineNum >= bufLineCount {
@@ -840,9 +968,25 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 			}
 			if numW > 0 {
 				numStr := fmt.Sprintf("%*d ", numW-1, lineNum+1)
+				// Tint the number to match its gutter marker, so a diff reads
+				// as one coloured unit (number + sign + line) the way
+				// `git diff` does.
+				//
+				// The accent is checked before the cursor line, not after: the
+				// cursor-line style is a brighter grey, so letting it win left
+				// whichever line you happened to be on rendering white in the
+				// middle of a diff. Both signals survive instead — the accent
+				// supplies the colour, bold marks the cursor's line.
+				accent := m.gutterAccentAt(lineNum)
 				switch {
 				case isFlash:
 					sb.WriteString(flashGutterStyle.Width(numW).Render(numStr))
+				case accent != "":
+					st := lipgloss.NewStyle().Foreground(lipgloss.Color(accent))
+					if lineNum == m.cursor.Line {
+						st = st.Bold(true)
+					}
+					sb.WriteString(st.Render(numStr))
 				case lineNum == m.cursor.Line:
 					sb.WriteString(gutterCurStyle.Render(numStr))
 				default:
@@ -855,7 +999,9 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 				decor := m.gutterDecorAt(lineNum)
 				if decor == nil || decor.Text == "" {
 					sb.WriteString(gutterStyle.Render("  "))
-				} else if decor.TextColor != "" {
+				} else if !m.inlineDiffOn && decor.TextColor != "" {
+					// Inline diff off: a solid colour block, unobtrusive
+					// enough to live in the gutter permanently while editing.
 					barStyle := lipgloss.NewStyle().Background(lipgloss.Color(decor.TextColor))
 					sb.WriteString(" ")
 					sb.WriteString(barStyle.Render(" "))
@@ -864,8 +1010,17 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 					if len([]rune(label)) > 1 {
 						label = string([]rune(label)[:1])
 					}
+					// Inline diff on: draw the glyph itself (git's +/-) in the
+					// decoration's colour. The trailing space — rather than a
+					// leading one — sits the sign between the line number's
+					// own trailing space and the text, instead of jammed up
+					// against the first character.
+					style := decorOverlayStyle
+					if decor.TextColor != "" {
+						style = lipgloss.NewStyle().Foreground(lipgloss.Color(decor.TextColor))
+					}
+					sb.WriteString(style.Render(label))
 					sb.WriteString(" ")
-					sb.WriteString(decorOverlayStyle.Render(label))
 				}
 			}
 		} else {
@@ -1040,6 +1195,30 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 		})
 	}
 
-	renderLineRunes(&sb, chunkRunes, selA, selB, curCol, remappedSpans, overlays, underlines)
+	// Diff tints are stored in rune columns like everything else the plugin
+	// reports, so remap them to this chunk's visual columns the same way the
+	// underline ranges above were.
+	var chunkTints []tintRange
+	for _, t := range m.lineTintsFor(lineNum) {
+		startVis, endVis := t.StartCol, t.EndCol
+		if t.StartCol < len(colMap) {
+			startVis = colMap[t.StartCol]
+		}
+		if t.EndCol < len(colMap) {
+			endVis = colMap[t.EndCol]
+		} else if len(colMap) > 0 {
+			endVis = len(expandedRunes)
+		}
+		if startVis >= chunkStart+cw || endVis <= chunkStart {
+			continue
+		}
+		chunkTints = append(chunkTints, tintRange{
+			StartCol: max(0, startVis-chunkStart),
+			EndCol:   min(cw, endVis-chunkStart),
+			BG:       t.BG,
+		})
+	}
+
+	renderLineRunes(&sb, chunkRunes, selA, selB, curCol, remappedSpans, overlays, underlines, chunkTints)
 	return padToWidth(sb.String())
 }

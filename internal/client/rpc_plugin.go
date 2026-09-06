@@ -176,6 +176,7 @@ func (r *RPC) GetDecorations(ctx context.Context, bufID uint32) ([]ClientDecorat
 			FixData:        fixData,
 			PluginName:     pluginName,
 			TextColor:      textColor,
+			OldLine:        item.OldLine(),
 		}
 	}
 	return out, nil

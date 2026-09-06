@@ -60,6 +60,11 @@ const (
 	ClientDecorationStatusBar  ClientDecorationKind = 2
 	ClientDecorationUnderline  ClientDecorationKind = 3
 	ClientDecorationLeftGutter ClientDecorationKind = 4
+	// ClientDecorationRemovedLine becomes a virtual screen row above Line;
+	// ClientDecorationLineTint a background range on Line. See
+	// virtual_lines.go for how both are consumed.
+	ClientDecorationRemovedLine ClientDecorationKind = 5
+	ClientDecorationLineTint    ClientDecorationKind = 6
 )
 
 // ClientUnderlineStyle mirrors the server-side enum.
@@ -113,6 +118,10 @@ type ClientDecoration struct {
 
 	// TextColor is the hex foreground color for gutter/overlay text; empty = default.
 	TextColor string
+
+	// OldLine is only set for the removed-line kind: the 1-based line number
+	// this content had before the change, for the gutter beside it.
+	OldLine uint32
 }
 
 // RPC wraps a Cap'n Proto connection to the editor server.

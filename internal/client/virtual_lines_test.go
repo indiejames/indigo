@@ -598,3 +598,38 @@ func TestCursorLineWithoutDiffKeepsItsOwnStyle(t *testing.T) {
 		t.Errorf("cursor line = %q, want the normal cursor-line gutter style", row)
 	}
 }
+
+// TestScrollToShowLineTailCountsVirtualRows covers a coordinate mismatch
+// introduced with virtual rows: topChunk indexes a line's *combined* span
+// (its virtual rows, then its wrap chunks), but chunkOfCol returns only a
+// wrap-chunk index. Comparing the two directly makes the cursor-visibility
+// cap clamp topChunk too low, showing less of the tail than intended.
+//
+// The cap only fires when the cursor is *before* the tail — with the cursor
+// already at the end there is nothing to cap — so the cursor sits at column 0
+// of the long line here.
+func TestScrollToShowLineTailCountsVirtualRows(t *testing.T) {
+	long := strings.Repeat("x", 400)
+	m := virtTestModel(t, "a\nb\n"+long+"\n", map[int][]virtualLine{
+		2: removed("gone 1", "gone 2", "gone 3"),
+	})
+	m.height = 6
+	cw := m.contentWidth()
+
+	m.cursor.Line, m.cursor.Col = 2, 0
+	m.scrollToShowLineTail(2)
+
+	// The cap should have clamped topChunk to the cursor's position in
+	// combined coordinates: its three virtual rows, then its wrap chunk 0.
+	want := len(m.virtualLinesBefore(2)) + m.chunkOfCol(2, 0, cw)
+	if m.topChunk != want {
+		t.Errorf("topChunk = %d, want %d — the cap compared a combined-span value against "+
+			"a bare wrap-chunk index, clamping %d rows too far and hiding that much of the tail",
+			m.topChunk, want, want-m.topChunk)
+	}
+
+	// Whichever way the cap lands, the cursor must stay on screen.
+	if row := m.cursorVisualRowFromTop(cw); row < 0 || row >= m.visibleLines() {
+		t.Errorf("cursor row %d outside the %d visible rows", row, m.visibleLines())
+	}
+}

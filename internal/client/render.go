@@ -391,7 +391,13 @@ func (m *Model) scrollToShowLineTail(line int) {
 	// satisfied, and cursor visibility wins. When the anchor line is the
 	// cursor's own line, cap topChunk at the cursor's chunk.
 	if topLine == m.cursor.Line {
-		if cursorChunk := m.chunkOfCol(m.cursor.Line, m.cursor.Col, cw); topChunk > cursorChunk {
+		// topChunk indexes the line's *combined* span — its virtual rows
+		// first, then its wrap chunks (see buildScreenLayout) — but
+		// chunkOfCol only counts wrap chunks, so the virtual rows have to be
+		// added back or the two are in different coordinate systems and the
+		// cap fires too early, cutting the tail short.
+		cursorChunk := len(m.virtualLinesBefore(m.cursor.Line)) + m.chunkOfCol(m.cursor.Line, m.cursor.Col, cw)
+		if topChunk > cursorChunk {
 			topChunk = cursorChunk
 		}
 	}

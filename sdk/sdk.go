@@ -1084,6 +1084,7 @@ func (s *decorProviderServer) GetDecorations(_ context.Context, call pluginproto
 		if err := item.SetTextColor(d.TextColor); err != nil {
 			return err
 		}
+		item.SetOldLine(d.OldLine)
 	}
 	return nil
 }

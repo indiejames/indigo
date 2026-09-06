@@ -985,8 +985,12 @@ func parseDiff(output string) diffDetail {
 		switch {
 		case strings.HasPrefix(line, "@@"):
 			flush()
-		case strings.HasPrefix(line, "---"), strings.HasPrefix(line, "+++"):
-			continue // file headers, not content
+		case !inHunk && (strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++")):
+			// File headers, and only outside a hunk: inside one, "---" is a
+			// removed line whose own text starts with "--" (e.g. "--count;")
+			// and "+++" likewise ("++i;"). Matching those as headers silently
+			// dropped them from the diff.
+			continue
 		case inHunk && strings.HasPrefix(line, "-"):
 			oldTexts = append(oldTexts, line[1:])
 			continue

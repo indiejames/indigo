@@ -257,6 +257,43 @@ func TestParseDiffCapturesRemovedText(t *testing.T) {
 	}
 }
 
+// TestParseDiffContentStartingWithDiffMarkers is a regression test: a removed
+// line whose own text starts with "--" produces the diff line "---count;",
+// and an added line starting with "++" produces "+++i;". Both were being
+// matched as the "---"/"+++" *file headers* and silently dropped, because
+// that case was checked before the in-hunk -/+ cases. File headers only ever
+// appear outside a hunk, so the check is gated on that now.
+func TestParseDiffContentStartingWithDiffMarkers(t *testing.T) {
+	diff := "--- a/x.c\n+++ b/x.c\n" +
+		"@@ -5,1 +5,1 @@\n" +
+		"---count;\n" +
+		"+++i;\n"
+
+	d := parseDiff(diff)
+
+	got := d.removed[5]
+	if len(got) != 1 {
+		t.Fatalf("removed[5] = %+v, want the one removed line — content beginning with "+
+			"\"--\" was mistaken for a file header", got)
+	}
+	if got[0].Text != "--count;" {
+		t.Errorf("removed text = %q, want %q", got[0].Text, "--count;")
+	}
+	// The real file headers, outside the hunk, must still be ignored.
+	for anchor, rls := range d.removed {
+		for _, rl := range rls {
+			if strings.HasPrefix(rl.Text, "a/") || strings.HasPrefix(rl.Text, "b/") {
+				t.Errorf("removed[%d] = %q: a real file header leaked in as content", anchor, rl.Text)
+			}
+		}
+	}
+	// And the added line "++i;" is what the emphasis pairs against.
+	if e, ok := d.emph[5]; !ok || e[0] >= e[1] {
+		t.Errorf("emph[5] = %v (present=%v), want a range: the added line \"++i;\" was "+
+			"dropped as a header, leaving nothing to pair with", e, ok)
+	}
+}
+
 // TestParseDiffPureDeletionHasNoEmphasis pins that a deleted line with no
 // replacement carries no intra-line range — there is nothing to compare it
 // against, and emphasising all of it would be noise.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/indiejames/indigo/internal/config"
@@ -137,15 +138,22 @@ func TestManagerRunOnEditSkipsDiskLinter(t *testing.T) {
 func TestManagerRunOnEditCoalescesForStdinLinter(t *testing.T) {
 	lc := config.LinterConfig{Extensions: []string{"go"}, Command: "sh", Format: "golangci-lint-json", Stdin: true}
 	m := newTestManager(lc)
-	m.running["foo.go"] = true
+	// A real file: RunOnEdit skips paths with nothing on disk, since a
+	// type-aware linter reports that absence rather than analysing the buffer.
+	// This test is about coalescing, so it has to get past that guard.
+	path := filepath.Join(t.TempDir(), "foo.go")
+	if err := os.WriteFile(path, []byte("package p\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.running[path] = true
 
-	m.RunOnEdit("foo.go", "latest buffer text")
+	m.RunOnEdit(path, "latest buffer text")
 
-	if !m.pending["foo.go"] {
+	if !m.pending[path] {
 		t.Error("RunOnEdit while running should set pending, not launch a new run")
 	}
-	if got := m.content["foo.go"]; got != "latest buffer text" {
-		t.Errorf(`content["foo.go"] = %q, want %q`, got, "latest buffer text")
+	if got := m.content[path]; got != "latest buffer text" {
+		t.Errorf("content[%q] = %q, want %q", path, got, "latest buffer text")
 	}
 }
 
@@ -344,5 +352,123 @@ func TestEffectiveWorkspaceLintersFindsWorkspaceRootNodeModulesBinary(t *testing
 	}
 	if found == nil {
 		t.Fatalf("effectiveWorkspaceLinters() = %+v, want an entry for the workspace-root eslint at %q", linters, fakeESLint)
+	}
+}
+
+// TestRunOnEditSkipsFileNotOnDisk is a regression test for spurious
+// diagnostics on a buffer that has not been saved yet.
+//
+// Stdin linters get the buffer's content directly, so it is tempting to assume
+// the file's absence from disk does not matter. It does: a type-aware linter
+// builds its view of the project from disk and rejects a path it cannot find
+// there. Editing a new file through the MCP tools (which write the buffer, not
+// the file) produced eslint's
+//
+//	Parsing error: "parserOptions.project" has been provided for
+//	@typescript-eslint/parser. The file was not found in any of the
+//	provided project(s)
+//
+// on every keystroke until the first save — noise about the file's absence
+// rather than anything about its contents.
+func TestRunOnEditSkipsFileNotOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{Linters: []config.LinterConfig{{
+		Extensions: []string{"txt"},
+		// `true` exits 0 and prints nothing, so a run that happens is
+		// detectable only by the manager's own bookkeeping below.
+		Command: "true",
+		Args:    []string{"{file}"},
+		Format:  "eslint-json",
+		Stdin:   true,
+	}}}
+	m := NewManager(cfg, dir)
+
+	absent := filepath.Join(dir, "not-saved-yet.txt")
+	m.RunOnEdit(absent, "some buffer content")
+	if m.startedRun(absent) {
+		t.Error("linted a path with no file on disk; a type-aware linter reports that " +
+			"absence as a parse error on the user's unsaved buffer")
+	}
+
+	// The same path becomes lintable the moment it exists.
+	present := filepath.Join(dir, "saved.txt")
+	if err := os.WriteFile(present, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.RunOnEdit(present, "some buffer content")
+	if !m.startedRun(present) {
+		t.Error("skipped a file that does exist on disk; live linting is now dead")
+	}
+}
+
+// startedRun reports whether runAsync claimed path, i.e. a lint actually
+// started for it. Reading the manager's own map avoids racing the run's
+// completion, which would make the assertion timing-dependent.
+func (m *Manager) startedRun(path string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, seen := m.content[path]
+	return seen
+}
+
+// TestPerFileLinterRunsInItsOwnPackage is the regression test for a mismatch
+// between two decisions that both answer "which package does this file belong
+// to?": findLinter resolved the binary by walking up from the file (so a
+// package's own non-hoisted node_modules wins), while runLinter always set the
+// cwd to the workspace root.
+//
+// Tools act on the cwd, not on where their binary lives. ESLint 9 discovers
+// flat config from the cwd upward rather than from the linted file, and a
+// relative `parserOptions.project` resolves against the cwd unless
+// tsconfigRootDir says otherwise — so a package-local eslint would run under
+// the root's config and the root's tsconfig, and report errors about the wrong
+// project.
+func TestPerFileLinterRunsInItsOwnPackage(t *testing.T) {
+	root := t.TempDir()
+	pkg := filepath.Join(root, "services", "harmony")
+	binDir := filepath.Join(pkg, "node_modules", ".bin")
+	appDir := filepath.Join(pkg, "app")
+	for _, d := range []string{binDir, appDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A stand-in "eslint" that records the cwd it was run in and emits a valid
+	// empty eslint-json report.
+	marker := filepath.Join(root, "cwd.txt")
+	script := fmt.Sprintf("#!/bin/sh\npwd > %s\necho '[]'\n", marker)
+	if err := os.WriteFile(filepath.Join(binDir, "eslint"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	file := filepath.Join(appDir, "thing.ts")
+	if err := os.WriteFile(file, []byte("export const x = 1;\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager(&config.Config{}, root)
+	lc, ok := m.findLinter(file, "ts")
+	if !ok {
+		t.Fatal("findLinter did not resolve the package-local eslint")
+	}
+	if _, err := runLinter(lc, file, "export const x = 1;\n", root); err != nil {
+		t.Fatalf("runLinter: %v", err)
+	}
+
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("the linter did not run: %v", err)
+	}
+	// Compare resolved forms on both sides: the shell may report either the
+	// logical or the physical path, and TMPDIR is itself symlinked on macOS.
+	resolve := func(p string) string {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return p
+	}
+	if cwd, want := resolve(strings.TrimSpace(string(got))), resolve(pkg); cwd != want {
+		t.Errorf("linter ran in %q, want its own package %q — it would discover the "+
+			"workspace root's config instead of the package's", cwd, want)
 	}
 }

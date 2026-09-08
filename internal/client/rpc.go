@@ -126,6 +126,13 @@ type ClientDecoration struct {
 
 // RPC wraps a Cap'n Proto connection to the editor server.
 type RPC struct {
+	// serverStale is what the server said at connect time: its own binary, or
+	// a plugin's, has been replaced on disk since it started, so it is serving
+	// code older than what is installed. Surfaced to the user rather than
+	// acted on — see internal/server/staleness.go for why the server does not
+	// simply restart itself.
+	serverStale bool
+
 	conn     *rpc.Conn
 	svc      proto.EditorService
 	clientID uint64
@@ -196,6 +203,7 @@ func Dial(socketPath string) (*RPC, error) {
 		conn:            conn,
 		svc:             svc,
 		clientID:        res.ClientId(),
+		serverStale:     res.ServerStale(),
 		cb:              cb,
 		pluginKeys:      make(map[string]bool),
 		insertHookChars: make(map[string]bool),
@@ -384,3 +392,30 @@ func (r *RPC) Disconnect(ctx context.Context) error {
 	r.conn.Close() //nolint:errcheck
 	return err
 }
+
+// Alive reports whether the connection to the server is still open.
+//
+// A long-lived non-interactive client (the MCP server, which outlives any
+// editor window) needs this: an indigo server exits when its last client
+// disconnects, and a handle to a dead one keeps answering every call with
+// "rpc: connection closed" forever. Checking before use is what lets such a
+// client redial instead of failing for the rest of its life.
+func (r *RPC) Alive() bool {
+	if r == nil || r.conn == nil {
+		return false
+	}
+	select {
+	case <-r.conn.Done():
+		return false
+	default:
+		return true
+	}
+}
+
+// ServerStale reports whether the connected server is running code that has
+// since been replaced on disk.
+//
+// Worth surfacing prominently: a stale server looks completely normal — it
+// connects, answers, and quietly lacks whatever was just built — so the
+// natural conclusion is that the new code is broken rather than absent.
+func (r *RPC) ServerStale() bool { return r != nil && r.serverStale }

@@ -329,6 +329,8 @@ Use `:grep [pattern]` for workspace-wide search across all files.
 
 **Shared server** — Opening the same workspace in multiple terminal windows shares one server process. Buffers are synchronized across sessions.
 
+**Agent integration (MCP)** — `claude mcp add --scope user indigo -- indigo --mcp` gives Claude Code (or any stdio MCP client) the workspace indigo already has open: it reads your **live buffers** including unsaved edits, and answers "what calls this?" from the language server rather than by grepping. Edits arrive as ordinary undoable buffer ops. One registration covers every repository, and indigo need not be running — a server starts on demand. See [Agent Integration](docs/agent-integration.md).
+
 ## Configuration
 
 Config file: `~/.config/indigo/config.toml`

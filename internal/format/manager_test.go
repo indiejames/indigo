@@ -2,8 +2,10 @@ package format
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -399,5 +401,50 @@ func TestFormatPrefersNodeModulesBinOverLSPWhenNotOnPath(t *testing.T) {
 	}
 	if fl.called {
 		t.Error("LSP formatter should not have been called — node_modules/.bin should win")
+	}
+}
+
+// TestPerFileFormatterRunsInItsOwnPackage mirrors internal/lint's test of the
+// same mismatch: findFormatter resolves the binary by walking up from the file,
+// so a package's own non-hoisted node_modules wins, but the process used to
+// inherit the server's cwd (the workspace root) regardless. prettier resolves
+// .prettierrc from the cwd upward, so a package-local prettier would have been
+// run under the workspace root's config.
+func TestPerFileFormatterRunsInItsOwnPackage(t *testing.T) {
+	root := t.TempDir()
+	pkg := filepath.Join(root, "packages", "util")
+	binDir := filepath.Join(pkg, "node_modules", ".bin")
+	srcDir := filepath.Join(pkg, "src")
+	for _, d := range []string{binDir, srcDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	marker := filepath.Join(root, "cwd.txt")
+	// Records its cwd, then behaves like a formatter by echoing stdin back.
+	script := fmt.Sprintf("#!/bin/sh\npwd > %s\ncat\n", marker)
+	bin := filepath.Join(binDir, "prettier")
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	fc := config.FormatterConfig{Extensions: []string{"ts"}, Command: bin}
+	if _, _, err := runExternal(fc, filepath.Join(srcDir, "a.ts"), "const x = 1;\n"); err != nil {
+		t.Fatalf("runExternal: %v", err)
+	}
+
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("the formatter did not run: %v", err)
+	}
+	resolve := func(p string) string {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return p
+	}
+	if cwd, want := resolve(strings.TrimSpace(string(got))), resolve(pkg); cwd != want {
+		t.Errorf("formatter ran in %q, want its own package %q — it would pick up the "+
+			"workspace root's .prettierrc instead of the package's", cwd, want)
 	}
 }

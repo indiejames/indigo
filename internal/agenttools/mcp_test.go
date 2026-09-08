@@ -1,4 +1,4 @@
-package main
+package agenttools
 
 import (
 	"encoding/json"
@@ -135,5 +135,48 @@ func TestMCPPing(t *testing.T) {
 	m := decode(t, srv.handleMessage([]byte(`{"jsonrpc":"2.0","id":6,"method":"ping"}`)))
 	if _, ok := m["result"]; !ok {
 		t.Errorf("ping response missing result")
+	}
+}
+
+// TestNegotiateProtocolVersion covers initialize's version handling. Echoing
+// the client's request claims support for any revision it names, including
+// future ones whose semantics this server does not implement; the spec's own
+// answer for an unsupported revision is to reply with one the server does
+// support and let the client decide whether to continue.
+func TestNegotiateProtocolVersion(t *testing.T) {
+	for _, v := range supportedProtocolVersions {
+		if got := negotiateProtocolVersion(v); got != v {
+			t.Errorf("negotiateProtocolVersion(%q) = %q, want it honoured", v, got)
+		}
+	}
+	preferred := supportedProtocolVersions[0]
+	for _, req := range []string{"", "2099-01-01", "nonsense"} {
+		if got := negotiateProtocolVersion(req); got != preferred {
+			t.Errorf("negotiateProtocolVersion(%q) = %q, want the preferred supported "+
+				"revision %q rather than an echo", req, got, preferred)
+		}
+	}
+}
+
+// The same property through the actual initialize handler, so the wiring is
+// covered and not just the helper.
+func TestInitializeDoesNotEchoUnsupportedVersion(t *testing.T) {
+	srv := newTestServer(func(string, json.RawMessage) (string, bool) { return "", false })
+	resp := srv.handleMessage([]byte(
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2099-01-01"}}`))
+
+	var out struct {
+		Result struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(resp, &out); err != nil {
+		t.Fatalf("initialize response: %v (%s)", err, resp)
+	}
+	if out.Result.ProtocolVersion == "2099-01-01" {
+		t.Error("initialize echoed a revision this server does not implement")
+	}
+	if out.Result.ProtocolVersion != supportedProtocolVersions[0] {
+		t.Errorf("protocolVersion = %q, want %q", out.Result.ProtocolVersion, supportedProtocolVersions[0])
 	}
 }

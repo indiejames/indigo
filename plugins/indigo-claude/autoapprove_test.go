@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/indiejames/indigo/internal/agenttools"
 	"strings"
 	"testing"
 
@@ -56,10 +57,10 @@ func TestAutoApproveSlashCommandClearsInputAndShowsStatus(t *testing.T) {
 func TestRequestEditApprovalSkipsPopupWhenAutoApproved(t *testing.T) {
 	prog := &programLink{}
 	prog.setAutoApproveEdits(true)
-	// send is left nil: if requestEditApproval tried to emit+block anyway,
-	// this would hang forever waiting on a reply nothing will ever send.
-	if !requestEditApproval(prog, permissionRequestMsg{file: "x.go"}) {
-		t.Error("requestEditApproval() = false, want true when auto-approve is on")
+	// send is left nil: if ApproveEdit tried to emit+block anyway, this would
+	// hang forever waiting on a reply nothing will ever send.
+	if !(tuiApprover{prog}).ApproveEdit(agenttools.EditRequest{File: "x.go"}) {
+		t.Error("ApproveEdit() = false, want true when auto-approve is on")
 	}
 }
 
@@ -71,9 +72,9 @@ func TestRequestEditApprovalRoundTripsWhenNotAutoApproved(t *testing.T) {
 				r.replyCh <- want
 			}
 		}
-		got := requestEditApproval(prog, permissionRequestMsg{file: "x.go"})
+		got := (tuiApprover{prog}).ApproveEdit(agenttools.EditRequest{File: "x.go"})
 		if got != want {
-			t.Errorf("requestEditApproval() = %v, want %v (round-tripped through the popup)", got, want)
+			t.Errorf("ApproveEdit() = %v, want %v (round-tripped through the popup)", got, want)
 		}
 	}
 }

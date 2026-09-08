@@ -151,6 +151,17 @@ func runExternal(fc config.FormatterConfig, filePath, content string) (string, b
 	proc := exec.CommandContext(ctx, cmd, args...)
 	procutil.SetPgid(proc)
 	proc.Cancel = func() error { return procutil.KillGroup(proc) }
+	// A formatter resolved out of a package's own node_modules runs with that
+	// package as its cwd. findFormatter picks the binary by walking up from the
+	// file, so running it from the workspace root would assert two different
+	// things about which package the file belongs to — and these tools read the
+	// cwd, not their own location, when they look for config (prettier resolves
+	// .prettierrc from the cwd upward). Left unset otherwise, inheriting the
+	// server's cwd, which is the workspace root: unchanged behaviour for
+	// anything found on PATH.
+	if dir, ok := localbin.PackageDir(cmd); ok {
+		proc.Dir = dir
+	}
 	proc.Stdin = strings.NewReader(content)
 	var out, errBuf bytes.Buffer
 	proc.Stdout = &out

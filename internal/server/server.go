@@ -192,6 +192,11 @@ type editorService struct {
 	// statusBar holds client-contributed status bar text segments.
 	statusBar *statusBarRegistry
 
+	// staleWatch remembers the binaries this process started from, so Connect
+	// can tell a client it is talking to code that has since been replaced on
+	// disk. See staleness.go.
+	staleWatch *staleWatch
+
 	// shutdown is called when the last client disconnects (cleanly or not).
 	shutdown        func()
 	onClientConnect func() // called once per Connect RPC; used to mark that real clients have connected
@@ -210,6 +215,7 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 	lspMgr := lsp.NewManager(workspaceDir, servers)
 	watcher, _ := fsnotify.NewWatcher()
 	svc := &editorService{
+		staleWatch:           newStaleWatch(),
 		buffers:              make(map[uint32]*bufferEntry),
 		clientMap:            make(map[uint64]*clientEntry),
 		recDir:               recDir,
@@ -411,6 +417,26 @@ func (s *editorService) Connect(_ context.Context, call proto.EditorService_conn
 	s.mu.Unlock()
 	serverLog("Connect: stored clientID=%d, callback.IsValid=%v", id, cbOwned.IsValid())
 	res.SetClientId(id)
+	// Plugin binaries are registered lazily: plugins start asynchronously
+	// after the server does, so they cannot all be stamped at construction.
+	// The stamp comes from the plugin manager rather than being taken here,
+	// because "here" can be hours after the plugin launched — restatting the
+	// file now would adopt a build installed since as the baseline and report
+	// a genuinely stale plugin as current.
+	for _, bin := range s.pluginMgr.BinaryStamps() {
+		s.staleWatch.watchStamped(bin.Path, binaryStamp{
+			size:    bin.Size,
+			modTime: bin.ModTimeUnixNano,
+		})
+	}
+	if desc := s.staleWatch.staleDescription(); desc != "" {
+		// Deliberately reported, not acted on: someone may be editing in this
+		// server, and dropping their session to pick up a new build would be
+		// worse than serving old code for a while longer. The client decides
+		// how loudly to say it.
+		serverLog("Connect: serving a stale build — %s", desc)
+		res.SetServerStale(true)
+	}
 	if s.onClientConnect != nil {
 		s.onClientConnect()
 	}

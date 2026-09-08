@@ -25,7 +25,11 @@ interface ClientCallback {
 }
 
 interface EditorService {
-  connect         @0 (callback :ClientCallback)                                -> (clientId :UInt64);
+  # serverStale is true when this server process is running code that has
+  # since been replaced on disk — its own binary or a plugin's. The server
+  # cannot restart itself without disrupting whoever is connected, so it
+  # reports the condition and lets the client decide what to say.
+  connect         @0 (callback :ClientCallback)                                -> (clientId :UInt64, serverStale :Bool);
   disconnect      @1 (clientId :UInt64)                                        -> ();
   # generation increments every time the server replaces this buffer's
   # underlying object wholesale (format-on-save, SaveAs, DiscardRecovery,

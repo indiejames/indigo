@@ -132,3 +132,48 @@ func TestResolveStopsAtWorkspaceRootWithTrailingSeparator(t *testing.T) {
 		t.Fatal("expected the walk to stop at workspaceRoot despite its trailing separator, not find the binary just outside it")
 	}
 }
+
+// TestPackageDirInvertsResolve pins PackageDir to Resolve: whatever directory
+// Resolve found a binary under is the directory PackageDir reports for it.
+// They are used as a pair — Resolve picks the tool, PackageDir decides the cwd
+// it runs in — so any drift between them silently reintroduces the mismatch
+// they exist to prevent.
+func TestPackageDirInvertsResolve(t *testing.T) {
+	root := t.TempDir()
+	pkg := filepath.Join(root, "services", "harmony")
+	binDir := filepath.Join(pkg, "node_modules", ".bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "eslint"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	bin, ok := Resolve(filepath.Join(pkg, "app", "deep"), root, "eslint")
+	if !ok {
+		t.Fatal("Resolve did not find the package-local binary")
+	}
+	got, ok := PackageDir(bin)
+	if !ok {
+		t.Fatalf("PackageDir(%q) reported no package", bin)
+	}
+	if got != pkg {
+		t.Errorf("PackageDir(%q) = %q, want %q — the tool would run with the wrong cwd, "+
+			"so it would find the wrong config", bin, got, pkg)
+	}
+}
+
+// A tool from PATH has no package, and must keep the caller's own working
+// directory rather than being handed some directory derived from its path.
+func TestPackageDirRejectsNonPackagePaths(t *testing.T) {
+	for _, bin := range []string{
+		"/usr/local/bin/eslint",
+		"eslint",
+		"/some/where/.bin/eslint",   // .bin, but not under node_modules
+		"/some/node_modules/eslint", // under node_modules, but not via .bin
+	} {
+		if dir, ok := PackageDir(bin); ok {
+			t.Errorf("PackageDir(%q) = %q, true; want no package", bin, dir)
+		}
+	}
+}

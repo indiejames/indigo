@@ -46,3 +46,28 @@ func Resolve(startDir, workspaceRoot, cmd string) (string, bool) {
 		dir = parent
 	}
 }
+
+// PackageDir reports the directory whose node_modules supplied bin — the
+// inverse of the path Resolve builds. Returns ("", false) for anything not
+// shaped like "<dir>/node_modules/.bin/<cmd>", which is the right answer for a
+// tool found on PATH.
+//
+// This exists so a caller can run that tool with the package as its working
+// directory. Resolving the binary per-file but running it from the workspace
+// root asserts two different things about which package a file belongs to, and
+// tools notice: ESLint 9's flat config is discovered from the cwd upward, not
+// from the linted file, so a package's own eslint.config.* would never be seen;
+// and a typescript-eslint `parserOptions.project` given as a relative path is
+// resolved against the cwd unless tsconfigRootDir says otherwise, so it would
+// name the wrong tsconfig.
+func PackageDir(bin string) (string, bool) {
+	dotBin := filepath.Dir(bin)
+	if filepath.Base(dotBin) != ".bin" {
+		return "", false
+	}
+	nodeModules := filepath.Dir(dotBin)
+	if filepath.Base(nodeModules) != "node_modules" {
+		return "", false
+	}
+	return filepath.Dir(nodeModules), true
+}

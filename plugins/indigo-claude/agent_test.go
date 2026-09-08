@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/indiejames/indigo/internal/client"
-	"github.com/indiejames/indigo/internal/document"
 )
 
 // extractSelection must mirror the editor's selection semantics: ranges in
@@ -43,33 +42,6 @@ func TestExtractSelection(t *testing.T) {
 
 // Regression test for the off-by-one insert bug: text inserted "at line N"
 // must become line N (1-based), not land a line below.
-func TestInsertLineOp(t *testing.T) {
-	cases := []struct {
-		name    string
-		content string
-		line    int
-		text    string
-		want    string
-	}{
-		{"middle", "a\nb\nc", 2, "X", "a\nX\nb\nc"},
-		{"first line", "a\nb", 1, "X", "X\na\nb"},
-		{"cursor line 26 scenario", "l1\nl2\nl3", 3, "// comment", "l1\nl2\n// comment\nl3"},
-		{"past end no trailing newline", "a\nb", 3, "X", "a\nb\nX"},
-		{"clamped below 1", "a\nb", 0, "X", "X\na\nb"},
-		{"multi-line insert", "a\nb", 2, "X\nY", "a\nX\nY\nb"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			buf := document.New("t.txt", c.content)
-			buf.Apply(insertLineOp(c.content, c.text, c.line))
-			if got := buf.Content(); got != c.want {
-				t.Errorf("insertLineOp(%q, %q, %d): got %q, want %q",
-					c.content, c.text, c.line, got, c.want)
-			}
-		})
-	}
-}
-
 func TestClassifyAgentError(t *testing.T) {
 	cases := []struct {
 		in       string
@@ -121,8 +93,8 @@ func TestStripMouseArtifacts(t *testing.T) {
 	cases := []struct{ in, want string }{
 		// The exact leak reported: a burst of wheel-down events.
 		{"<65;70;21M<65;69;18M<65;62;24M<65;62;24M<65;62;24M", ""},
-		{"[<64;10;5M", ""},          // with leading [ when ESC alone was eaten
-		{"<65;70;21m", ""},          // release variant (lowercase m)
+		{"[<64;10;5M", ""},             // with leading [ when ESC alone was eaten
+		{"<65;70;21m", ""},             // release variant (lowercase m)
 		{"abc<65;70;21Mdef", "abcdef"}, // mixed with real typed text
 		{"hello world", "hello world"}, // plain text untouched
 		{"a < b; c > d", "a < b; c > d"},

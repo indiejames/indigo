@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -19,6 +20,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/indiejames/indigo/internal/agenttools"
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/server"
 )
@@ -2075,7 +2077,15 @@ func main() {
 	// MCP server mode: spawned by the claude CLI; speaks MCP over stdio and
 	// forwards tool calls to the running TUI via the Unix socket.
 	if len(os.Args) == 3 && os.Args[1] == "--mcp" {
-		runMCPServer(os.Args[2])
+		agenttools.RunForwarding(os.Args[2])
+		return
+	}
+
+	// Standalone MCP server mode: same protocol, but talks straight to the
+	// workspace's indigo server (starting one if needed) instead of to a TUI.
+	// Register once with:  claude mcp add indigo -- indigo-claude --mcp-standalone
+	if len(os.Args) == 2 && os.Args[1] == "--mcp-standalone" {
+		agenttools.RunStandalone()
 		return
 	}
 
@@ -2117,22 +2127,19 @@ func main() {
 	if runtimeDir, err := os.MkdirTemp("", "indigo-claude-"); err == nil {
 		defer os.RemoveAll(runtimeDir) //nolint:errcheck
 		permSockPath := filepath.Join(runtimeDir, "perm.sock")
-		hookScriptPath := filepath.Join(runtimeDir, "indigo-claude-hook.sh")
 		mcpConfigPath := filepath.Join(runtimeDir, "mcp.json")
 		if binaryPath, err := os.Executable(); err == nil {
 			// Fail closed: the socket must be listening before the hook is
 			// installed, so hook decisions can never come from a socket we
 			// don't own.
 			if ln, err := startPermissionServer(permSockPath, prog, rpc, workDir); err == nil {
-				defer ln.Close() //nolint:errcheck
-				if err := writeHookScript(hookScriptPath, binaryPath, permSockPath); err == nil {
-					installHook(workDir, hookScriptPath) //nolint:errcheck
-					defer removeHook(workDir)
-				}
+				defer ln.Close()                                            //nolint:errcheck
+				installHook(workDir, hookCommand(binaryPath, permSockPath)) //nolint:errcheck
+				defer removeHook(workDir)
 				// Buffer-aware file tools for the claude subprocess: claude
 				// spawns `indigo-claude --mcp <sock>`, which forwards tool
 				// calls back to this process over the same socket.
-				if err := writeMCPConfig(mcpConfigPath, binaryPath, permSockPath); err == nil {
+				if err := agenttools.WriteMCPConfig(mcpConfigPath, binaryPath, permSockPath); err == nil {
 					prog.mcpConfig = mcpConfigPath
 				}
 			}
@@ -2150,6 +2157,23 @@ func main() {
 	model = model.restoreState(loadState(workDir, apiKey))
 	p := tea.NewProgram(model, tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
+
+	// Quit cleanly when the terminal goes away (SIGHUP) or something asks us to
+	// stop (SIGTERM), so p.Run() returns and every deferred cleanup above runs
+	// — most importantly removeHook, which otherwise leaves a PreToolUse entry
+	// in this workspace's settings.local.json pointing at a socket that no
+	// longer exists. hookCommand makes such an entry harmless, but harmless
+	// clutter is still clutter. SIGINT is deliberately not handled: the program
+	// runs with tea.WithoutSignalHandler so the model can treat ctrl+c as
+	// "interrupt the agent" rather than "quit".
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	go func() {
+		if _, ok := <-sigCh; ok {
+			p.Quit()
+		}
+	}()
 
 	prog.mu.Lock()
 	prog.send = p.Send

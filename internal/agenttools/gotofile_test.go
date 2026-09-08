@@ -1,4 +1,4 @@
-package main
+package agenttools
 
 import "testing"
 
@@ -22,7 +22,7 @@ func TestGotoFileWireLine(t *testing.T) {
 
 func TestGotoFileToolRegistered(t *testing.T) {
 	found := false
-	for _, tool := range allTools() {
+	for _, tool := range AllTools() {
 		if tool.Name == "goto_file" {
 			found = true
 			if len(tool.InputSchema.Required) != 1 || tool.InputSchema.Required[0] != "path" {
@@ -34,7 +34,7 @@ func TestGotoFileToolRegistered(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("goto_file not found in allTools()")
+		t.Error("goto_file not found in AllTools()")
 	}
 }
 

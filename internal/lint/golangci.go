@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -66,8 +67,21 @@ type golangciEntry struct {
 // default), so an empty/unknown value is treated as a warning rather than
 // dropped.
 func parseGolangciEntries(out []byte) ([]golangciEntry, error) {
+	// Decode the first JSON value and ignore whatever follows, rather than
+	// json.Unmarshal, which is strict about trailing data.
+	//
+	// golangci-lint (v2 with --output.json.path=stdout) writes its JSON
+	// report and *then* a human-readable summary to the same stream:
+	//
+	//	{"Issues":[...],"Report":{...}}
+	//	14 issues:
+	//	* staticcheck: 1
+	//
+	// Unmarshal rejected that whole payload as malformed, so every run —
+	// per-file and whole-workspace alike — was discarded as a parse error and
+	// Go linting silently produced nothing at all.
 	var parsed golangciOutput
-	if err := json.Unmarshal(out, &parsed); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(out)).Decode(&parsed); err != nil {
 		return nil, fmt.Errorf("golangci-lint: parse output: %w", err)
 	}
 

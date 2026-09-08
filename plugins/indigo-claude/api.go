@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/indiejames/indigo/internal/agenttools"
 )
 
 const (
@@ -80,23 +82,9 @@ func toolResultBlock(toolUseID, result string, isError bool) apiBlock {
 	return apiBlock{Type: "tool_result", ToolUseID: toolUseID, Content: result, IsError: isError}
 }
 
-// toolDef describes a tool to the model.
-type toolDef struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	InputSchema toolSchema `json:"input_schema"`
-}
-
-type toolSchema struct {
-	Type       string                `json:"type"`
-	Properties map[string]schemaProp `json:"properties"`
-	Required   []string              `json:"required,omitempty"`
-}
-
-type schemaProp struct {
-	Type        string `json:"type"`
-	Description string `json:"description,omitempty"`
-}
+// Tool definitions live in internal/agenttools, which owns the tools
+// themselves; the Anthropic API's tool schema happens to be the same shape
+// (same JSON field names included), so there is nothing to convert.
 
 // ─── streaming events ────────────────────────────────────────────────────────
 
@@ -114,7 +102,7 @@ type streamUsageEvent struct{ ctxTokens int }
 
 // ─── streaming API call ──────────────────────────────────────────────────────
 
-func streamAPI(ctx context.Context, apiKey, model, system string, messages []apiMessage, tools []toolDef, onEvent func(any)) error {
+func streamAPI(ctx context.Context, apiKey, model, system string, messages []apiMessage, tools []agenttools.ToolDef, onEvent func(any)) error {
 	body := map[string]any{
 		"model":      resolveModel(model),
 		"max_tokens": maxTokens,

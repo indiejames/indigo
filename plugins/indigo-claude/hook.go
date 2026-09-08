@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/indiejames/indigo/internal/agenttools"
 	"github.com/indiejames/indigo/internal/client"
 )
 
@@ -162,26 +163,59 @@ func handleMCPToolCall(conn net.Conn, line string, prog *programLink, rpc *clien
 		writeReply("bad tool call request: "+err.Error(), true)
 		return
 	}
-	result, isError := execTool(context.Background(), rpc, prog, workDir, req.Name, req.Input)
+	result, isError := agenttools.ExecTool(context.Background(), rpc, tuiApprover{prog}, workDir, req.Name, req.Input)
 	writeReply(result, isError)
 }
 
 // ─── hook script + settings ───────────────────────────────────────────────────
 
-func writeHookScript(scriptPath, binaryPath, socketPath string) error {
-	// The env guard scopes the hook to the claude subprocess spawned by
-	// indigo-claude (which sets INDIGO_CLAUDE_HOOK=1). Any other Claude Code
-	// session in this workspace also runs the hook — settings.local.json
-	// applies directory-wide — but exits silently with no decision, so those
-	// sessions keep their own permission flow instead of popping dialogs in
-	// the indigo-claude TUI.
-	content := fmt.Sprintf("#!/bin/sh\n[ \"$INDIGO_CLAUDE_HOOK\" = \"1\" ] || exit 0\nexec %s --hook %s\n", binaryPath, socketPath)
-	return os.WriteFile(scriptPath, []byte(content), 0700)
+// hookCommand builds the shell command registered as the PreToolUse hook.
+//
+// It is a self-guarding one-liner rather than the path to a generated script,
+// because a script has nowhere safe to live. The runtime directory is under
+// $TMPDIR, and macOS's tmp reaper deletes files there by access time — the
+// script is written once at startup and never read by us again, so it gets
+// purged out from under a session that is still running. Every Bash call in
+// that workspace then fails with "No such file or directory", including in
+// Claude Code sessions that have nothing to do with indigo-claude, and it
+// keeps failing until some later indigo-claude run happens to rewrite the
+// entry. The binary and the socket are both things this process keeps alive,
+// so testing those instead is stable.
+//
+// Each guard degrades to "no decision" (exit 0, no output), which Claude Code
+// treats as the hook having no opinion, so it falls back to its own permission
+// flow:
+//
+//   - INDIGO_CLAUDE_HOOK scopes the hook to the claude subprocess spawned by
+//     indigo-claude (see agent.go). settings.local.json applies directory-wide,
+//     so any other Claude Code session in this workspace runs the hook too; it
+//     must not pop approval dialogs in someone else's TUI.
+//   - The socket test makes an entry left behind by a crashed or killed
+//     session — one whose deferred removeHook never ran — inert rather than
+//     fatal.
+//   - The binary test does the same after an uninstall or a rebuild that moved
+//     the executable.
+//
+// The trailing comment is the marker isOurHookEntry matches on, so install and
+// remove still recognize our own entries now that there is no script name in
+// the command.
+func hookCommand(binaryPath, socketPath string) string {
+	bin, sock := shellQuote(binaryPath), shellQuote(socketPath)
+	return fmt.Sprintf(
+		`[ "$INDIGO_CLAUDE_HOOK" = "1" ] || exit 0; [ -S %s ] || exit 0; [ -x %s ] || exit 0; exec %s --hook %s # indigo-claude-hook`,
+		sock, bin, bin, sock)
+}
+
+// shellQuote wraps s for /bin/sh. Both os.MkdirTemp and os.Executable can
+// return paths containing spaces (a home directory or an app bundle), which
+// would otherwise split into separate words.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // installHook merges a PreToolUse/Bash hook entry into the project-local
 // .claude/settings.local.json (gitignored, does not affect committed settings).
-func installHook(workDir, scriptPath string) error {
+func installHook(workDir, command string) error {
 	settingsPath := filepath.Join(workDir, ".claude", "settings.local.json")
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0755); err != nil {
 		return err
@@ -210,7 +244,7 @@ func installHook(workDir, scriptPath string) error {
 		"matcher": "Bash",
 		"hooks": []any{map[string]any{
 			"type":    "command",
-			"command": scriptPath,
+			"command": command,
 			"timeout": 60,
 		}},
 	})
@@ -263,9 +297,12 @@ func removeHook(workDir string) {
 	}
 }
 
-// isOurHookEntry identifies entries written by indigo-claude by their command
-// path, which always contains "indigo-claude-hook" (also matches the older
-// "indigo-claude-hook-<pid>.sh" naming so stale entries still get cleaned up).
+// isOurHookEntry identifies entries written by indigo-claude by the string
+// "indigo-claude-hook" in their command. That is the trailing marker comment
+// hookCommand appends today; it also matches every historical form, which all
+// pointed at a generated script named indigo-claude-hook.sh (or the older
+// indigo-claude-hook-<pid>.sh), so entries left behind by earlier versions
+// still get cleaned up rather than accumulating.
 func isOurHookEntry(entry any) bool {
 	e, ok := entry.(map[string]any)
 	if !ok {

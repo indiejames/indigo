@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/indiejames/indigo/internal/agenttools"
 	"github.com/indiejames/indigo/internal/app"
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
@@ -121,6 +122,16 @@ func main() {
 	rpc, err := client.Dial(sockPath)
 	if err != nil {
 		fatalf("connect to server: %v", err)
+	}
+	if rpc.ServerStale() {
+		// Not fatal: the running server still works, it is just older than
+		// what is installed, and someone may be mid-edit in it. Say so on
+		// stderr before the TUI takes the screen, because the alternative is
+		// silently missing whatever was just built.
+		fmt.Fprintf(os.Stderr,
+			"indigo: warning — the running server for this workspace started from an older "+
+				"build. Close every indigo window on it (or kill the `indigo --server` process) "+
+				"to pick up the current one.\n")
 	}
 
 	var a *app.App
@@ -307,6 +318,19 @@ func reportIfServerDisconnected(finalModel tea.Model) {
 func init() {
 	if len(os.Args) == 3 && os.Args[1] == "--server" {
 		runServer(os.Args[2])
+		os.Exit(0)
+	}
+	// MCP server mode: speak the Model Context Protocol over stdio, exposing
+	// indigo's buffers and language servers to an agent. Registered once with
+	//
+	//	claude mcp add --scope user indigo -- indigo --mcp
+	//
+	// This runs in init() alongside --server because both are alternate entry
+	// points that must not fall through to the TUI's terminal setup — stdout
+	// here is the MCP transport, and writing anything else to it corrupts the
+	// protocol.
+	if len(os.Args) == 2 && os.Args[1] == "--mcp" {
+		agenttools.RunStandalone()
 		os.Exit(0)
 	}
 }

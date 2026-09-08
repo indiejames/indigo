@@ -1,4 +1,4 @@
-package main
+package agenttools
 
 import (
 	"encoding/json"

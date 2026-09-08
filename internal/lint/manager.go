@@ -154,6 +154,30 @@ func (m *Manager) RunOnEdit(path, content string) {
 	if !ok || !lc.Stdin {
 		return
 	}
+	// A buffer whose file is not on disk yet cannot be usefully linted, even by
+	// a linter that takes content on stdin. Stdin supplies only the file being
+	// linted; a type-aware linter still builds its view of the project from
+	// disk, and a path absent from that view is rejected outright rather than
+	// analysed. eslint under typescript-eslint's `project` answers such a path
+	// with
+	//
+	//	Parsing error: "parserOptions.project" has been provided for
+	//	@typescript-eslint/parser. The file was not found in any of the
+	//	provided project(s): <path>
+	//
+	// which describes the file's absence rather than its contents, and clears
+	// itself on the first save. So every keystroke in a new .ts buffer would
+	// raise an error about the file not existing yet. Skipping the live run
+	// costs nothing: RunAsync still lints on save, the first moment the result
+	// can mean anything.
+	//
+	// Note this is not the only way to provoke that message — a file that is on
+	// disk but outside the tsconfig's `include` produces it too, and there it
+	// is a genuine finding about the project's configuration that must keep
+	// being reported.
+	if _, err := os.Stat(path); err != nil {
+		return
+	}
 	m.runAsync(path, content, lc)
 }
 
@@ -458,7 +482,9 @@ func (m *Manager) WorkspaceScanError(cmd string) error {
 // The process runs with workDir as its working directory — cargo clippy in
 // particular discovers Cargo.toml from the CWD rather than from a
 // command-line argument, so without this it fails outright on any project
-// not launched from its own root. Most linters exit non-zero when they find
+// not launched from its own root — except when the linter itself came from a
+// package's own node_modules, in which case that package is the cwd (see
+// perFileRunDir). Most linters exit non-zero when they find
 // issues, so a non-zero exit is only treated as a fatal error when there's
 // no parseable output to fall back on. When lc.Stdin is set, content is
 // piped to the process's stdin instead of the linter reading filePath off
@@ -479,7 +505,7 @@ func runLinter(lc config.LinterConfig, filePath, content, workDir string) ([]lsp
 	proc := exec.CommandContext(ctx, cmd, args...)
 	procutil.SetPgid(proc)
 	proc.Cancel = func() error { return procutil.KillGroup(proc) }
-	proc.Dir = workDir
+	proc.Dir = perFileRunDir(cmd, workDir)
 	if lc.Stdin {
 		proc.Stdin = strings.NewReader(content)
 	}
@@ -601,4 +627,27 @@ func expandArgs(args []string, filePath string) []string {
 		expanded[i] = strings.ReplaceAll(a, "{file}", filePath)
 	}
 	return expanded
+}
+
+// perFileRunDir returns the working directory for a single-file linter run.
+//
+// findLinter resolves the binary by walking up from the file's own directory,
+// so a monorepo package with its own non-hoisted node_modules gets its own
+// linter. Running that binary from the workspace root would then assert two
+// different things about which package the file belongs to, and the tool acts
+// on the cwd, not on the binary's location: ESLint 9 discovers flat config from
+// the cwd upward rather than from the linted file, and a relative
+// `parserOptions.project` resolves against the cwd unless tsconfigRootDir says
+// otherwise. So the package that supplied the binary is the cwd.
+//
+// Anything found on PATH — cargo, golangci-lint, a system eslint — keeps
+// workDir, which several linters require: cargo clippy discovers Cargo.toml
+// from the cwd rather than from an argument. Whole-workspace runs
+// (runWorkspaceLinter) are deliberately not routed through this: `golangci-lint
+// run ./...` and `cargo clippy` are defined relative to the workspace root.
+func perFileRunDir(cmd, workDir string) string {
+	if dir, ok := localbin.PackageDir(cmd); ok {
+		return dir
+	}
+	return workDir
 }

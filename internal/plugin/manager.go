@@ -253,6 +253,11 @@ type Manager struct {
 	workDir string
 	bridge  ServerBridge
 
+	// binPaths records the binary each running plugin was launched from, so
+	// the server can notice one being replaced on disk (`make install-<plugin>`)
+	// while the old process keeps serving. See internal/server/staleness.go.
+	binPaths []string
+
 	// capture state: when a plugin returns captureKeys > 0, subsequent keys
 	// with mode "capture" are routed to this handler instead of looking up by name.
 	captureMu      sync.Mutex
@@ -351,6 +356,9 @@ func pluginLogFile() *os.File {
 
 func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryPath string) error {
 	name := manifest.Name
+	m.mu.Lock()
+	m.binPaths = append(m.binPaths, binaryPath)
+	m.mu.Unlock()
 	sockPath := m.pluginSocketPath(name)
 	os.Remove(sockPath) //nolint:errcheck
 
@@ -1500,4 +1508,17 @@ func waitForSocket(path string, timeout time.Duration) error {
 		time.Sleep(5 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for %s", path)
+}
+
+// BinaryPaths returns the binaries the running plugins were launched from.
+//
+// Used for staleness detection: replacing a plugin binary leaves the already
+// running process serving the old code, with nothing to indicate it.
+func (m *Manager) BinaryPaths() []string {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.binPaths...)
 }

@@ -16,6 +16,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/indiejames/indigo/internal/agenttools"
 	"github.com/indiejames/indigo/internal/client"
 )
 
@@ -341,7 +342,7 @@ func runAgent(prog *programLink, rpc *client.RPC, apiKey, model, workDir string,
 	history = append(history, buildUserMessage(text, ac, snippet, selectionNote(rpc, ac, sel)))
 
 	system := buildSystemPrompt(workDir, ac)
-	tools := allTools()
+	tools := agenttools.AllTools()
 
 	for {
 		var (
@@ -392,7 +393,7 @@ func runAgent(prog *programLink, rpc *client.RPC, apiKey, model, workDir string,
 		// Execute tools and collect results.
 		resultBlocks := []apiBlock{}
 		for _, tc := range toolCalls {
-			result, isError := execTool(ctx, rpc, prog, workDir, tc.name, tc.input)
+			result, isError := agenttools.ExecTool(ctx, rpc, tuiApprover{prog}, workDir, tc.name, tc.input)
 			prog.emit(agentToolDoneMsg{name: tc.name})
 			content := result
 			if isError {

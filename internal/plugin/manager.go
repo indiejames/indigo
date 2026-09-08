@@ -253,10 +253,13 @@ type Manager struct {
 	workDir string
 	bridge  ServerBridge
 
-	// binPaths records the binary each running plugin was launched from, so
-	// the server can notice one being replaced on disk (`make install-<plugin>`)
-	// while the old process keeps serving. See internal/server/staleness.go.
-	binPaths []string
+	// binStamps records, for each plugin that started successfully, the binary
+	// it was launched from and that file's identity at launch time — so the
+	// server can notice one being replaced on disk (`make install-<plugin>`)
+	// while the old process keeps serving. Appended only after Initialize
+	// succeeds, so a plugin that failed to start is never reported as running
+	// stale code. See internal/server/staleness.go.
+	binStamps []PluginBinary
 
 	// capture state: when a plugin returns captureKeys > 0, subsequent keys
 	// with mode "capture" are routed to this handler instead of looking up by name.
@@ -356,9 +359,13 @@ func pluginLogFile() *os.File {
 
 func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryPath string) error {
 	name := manifest.Name
-	m.mu.Lock()
-	m.binPaths = append(m.binPaths, binaryPath)
-	m.mu.Unlock()
+	// Stamp the binary before launching from it, and record it only once the
+	// plugin is fully up (see the end of this function). Two separate reasons:
+	// a plugin that never started must not be reported as running stale code,
+	// and the stamp has to describe the file this process was actually
+	// launched from — a `make install-<plugin>` landing later would otherwise
+	// be baked in as the baseline and never reported.
+	launchStamp, haveStamp := binaryStampOf(binaryPath)
 	sockPath := m.pluginSocketPath(name)
 	os.Remove(sockPath) //nolint:errcheck
 
@@ -463,6 +470,19 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 	// process would sit as a zombie until the whole server exits) or from
 	// Shutdown closing rpcConn as part of ordinary teardown.
 	reg.reapDone = reapOnDisconnect(proc, rpcConn)
+
+	// Everything succeeded: process started, socket connected, Initialize
+	// returned. Only now is this a plugin genuinely running that binary, which
+	// is what BinaryStamps promises its callers.
+	if haveStamp {
+		m.mu.Lock()
+		m.binStamps = append(m.binStamps, PluginBinary{
+			Path:            binaryPath,
+			Size:            launchStamp.size,
+			ModTimeUnixNano: launchStamp.modTime,
+		})
+		m.mu.Unlock()
+	}
 
 	return nil
 }
@@ -1510,15 +1530,45 @@ func waitForSocket(path string, timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for %s", path)
 }
 
-// BinaryPaths returns the binaries the running plugins were launched from.
+// BinaryStamps returns the binaries the successfully-started plugins were
+// launched from, each with that file's identity at launch time.
 //
 // Used for staleness detection: replacing a plugin binary leaves the already
 // running process serving the old code, with nothing to indicate it.
-func (m *Manager) BinaryPaths() []string {
+func (m *Manager) BinaryStamps() []PluginBinary {
 	if m == nil {
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]string(nil), m.binPaths...)
+	return append([]PluginBinary(nil), m.binStamps...)
+}
+
+// PluginBinary is a plugin executable together with the identity it had at the
+// moment a plugin process was launched from it.
+//
+// The stamp travels with the path because the two are only meaningful together:
+// a consumer asking "has this been replaced?" needs the baseline from launch
+// time, not from whenever it happens to ask. Size and modification time rather
+// than a hash — the question is "was this replaced", not "is it byte-identical".
+type PluginBinary struct {
+	Path            string
+	Size            int64
+	ModTimeUnixNano int64
+}
+
+// binaryStamp is the plugin package's own copy of the identity pair, kept
+// unexported so PluginBinary stays the only thing crossing the package
+// boundary.
+type binaryStamp struct {
+	size    int64
+	modTime int64
+}
+
+func binaryStampOf(path string) (binaryStamp, bool) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return binaryStamp{}, false
+	}
+	return binaryStamp{size: fi.Size(), modTime: fi.ModTime().UnixNano()}, true
 }

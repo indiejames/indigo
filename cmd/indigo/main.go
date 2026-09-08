@@ -123,16 +123,7 @@ func main() {
 	if err != nil {
 		fatalf("connect to server: %v", err)
 	}
-	if rpc.ServerStale() {
-		// Not fatal: the running server still works, it is just older than
-		// what is installed, and someone may be mid-edit in it. Say so on
-		// stderr before the TUI takes the screen, because the alternative is
-		// silently missing whatever was just built.
-		fmt.Fprintf(os.Stderr,
-			"indigo: warning — the running server for this workspace started from an older "+
-				"build. Close every indigo window on it (or kill the `indigo --server` process) "+
-				"to pick up the current one.\n")
-	}
+	warnIfServerStale(rpc)
 
 	var a *app.App
 	if info.IsDir() {
@@ -186,6 +177,28 @@ func waitForServer(sockPath string, timeout time.Duration) error {
 		time.Sleep(5 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for %s", sockPath)
+}
+
+// warnIfServerStale prints a warning when the server we just connected to is
+// running code that has since been replaced on disk.
+//
+// Not fatal: the running server still works, it is just older than what is
+// installed, and someone may be mid-edit in it. Said on stderr before the TUI
+// takes the screen, because the alternative is silently missing whatever was
+// just built — a failure mode that cost three separate rounds of misdiagnosis
+// before it was recognised (see internal/server/staleness.go).
+//
+// Every path that dials the server must call this. It is a helper rather than
+// inline code precisely because it was inline once and openUntitled did not
+// have it, so `indigo` with no argument silently skipped the check.
+func warnIfServerStale(rpc *client.RPC) {
+	if !rpc.ServerStale() {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"indigo: warning — the running server for this workspace started from an older "+
+			"build. Close every indigo window on it (or kill the `indigo --server` process) "+
+			"to pick up the current one.\n")
 }
 
 // resolvePath returns path with any symlinks resolved, falling back to path
@@ -250,6 +263,7 @@ func openUntitled(startLine int) {
 	if err != nil {
 		fatalf("connect to server: %v", err)
 	}
+	warnIfServerStale(rpc)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	bufID, content, version, _, generation, err := rpc.OpenFile(ctx, "")

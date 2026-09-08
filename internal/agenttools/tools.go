@@ -446,7 +446,11 @@ func execSearchFiles(workDir, pattern, relPath, include string) (string, bool) {
 	var err error
 
 	if isGitRepo(workDir) {
-		args := []string{"-C", workDir, "grep", "-n", pattern}
+		// -e keeps pattern a search expression: without it a pattern starting
+		// with "-" is parsed as an option, so searching for something like
+		// "--force" fails with a git usage error instead of searching. The
+		// plain-grep branch below gets the same protection from its "--".
+		args := []string{"-C", workDir, "grep", "-n", "-e", pattern}
 		if include != "" {
 			args = append(args, "--", "*."+strings.TrimPrefix(include, "*."))
 		} else if relPath != "" {
@@ -615,8 +619,13 @@ func execInsertAtLine(ctx context.Context, rpc *client.RPC, ap Approver, workDir
 			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
 			return fmt.Sprintf("inserted at line %d in %s (save failed: %v)", in.Line, in.Path, serr), false
 		}
+		// Read the file back like execApplyEdits and execSaveFile do, rather
+		// than trusting Save's return: reporting a write that did not reach
+		// disk as success is the specific failure this project has already
+		// been burned by (see CLAUDE.md's "Known tooling issue").
+		warn := verifySaved(ctx, rpc, bufID, absPath(workDir, in.Path))
 		rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
-		return fmt.Sprintf("inserted at line %d and saved %s", in.Line, in.Path), false
+		return fmt.Sprintf("inserted at line %d and saved %s%s", in.Line, in.Path, warn), warn != ""
 	}
 	return fmt.Sprintf("inserted at line %d in %s — applied to the live buffer (approved by the user). Not yet on disk: call save_file before disk-based builds/tests.", in.Line, in.Path), false
 }
@@ -699,9 +708,25 @@ func absPath(workDir, p string) string {
 	return filepath.Join(workDir, p)
 }
 
-func offsetToLineCol(s string, offset int) (line, col int) {
-	for i := 0; i < offset && i < len(s); i++ {
-		if s[i] == '\n' {
+// offsetToLineCol converts a byte offset into s (what strings.Index returns)
+// into the line and column document.Op expects.
+//
+// The column is counted in **runes**, not bytes. document.Buffer addresses
+// positions logically — logicalOffset does lineStart+col over a rune sequence,
+// and logicalSlice slices runes — so a byte column silently points somewhere
+// else in any line containing multibyte text. Editing a line holding "héllo"
+// deleted from the wrong column and corrupted the text rather than failing.
+func offsetToLineCol(s string, byteOffset int) (line, col int) {
+	if byteOffset > len(s) {
+		byteOffset = len(s)
+	}
+	if byteOffset < 0 {
+		byteOffset = 0
+	}
+	// Ranging over a string yields runes, so col advances once per rune
+	// regardless of how many bytes it occupies.
+	for _, r := range s[:byteOffset] {
+		if r == '\n' {
 			line++
 			col = 0
 		} else {

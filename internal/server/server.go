@@ -419,8 +419,15 @@ func (s *editorService) Connect(_ context.Context, call proto.EditorService_conn
 	res.SetClientId(id)
 	// Plugin binaries are registered lazily: plugins start asynchronously
 	// after the server does, so they cannot all be stamped at construction.
-	for _, bin := range s.pluginMgr.BinaryPaths() {
-		s.staleWatch.watch(bin)
+	// The stamp comes from the plugin manager rather than being taken here,
+	// because "here" can be hours after the plugin launched — restatting the
+	// file now would adopt a build installed since as the baseline and report
+	// a genuinely stale plugin as current.
+	for _, bin := range s.pluginMgr.BinaryStamps() {
+		s.staleWatch.watchStamped(bin.Path, binaryStamp{
+			size:    bin.Size,
+			modTime: bin.ModTimeUnixNano,
+		})
 	}
 	if desc := s.staleWatch.staleDescription(); desc != "" {
 		// Deliberately reported, not acted on: someone may be editing in this

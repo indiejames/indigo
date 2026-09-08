@@ -1,8 +1,10 @@
 package server
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -88,5 +90,81 @@ func TestStaleWatchWatchesItsOwnExecutable(t *testing.T) {
 	if _, ok := w.paths[exe]; !ok {
 		t.Errorf("newStaleWatch() does not watch its own executable (%s); `make install` "+
 			"would go unnoticed", exe)
+	}
+}
+
+// TestStaleWatchConcurrentAccess exercises watch and changed from many
+// goroutines at once. Connect both writes (registering plugin binaries) and
+// reads (staleDescription) this map, and the server handles each client
+// connection on its own goroutine — so two clients connecting simultaneously
+// raced here. For a Go map that is not a torn read but a fatal "concurrent map
+// writes", i.e. the whole server dying.
+//
+// Run with -race to get the full value from this.
+func TestStaleWatchConcurrentAccess(t *testing.T) {
+	dir := t.TempDir()
+	var paths []string
+	for i := range 8 {
+		p := filepath.Join(dir, fmt.Sprintf("bin%d", i))
+		if err := os.WriteFile(p, []byte("x"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, p)
+	}
+
+	w := newStaleWatch()
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for _, p := range paths {
+				w.watch(p)
+				w.watchStamped(p, binaryStamp{size: 1, modTime: 1})
+				w.changed()
+				w.stale()
+				w.staleDescription()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// TestWatchStampedKeepsTheLaunchTimeBaseline covers the reason plugin stamps
+// are taken at launch rather than at registration.
+//
+// Plugins start asynchronously, so they are registered at the first Connect
+// that sees them — potentially hours later. Stamping the file at that point
+// adopts whatever is on disk *then* as the baseline, so a `make install-plugin`
+// done in between is invisible and the running plugin is reported as current
+// forever.
+func TestWatchStampedKeepsTheLaunchTimeBaseline(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "plugin")
+	if err := os.WriteFile(bin, []byte("v1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	launch, ok := stampOf(bin)
+	if !ok {
+		t.Fatal("could not stamp the binary")
+	}
+
+	// The binary is replaced before anything registers it — the plugin process
+	// is still running v1.
+	if err := os.WriteFile(bin, []byte("v2-and-longer"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	w := &staleWatch{paths: map[string]binaryStamp{}}
+	w.watchStamped(bin, launch)
+	if !w.stale() {
+		t.Error("a plugin binary replaced between launch and registration was not reported " +
+			"stale; stamping at registration time hides exactly this case")
+	}
+
+	// Re-registering on a later Connect must not overwrite the baseline, or the
+	// staleness disappears the second time anyone connects.
+	w.watch(bin)
+	if !w.stale() {
+		t.Error("re-registering the path overwrote the launch-time baseline")
 	}
 }

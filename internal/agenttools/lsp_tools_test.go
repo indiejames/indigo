@@ -1,6 +1,9 @@
 package agenttools
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -241,5 +244,66 @@ func TestReadFileRangeReplacesSed(t *testing.T) {
 	if got, isErr := sliceLines(content, readFileInput{Path: "f", StartLine: 99}); !isErr ||
 		!strings.Contains(got, "past the end") {
 		t.Errorf("start past EOF = %q (isErr=%v), want an explanatory error", got, isErr)
+	}
+}
+
+// TestOffsetToLineColCountsRunes is a regression test for apply_edits
+// corrupting any line containing multibyte text.
+//
+// strings.Index returns a byte offset, but document.Buffer addresses positions
+// logically — logicalOffset does lineStart+col over a rune sequence — so a
+// column counted in bytes points somewhere else entirely once a line holds
+// anything outside ASCII, and the delete op lands on the wrong characters.
+func TestOffsetToLineColCountsRunes(t *testing.T) {
+	const content = "héllo world\nsecond é line\n"
+
+	// "world" begins after 6 runes ("héllo ") but 7 bytes: é is two bytes.
+	idx := strings.Index(content, "world")
+	line, col := offsetToLineCol(content, idx)
+	if line != 0 || col != 6 {
+		t.Errorf("start of \"world\" = line %d col %d, want 0/6 — a byte column would say 7 "+
+			"and the edit would land one character late", line, col)
+	}
+	if _, endCol := offsetToLineCol(content, idx+len("world")); endCol != 11 {
+		t.Errorf("end of \"world\" = col %d, want 11", endCol)
+	}
+
+	// Columns reset per line, and the multibyte rune on line 2 counts once.
+	idx2 := strings.Index(content, "line")
+	line2, col2 := offsetToLineCol(content, idx2)
+	if line2 != 1 || col2 != 9 {
+		t.Errorf("start of \"line\" = line %d col %d, want 1/9", line2, col2)
+	}
+
+	// Offsets past the end clamp rather than panicking on the slice.
+	if _, _ = offsetToLineCol(content, len(content)+50); false {
+		t.Fatal("unreachable")
+	}
+}
+
+// TestSearchFilesTreatsLeadingDashAsPattern is a regression test for `git grep`
+// parsing a pattern that starts with "-" as an option. Without -e, searching
+// for a flag name fails with a git usage error instead of searching for it.
+func TestSearchFilesTreatsLeadingDashAsPattern(t *testing.T) {
+	dir := t.TempDir()
+	if err := exec.Command("git", "-C", dir, "init", "-q").Run(); err != nil {
+		t.Skipf("git unavailable: %v", err)
+	}
+	body := "run with --force to skip\nnothing here\n"
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// git grep only searches tracked files unless told otherwise; add it.
+	if err := exec.Command("git", "-C", dir, "add", "notes.txt").Run(); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+
+	out, isErr := execSearchFiles(dir, "--force", "", "")
+	if isErr {
+		t.Fatalf("search for a dash-leading pattern errored: %s", out)
+	}
+	if !strings.Contains(out, "--force") {
+		t.Errorf("search output = %q, want the matching line — git parsed the pattern as an "+
+			"option instead of a search expression", out)
 	}
 }

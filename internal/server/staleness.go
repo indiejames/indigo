@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"os"
+	"sync"
 )
 
 // Staleness detection: is this server process running code that has since
@@ -44,10 +45,15 @@ func stampOf(path string) (binaryStamp, bool) {
 // staleWatch remembers what the binaries looked like when this process
 // started, so a later stat can tell whether they were replaced underneath it.
 type staleWatch struct {
-	// paths maps a label ("server", or a plugin name) to the stamp its binary
-	// had at startup. A binary we could not stat at startup is not recorded —
-	// it can't be compared against anything, and guessing would produce
-	// spurious "stale" reports.
+	// mu guards paths. Connect is where both the write (watch) and the read
+	// (changed) happen, and the server handles each client connection on its
+	// own goroutine — so two clients connecting at once race here, which for a
+	// Go map is not merely a torn read but a fatal "concurrent map writes".
+	mu sync.Mutex
+	// paths maps a binary's path to the stamp it had when this process began
+	// using it. A binary we could not stat then is not recorded — it can't be
+	// compared against anything, and guessing would produce spurious "stale"
+	// reports.
 	paths map[string]binaryStamp
 }
 
@@ -61,17 +67,39 @@ func newStaleWatch() *staleWatch {
 	return w
 }
 
-// watch adds a binary to track, ignoring one that cannot be stat'd.
+// watch adds a binary to track, stamping it as it is now. Only for binaries
+// this process starts using at the moment of the call; anything launched
+// earlier must use watchStamped, or a replacement made in between is baked in
+// as the baseline and never reported.
 func (w *staleWatch) watch(path string) {
+	if st, ok := stampOf(path); ok {
+		w.watchStamped(path, st)
+	}
+}
+
+// watchStamped adds a binary to track using a stamp taken at some earlier
+// moment — for a plugin, the instant its process was launched from that file.
+//
+// This is the difference between detecting a replaced plugin and missing it.
+// Plugins start asynchronously, so they are registered at the first Connect
+// that sees them, which can be hours later; stamping the file then would record
+// whatever is on disk at that point, including a build installed since the
+// running plugin was launched. The comparison has to be against what the
+// running process actually came from.
+//
+// The first stamp for a path wins: later calls are the same binary being
+// re-registered on a subsequent Connect, and overwriting would erase the
+// baseline the comparison depends on.
+func (w *staleWatch) watchStamped(path string, st binaryStamp) {
 	if w == nil || path == "" {
 		return
 	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if _, already := w.paths[path]; already {
 		return
 	}
-	if st, ok := stampOf(path); ok {
-		w.paths[path] = st
-	}
+	w.paths[path] = st
 }
 
 // changed returns the paths whose binaries differ from their startup stamp.
@@ -82,10 +110,20 @@ func (w *staleWatch) changed() []string {
 	if w == nil {
 		return nil
 	}
+	w.mu.Lock()
+	// Copy under the lock and stat outside it: stampOf hits the filesystem
+	// once per watched binary, which has no business holding a lock that
+	// every Connect needs.
+	want := make(map[string]binaryStamp, len(w.paths))
+	for path, st := range w.paths {
+		want[path] = st
+	}
+	w.mu.Unlock()
+
 	var out []string
-	for path, want := range w.paths {
+	for path, st := range want {
 		got, ok := stampOf(path)
-		if !ok || got != want {
+		if !ok || got != st {
 			out = append(out, path)
 		}
 	}

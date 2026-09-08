@@ -306,12 +306,8 @@ func (s *mcpServer) handleMessage(raw []byte) []byte {
 			ProtocolVersion string `json:"protocolVersion"`
 		}
 		json.Unmarshal(req.Params, &p) //nolint:errcheck
-		ver := p.ProtocolVersion
-		if ver == "" {
-			ver = "2024-11-05"
-		}
 		result = map[string]any{
-			"protocolVersion": ver,
+			"protocolVersion": negotiateProtocolVersion(p.ProtocolVersion),
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "indigo", "version": "0.1.0"},
 		}
@@ -432,11 +428,22 @@ func mcpTools() []mcpTool {
 // forwardToolCall sends one tool call to the TUI's Unix socket and reads the
 // single-line JSON reply. One connection per call keeps concurrency trivial.
 func forwardToolCall(socketPath, name string, input json.RawMessage) (string, bool) {
-	conn, err := net.Dial("unix", socketPath)
+	// Bounded at every step. The TUI on the other end blocks on a human for an
+	// edit approval, so a slow reply is normal and the budget is generous — but
+	// none of dial, write or read may block forever, or a TUI that has wedged
+	// (or died between the socket existing and being served) hangs the agent
+	// with no error to act on. mcpToolTimeout is the same budget the standalone
+	// path gives one tool call.
+	conn, err := net.DialTimeout("unix", socketPath, mcpToolTimeout)
 	if err != nil {
 		return "indigo-claude TUI not reachable: " + err.Error(), true
 	}
 	defer conn.Close() //nolint:errcheck
+	// One deadline covers the write and the read together: the call as a whole
+	// is what has a budget, not each syscall separately.
+	if err := conn.SetDeadline(time.Now().Add(mcpToolTimeout)); err != nil {
+		return "cannot set a deadline on the tool call: " + err.Error(), true
+	}
 
 	req, _ := json.Marshal(map[string]any{"type": "mcp_tool_call", "name": name, "input": input})
 	if _, err := conn.Write(append(req, '\n')); err != nil {
@@ -477,4 +484,30 @@ func WriteMCPConfig(path, binaryPath, socketPath string) error {
 		return err
 	}
 	return os.WriteFile(path, b, 0600)
+}
+
+// supportedProtocolVersions are the MCP revisions this server implements, in
+// preference order. The first entry is what an initialize with no version, or
+// with one we do not implement, is answered with.
+//
+// Only the subset of MCP used here matters — initialize, tools/list,
+// tools/call, ping, and the notification shapes around them — and it is
+// identical across these revisions, which is why more than one can be claimed
+// honestly.
+var supportedProtocolVersions = []string{"2025-06-18", "2025-03-26", "2024-11-05"}
+
+// negotiateProtocolVersion picks the revision to report back from initialize.
+//
+// It used to echo whatever the client asked for, which claims support for any
+// revision a client cares to name — including future ones with semantics this
+// server does not implement. The spec's own resolution for a version the server
+// does not support is to answer with one it does and let the client decide
+// whether to proceed, which is what this does.
+func negotiateProtocolVersion(requested string) string {
+	for _, v := range supportedProtocolVersions {
+		if requested == v {
+			return v
+		}
+	}
+	return supportedProtocolVersions[0]
 }

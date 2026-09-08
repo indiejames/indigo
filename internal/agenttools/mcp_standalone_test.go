@@ -1,11 +1,14 @@
 package agenttools
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/server"
 )
 
@@ -122,9 +125,37 @@ func TestStandaloneApprovalDoesNotBlock(t *testing.T) {
 // forever. The visible symptoms were asymmetric and misleading: apply_edits
 // failed, so the agent fell back to filesystem tools, while read_file quietly
 // served on-disk bytes and appeared to work.
+//
+// The server here runs in-process and is kept alive by a second client, so the
+// test needs no `indigo` on PATH (CI has none) and exercises the part that was
+// actually broken: noticing a dead connection and replacing it. Restarting a
+// server that has genuinely exited is startIndigoServer's job, covered
+// separately below.
 func TestMCPConnRedialsAfterServerExit(t *testing.T) {
 	dir := t.TempDir()
-	c := &mcpConn{workDir: dir, sock: server.SocketPath(dir)}
+	sock := server.SocketPath(dir)
+
+	srv, err := server.New(dir)
+	if err != nil {
+		t.Fatalf("start an in-process server: %v", err)
+	}
+	done := make(chan struct{})
+	go func() { srv.Wait(); close(done) }()
+	waitUntil(t, func() bool { return server.IsRunning(sock) }, "the server to accept connections")
+
+	// Holding a second client keeps the server up when the connection under
+	// test goes away — otherwise the last disconnect shuts it down and get()
+	// would need to spawn a replacement.
+	keepalive, err := client.Dial(sock)
+	if err != nil {
+		t.Fatalf("keepalive dial: %v", err)
+	}
+	t.Cleanup(func() {
+		keepalive.Disconnect(context.Background()) //nolint:errcheck
+		<-done
+	})
+
+	c := &mcpConn{workDir: dir, sock: sock}
 
 	first, err := c.get()
 	if err != nil {
@@ -135,18 +166,18 @@ func TestMCPConnRedialsAfterServerExit(t *testing.T) {
 	}
 	// get() must reuse a live connection rather than dialing per call.
 	if again, err := c.get(); err != nil || again != first {
-		t.Errorf("live connection was not reused: %v, %v", again == first, err)
+		t.Errorf("live connection was not reused: reused=%v, err=%v", again == first, err)
 	}
 
 	// Drop the connection the way a server exit does.
-	if err := first.Disconnect(t.Context()); err != nil {
+	if err := first.Disconnect(context.Background()); err != nil {
 		t.Logf("disconnect returned %v (the connection is closed either way)", err)
 	}
 	waitUntil(t, func() bool { return !first.Alive() }, "connection to report itself closed")
 
 	second, err := c.get()
 	if err != nil {
-		t.Fatalf("redial after the server went away: %v", err)
+		t.Fatalf("redial after the connection died: %v", err)
 	}
 	if second == first {
 		t.Error("get() handed back the dead connection; every later tool call would fail " +
@@ -155,7 +186,28 @@ func TestMCPConnRedialsAfterServerExit(t *testing.T) {
 	if !second.Alive() {
 		t.Error("redialed connection is not alive")
 	}
-	second.Disconnect(t.Context()) //nolint:errcheck
+	second.Disconnect(context.Background()) //nolint:errcheck
+}
+
+// TestMCPConnStartsServerWhenNoneRunning covers get()'s other branch: no server
+// at all, so one has to be spawned. That needs the real `indigo` binary, which
+// a checkout does not have until `make install`, so it is skipped rather than
+// failed when absent — the branch above is the one carrying the regression.
+func TestMCPConnStartsServerWhenNoneRunning(t *testing.T) {
+	if _, err := exec.LookPath("indigo"); err != nil {
+		t.Skip("no indigo on PATH; this branch spawns the real binary")
+	}
+	dir := t.TempDir()
+	c := &mcpConn{workDir: dir, sock: server.SocketPath(dir)}
+
+	rpc, err := c.get()
+	if err != nil {
+		t.Fatalf("get() with no server running: %v", err)
+	}
+	if !rpc.Alive() {
+		t.Error("connection to the spawned server is not alive")
+	}
+	rpc.Disconnect(context.Background()) //nolint:errcheck
 }
 
 func waitUntil(t *testing.T, cond func() bool, what string) {

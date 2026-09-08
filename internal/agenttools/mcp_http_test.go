@@ -124,3 +124,30 @@ func TestMCPHTTPBearerToken(t *testing.T) {
 		})
 	}
 }
+
+// Over HTTP a malformed body must come back as a JSON-RPC parse error, not the
+// 202 that says "accepted, no reply owed" — that status is reserved for a valid
+// notification, which genuinely owes no reply.
+func TestMCPHTTPMalformedBodyIsNotAccepted(t *testing.T) {
+	h := mcpHTTPHandler(echoServer(), "")
+	resp := post(t, h, `{ not json at all`, nil)
+
+	if resp.StatusCode == http.StatusAccepted {
+		t.Fatal("malformed body returned 202; the client cannot tell that its request " +
+			"never parsed")
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 carrying a JSON-RPC error", resp.StatusCode)
+	}
+	var out struct {
+		Error struct {
+			Code int `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Error.Code != -32700 {
+		t.Errorf("error code = %d, want -32700 (parse error)", out.Error.Code)
+	}
+}

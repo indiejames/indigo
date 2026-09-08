@@ -180,3 +180,45 @@ func TestInitializeDoesNotEchoUnsupportedVersion(t *testing.T) {
 		t.Errorf("protocolVersion = %q, want %q", out.Result.ProtocolVersion, supportedProtocolVersions[0])
 	}
 }
+
+// TestMCPMalformedInputIsAProtocolError pins the distinction handleMessage's
+// nil return depends on.
+//
+// nil means "no reply is owed", which is true only of a valid notification.
+// Using it for input that never parsed made the two indistinguishable — over
+// stdio that was unhelpful silence, but over HTTP serveMCPPost turns nil into
+// 202 Accepted, which tells a client its request was fine when it was not.
+func TestMCPMalformedInputIsAProtocolError(t *testing.T) {
+	srv := newTestServer(nil)
+
+	for _, tc := range []struct {
+		name, input string
+		wantCode    float64
+	}{
+		{"not json", `{ this is not json`, -32700},
+		{"truncated", `{"jsonrpc":"2.0","id":1,`, -32700},
+		{"json but not a request", `{"jsonrpc":"2.0","id":1}`, -32600},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := srv.handleMessage([]byte(tc.input))
+			if resp == nil {
+				t.Fatal("malformed input produced no response; over HTTP that becomes a 202 " +
+					"and the client believes the request succeeded")
+			}
+			m := decode(t, resp)
+			errObj, _ := m["error"].(map[string]any)
+			if errObj == nil {
+				t.Fatalf("expected an error response, got %s", resp)
+			}
+			if errObj["code"] != tc.wantCode {
+				t.Errorf("error code = %v, want %v", errObj["code"], tc.wantCode)
+			}
+		})
+	}
+
+	// A genuine notification must still produce nothing — that is the case the
+	// nil return exists for.
+	if resp := srv.handleMessage([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)); resp != nil {
+		t.Errorf("valid notification got a response: %s", resp)
+	}
+}

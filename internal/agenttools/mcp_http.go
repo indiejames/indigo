@@ -75,11 +75,14 @@ func RunHTTP(addr string) {
 
 	httpSrv := &http.Server{
 		Handler: mcpHTTPHandler(srv, token),
-		// A tool call can legitimately take a while (an edit waits on the
-		// server's format-on-save), so the write budget is the tool budget plus
-		// room to send the reply. No read timeout beyond headers: bodies here
-		// are small and arrive at once.
+		// Every phase is bounded. A tool call can legitimately take a while (an
+		// edit waits on the server's format-on-save), so the write budget is
+		// the tool budget plus room to send the reply — but nothing else here
+		// is slow, and an unbounded read or an idle keep-alive connection is a
+		// socket anyone can hold open indefinitely for free.
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second, // headers plus body; bodies are small
+		IdleTimeout:       120 * time.Second,
 		WriteTimeout:      mcpToolTimeout + 30*time.Second,
 	}
 	if err := httpSrv.Serve(ln); err != nil {

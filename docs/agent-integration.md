@@ -17,9 +17,12 @@ client spawns the server) and **HTTP** (`indigo --mcp-http`, for a client that
 cannot — an agent in a container, say). Both serve the same tools through the
 same code; only the framing differs.
 
-The supported MCP protocol revisions are 2025-06-18, 2025-03-26 and 2024-11-05.
-A client asking for anything else is answered with the newest of those rather
-than being refused.
+Supported MCP protocol revisions differ by transport. Over **stdio**: 2025-06-18,
+2025-03-26 and 2024-11-05. Over **HTTP**: 2025-06-18 and 2025-03-26 only — the
+HTTP endpoint implements Streamable HTTP, and 2024-11-05 predates it, using the
+separate HTTP+SSE transport (a `/sse` endpoint plus a `/messages` endpoint)
+which is not implemented. A client asking for a revision that is not supported
+is answered with the newest one that is, rather than being refused.
 
 ## Setup
 
@@ -97,12 +100,19 @@ directory was doing that job. Binding wider hands anything that can route to the
 port the ability to read and edit your files. Set a shared secret:
 
 ```sh
-INDIGO_MCP_TOKEN=$(openssl rand -hex 32) indigo --mcp-http 0.0.0.0:7391
+# on the host — generate it, keep it, then start the server with it
+export INDIGO_MCP_TOKEN=$(openssl rand -hex 32)
+echo "$INDIGO_MCP_TOKEN"          # you need this value again, in the container
+indigo --mcp-http 0.0.0.0:7391
 ```
 
-Every request then needs `Authorization: Bearer <token>`:
+Every request then needs `Authorization: Bearer <token>`. The registration runs
+in a *different* shell — inside the container — so the token has to be carried
+across rather than referenced; paste the value printed above:
 
 ```sh
+# in the container
+export INDIGO_MCP_TOKEN=<the value printed on the host>
 claude mcp add --transport http indigo http://host.docker.internal:7391 \
   --header "Authorization: Bearer $INDIGO_MCP_TOKEN"
 ```
@@ -119,12 +129,27 @@ MCP client is not a browser and sends none.
 possible with `socat`, at the cost of aligning the uid and workspace path
 described above:
 
+Each side needs the socket path *that side* computes, and they differ: the
+directory name is the same on both (it is `indigo-<uid>-<hash of the workspace
+path>`, and you have aligned the uid and the path), but its parent is `$TMPDIR`,
+which is `/var/folders/...` on macOS and `/tmp` in the container.
+
 ```sh
-# host
-socat TCP-LISTEN:7777,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:"$SOCK"
-# container, before starting claude, at the path the container computes
-socat UNIX-LISTEN:"$SOCK",fork,unlink-early TCP:host.docker.internal:7777
+# host — derive the directory name, then point socat at the live socket
+DIR="indigo-$(id -u)-$(printf %s /Volumes/Data/Golang/indigo | shasum -a 256 | cut -c1-16)"
+socat TCP-LISTEN:7777,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:"$TMPDIR/$DIR/server.sock"
 ```
+
+```sh
+# container, before starting claude — same directory name, container's TMPDIR
+DIR="indigo-$(id -u)-$(printf %s /Volumes/Data/Golang/indigo | sha256sum | cut -c1-16)"
+mkdir -p "/tmp/$DIR"
+socat UNIX-LISTEN:"/tmp/$DIR/server.sock",fork,unlink-early TCP:host.docker.internal:7777
+```
+
+Substitute your own workspace path in both. If the two `DIR` values differ, the
+container is computing a different workspace or uid and the bridge will not be
+found — compare them before debugging anything else.
 
 **The failure mode to watch for is quiet.** If the container cannot reach the
 editor's server, `indigo --mcp` finds none running and starts its own inside the

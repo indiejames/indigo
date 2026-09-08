@@ -314,7 +314,18 @@ type mcpRequest struct {
 func (s *mcpServer) handleMessage(raw []byte) []byte {
 	var req mcpRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
-		return nil
+		// A nil return means "no reply is owed", which is true only of a valid
+		// notification. Using it for malformed input made the two
+		// indistinguishable: over stdio that was merely unhelpful silence, but
+		// over HTTP serveMCPPost turns it into 202 Accepted — telling a client
+		// its request was fine when it never parsed. The id cannot be recovered
+		// from something that did not decode, so it is null, per JSON-RPC.
+		return mcpError(nil, -32700, "parse error: "+err.Error())
+	}
+	if req.Method == "" {
+		// Valid JSON that is not a request. Same reasoning: silence here would
+		// be read as success.
+		return mcpError(req.ID, -32600, "invalid request: no method")
 	}
 	isNotification := len(req.ID) == 0 || string(req.ID) == "null"
 

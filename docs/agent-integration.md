@@ -10,9 +10,16 @@ agent using ordinary shell tools reads what is on disk and searches text; throug
 this integration it reads your unsaved buffers and asks a real language server
 where a symbol is used.
 
-Written for Claude Code, which is what it is tested against. Any MCP client that
-speaks stdio can use it — the registration command is the only Claude-specific
-part.
+Written for Claude Code, which is what it is tested against. Any MCP client can
+use it — the registration commands are the only Claude-specific part. Two
+transports are available: **stdio** (`indigo --mcp`, the default, where the
+client spawns the server) and **HTTP** (`indigo --mcp-http`, for a client that
+cannot — an agent in a container, say). Both serve the same tools through the
+same code; only the framing differs.
+
+The supported MCP protocol revisions are 2025-06-18, 2025-03-26 and 2024-11-05.
+A client asking for anything else is answered with the newest of those rather
+than being refused.
 
 ## Setup
 
@@ -50,6 +57,82 @@ You do not need indigo open. If no server is running for the workspace, one is
 started on demand and shuts down when nothing is using it. If you *do* have
 indigo open, the agent shares that server, which is where the live-buffer
 behaviour comes from.
+
+## Running the agent in a container
+
+The setup above has Claude Code *spawn* `indigo --mcp`, which ties the agent to
+the same machine, filesystem and uid as the editor. An agent in a container has
+none of those. Reaching the editor's Unix socket from one means aligning three
+things at once — the socket path is
+`$TMPDIR/indigo-<uid>-<sha256(abs workspace path)[:8]>/server.sock`, so the
+workspace must be mounted at an identical path, the container must run as the
+same uid, and the socket has to cross the boundary at all, which Docker Desktop
+on macOS will not do for socket files.
+
+Use the HTTP transport instead. On the host, beside the editor:
+
+```sh
+indigo --mcp-http            # 127.0.0.1:7391 by default
+```
+
+and register that URL from inside the container:
+
+```sh
+claude mcp add --transport http indigo http://host.docker.internal:7391
+```
+
+Nothing else has to line up: no `indigo` binary in the container, no socket, no
+path or uid alignment. The workspace is still resolved from the cwd of the
+`--mcp-http` process, so run it from the repository you want served.
+
+**Reaching it from the container.** Docker Desktop (macOS, Windows) forwards
+`host.docker.internal` to the host, including services bound to loopback. On
+Linux you need `--add-host=host.docker.internal:host-gateway`, and a
+loopback-bound listener is *not* reachable that way — bind to the bridge address
+or `0.0.0.0` and read the next paragraph first.
+
+**Before binding beyond loopback.** This endpoint exposes your buffers and an
+edit tool, and has no authentication of its own — the Unix socket's 0700
+directory was doing that job. Binding wider hands anything that can route to the
+port the ability to read and edit your files. Set a shared secret:
+
+```sh
+INDIGO_MCP_TOKEN=$(openssl rand -hex 32) indigo --mcp-http 0.0.0.0:7391
+```
+
+Every request then needs `Authorization: Bearer <token>`:
+
+```sh
+claude mcp add --transport http indigo http://host.docker.internal:7391 \
+  --header "Authorization: Bearer $INDIGO_MCP_TOKEN"
+```
+
+indigo warns on stderr if you bind beyond loopback without a token. It is a
+bearer token over plain HTTP, not real authentication — appropriate for a
+container on the same host, not for anything routable.
+
+Cross-origin requests are refused regardless: a browser can be coerced into
+POSTing at a loopback port, and would attach an `Origin` naming the page. A real
+MCP client is not a browser and sends none.
+
+**If you would rather bridge the socket** — no HTTP listener, no token — it is
+possible with `socat`, at the cost of aligning the uid and workspace path
+described above:
+
+```sh
+# host
+socat TCP-LISTEN:7777,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:"$SOCK"
+# container, before starting claude, at the path the container computes
+socat UNIX-LISTEN:"$SOCK",fork,unlink-early TCP:host.docker.internal:7777
+```
+
+**The failure mode to watch for is quiet.** If the container cannot reach the
+editor's server, `indigo --mcp` finds none running and starts its own inside the
+container. Every tool then works perfectly against a second server with its own
+buffers, and you get none of the shared-live-buffer behaviour you set this up
+for. The tell is that reads never reflect your unsaved edits; `ps` inside the
+container showing an `indigo --server` confirms it. The HTTP transport does not
+have this failure mode, because there is nothing in the container to start.
 
 ## Optional: skip the approval prompts
 

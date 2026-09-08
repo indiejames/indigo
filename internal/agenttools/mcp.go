@@ -94,6 +94,21 @@ const mcpToolTimeout = 60 * time.Second
 // RunStandalone speaks MCP over stdio and executes each tool call directly
 // against the workspace's indigo server, with no chat TUI in the loop.
 func RunStandalone() {
+	serveMCPStdio(&mcpServer{callTool: workspaceToolCaller()})
+}
+
+// workspaceToolCaller builds the tool-execution function both transports use:
+// resolve the workspace from the cwd, keep a live connection to its indigo
+// server, and run each call against it.
+//
+// Shared by stdio and HTTP deliberately. The transport decides how bytes move;
+// nothing about which tools exist, how the workspace is found, or how a stale
+// server is reported may differ between them, or the two would drift into
+// answering the same question differently.
+//
+// Exits the process on a workspace that cannot host a server at all, so that
+// failure is visible at startup rather than once per tool call.
+func workspaceToolCaller() func(string, json.RawMessage) (string, bool) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		mcpFatal("cannot determine working directory: %v", err)
@@ -101,44 +116,48 @@ func RunStandalone() {
 	workDir := workspaceRoot(cwd)
 
 	conn := &mcpConn{workDir: workDir, sock: server.SocketPath(workDir)}
-	// Connect eagerly so a workspace that cannot host a server at all fails
-	// visibly at startup rather than once per tool call.
 	if _, err := conn.get(); err != nil {
 		mcpFatal("%v", err)
 	}
-
 	ap := standaloneApprover()
 
-	// A stale server is why three separate investigations in one session
-	// chased phantom bugs: the tools answered normally while the server ran
-	// code from before the last build. Prefixing every result is deliberately
-	// heavy-handed — a warning that appears once at startup is exactly the
-	// kind an agent reads past and then reasons from stale output anyway.
-	serveMCPStdio(&mcpServer{
-		callTool: func(name string, input json.RawMessage) (string, bool) {
-			// Reconnect per call rather than capturing one handle for the life
-			// of the process. This process outlives any editor window, and an
-			// indigo server exits when its last client disconnects, so the
-			// connection made at startup routinely dies mid-session. A dead
-			// handle answers every later call with "rpc: connection closed" —
-			// which surfaced as edits silently falling back to filesystem
-			// tools while reads appeared to keep working.
-			rpc, err := conn.get()
-			if err != nil {
-				return err.Error(), true
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), mcpToolTimeout)
-			defer cancel()
-			out, isErr := ExecTool(ctx, rpc, ap, workDir, name, input)
-			// Staleness is a property of the connection, so it is re-read here
-			// rather than captured once: a reconnect can land on a different
-			// server than the one that answered the previous call.
-			if rpc.ServerStale() {
-				out = staleServerWarning + out
-			}
-			return out, isErr
-		},
-	})
+	// One tool call at a time, matching what stdio does structurally (it reads
+	// and dispatches on a single goroutine). HTTP would otherwise let a client
+	// overlap calls, and two concurrent apply_edits on one buffer is a
+	// behaviour no transport has ever had here — not a difference worth
+	// introducing as a side effect of adding one.
+	var mu sync.Mutex
+
+	return func(name string, input json.RawMessage) (string, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		// Reconnect per call rather than capturing one handle for the life of
+		// the process. This process outlives any editor window, and an indigo
+		// server exits when its last client disconnects, so the connection made
+		// at startup routinely dies mid-session. A dead handle answers every
+		// later call with "rpc: connection closed" — which surfaced as edits
+		// silently falling back to filesystem tools while reads appeared to
+		// keep working.
+		rpc, err := conn.get()
+		if err != nil {
+			return err.Error(), true
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), mcpToolTimeout)
+		defer cancel()
+		out, isErr := ExecTool(ctx, rpc, ap, workDir, name, input)
+		// A stale server is why three separate investigations in one session
+		// chased phantom bugs: the tools answered normally while the server ran
+		// code from before the last build. Prefixing every result is
+		// deliberately heavy-handed — a warning shown once at startup is
+		// exactly the kind an agent reads past and then reasons from stale
+		// output anyway. Re-read per call rather than captured once, since a
+		// reconnect can land on a different server than the previous call.
+		if rpc.ServerStale() {
+			out = staleServerWarning + out
+		}
+		return out, isErr
+	}
 }
 
 // mcpConn hands out a live connection to the workspace's indigo server,

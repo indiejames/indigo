@@ -347,6 +347,24 @@ func init() {
 		agenttools.RunStandalone()
 		os.Exit(0)
 	}
+
+	// --mcp-http [addr] serves the same tools over HTTP instead of stdio, for a
+	// client that cannot spawn this process — an agent in a container, most
+	// obviously, which otherwise has to reach a Unix socket whose path encodes
+	// the workspace path and the uid, across a boundary Docker Desktop on macOS
+	// will not carry socket files over at all. Register it with
+	//
+	//	claude mcp add --transport http indigo http://127.0.0.1:7391
+	//
+	// Defaults to loopback; see docs/agent-integration.md before widening it.
+	if len(os.Args) >= 2 && os.Args[1] == "--mcp-http" {
+		addr := ""
+		if len(os.Args) > 2 {
+			addr = os.Args[2]
+		}
+		agenttools.RunHTTP(addr)
+		os.Exit(0)
+	}
 }
 
 func runServer(dir string) {

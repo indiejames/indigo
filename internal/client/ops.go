@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -65,15 +66,50 @@ func (m Model) sendOp(op document.Op) tea.Cmd {
 // content) is preferable to a retry: a retried op's line/col coordinates
 // may no longer be valid if the user kept typing before the retry lands.
 func (m Model) sendToServer(op document.Op) tea.Cmd {
+	bufID, generation, path := m.bufID, m.generation, m.filePath
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), applyOpTimeout)
 		defer cancel()
-		_, err := m.rpc.ApplyOp(ctx, m.bufID, op, m.generation)
+		_, err := m.rpc.ApplyOp(ctx, bufID, op, generation)
 		if err != nil {
-			return applyOpFailedMsg{bufID: m.bufID, err: err}
+			// Logged, not just shown. The popup this produces is transient and
+			// cannot be copied, so an intermittent failure leaves nothing behind
+			// to diagnose from — the reason this path has only ever been
+			// reported anecdotally. The line below is the evidence the next
+			// occurrence needs: which buffer, which op, and the server's own
+			// words for what went wrong.
+			clientLog("ApplyOp FAILED buf=%d gen=%d path=%s op=%s: %v",
+				bufID, generation, path, describeOp(op), err)
+			return applyOpFailedMsg{bufID: bufID, err: err}
 		}
 		return nil
 	}
+}
+
+// applyOpTimeout bounds one edit's round trip to the server, and
+// resyncTimeout the recovery fetch that follows a failed one.
+//
+// The recovery gets longer than the edit deliberately. Whatever made the edit
+// fail — a busy server, a slow moment under load — is still true a millisecond
+// later when the resync goes out, so giving the retry the same budget that just
+// expired is how a transient stall turns into "buffer may be out of sync with
+// the server", a message that reads as data loss and is not.
+const (
+	applyOpTimeout = 5 * time.Second
+	resyncTimeout  = 15 * time.Second
+)
+
+// describeOp renders an op compactly for a log line: enough to correlate with a
+// buffer state, without dumping inserted text (which can be a whole paste, and
+// is the user's content).
+func describeOp(op document.Op) string {
+	switch op.Type {
+	case document.OpInsert:
+		return fmt.Sprintf("insert at %d:%d (%d bytes)", op.InsertLine, op.InsertCol, len(op.InsertText))
+	case document.OpDelete:
+		return fmt.Sprintf("delete %d:%d-%d:%d", op.FromLine, op.FromCol, op.ToLine, op.ToCol)
+	}
+	return "unknown"
 }
 
 // resyncFromServer re-fetches this buffer's authoritative content from the
@@ -85,9 +121,18 @@ func (m Model) sendToServer(op document.Op) tea.Cmd {
 func (m Model) resyncFromServer() tea.Cmd {
 	bufID := m.bufID
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), resyncTimeout)
 		defer cancel()
 		content, version, generation, path, err := m.rpc.GetBufferSnapshot(ctx, bufID)
+		if err != nil {
+			// The failure that actually reaches the user as "buffer may be out
+			// of sync with the server". Recorded for the same reason as above:
+			// this is the point where knowing whether the server was slow, gone,
+			// or had dropped the buffer decides what to do about it.
+			clientLog("resync FAILED buf=%d: %v", bufID, err)
+		} else {
+			clientLog("resync ok buf=%d version=%d generation=%d path=%s", bufID, version, generation, path)
+		}
 		return bufferResyncMsg{bufID: bufID, content: content, version: version, generation: generation, path: path, err: err}
 	}
 }

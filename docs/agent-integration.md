@@ -94,6 +94,13 @@ for connectivity — for legibility: tool results carry the host's absolute path
 has that repo at `/workspace` those paths name nothing it can open, so the
 agent's own Read and Bash cannot follow up on anything indigo tells it.
 
+That advice assumes the host path is one a Linux container can also use, which
+holds because the machine serving MCP is running indigo, and indigo is
+macOS/Linux only — it does not build for Windows (the tree-sitter grammars are
+cgo). On a Windows machine the host side therefore runs under WSL, where the
+paths are Linux paths and this reads unchanged; there is no native-Windows host
+to translate paths for.
+
 **Reaching it from the container.** Docker Desktop (macOS, Windows) forwards
 `host.docker.internal` to the host, including services bound to loopback. On
 Linux you need `--add-host=host.docker.internal:host-gateway`, and a

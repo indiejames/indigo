@@ -195,9 +195,19 @@ func TestMCPMalformedInputIsAProtocolError(t *testing.T) {
 		name, input string
 		wantCode    float64
 	}{
+		// Not JSON at all.
 		{"not json", `{ this is not json`, -32700},
 		{"truncated", `{"jsonrpc":"2.0","id":1,`, -32700},
-		{"json but not a request", `{"jsonrpc":"2.0","id":1}`, -32600},
+		// Valid JSON of the wrong shape. Reporting these as parse errors would
+		// send a client hunting a syntax problem that is not there.
+		{"empty array", `[]`, -32600},
+		{"batch array", `[{"jsonrpc":"2.0","id":1,"method":"ping"}]`, -32600},
+		{"bare scalar", `42`, -32600},
+		{"method not a string", `{"jsonrpc":"2.0","id":1,"method":1}`, -32600},
+		{"missing jsonrpc", `{"id":1,"method":"ping"}`, -32600},
+		{"wrong jsonrpc", `{"jsonrpc":"1.0","id":1,"method":"ping"}`, -32600},
+		{"missing method with an id", `{"jsonrpc":"2.0","id":1}`, -32600},
+		{"id of the wrong type", `{"jsonrpc":"2.0","id":{},"method":"ping"}`, -32600},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resp := srv.handleMessage([]byte(tc.input))
@@ -213,7 +223,34 @@ func TestMCPMalformedInputIsAProtocolError(t *testing.T) {
 			if errObj["code"] != tc.wantCode {
 				t.Errorf("error code = %v, want %v", errObj["code"], tc.wantCode)
 			}
+			// JSON-RPC only permits echoing an id once the request it came
+			// from is known to be well formed, which by definition none of
+			// these are — so every reply here carries a null id even when an
+			// id was present and readable.
+			if id, present := m["id"]; !present || id != nil {
+				t.Errorf("id = %v (present=%v), want null", id, present)
+			}
 		})
+	}
+
+	// Valid ids of every permitted type must still be accepted and echoed.
+	for _, id := range []string{`1`, `"abc"`, `-7`, `null`} {
+		in := `{"jsonrpc":"2.0","id":` + id + `,"method":"ping"}`
+		resp := srv.handleMessage([]byte(in))
+		if id == "null" {
+			// A null id is a notification, so no reply is owed.
+			if resp != nil {
+				t.Errorf("id null got a response: %s", resp)
+			}
+			continue
+		}
+		if resp == nil {
+			t.Errorf("valid request with id %s got no response", id)
+			continue
+		}
+		if m := decode(t, resp); m["error"] != nil {
+			t.Errorf("valid request with id %s was rejected: %s", id, resp)
+		}
 	}
 
 	// A genuine notification must still produce nothing — that is the case the

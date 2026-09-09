@@ -151,3 +151,46 @@ func TestMCPHTTPMalformedBodyIsNotAccepted(t *testing.T) {
 		t.Errorf("error code = %d, want -32700 (parse error)", out.Error.Code)
 	}
 }
+
+// The same distinctions must survive the HTTP layer: valid JSON of the wrong
+// shape is an invalid request, not a parse error, and neither is a 202 — that
+// status says "accepted, no reply owed", which is only true of a notification.
+func TestMCPHTTPRejectsNonRequestBodies(t *testing.T) {
+	h := mcpHTTPHandler(echoServer(), "")
+
+	for _, tc := range []struct {
+		name, body string
+		wantCode   int
+	}{
+		{"not json", `{ not json at all`, -32700},
+		{"empty array", `[]`, -32600},
+		{"invalid jsonrpc", `{"jsonrpc":"1.0","id":1,"method":"ping"}`, -32600},
+		{"missing method with an id", `{"jsonrpc":"2.0","id":1}`, -32600},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := post(t, h, tc.body, nil)
+			if resp.StatusCode == http.StatusAccepted {
+				t.Fatal("returned 202; the client cannot tell its request was rejected")
+			}
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200 carrying a JSON-RPC error", resp.StatusCode)
+			}
+			var out struct {
+				ID    any `json:"id"`
+				Error struct {
+					Code int `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if out.Error.Code != tc.wantCode {
+				t.Errorf("error code = %d, want %d", out.Error.Code, tc.wantCode)
+			}
+			if out.ID != nil {
+				t.Errorf("id = %v, want null — an id is echoed only once the request "+
+					"it came from is known to be well formed", out.ID)
+			}
+		})
+	}
+}

@@ -2,6 +2,7 @@ package agenttools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -310,23 +311,43 @@ type mcpRequest struct {
 }
 
 // handleMessage processes one JSON-RPC message and returns the response bytes,
-// or nil when no response should be sent (notifications, unparseable input).
+// or nil when no response is owed — which is only ever a valid notification.
 func (s *mcpServer) handleMessage(raw []byte) []byte {
+	// Three outcomes, and they must stay distinguishable, because a nil return
+	// means "no reply is owed" — true only of a valid notification. Collapsing
+	// any of these into nil was how malformed input became a 202 Accepted over
+	// HTTP, telling a client its request was fine when it never parsed.
+	//
+	//   not JSON at all          -> -32700 parse error
+	//   JSON, but not a request  -> -32600 invalid request
+	//   a valid notification     -> nil
+	//
+	// The distinction between the first two is why this decodes twice: whether
+	// the bytes are JSON is a different question from whether that JSON is a
+	// request object, and reporting "parse error" for well-formed JSON sends a
+	// client looking for a syntax problem that does not exist.
+	if !json.Valid(raw) {
+		return mcpError(nil, -32700, "parse error: not valid JSON")
+	}
 	var req mcpRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
-		// A nil return means "no reply is owed", which is true only of a valid
-		// notification. Using it for malformed input made the two
-		// indistinguishable: over stdio that was merely unhelpful silence, but
-		// over HTTP serveMCPPost turns it into 202 Accepted — telling a client
-		// its request was fine when it never parsed. The id cannot be recovered
-		// from something that did not decode, so it is null, per JSON-RPC.
-		return mcpError(nil, -32700, "parse error: "+err.Error())
+		// Valid JSON of the wrong shape: an array (a batch, which this server
+		// does not implement, or an empty one), a bare scalar, or a member of
+		// the wrong type such as a numeric "method".
+		return mcpError(nil, -32600, "invalid request: not a JSON-RPC request object")
+	}
+	if req.JSONRPC != "2.0" {
+		return mcpError(nil, -32600, `invalid request: "jsonrpc" must be "2.0"`)
 	}
 	if req.Method == "" {
-		// Valid JSON that is not a request. Same reasoning: silence here would
-		// be read as success.
-		return mcpError(req.ID, -32600, "invalid request: no method")
+		return mcpError(nil, -32600, `invalid request: "method" is required`)
 	}
+	if !validRequestID(req.ID) {
+		return mcpError(nil, -32600, `invalid request: "id" must be a string, number, or null`)
+	}
+	// Note every invalid-request reply above carries a null id, including the
+	// ones where an id was present and readable. That is JSON-RPC's rule: an id
+	// is only echoed once the request it came from is known to be well formed.
 	isNotification := len(req.ID) == 0 || string(req.ID) == "null"
 
 	var result any
@@ -374,6 +395,26 @@ func (s *mcpServer) handleMessage(raw []byte) []byte {
 	}
 	b, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
 	return b
+}
+
+// validRequestID reports whether an id is one JSON-RPC permits: a string, a
+// number, or null. An absent id is fine and means a notification — the one
+// thing this must not reject, since notifications are the reason a nil
+// response exists at all.
+//
+// Checking the first byte is enough: json.Valid has already run, so the value
+// is well-formed and only its type is in question.
+func validRequestID(id json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(id)
+	if len(trimmed) == 0 {
+		return true // absent: a notification
+	}
+	switch c := trimmed[0]; {
+	case c == '"', c == '-', c >= '0' && c <= '9':
+		return true
+	default:
+		return bytes.Equal(trimmed, []byte("null"))
+	}
 }
 
 func mcpError(id json.RawMessage, code int, msg string) []byte {

@@ -1,0 +1,18 @@
+# golangci-lint configuration.
+#
+# This file exists for one reason: build tags. indigo gates every tree-sitter
+# grammar behind a `lang_*` tag (see internal/highlight), so a run without
+# `lang_all` cannot see the files that use those constants and reports each of
+# them as unused — 13 false positives on an otherwise clean tree.
+#
+# The Makefile passes `--build-tags lang_all` explicitly, but the editor's own
+# linter integration invokes `golangci-lint run ./...` with no flags of its
+# own, and indigo's linter config is global rather than per-project so it
+# cannot be overridden for this repo alone. Putting the tag here is what makes
+# both agree: golangci-lint reads this file automatically, so `make lint` and
+# the in-editor diagnostics now lint the same code.
+version: "2"
+
+run:
+  build-tags:
+    - lang_all

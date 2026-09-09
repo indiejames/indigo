@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  GOLANGCI_LINT_VERSION: v2.11.4
+
 jobs:
   lint:
     name: Lint
@@ -17,16 +20,31 @@ jobs:
           go-version: "1.26"
           cache: true
 
+      # Pinned, and the version is part of the cache key. Two reasons, both
+      # learned the hard way:
+      #
+      #   - The module path carries the major version. @latest on the v1 path
+      #     resolves to the newest *v1*, so CI silently stayed on v1 while
+      #     .golangci.yml moved to the v2 format, and every run failed with
+      #     "you are using a configuration file for golangci-lint v2 with
+      #     golangci-lint v1".
+      #   - Without the version in the cache key, a previously cached v1 binary
+      #     is restored and the install step is skipped, so changing the path
+      #     alone would have fixed nothing.
+      #
+      # Pinning rather than tracking latest also keeps CI from breaking on an
+      # unrelated day because a new release added a check. Keep this in step
+      # with what the Makefile's `make lint` runs locally.
       - name: Cache golangci-lint binary
         id: cache-lint
         uses: actions/cache@v4
         with:
           path: ~/go/bin/golangci-lint
-          key: golangci-lint-${{ runner.os }}-go1.26-${{ hashFiles('go.sum') }}
+          key: golangci-lint-${{ env.GOLANGCI_LINT_VERSION }}-${{ runner.os }}-go1.26
 
       - name: Install golangci-lint
         if: steps.cache-lint.outputs.cache-hit != 'true'
-        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ env.GOLANGCI_LINT_VERSION }}
 
       - name: Run golangci-lint
         run: golangci-lint run --build-tags lang_all ./...

@@ -2,6 +2,7 @@ package agenttools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -94,6 +95,21 @@ const mcpToolTimeout = 60 * time.Second
 // RunStandalone speaks MCP over stdio and executes each tool call directly
 // against the workspace's indigo server, with no chat TUI in the loop.
 func RunStandalone() {
+	serveMCPStdio(&mcpServer{callTool: workspaceToolCaller()})
+}
+
+// workspaceToolCaller builds the tool-execution function both transports use:
+// resolve the workspace from the cwd, keep a live connection to its indigo
+// server, and run each call against it.
+//
+// Shared by stdio and HTTP deliberately. The transport decides how bytes move;
+// nothing about which tools exist, how the workspace is found, or how a stale
+// server is reported may differ between them, or the two would drift into
+// answering the same question differently.
+//
+// Exits the process on a workspace that cannot host a server at all, so that
+// failure is visible at startup rather than once per tool call.
+func workspaceToolCaller() func(string, json.RawMessage) (string, bool) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		mcpFatal("cannot determine working directory: %v", err)
@@ -101,44 +117,48 @@ func RunStandalone() {
 	workDir := workspaceRoot(cwd)
 
 	conn := &mcpConn{workDir: workDir, sock: server.SocketPath(workDir)}
-	// Connect eagerly so a workspace that cannot host a server at all fails
-	// visibly at startup rather than once per tool call.
 	if _, err := conn.get(); err != nil {
 		mcpFatal("%v", err)
 	}
-
 	ap := standaloneApprover()
 
-	// A stale server is why three separate investigations in one session
-	// chased phantom bugs: the tools answered normally while the server ran
-	// code from before the last build. Prefixing every result is deliberately
-	// heavy-handed — a warning that appears once at startup is exactly the
-	// kind an agent reads past and then reasons from stale output anyway.
-	serveMCPStdio(&mcpServer{
-		callTool: func(name string, input json.RawMessage) (string, bool) {
-			// Reconnect per call rather than capturing one handle for the life
-			// of the process. This process outlives any editor window, and an
-			// indigo server exits when its last client disconnects, so the
-			// connection made at startup routinely dies mid-session. A dead
-			// handle answers every later call with "rpc: connection closed" —
-			// which surfaced as edits silently falling back to filesystem
-			// tools while reads appeared to keep working.
-			rpc, err := conn.get()
-			if err != nil {
-				return err.Error(), true
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), mcpToolTimeout)
-			defer cancel()
-			out, isErr := ExecTool(ctx, rpc, ap, workDir, name, input)
-			// Staleness is a property of the connection, so it is re-read here
-			// rather than captured once: a reconnect can land on a different
-			// server than the one that answered the previous call.
-			if rpc.ServerStale() {
-				out = staleServerWarning + out
-			}
-			return out, isErr
-		},
-	})
+	// One tool call at a time, matching what stdio does structurally (it reads
+	// and dispatches on a single goroutine). HTTP would otherwise let a client
+	// overlap calls, and two concurrent apply_edits on one buffer is a
+	// behaviour no transport has ever had here — not a difference worth
+	// introducing as a side effect of adding one.
+	var mu sync.Mutex
+
+	return func(name string, input json.RawMessage) (string, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		// Reconnect per call rather than capturing one handle for the life of
+		// the process. This process outlives any editor window, and an indigo
+		// server exits when its last client disconnects, so the connection made
+		// at startup routinely dies mid-session. A dead handle answers every
+		// later call with "rpc: connection closed" — which surfaced as edits
+		// silently falling back to filesystem tools while reads appeared to
+		// keep working.
+		rpc, err := conn.get()
+		if err != nil {
+			return err.Error(), true
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), mcpToolTimeout)
+		defer cancel()
+		out, isErr := ExecTool(ctx, rpc, ap, workDir, name, input)
+		// A stale server is why three separate investigations in one session
+		// chased phantom bugs: the tools answered normally while the server ran
+		// code from before the last build. Prefixing every result is
+		// deliberately heavy-handed — a warning shown once at startup is
+		// exactly the kind an agent reads past and then reasons from stale
+		// output anyway. Re-read per call rather than captured once, since a
+		// reconnect can land on a different server than the previous call.
+		if rpc.ServerStale() {
+			out = staleServerWarning + out
+		}
+		return out, isErr
+	}
 }
 
 // mcpConn hands out a live connection to the workspace's indigo server,
@@ -291,12 +311,43 @@ type mcpRequest struct {
 }
 
 // handleMessage processes one JSON-RPC message and returns the response bytes,
-// or nil when no response should be sent (notifications, unparseable input).
+// or nil when no response is owed — which is only ever a valid notification.
 func (s *mcpServer) handleMessage(raw []byte) []byte {
+	// Three outcomes, and they must stay distinguishable, because a nil return
+	// means "no reply is owed" — true only of a valid notification. Collapsing
+	// any of these into nil was how malformed input became a 202 Accepted over
+	// HTTP, telling a client its request was fine when it never parsed.
+	//
+	//   not JSON at all          -> -32700 parse error
+	//   JSON, but not a request  -> -32600 invalid request
+	//   a valid notification     -> nil
+	//
+	// The distinction between the first two is why this decodes twice: whether
+	// the bytes are JSON is a different question from whether that JSON is a
+	// request object, and reporting "parse error" for well-formed JSON sends a
+	// client looking for a syntax problem that does not exist.
+	if !json.Valid(raw) {
+		return mcpError(nil, -32700, "parse error: not valid JSON")
+	}
 	var req mcpRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
-		return nil
+		// Valid JSON of the wrong shape: an array (a batch, which this server
+		// does not implement, or an empty one), a bare scalar, or a member of
+		// the wrong type such as a numeric "method".
+		return mcpError(nil, -32600, "invalid request: not a JSON-RPC request object")
 	}
+	if req.JSONRPC != "2.0" {
+		return mcpError(nil, -32600, `invalid request: "jsonrpc" must be "2.0"`)
+	}
+	if req.Method == "" {
+		return mcpError(nil, -32600, `invalid request: "method" is required`)
+	}
+	if !validRequestID(req.ID) {
+		return mcpError(nil, -32600, `invalid request: "id" must be a string, number, or null`)
+	}
+	// Note every invalid-request reply above carries a null id, including the
+	// ones where an id was present and readable. That is JSON-RPC's rule: an id
+	// is only echoed once the request it came from is known to be well formed.
 	isNotification := len(req.ID) == 0 || string(req.ID) == "null"
 
 	var result any
@@ -344,6 +395,26 @@ func (s *mcpServer) handleMessage(raw []byte) []byte {
 	}
 	b, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
 	return b
+}
+
+// validRequestID reports whether an id is one JSON-RPC permits: a string, a
+// number, or null. An absent id is fine and means a notification — the one
+// thing this must not reject, since notifications are the reason a nil
+// response exists at all.
+//
+// Checking the first byte is enough: json.Valid has already run, so the value
+// is well-formed and only its type is in question.
+func validRequestID(id json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(id)
+	if len(trimmed) == 0 {
+		return true // absent: a notification
+	}
+	switch c := trimmed[0]; {
+	case c == '"', c == '-', c >= '0' && c <= '9':
+		return true
+	default:
+		return bytes.Equal(trimmed, []byte("null"))
+	}
 }
 
 func mcpError(id json.RawMessage, code int, msg string) []byte {

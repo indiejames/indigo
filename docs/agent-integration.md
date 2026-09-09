@@ -84,9 +84,15 @@ and register that URL from inside the container:
 claude mcp add --transport http indigo http://host.docker.internal:7391
 ```
 
-Nothing else has to line up: no `indigo` binary in the container, no socket, no
-path or uid alignment. The workspace is still resolved from the cwd of the
-`--mcp-http` process, so run it from the repository you want served.
+Nothing has to line up for it to *connect*: no `indigo` binary in the container,
+no socket, no uid alignment. The workspace is resolved from the cwd of the
+`--mcp-http` process on the host, so run it from the repository you want served.
+
+Mount the repository at the **same absolute path** in the container anyway. Not
+for connectivity — for legibility: tool results carry the host's absolute paths
+(`find_references` answers with `/Volumes/.../thing.go:42`), and if the container
+has that repo at `/workspace` those paths name nothing it can open, so the
+agent's own Read and Bash cannot follow up on anything indigo tells it.
 
 **Reaching it from the container.** Docker Desktop (macOS, Windows) forwards
 `host.docker.internal` to the host, including services bound to loopback. On

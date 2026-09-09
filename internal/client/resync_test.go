@@ -2,6 +2,7 @@ package client
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/indiejames/indigo/internal/document"
@@ -184,5 +185,41 @@ func TestBufferResyncMsgHandlesFetchError(t *testing.T) {
 	}
 	if m2.severeErr == "" {
 		t.Error("expected a must-dismiss error modal after a failed resync fetch")
+	}
+}
+
+// TestDescribeOpSummarisesWithoutLeakingContent covers the log line's payload.
+// It has to identify the op well enough to correlate with a buffer state, while
+// not writing the user's text into a file in the temp directory — an insert can
+// be an entire paste.
+func TestDescribeOpSummarisesWithoutLeakingContent(t *testing.T) {
+	ins := describeOp(document.Op{
+		Type: document.OpInsert, InsertLine: 4, InsertCol: 2, InsertText: "hunter2-secret",
+	})
+	if !strings.Contains(ins, "4:2") {
+		t.Errorf("insert description %q omits the position", ins)
+	}
+	if strings.Contains(ins, "hunter2") {
+		t.Errorf("insert description %q contains the inserted text; a log in the temp "+
+			"directory must not hold the user's content", ins)
+	}
+	if !strings.Contains(ins, "14 bytes") {
+		t.Errorf("insert description %q omits the size, which is what makes it correlatable", ins)
+	}
+
+	del := describeOp(document.Op{Type: document.OpDelete, FromLine: 1, FromCol: 0, ToLine: 3, ToCol: 5})
+	if !strings.Contains(del, "1:0-3:5") {
+		t.Errorf("delete description %q omits the range", del)
+	}
+}
+
+// The recovery fetch must get a longer budget than the edit that failed.
+// Whatever made the edit time out is still true when the resync goes out a
+// moment later, so an equal budget turns one slow moment into "buffer may be
+// out of sync with the server" — a message that reads as data loss and is not.
+func TestResyncBudgetExceedsEditBudget(t *testing.T) {
+	if resyncTimeout <= applyOpTimeout {
+		t.Errorf("resyncTimeout (%v) must exceed applyOpTimeout (%v), or a transient stall "+
+			"escalates straight to an unrecoverable-sounding error", resyncTimeout, applyOpTimeout)
 	}
 }

@@ -200,6 +200,59 @@ command    = "ruff"
 args       = ["format", "-"]
 ```
 
+### Language-server formatting (the fallback)
+
+When no formatter above matches — none configured, and none of the built-in defaults installed
+— indigo formats with the file's **language server** instead. Which of the two ran is recorded
+in the log (`$INDIGO_LOG_DIR`, or your temp directory, as `indigo-plugins-<date>.log`), because
+the difference is otherwise invisible and the two do not agree on style.
+
+A language server's formatter has its own settings, sent with the request. These are the same
+settings VS Code exposes as its per-language formatting checkboxes — its `typescript.format.*`
+settings are exactly these keys, passed through to `tsserver` by
+`typescript-language-server`.
+
+indigo sends one by default:
+
+| Extensions | Setting | Default | Why |
+|-----------|---------|---------|-----|
+| `.js` `.jsx` `.ts` `.tsx` | `insertSpaceAfterFunctionKeywordForAnonymousFunctions` | `true` | `tsserver`'s own default is `false`, which rewrites `function () {}` as `function() {}` — failing ESLint's `space-before-function-paren` on every save. VS Code ships this checked ("Insert space after function keyword for anonymous functions"), which is why the same file formats correctly there. |
+
+Everything else is left at the language server's own default. Override or add settings with an
+`[[lsp_format]]` block:
+
+```toml
+[[lsp_format]]
+extensions = ["ts", "tsx"]
+
+  [lsp_format.options]
+  insertSpaceAfterFunctionKeywordForAnonymousFunctions = false
+  placeOpenBraceOnNewLineForFunctions                  = true
+  semicolons                                           = "insert"
+```
+
+A block overrides the defaults **key by key**, so setting one option leaves the others in
+place. The first block matching an extension wins.
+
+The full set `tsserver` accepts:
+
+`insertSpaceAfterCommaDelimiter`, `insertSpaceAfterSemicolonInForStatements`,
+`insertSpaceBeforeAndAfterBinaryOperators`, `insertSpaceAfterConstructor`,
+`insertSpaceAfterKeywordsInControlFlowStatements`,
+`insertSpaceAfterFunctionKeywordForAnonymousFunctions`,
+`insertSpaceBeforeFunctionParenthesis`, `insertSpaceAfterTypeAssertion`,
+`insertSpaceAfterOpeningAndBeforeClosingNonemptyParenthesis`,
+`insertSpaceAfterOpeningAndBeforeClosingNonemptyBrackets`,
+`insertSpaceAfterOpeningAndBeforeClosingNonemptyBraces`,
+`insertSpaceAfterOpeningAndBeforeClosingTemplateStringBraces`,
+`insertSpaceAfterOpeningAndBeforeClosingJsxExpressionBraces`,
+`placeOpenBraceOnNewLineForFunctions`, `placeOpenBraceOnNewLineForControlBlocks`,
+`semicolons` (`"ignore"`, `"insert"` or `"remove"`).
+
+The mechanism is not TypeScript-specific: LSP defines the formatting request's options object
+as an open map, so `[[lsp_format]]` can carry whatever settings any language server reads out
+of it. Keys a server does not recognise are ignored by it.
+
 ## Linters
 
 Linter results are merged with whatever diagnostics the file's LSP server already reports,

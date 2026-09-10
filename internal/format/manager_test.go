@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/indiejames/indigo/internal/config"
+	"github.com/indiejames/indigo/internal/debuglog"
 	"github.com/indiejames/indigo/internal/lsp"
 )
 
@@ -446,5 +447,59 @@ func TestPerFileFormatterRunsInItsOwnPackage(t *testing.T) {
 	if cwd, want := resolve(strings.TrimSpace(string(got))), resolve(pkg); cwd != want {
 		t.Errorf("formatter ran in %q, want its own package %q — it would pick up the "+
 			"workspace root's .prettierrc instead of the package's", cwd, want)
+	}
+}
+
+// TestLSPFallbackIsLoggedWithTheFormatterItExpected covers the diagnostic added
+// after a report of indigo reformatting TypeScript on save in a way that broke
+// the project's lint rules (`function () {}` saved as `function() {}`).
+//
+// The cause is this fallback: with prettier neither on PATH nor in a reachable
+// node_modules/.bin, formatting silently goes to the language server, whose
+// conventions are its own. Nothing recorded that the fallback had been taken,
+// so from the outside it was indistinguishable from indigo choosing to mangle
+// the file. The log line has to name both the fallback and the formatter that
+// was expected but missing, since "install prettier" is the actual fix.
+func TestLSPFallbackIsLoggedWithTheFormatterItExpected(t *testing.T) {
+	logDir := t.TempDir()
+	t.Setenv("INDIGO_LOG_DIR", logDir)
+
+	m := &Manager{lsp: &fakeLSP{formatted: "formatted\n", changed: true}, cfg: &config.Config{}}
+	if _, _, err := m.Format("/tmp/app.ts", "hello\n"); err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+
+	data, err := os.ReadFile(debuglog.Path())
+	if err != nil {
+		t.Fatalf("reading the log: %v", err)
+	}
+	logged := string(data)
+	for _, want := range []string{"app.ts", "falling back to the language server", "prettier"} {
+		if !strings.Contains(logged, want) {
+			t.Errorf("log %q does not mention %q", logged, want)
+		}
+	}
+}
+
+// TestExternalFormatterChoiceIsLogged is the other half: when an external
+// formatter does run, the log has to say which, so "which of these formatted my
+// file?" is answerable without guessing.
+func TestExternalFormatterChoiceIsLogged(t *testing.T) {
+	logDir := t.TempDir()
+	t.Setenv("INDIGO_LOG_DIR", logDir)
+
+	auto := makeFC("tr", "a-z", "A-Z")
+	auto.Extensions = []string{"ts"}
+	m := &Manager{lsp: &fakeLSP{}, cfg: &config.Config{}, autoFmts: []config.FormatterConfig{auto}}
+	if _, _, err := m.Format("/tmp/app.ts", "hello\n"); err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+
+	data, err := os.ReadFile(debuglog.Path())
+	if err != nil {
+		t.Fatalf("reading the log: %v", err)
+	}
+	if logged := string(data); !strings.Contains(logged, "tr") || !strings.Contains(logged, "app.ts") {
+		t.Errorf("log %q does not name the formatter that ran", logged)
 	}
 }

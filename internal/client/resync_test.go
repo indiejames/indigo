@@ -63,7 +63,10 @@ func TestBufferResyncMsgAppliesNewContent(t *testing.T) {
 	m.redoStack = []undoEntry{{}}
 	m.currentGroup = []document.Op{{}}
 
-	msg := bufferResyncMsg{bufID: 7, content: "brand new server content\n", version: 42}
+	// failureCause set: this is the post-ApplyOp-failure resync, where the modal is
+	// warranted. The routine generation-change resync is covered separately by
+	// TestBufferResyncAfterServerChangeIsNotAnError.
+	msg := bufferResyncMsg{bufID: 7, content: "brand new server content\n", version: 42, failureCause: "rpc: connection closed"}
 	updated, cmd := m.Update(msg)
 	m2 := updated.(Model)
 
@@ -221,5 +224,73 @@ func TestResyncBudgetExceedsEditBudget(t *testing.T) {
 	if resyncTimeout <= applyOpTimeout {
 		t.Errorf("resyncTimeout (%v) must exceed applyOpTimeout (%v), or a transient stall "+
 			"escalates straight to an unrecoverable-sounding error", resyncTimeout, applyOpTimeout)
+	}
+}
+
+// TestBufferResyncAfterServerChangeIsNotAnError is a regression test for a red
+// "Error" modal appearing during entirely normal work.
+//
+// Two different events start a resync, and only one of them is a problem. An
+// ApplyOp failure means an edit never reached the server — worth interrupting
+// for. A generation change means the server replaced the buffer *because it was
+// asked to*: format-on-save, SaveAs, or an explicit Format. Working alongside an
+// agent makes the second routine — every save_file on a file with
+// format_on_save fires one — and reporting it as "Error ... please check your
+// last change" says something went wrong when nothing did, which is exactly how
+// a user learns to dismiss modals without reading them.
+func TestBufferResyncAfterServerChangeIsNotAnError(t *testing.T) {
+	m := newTestModel("original\n")
+	m.bufID = 7
+	m.undoStack = []undoEntry{{}}
+
+	msg := bufferResyncMsg{bufID: 7, content: "reformatted\n", version: 42} // no failureCause
+	updated, _ := m.Update(msg)
+	m2 := updated.(Model)
+
+	if m2.severeErr != "" {
+		t.Errorf("severeErr = %q; a server-side reformat is routine and must not raise a "+
+			"must-dismiss error modal", m2.severeErr)
+	}
+	// The content still has to be adopted, and the undo history still discarded:
+	// its inverse ops describe pre-resync content either way.
+	if m2.buf.Content() != "reformatted\n" {
+		t.Errorf("buf.Content() = %q, want the resynced content", m2.buf.Content())
+	}
+	if len(m2.undoStack) != 0 {
+		t.Error("undo stack should be cleared after any resync, benign or not")
+	}
+}
+
+// TestResyncModalNamesTheCause is a regression test for a failure that could
+// not be diagnosed from the screen.
+//
+// severeErr is a single field, so the modal raised by applyOpFailedMsg — the
+// one carrying the server's actual error — is overwritten by the resync's own
+// modal milliseconds later. The user is left looking at "Buffer resynced from
+// server" with no indication of what failed, which is exactly how it was
+// reported. The surviving message must name the cause.
+func TestResyncModalNamesTheCause(t *testing.T) {
+	m := newTestModel("original\n")
+	m.bufID = 7
+
+	// The failure arrives first and raises its own modal.
+	updated, _ := m.Update(applyOpFailedMsg{bufID: 7, err: errors.New("rpc: connection closed")})
+	m1 := updated.(Model)
+	if m1.severeErr == "" {
+		t.Fatal("no modal on the failure itself; a resync that never completes would be silent")
+	}
+
+	// Then the resync succeeds and replaces it. What is left on screen has to
+	// still say why.
+	updated2, _ := m1.Update(bufferResyncMsg{
+		bufID: 7, content: "server content\n", version: 9, failureCause: "rpc: connection closed",
+	})
+	m2 := updated2.(Model)
+	if m2.severeErr == "" {
+		t.Fatal("expected the resync modal")
+	}
+	if !strings.Contains(m2.severeErr, "rpc: connection closed") {
+		t.Errorf("surviving modal = %q; it must name the cause, or the failure is "+
+			"undiagnosable from the screen", m2.severeErr)
 	}
 }

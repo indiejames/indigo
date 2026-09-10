@@ -348,6 +348,30 @@ type WorkspaceDocumentDiagnosticReport struct {
 type FormattingOptions struct {
 	TabSize      int  `json:"tabSize"`
 	InsertSpaces bool `json:"insertSpaces"`
+	// Extra carries server-specific formatting settings alongside the two
+	// standard ones. LSP defines FormattingOptions as an open map
+	// ("[key: string]: boolean | integer | string"), and a server is free to
+	// read its own keys out of it — typescript-language-server passes them
+	// straight through to tsserver's FormatCodeSettings, which is how
+	// settings like insertSpaceAfterFunctionKeywordForAnonymousFunctions
+	// (the thing VS Code's TypeScript formatting checkboxes set) reach it.
+	//
+	// Marshalled flat into the same object rather than nested, which is what
+	// the protocol says and what servers look for.
+	Extra map[string]any `json:"-"`
+}
+
+// MarshalJSON flattens Extra into the options object. tabSize and insertSpaces
+// are written last so a stray Extra key cannot shadow the two settings the
+// protocol requires.
+func (o FormattingOptions) MarshalJSON() ([]byte, error) {
+	m := make(map[string]any, len(o.Extra)+2)
+	for k, v := range o.Extra {
+		m[k] = v
+	}
+	m["tabSize"] = o.TabSize
+	m["insertSpaces"] = o.InsertSpaces
+	return json.Marshal(m)
 }
 
 type DocumentFormattingParams struct {

@@ -432,11 +432,24 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
 	if ok && entry.generation != clientGeneration {
+		gen, path := entry.generation, entry.buf.Path()
 		s.mu.Unlock()
-		return fmt.Errorf("buffer %d generation mismatch: client has %d, server has %d", bufID, clientGeneration, entry.generation)
+		// Logged, not just returned. A rejection here makes the client discard
+		// the edit and resync, which the user sees as an error modal — and the
+		// error string below was the only record that it happened, living just
+		// long enough to be overwritten on screen. The server is the one place
+		// that knows *why*, so it says so somewhere durable.
+		// %q, not %s: the path traces back to a client-supplied OpenFile
+		// argument, and the log is line-oriented — an embedded newline would
+		// let a caller write whatever it liked as a separate log line.
+		serverLog("ApplyOp REJECTED: buffer %d (%q) generation mismatch: client has %d, server has %d",
+			bufID, path, clientGeneration, gen)
+		return fmt.Errorf("buffer %d generation mismatch: client has %d, server has %d", bufID, clientGeneration, gen)
 	}
 	s.mu.Unlock()
 	if !ok {
+		serverLog("ApplyOp REJECTED: unknown buffer %d (client %d) — the buffer was closed or "+
+			"the server restarted while a client still held it", bufID, clientID)
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 
@@ -496,6 +509,10 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 	entry, ok := s.buffers[bufID]
 	s.mu.Unlock()
 	if !ok {
+		// Same reasoning as ApplyOp's rejections: the caller (an agent tool, or
+		// a client replaying a batch) gets a string it may not surface, and this
+		// is the only place that knows it happened.
+		serverLog("ApplyOps REJECTED: unknown buffer %d (client %d)", bufID, clientID)
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 	path := entry.buf.Path()

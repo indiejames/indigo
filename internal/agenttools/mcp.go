@@ -111,6 +111,11 @@ func RunStandalone() {
 // Exits the process on a workspace that cannot host a server at all, so that
 // failure is visible at startup rather than once per tool call.
 func workspaceToolCaller() func(string, json.RawMessage) (string, bool) {
+	// Stamped before any startup work, not after: conn.get can start a server
+	// and wait several seconds for it, and a build landing inside that window
+	// would otherwise be adopted as the baseline and never reported.
+	self := newSelfStale()
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		mcpFatal("cannot determine working directory: %v", err)
@@ -122,7 +127,6 @@ func workspaceToolCaller() func(string, json.RawMessage) (string, bool) {
 		mcpFatal("%v", err)
 	}
 	ap := standaloneApprover()
-	self := newSelfStale()
 
 	// One tool call at a time, matching what stdio does structurally (it reads
 	// and dispatches on a single goroutine). HTTP would otherwise let a client

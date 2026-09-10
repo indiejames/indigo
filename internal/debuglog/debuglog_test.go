@@ -23,9 +23,14 @@ func useTempDir(t *testing.T) string {
 
 func TestWriteGoesToDatedFile(t *testing.T) {
 	dir := useTempDir(t)
+	// One date for both the write and the assertion. Formatting time.Now()
+	// again after Write would disagree with the file Write actually opened if
+	// the two calls straddled midnight — rare, but a test that fails once a
+	// year at 00:00 is worse than one that never does.
+	day := time.Now().Format("2006-01-02")
 	Write("app", "hello %d", 7)
 
-	want := filepath.Join(dir, "indigo-plugins-"+time.Now().Format("2006-01-02")+".log")
+	want := filepath.Join(dir, "indigo-plugins-"+day+".log")
 	content, err := os.ReadFile(want)
 	if err != nil {
 		t.Fatalf("reading %s: %v", want, err)
@@ -140,10 +145,64 @@ func TestWritePrunesOnceThenThrottles(t *testing.T) {
 
 func TestPathRollsOverByDate(t *testing.T) {
 	useTempDir(t)
-	if got := filepath.Base(Path()); !strings.HasPrefix(got, "indigo-plugins-") || !strings.HasSuffix(got, ".log") {
-		t.Errorf("Path() = %q, want indigo-plugins-<date>.log", got)
+	// Bracket the call rather than comparing against a single later
+	// time.Now(): either date is correct if the clock crossed midnight
+	// mid-test, and accepting both is what makes this deterministic.
+	before := time.Now()
+	got := filepath.Base(Path())
+	after := time.Now()
+
+	if !strings.HasPrefix(got, "indigo-plugins-") || !strings.HasSuffix(got, ".log") {
+		t.Fatalf("Path() = %q, want indigo-plugins-<date>.log", got)
 	}
-	if got, want := filepath.Base(Path()), "indigo-plugins-"+time.Now().Format("2006-01-02")+".log"; got != want {
-		t.Errorf("Path() = %q, want %q", got, want)
+	name := func(at time.Time) string { return "indigo-plugins-" + at.Format("2006-01-02") + ".log" }
+	if got != name(before) && got != name(after) {
+		t.Errorf("Path() = %q, want %q", got, name(after))
+	}
+}
+
+// TestOpenRefusesSymlinkedLogPath covers the shared-temp-directory hazard: the
+// log's name is a predictable function of the date, so on a multi-user machine
+// with /tmp as os.TempDir() another user can pre-create it as a symlink and
+// have every log line appended to a file of their choosing. The open must fail
+// instead of following it.
+func TestOpenRefusesSymlinkedLogPath(t *testing.T) {
+	dir := useTempDir(t)
+	target := filepath.Join(dir, "victim")
+	if err := os.WriteFile(target, []byte("original\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, Path()); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	if f, err := Open(); err == nil {
+		f.Close() //nolint:errcheck
+		t.Error("Open() followed a symlink at the log path, want an error")
+	}
+
+	Write("app", "should not be written")
+
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "original\n" {
+		t.Errorf("symlink target was appended to: %q", content)
+	}
+}
+
+// TestOpenCreatesPrivateFile: log contents are buffer text and file paths, so
+// on a shared /tmp they must not be world-readable.
+func TestOpenCreatesPrivateFile(t *testing.T) {
+	useTempDir(t)
+	Write("app", "private")
+
+	fi, err := os.Stat(Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := fi.Mode().Perm(); perm&0077 != 0 {
+		t.Errorf("log file mode = %o, want no group/other access", perm)
 	}
 }

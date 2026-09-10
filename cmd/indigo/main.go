@@ -157,7 +157,16 @@ func startServer(workDir string) {
 	// The server process keeps this descriptor as its stderr for its whole
 	// life, so its output stays in the day's file it was started under rather
 	// than following the daily rotation (see the debuglog package comment).
-	logFile, _ := debuglog.Open()
+	//
+	// A log that won't open is reported but is not fatal: refusing to start
+	// the editor's server because a diagnostic file was unavailable would
+	// turn a lost log into a lost session. os.StartProcess accepts a nil
+	// entry — the child simply gets no stderr — so the server still comes up,
+	// silently rather than not at all.
+	logFile, err := debuglog.Open()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "indigo: cannot open %s, server stderr will be discarded: %v\n", debuglog.Path(), err)
+	}
 	proc, err := os.StartProcess(exe, []string{exe, "--server", workDir}, &os.ProcAttr{
 		Dir:   workDir,
 		Files: []*os.File{nil, nil, logFile},

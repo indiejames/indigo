@@ -444,14 +444,7 @@ func (a App) tabLayout() (slots []tabSlot, hidden int) {
 		total += w
 	}
 
-	// The status message shares this row, so it comes out of the tab budget.
-	// A width of 0 means the terminal size isn't known yet (startup, and the
-	// App literals tests build), where laying out against a zero budget would
-	// hide every tab; treat it as unconstrained instead.
-	budget := a.width
-	if a.status != "" {
-		budget -= lipgloss.Width(a.status)
-	}
+	budget := a.tabBudget()
 	if a.width <= 0 || total <= budget {
 		return all, 0
 	}
@@ -494,6 +487,20 @@ func (a App) tabLayout() (slots []tabSlot, hidden int) {
 		}
 	}
 	return slots, len(all) - len(slots)
+}
+
+// tabBudget is how many columns the tabs and the overflow marker have between
+// them. The status message shares this row, so it comes out of the budget.
+//
+// A width of 0 means the terminal size isn't known yet (startup, and the App
+// literals tests build), where laying out against a zero budget would hide
+// every tab; callers treat that as unconstrained instead.
+func (a App) tabBudget() int {
+	budget := a.width
+	if a.status != "" {
+		budget -= lipgloss.Width(a.status)
+	}
+	return budget
 }
 
 // tabsByRecency returns buffer indices most-recently-active first. Buffers
@@ -549,9 +556,17 @@ func (a App) renderTabBar() string {
 		used += t.width
 	}
 	if hidden > 0 {
-		marker := tabOverflowLabel(hidden)
-		sb.WriteString(tabOverflowStyle.Render(marker))
-		used += lipgloss.Width(marker)
+		// The marker is what's left over, not a reservation that must be
+		// honoured: with a long enough status message the budget can be
+		// narrower than the marker itself, and printing it whole would push
+		// the row past the terminal width and wrap it. Showing where you are
+		// beats showing how many tabs you can't see, so the truncated active
+		// tab keeps its columns and the marker takes what remains — down to
+		// nothing.
+		if marker := ansi.Truncate(tabOverflowLabel(hidden), max(0, a.tabBudget()-used), ""); marker != "" {
+			sb.WriteString(tabOverflowStyle.Render(marker))
+			used += lipgloss.Width(marker)
+		}
 	}
 	// Show app-level status at the right if set.
 	if a.status != "" {

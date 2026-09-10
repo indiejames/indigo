@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
@@ -143,6 +144,26 @@ func TestRenderTabBarFitsTerminalWidth(t *testing.T) {
 		a.visit(n - 1)
 		if got := lipgloss.Width(a.renderTabBar()); got > 60 {
 			t.Errorf("%d buffers: tab bar is %d columns wide, want ≤ 60", n, got)
+		}
+	}
+}
+
+// TestRenderTabBarFitsWithLongStatus is the case that made the marker itself
+// the overflow: a status message long enough to leave a budget narrower than
+// "  +29  " meant the marker alone pushed the row past the terminal width and
+// wrapped it, shoving the buffer down a line.
+func TestRenderTabBarFitsWithLongStatus(t *testing.T) {
+	for _, statusLen := range []int{20, 34, 36, 38, 40} {
+		a := newOverflowApp(30, 40)
+		a.status = strings.Repeat("x", statusLen)
+		a.visit(17)
+
+		row := a.renderTabBar()
+		if got := lipgloss.Width(row); got > a.width {
+			t.Errorf("status of %d columns: tab bar is %d wide, want <= %d", statusLen, got, a.width)
+		}
+		if !strings.Contains(ansi.Strip(row), a.status) {
+			t.Errorf("status of %d columns: status text missing from the row", statusLen)
 		}
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,23 +20,21 @@ import (
 
 // ─── MCP server mode ─────────────────────────────────────────────────────────
 //
-// The claude CLI spawns this process and speaks MCP (JSON-RPC 2.0, one
-// message per line) over stdio. Tool calls execute against live editor
-// buffers, so reads see unsaved changes and edits land as undoable buffer
-// ops rather than blind disk writes.
+// An agent (the claude CLI, or anything else that speaks MCP) spawns this
+// process and talks JSON-RPC 2.0, one message per line, over stdio — or
+// reaches RunHTTP over loopback. Tool calls execute against live editor
+// buffers, so reads see unsaved changes and edits land as undoable buffer ops
+// rather than blind disk writes.
 //
-// There are two ways to reach those buffers:
+// Either transport connects straight to the workspace's indigo server,
+// starting one if none is running. No editor window is needed, which is the
+// point: the editor integration is useful to an agent whether or not a human
+// has indigo open.
 //
-//   - runMCPServer (--mcp <socket>): forwards each call to a running
-//     indigo-claude TUI, which owns the connection and shows the approval
-//     popup. This is what the TUI itself wires up for its own claude
-//     subprocess.
-//
-//   - runMCPStandalone (--mcp-standalone): connects straight to the
-//     workspace's indigo server, starting one if none is running. No TUI is
-//     needed, which is the point — the chat UI and the editor integration
-//     are separate things, and requiring the former to get the latter meant
-//     that anyone not using the chat UI got nothing.
+// A third mode used to exist, forwarding each call to the indigo-claude chat
+// TUI so that it could own the connection and show an approval popup. That
+// plugin has been removed and the forwarding mode with it; approval is now
+// the MCP client's job (see standaloneApprover).
 
 const mcpMaxLine = 4 * 1024 * 1024
 
@@ -47,20 +44,11 @@ type mcpServer struct {
 	callTool func(name string, input json.RawMessage) (result string, isError bool)
 }
 
-// RunForwarding speaks MCP over stdio and forwards each tool call to a
-// running indigo-claude TUI over its Unix socket, which owns the connection
-// and shows the approval popup.
-func RunForwarding(socketPath string) {
-	serveMCPStdio(&mcpServer{
-		callTool: func(name string, input json.RawMessage) (string, bool) {
-			return forwardToolCall(socketPath, name, input)
-		},
-	})
-}
-
 // serveMCPStdio runs the MCP read/dispatch/write loop over stdio until stdin
-// closes. Shared by both modes so they can only differ in how a tool call is
-// executed, never in how the protocol is spoken.
+// closes. It takes the tool executor as a parameter so that a transport can
+// only ever differ in how a tool call is dispatched, never in how the
+// protocol is spoken — the property that kept stdio and HTTP in agreement
+// when a second transport was added.
 func serveMCPStdio(srv *mcpServer) {
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 64*1024), mcpMaxLine)
@@ -83,8 +71,8 @@ func serveMCPStdio(srv *mcpServer) {
 // a tool error rather than hanging the agent indefinitely.
 const mcpToolTimeout = 60 * time.Second
 
-// runMCPStandalone speaks MCP over stdio and executes each tool call directly
-// against the workspace's indigo server, with no TUI in the loop.
+// RunStandalone speaks MCP over stdio and executes each tool call directly
+// against the workspace's indigo server.
 //
 // The workspace is resolved from the cwd exactly the way indigo resolves it
 // (nearest .git, else the directory itself), so a single user-level
@@ -93,8 +81,6 @@ const mcpToolTimeout = 60 * time.Second
 // designed for this, coming up on first client connection and exiting when
 // the last client disconnects, so an agent session can use the editor's
 // buffers and language servers without the user having indigo open.
-// RunStandalone speaks MCP over stdio and executes each tool call directly
-// against the workspace's indigo server, with no chat TUI in the loop.
 func RunStandalone() {
 	serveMCPStdio(&mcpServer{callTool: workspaceToolCaller()})
 }
@@ -265,20 +251,20 @@ func (c *mcpConn) get() (*client.RPC, error) {
 	return rpc, nil
 }
 
-// standaloneProgramLink builds the programLink the standalone mode runs with.
+// standaloneApprover is the Approver every transport here runs with.
 //
-// No TUI means no approval popup, so the plugin's own gate is stood down and
-// approval becomes the MCP client's job — the claude CLI prompts before
-// calling a tool unless the user has allowlisted it, the same model every
-// other MCP server relies on.
+// There is no in-editor popup to gate an edit, so approval is the MCP
+// client's job — the claude CLI prompts before calling a tool unless the user
+// has allowlisted it, the same model every other MCP server relies on.
 //
-// Leaving the gate enabled would not be safer, it would be broken:
-// requestEditApproval emits a permission request to the TUI program and then
-// blocks on the reply channel, so with no program attached every edit would
-// hang until the tool timeout with no indication why.
+// A gate with nothing behind it would not be safer, it would be broken: an
+// approver that emits a permission request to a UI and then waits on a reply
+// channel hangs every edit until the tool timeout, with no indication why,
+// when no UI is attached. That is exactly what happened when this path first
+// reused the chat plugin's approver.
 //
 // Split out as a named constructor so a test can assert this property of the
-// thing standalone actually uses, rather than of a lookalike built in the
+// thing the transports actually use, rather than of a lookalike built in the
 // test.
 func standaloneApprover() Approver {
 	return AlwaysApprove{}
@@ -558,67 +544,6 @@ func mcpTools() []mcpTool {
 		})
 	}
 	return out
-}
-
-// forwardToolCall sends one tool call to the TUI's Unix socket and reads the
-// single-line JSON reply. One connection per call keeps concurrency trivial.
-func forwardToolCall(socketPath, name string, input json.RawMessage) (string, bool) {
-	// Bounded at every step. The TUI on the other end blocks on a human for an
-	// edit approval, so a slow reply is normal and the budget is generous — but
-	// none of dial, write or read may block forever, or a TUI that has wedged
-	// (or died between the socket existing and being served) hangs the agent
-	// with no error to act on. mcpToolTimeout is the same budget the standalone
-	// path gives one tool call.
-	conn, err := net.DialTimeout("unix", socketPath, mcpToolTimeout)
-	if err != nil {
-		return "indigo-claude TUI not reachable: " + err.Error(), true
-	}
-	defer conn.Close() //nolint:errcheck
-	// One deadline covers the write and the read together: the call as a whole
-	// is what has a budget, not each syscall separately.
-	if err := conn.SetDeadline(time.Now().Add(mcpToolTimeout)); err != nil {
-		return "cannot set a deadline on the tool call: " + err.Error(), true
-	}
-
-	req, _ := json.Marshal(map[string]any{"type": "mcp_tool_call", "name": name, "input": input})
-	if _, err := conn.Write(append(req, '\n')); err != nil {
-		return "cannot send tool call: " + err.Error(), true
-	}
-
-	line, err := bufio.NewReaderSize(conn, 64*1024).ReadString('\n')
-	if err != nil {
-		return "no reply from indigo-claude: " + err.Error(), true
-	}
-	var resp struct {
-		Result  string `json:"result"`
-		IsError bool   `json:"is_error"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &resp); err != nil {
-		return "bad reply from indigo-claude: " + err.Error(), true
-	}
-	return resp.Result, resp.IsError
-}
-
-// writeMCPConfig writes the --mcp-config file handed to the claude subprocess:
-// it tells claude to spawn this same binary in --mcp mode, pointed at the
-// TUI's tool socket.
-// WriteMCPConfig writes the --mcp-config file the claude subprocess uses to
-// reach this process's tool socket.
-func WriteMCPConfig(path, binaryPath, socketPath string) error {
-	cfg := map[string]any{
-		"mcpServers": map[string]any{
-			"indigo": map[string]any{
-				"type":    "stdio",
-				"command": binaryPath,
-				"args":    []string{"--mcp", socketPath},
-			},
-		},
-	}
-	b, err := json.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, b, 0600)
 }
 
 // supportedProtocolVersions are the MCP revisions this server implements, in

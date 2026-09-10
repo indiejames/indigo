@@ -487,9 +487,10 @@ func isGitRepo(dir string) bool {
 
 // requestEditApproval asks the front end whether a change may proceed.
 //
-// It used to own the TUI popup and the auto-approve check directly; both moved
-// behind Approver when this package was split out, so a front end with no UI
-// can answer without the plumbing of one.
+// It used to own an in-editor approval popup and the auto-approve check
+// directly; both moved behind Approver when this package was split out of the
+// chat plugin, so a front end with no UI can answer without the plumbing of
+// one.
 func requestEditApproval(ap Approver, req EditRequest) bool {
 	return ap.ApproveEdit(req)
 }

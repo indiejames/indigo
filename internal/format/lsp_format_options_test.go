@@ -62,8 +62,22 @@ func TestLSPFormattingPreservesSpaceAfterFunctionKeyword(t *testing.T) {
 	deadline := time.Now().Add(30 * time.Second)
 	ready := false
 	for time.Now().Before(deadline) {
-		if _, changed, err := m.Format(probe, badlySpaced); err == nil && changed {
+		_, changed, err := m.Format(probe, badlySpaced)
+		switch {
+		case err == nil && changed:
 			ready = true
+		case errors.Is(err, ErrNoFormatter):
+			// How "the formatter ran and made no edits" is reported, which is
+			// also what a server still loading the project answers. The only
+			// error worth continuing to poll through.
+		case err != nil:
+			// Anything else — the server failed to start, the request errored —
+			// is a real failure. Swallowing it here would spend the full 30s
+			// and then t.Skip, quietly reporting a broken test environment as
+			// "not applicable".
+			t.Fatalf("formatting the readiness probe: %v", err)
+		}
+		if ready {
 			break
 		}
 		time.Sleep(200 * time.Millisecond)

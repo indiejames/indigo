@@ -547,8 +547,13 @@ func (s *editorService) dropClients(ids []uint64) (remaining int) {
 			}
 			o := orphan{bufID: bufID, path: e.buf.Path(), dirty: e.buf.Dirty()}
 			if o.dirty {
-				o.content = e.buf.Content()
+				// Size first: a buffer over the recovery limit has its content
+				// thrown away below, and copying the whole thing out of the rope
+				// to discard it would be paid for while holding s.mu.
 				o.tooBig = int64(e.buf.ByteLen()) > s.cfg.RecoveryMaxBytes
+				if !o.tooBig {
+					o.content = e.buf.Content()
+				}
 			}
 			orphans = append(orphans, o)
 			delete(s.buffers, bufID)
@@ -571,7 +576,21 @@ func (s *editorService) dropClients(ids []uint64) (remaining int) {
 		rp := recoveryFilePath(s.recDir, o.path)
 		switch {
 		case o.dirty && !o.tooBig:
-			os.WriteFile(rp, []byte(o.content), 0600) //nolint:errcheck
+			// The buffer is gone from s.buffers by now, so this file is the only
+			// remaining copy of the unsaved content and no later
+			// flushDirtyBuffers tick will write it. A failure here loses that
+			// content for good, which is worth a log line rather than a dropped
+			// error — there is no caller left to report it to (dropClients runs
+			// from a dead connection's teardown) and nothing useful to retry
+			// against.
+			if err := os.WriteFile(rp, []byte(o.content), 0600); err != nil {
+				serverLog("dropClients: FAILED to write recovery file %q for buffer %d (%q): %v — "+
+					"unsaved content is lost", rp, o.bufID, o.path, err)
+			}
+		case o.dirty && o.tooBig:
+			serverLog("dropClients: buffer %d (%q) is dirty but over recovery_max_bytes; "+
+				"unsaved content is not recoverable", o.bufID, o.path)
+			os.Remove(rp) //nolint:errcheck
 		default:
 			os.Remove(rp) //nolint:errcheck
 		}

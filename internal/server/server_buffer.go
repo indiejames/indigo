@@ -439,7 +439,10 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 		// error string below was the only record that it happened, living just
 		// long enough to be overwritten on screen. The server is the one place
 		// that knows *why*, so it says so somewhere durable.
-		serverLog("ApplyOp REJECTED: buffer %d (%s) generation mismatch: client has %d, server has %d",
+		// %q, not %s: the path traces back to a client-supplied OpenFile
+		// argument, and the log is line-oriented — an embedded newline would
+		// let a caller write whatever it liked as a separate log line.
+		serverLog("ApplyOp REJECTED: buffer %d (%q) generation mismatch: client has %d, server has %d",
 			bufID, path, clientGeneration, gen)
 		return fmt.Errorf("buffer %d generation mismatch: client has %d, server has %d", bufID, clientGeneration, gen)
 	}

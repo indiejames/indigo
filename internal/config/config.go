@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/BurntSushi/toml"
 )
@@ -21,6 +22,76 @@ type LanguageServer struct {
 	Command    string   `toml:"command"`
 	Args       []string `toml:"args,omitempty"`
 	Address    string   `toml:"address,omitempty"`
+}
+
+// LSPFormatConfig carries server-specific formatting settings for a set of
+// file extensions, sent alongside tabSize/insertSpaces in the LSP
+// textDocument/formatting request. LSP defines the options object as an open
+// map, so a language server can read its own keys out of it.
+//
+// This is the equivalent of VS Code's per-language formatting checkboxes: its
+// `typescript.format.*` settings are exactly these keys, and
+// typescript-language-server passes them through to tsserver.
+type LSPFormatConfig struct {
+	Extensions []string       `toml:"extensions"`
+	Options    map[string]any `toml:"options"`
+}
+
+// defaultLSPFormatOptions are the server-specific formatting settings indigo
+// sends when the user hasn't overridden them, keyed by bare extension.
+//
+// Only settings where the language server's own default disagrees with what
+// the ecosystem expects are listed. tsserver defaults
+// insertSpaceAfterFunctionKeywordForAnonymousFunctions to false, so it
+// rewrites `function () {}` as `function() {}` — which is what VS Code shows
+// as "Insert space after function keyword for anonymous functions", checked by
+// default, and what ESLint's space-before-function-paren rule expects. Leaving
+// it at the server's default silently reformats a file into a state that fails
+// the project's own lint on every save.
+//
+// Every other tsserver format setting is left at the server's default and can
+// be set explicitly via an [[lsp_format]] block; docs/configuration.md lists
+// them.
+var defaultLSPFormatOptions = map[string]map[string]any{
+	"ts":  {"insertSpaceAfterFunctionKeywordForAnonymousFunctions": true},
+	"tsx": {"insertSpaceAfterFunctionKeywordForAnonymousFunctions": true},
+	"js":  {"insertSpaceAfterFunctionKeywordForAnonymousFunctions": true},
+	"jsx": {"insertSpaceAfterFunctionKeywordForAnonymousFunctions": true},
+}
+
+// EffectiveLSPFormatOptions returns the server-specific formatting settings for
+// a file with the given bare extension: indigo's defaults for that extension,
+// with the first matching [[lsp_format]] block's keys laid over them.
+//
+// Overlaid per key rather than replacing the whole set, so setting one option
+// doesn't silently drop the others — and "first matching block wins", matching
+// how formatters and language servers resolve. Returns nil when there is
+// nothing to send, which keeps the request identical to before for every
+// language with no defaults and no configuration.
+func (c *Config) EffectiveLSPFormatOptions(ext string) map[string]any {
+	var out map[string]any
+	for k, v := range defaultLSPFormatOptions[ext] {
+		if out == nil {
+			out = make(map[string]any)
+		}
+		out[k] = v
+	}
+	if c == nil {
+		return out
+	}
+	for _, f := range c.LSPFormat {
+		if !slices.Contains(f.Extensions, ext) {
+			continue
+		}
+		for k, v := range f.Options {
+			if out == nil {
+				out = make(map[string]any)
+			}
+			out[k] = v
+		}
+		break
+	}
+	return out
 }
 
 // FormatterConfig maps file extensions to an external formatter command.
@@ -209,6 +280,7 @@ type Config struct {
 	FuzzySearch          bool              `toml:"fuzzy_search"`
 	FormatOnSave         bool              `toml:"format_on_save"`
 	Formatters           []FormatterConfig `toml:"formatter"`
+	LSPFormat            []LSPFormatConfig `toml:"lsp_format"`
 	Theme                string            `toml:"theme"`
 	BracketColors        bool              `toml:"bracket_colors"`
 	IndentGuides         bool              `toml:"indent_guides"`
@@ -531,6 +603,45 @@ const defaultConfigTemplate = `# Indigo editor configuration
 # extensions = ["js", "ts"]
 # command    = "prettier"
 # args       = ["--stdin-filepath", "{file}"]
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Language-server formatting options
+#
+# When no external formatter is installed for a file, indigo formats with the
+# file's language server instead. These are the settings sent with that
+# request — the same ones VS Code exposes as its per-language formatting
+# checkboxes (its typescript.format.* settings are exactly these keys).
+#
+# indigo already sends
+# insertSpaceAfterFunctionKeywordForAnonymousFunctions = true for js/jsx/ts/tsx,
+# because tsserver's own default (false) rewrites "function () {}" as
+# "function() {}" and breaks ESLint's space-before-function-paren. Everything
+# else is left at the language server's default.
+#
+# A block overrides the defaults key by key, so setting one option leaves the
+# rest alone. First matching block wins.
+#
+# [[lsp_format]]
+# extensions = ["ts", "tsx"]
+#
+#   [lsp_format.options]
+#   insertSpaceAfterFunctionKeywordForAnonymousFunctions        = true
+#   insertSpaceBeforeFunctionParenthesis                        = false
+#   insertSpaceAfterCommaDelimiter                              = true
+#   insertSpaceAfterSemicolonInForStatements                    = true
+#   insertSpaceBeforeAndAfterBinaryOperators                    = true
+#   insertSpaceAfterKeywordsInControlFlowStatements             = true
+#   insertSpaceAfterConstructor                                 = false
+#   insertSpaceAfterTypeAssertion                               = false
+#   insertSpaceAfterOpeningAndBeforeClosingNonemptyParenthesis  = false
+#   insertSpaceAfterOpeningAndBeforeClosingNonemptyBrackets     = false
+#   insertSpaceAfterOpeningAndBeforeClosingNonemptyBraces       = true
+#   insertSpaceAfterOpeningAndBeforeClosingTemplateStringBraces = false
+#   insertSpaceAfterOpeningAndBeforeClosingJsxExpressionBraces  = false
+#   placeOpenBraceOnNewLineForFunctions                         = false
+#   placeOpenBraceOnNewLineForControlBlocks                     = false
+#   semicolons                                                  = "ignore"  # or "insert" / "remove"
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------

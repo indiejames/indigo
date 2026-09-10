@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestLoadDefaults(t *testing.T) {
@@ -454,5 +456,102 @@ func TestDefaultLintersEntriesHaveFormatAndCommand(t *testing.T) {
 		if l.Format == "" {
 			t.Errorf("DefaultLinters entry %+v has empty Format", l)
 		}
+	}
+}
+
+// TestEffectiveLSPFormatOptions covers the settings sent with an LSP
+// formatting request — VS Code's `typescript.format.*` checkboxes and their
+// equivalents. The defaults exist because tsserver's own disagree with what
+// the ecosystem expects (see defaultLSPFormatOptions), so both halves matter:
+// the default has to be there, and the user has to be able to overrule it.
+func TestEffectiveLSPFormatOptions(t *testing.T) {
+	const key = "insertSpaceAfterFunctionKeywordForAnonymousFunctions"
+
+	t.Run("default for typescript", func(t *testing.T) {
+		var c Config
+		if got := c.EffectiveLSPFormatOptions("ts")[key]; got != true {
+			t.Errorf("%s = %v, want true", key, got)
+		}
+	})
+
+	t.Run("nothing for a language with no defaults", func(t *testing.T) {
+		var c Config
+		if got := c.EffectiveLSPFormatOptions("go"); got != nil {
+			t.Errorf("go options = %v, want nil so the request is unchanged", got)
+		}
+	})
+
+	t.Run("user block overrides a default and adds to it", func(t *testing.T) {
+		c := Config{LSPFormat: []LSPFormatConfig{{
+			Extensions: []string{"ts", "tsx"},
+			Options:    map[string]any{key: false, "placeOpenBraceOnNewLineForFunctions": true},
+		}}}
+		got := c.EffectiveLSPFormatOptions("ts")
+		if got[key] != false {
+			t.Errorf("%s = %v, want the user's false", key, got[key])
+		}
+		if got["placeOpenBraceOnNewLineForFunctions"] != true {
+			t.Errorf("added key = %v, want true", got["placeOpenBraceOnNewLineForFunctions"])
+		}
+	})
+
+	t.Run("a block that sets one key keeps the other defaults", func(t *testing.T) {
+		// Overlaid per key rather than replacing the set wholesale: setting an
+		// unrelated option must not silently drop the default that exists to
+		// stop `function ()` being rewritten as `function()`.
+		c := Config{LSPFormat: []LSPFormatConfig{{
+			Extensions: []string{"ts"},
+			Options:    map[string]any{"semicolons": "insert"},
+		}}}
+		got := c.EffectiveLSPFormatOptions("ts")
+		if got[key] != true {
+			t.Errorf("%s = %v, want the default to survive an unrelated override", key, got[key])
+		}
+		if got["semicolons"] != "insert" {
+			t.Errorf("semicolons = %v, want %q", got["semicolons"], "insert")
+		}
+	})
+
+	t.Run("a block for other extensions does not apply", func(t *testing.T) {
+		c := Config{LSPFormat: []LSPFormatConfig{{
+			Extensions: []string{"js"},
+			Options:    map[string]any{key: false},
+		}}}
+		if got := c.EffectiveLSPFormatOptions("ts")[key]; got != true {
+			t.Errorf("ts %s = %v, want the ts default, not the js block's value", key, got)
+		}
+	})
+}
+
+// TestLSPFormatOptionsParseFromTOML pins the config file syntax down: an
+// [[lsp_format]] block with an [lsp_format.options] sub-table. It is the one
+// section whose values are free-form rather than a fixed set of fields, so a
+// decoding change here would be invisible until formatting quietly stopped
+// honouring the file.
+func TestLSPFormatOptionsParseFromTOML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	const body = `
+[[lsp_format]]
+extensions = ["ts", "tsx"]
+
+  [lsp_format.options]
+  insertSpaceAfterFunctionKeywordForAnonymousFunctions = false
+  placeOpenBraceOnNewLineForFunctions = true
+  semicolons = "insert"
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var c Config
+	if _, err := toml.DecodeFile(path, &c); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	got := c.EffectiveLSPFormatOptions("tsx")
+	if got["insertSpaceAfterFunctionKeywordForAnonymousFunctions"] != false {
+		t.Errorf("parsed options = %v, want the file's false", got)
+	}
+	if got["placeOpenBraceOnNewLineForFunctions"] != true || got["semicolons"] != "insert" {
+		t.Errorf("parsed options = %v, want all three keys", got)
 	}
 }

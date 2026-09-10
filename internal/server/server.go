@@ -136,6 +136,13 @@ type clientEntry struct {
 	callback proto.ClientCallback
 	topLine  uint32
 	height   uint32
+	// connID is the connection this client registered on, recorded so the
+	// connection dying can undo the registration. Disconnect is an explicit
+	// RPC and a crashed, killed, or timed-out client never sends it; without
+	// this there is nothing linking the corpse to the buffers it holds open.
+	// Zero for a client registered outside a real connection (tests calling
+	// Connect on *editorService directly), which never matches a live connID.
+	connID uint64
 }
 
 // editorService implements proto.EditorService_Server.
@@ -401,7 +408,21 @@ func setupRecoveryDir() (string, error) {
 	return dir, nil
 }
 
-func (s *editorService) Connect(_ context.Context, call proto.EditorService_connect) error {
+// Connect on *editorService satisfies the interface but is unreachable in
+// practice because all real connections go through connSvc. It falls back to
+// connID 0 (no auto-cleanup when the connection dies), matching
+// SetStatusBarText's split for the same reason.
+func (s *editorService) Connect(ctx context.Context, call proto.EditorService_connect) error {
+	return s.connect(0, call)
+}
+
+// Connect records the connection the client arrived on, so dropConnection can
+// release everything it holds if it goes away without calling Disconnect.
+func (c *connSvc) Connect(_ context.Context, call proto.EditorService_connect) error {
+	return c.connect(c.connID, call)
+}
+
+func (s *editorService) connect(connID uint64, call proto.EditorService_connect) error {
 	cb := call.Args().Callback()
 	res, err := call.AllocResults()
 	if err != nil {
@@ -414,7 +435,7 @@ func (s *editorService) Connect(_ context.Context, call proto.EditorService_conn
 	s.mu.Lock()
 	s.nextClt++
 	id := s.nextClt
-	s.clientMap[id] = &clientEntry{callback: cbOwned}
+	s.clientMap[id] = &clientEntry{callback: cbOwned, connID: connID}
 	s.mu.Unlock()
 	serverLog("Connect: stored clientID=%d, callback.IsValid=%v", id, cbOwned.IsValid())
 	res.SetClientId(id)
@@ -447,24 +468,119 @@ func (s *editorService) Connect(_ context.Context, call proto.EditorService_conn
 func (s *editorService) Disconnect(_ context.Context, call proto.EditorService_disconnect) error {
 	clientID := call.Args().ClientId()
 	serverLog("Disconnect called for clientID=%d", clientID)
-	s.mu.Lock()
-	if entry, ok := s.clientMap[clientID]; ok {
-		entry.callback.Release()
-		delete(s.clientMap, clientID)
-	}
-	// Remove client from any open buffers.
-	for _, e := range s.buffers {
-		delete(e.clients, clientID)
-		delete(e.sinceByClient, clientID)
-	}
-	remaining := len(s.clientMap)
-	s.mu.Unlock()
-
-	if remaining == 0 {
+	if remaining := s.dropClients([]uint64{clientID}); remaining == 0 {
 		s.shutdown()
 	}
 	_, err := call.AllocResults()
 	return err
+}
+
+// dropConnection releases every client that registered on connID, for a
+// connection that has gone away.
+//
+// Disconnect is an explicit RPC, so it is sent only by a client that quits in
+// an orderly way. A crashed window, a `kill`, a dropped ssh session, or an
+// agent tool whose context expired mid-sequence all end the connection without
+// it — and until this existed, the corpse stayed registered as a client of
+// every buffer it had open, forever. That kept those buffers pinned: CloseBuffer
+// only frees a buffer once its client set empties, so the entry lived on with
+// whatever content it had, and OpenFile's attach path then served that content
+// to the next window to open the file. The file could be changed on disk in the
+// meantime and nothing would ever re-read it — not the watcher (whose reload is
+// CloseBuffer + OpenFile, which re-attached to the same pinned entry), and not
+// closing and reopening the file by hand. Only restarting the server recovered.
+//
+// It also pinned buffer history: recordClientProgress takes the minimum
+// version across registered clients, so a dead client's watermark blocked
+// TrimHistory for the life of the process.
+func (s *editorService) dropConnection(connID uint64) {
+	if connID == 0 {
+		return
+	}
+	s.mu.Lock()
+	var ids []uint64
+	for id, e := range s.clientMap {
+		if e.connID == connID {
+			ids = append(ids, id)
+		}
+	}
+	s.mu.Unlock()
+	if len(ids) == 0 {
+		return // the normal case: the client called Disconnect before hanging up
+	}
+	serverLog("dropConnection: connID=%d ended without Disconnect, releasing client(s) %v", connID, ids)
+	s.dropClients(ids)
+}
+
+// dropClients unregisters the given clients and frees any buffer left with no
+// clients at all, returning how many clients remain connected.
+//
+// Freeing the buffer is the point: a clientless buffer can never be read,
+// edited, or saved by anyone, but for as long as it sits in s.buffers it keeps
+// answering OpenFile with its in-memory content instead of the file.
+func (s *editorService) dropClients(ids []uint64) (remaining int) {
+	// What each freed buffer needs after the lock is released. Captured under
+	// the lock because the entry is gone by then.
+	type orphan struct {
+		bufID   uint32
+		path    string
+		content string
+		dirty   bool
+		tooBig  bool
+	}
+	var orphans []orphan
+
+	s.mu.Lock()
+	for _, id := range ids {
+		if entry, ok := s.clientMap[id]; ok {
+			entry.callback.Release()
+			delete(s.clientMap, id)
+		}
+		for bufID, e := range s.buffers {
+			if _, held := e.clients[id]; !held {
+				continue
+			}
+			delete(e.clients, id)
+			delete(e.sinceByClient, id)
+			if len(e.clients) > 0 {
+				continue
+			}
+			o := orphan{bufID: bufID, path: e.buf.Path(), dirty: e.buf.Dirty()}
+			if o.dirty {
+				o.content = e.buf.Content()
+				o.tooBig = int64(e.buf.ByteLen()) > s.cfg.RecoveryMaxBytes
+			}
+			orphans = append(orphans, o)
+			delete(s.buffers, bufID)
+		}
+	}
+	remaining = len(s.clientMap)
+	s.mu.Unlock()
+
+	for _, o := range orphans {
+		serverLog("dropClients: freeing buffer %d (%q), last client gone (dirty=%v)", o.bufID, o.path, o.dirty)
+		if o.path == "" {
+			continue // untitled: nothing watched, nothing to recover to, no LSP
+		}
+		// Unlike CloseBuffer — an explicit "I'm done with this file" — losing a
+		// client is not consent to discard unsaved work, so a dirty buffer's
+		// recovery file is written from its final content rather than removed.
+		// Writing it here rather than leaving it to the next flushDirtyBuffers
+		// tick matters because the buffer is being freed right now: whatever the
+		// last periodic flush missed would otherwise be gone.
+		rp := recoveryFilePath(s.recDir, o.path)
+		switch {
+		case o.dirty && !o.tooBig:
+			os.WriteFile(rp, []byte(o.content), 0600) //nolint:errcheck
+		default:
+			os.Remove(rp) //nolint:errcheck
+		}
+		s.removePathWatch(o.path)
+		go s.lspMgr.DidClose(o.path)
+		s.lintMgr.Forget(o.path)
+		go s.pluginMgr.DispatchBufferClose(context.Background(), o.bufID, o.path)
+	}
+	return remaining
 }
 
 // DirtyBuffers returns paths of unsaved buffers.
@@ -628,6 +744,10 @@ func (s *Server) serve() {
 					serverLog("serve: PANIC: %v\n%s", r, buf[:n])
 				}
 				s.svc.statusBar.clearForConn(connID)
+				// Same reasoning as the status-bar cleanup above, for the
+				// registrations that outlive the connection far more
+				// damagingly — see dropConnection.
+				s.svc.dropConnection(connID)
 				newCount := s.connCount.Add(-1)
 				serverLog("serve: connection closed, connCount now %d, hasHadClient=%v", newCount, s.hasHadClient.Load())
 				c.Close() //nolint:errcheck

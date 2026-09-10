@@ -118,7 +118,7 @@ func describeOp(op document.Op) string {
 // bufferID) rather than OpenFile (keyed by path): the client's own
 // remembered path can itself be stale if a different client renamed this
 // buffer via SaveAs since it last synced.
-func (m Model) resyncFromServer() tea.Cmd {
+func (m Model) resyncFromServer(failureCause string) tea.Cmd {
 	bufID := m.bufID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), resyncTimeout)
@@ -133,7 +133,7 @@ func (m Model) resyncFromServer() tea.Cmd {
 		} else {
 			clientLog("resync ok buf=%d version=%d generation=%d path=%s", bufID, version, generation, path)
 		}
-		return bufferResyncMsg{bufID: bufID, content: content, version: version, generation: generation, path: path, err: err}
+		return bufferResyncMsg{bufID: bufID, content: content, version: version, generation: generation, path: path, err: err, failureCause: failureCause}
 	}
 }
 

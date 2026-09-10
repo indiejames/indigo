@@ -115,6 +115,23 @@ type bufferResyncMsg struct {
 	generation uint64
 	path       string
 	err        error
+	// failureCause is empty when the resync was routine, and otherwise holds
+	// the error that made an edit fail. It decides both how loudly the result
+	// is reported and whether the reason survives to be read.
+	//
+	// A generation change is routine and explained: the server replaced this
+	// buffer wholesale because someone asked it to — format-on-save (including
+	// an agent's save_file), SaveAs, or an explicit Format. Nothing went wrong,
+	// and announcing it as an error trains the user to dismiss a modal during
+	// ordinary work.
+	//
+	// An ApplyOp failure is not routine: an edit did not reach the server, and
+	// the local buffer briefly held content the server never saw. The cause
+	// travels with the resync because severeErr is a single field — the failure
+	// modal is overwritten by the resync's own within milliseconds, so without
+	// this the user sees "Buffer resynced" with no hint of why and no way to
+	// find out.
+	failureCause string
 }
 
 // savedMsg signals a successful save. bufID is stamped at request time and
@@ -1211,7 +1228,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// explicit Format) — msg.ops describe changes to that different
 			// object and can't be safely applied against our current one.
 			m = m.pushStatus("Buffer changed on the server, resyncing...")
-			return m, m.resyncFromServer()
+			return m, m.resyncFromServer("")
 		}
 		m.generation = msg.generation
 		m.generationKnown = true
@@ -1269,8 +1286,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.bufID != m.bufID {
 			return m, nil // stale result from a previous buffer switch; discard
 		}
+		// Shown immediately *and* carried into the resync. severeErr is a single
+		// field, so this modal is replaced by the resync's own within
+		// milliseconds — which is why the user saw "Buffer resynced" with no
+		// hint of the cause. Keeping this one covers the case where the resync
+		// never completes at all; passing the cause along means the message that
+		// does survive still names it.
 		m = m.pushSevereError("ERR: edit failed to reach server, resyncing: " + msg.err.Error())
-		return m, m.resyncFromServer()
+		return m, m.resyncFromServer(msg.err.Error())
 
 	case bufferResyncMsg:
 		if msg.bufID != m.bufID {
@@ -1310,7 +1333,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor.Col = lineLen
 		}
 		m.scrollToCursor()
-		m = m.pushSevereError("Buffer resynced from server — please check your last change")
+		if msg.failureCause != "" {
+			// An edit really did fail to reach the server. The undo history was
+			// just discarded (its inverse ops describe pre-resync content), so
+			// the user's last change is genuinely worth re-reading — and the
+			// cause is named here because this is the modal that survives.
+			m = m.pushSevereError("Buffer resynced from server — please check your last change. " +
+				"An edit had failed to reach the server: " + msg.failureCause)
+		} else {
+			// The server reformatted or replaced the buffer on request. Say so
+			// in the status bar and move on: a modal here fires during routine
+			// work — every agent save_file on a formatted file — and says
+			// "Error" about something that worked.
+			m = m.pushStatus("Buffer updated from server (reformatted or replaced)")
+		}
 		return m, m.reparseHighlight()
 
 	case PluginShowMsgMsg:

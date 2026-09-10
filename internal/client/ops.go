@@ -494,6 +494,7 @@ func (m Model) reparseHighlight() tea.Cmd {
 	}
 	content := []byte(m.buf.Content())
 	hlr := m.hlr
+	bufID := m.bufID
 	bracketColors := m.cfg != nil && m.cfg.BracketColors
 	return func() tea.Msg {
 		start := time.Now()
@@ -504,7 +505,7 @@ func (m Model) reparseHighlight() tea.Cmd {
 				spans[ln] = append(bs, spans[ln]...)
 			}
 		}
-		return highlightMsg{spans: spans, duration: time.Since(start), seq: seq}
+		return highlightMsg{spans: spans, duration: time.Since(start), bufID: bufID, seq: seq}
 	}
 }
 

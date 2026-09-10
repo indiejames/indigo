@@ -442,11 +442,27 @@ func scheduleShowDiagPopup() tea.Cmd {
 }
 
 // highlightMsg carries freshly computed syntax-highlight spans and parse time.
+//
+// bufID names the buffer the spans were computed for. Implements RoutableMsg
+// so App delivers them to that buffer rather than to whichever tab happens to
+// be active: an external-change reload (App.doReloadBuffer) rebuilds a
+// possibly-inactive buffer's Model from scratch and calls Init() on it, and
+// Init's reparseHighlight is the one highlight request that routinely
+// originates from a buffer that isn't the active one. Delivered to the active
+// buffer instead, its spans described a completely different file's content —
+// and since hlSeq counts per Model, a freshly reloaded buffer's first request
+// (seq 1) matched an unedited active buffer's counter, so the check in the
+// handler accepted them and repainted that buffer with the reloaded file's
+// colors until its next reparse.
 type highlightMsg struct {
 	spans    highlight.LineSpans
 	duration time.Duration
+	bufID    uint32
 	seq      uint64 // Model.hlSeq's value when this request was issued; see reparseHighlight
 }
+
+// RouteBufID implements RoutableMsg.
+func (m highlightMsg) RouteBufID() uint32 { return m.bufID }
 
 // metricsData holds timing samples for the metrics overlay.
 // Stored behind a pointer so View()'s value receiver can write back.
@@ -1378,6 +1394,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case highlightMsg:
+		if msg.bufID != m.bufID {
+			// Belt-and-braces alongside App's RoutableMsg routing (see the
+			// type's doc comment): spans for another buffer must never be
+			// applied here, since seq alone can't tell them apart.
+			return m, nil
+		}
 		if m.hlSeq != nil && msg.seq != *m.hlSeq {
 			return m, nil // superseded by a newer reparseHighlight request; discard
 		}

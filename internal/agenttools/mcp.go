@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/indiejames/indigo/internal/binstamp"
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/server"
 )
@@ -121,6 +122,7 @@ func workspaceToolCaller() func(string, json.RawMessage) (string, bool) {
 		mcpFatal("%v", err)
 	}
 	ap := standaloneApprover()
+	self := newSelfStale()
 
 	// One tool call at a time, matching what stdio does structurally (it reads
 	// and dispatches on a single goroutine). HTTP would otherwise let a client
@@ -157,9 +159,67 @@ func workspaceToolCaller() func(string, json.RawMessage) (string, bool) {
 		if rpc.ServerStale() {
 			out = staleServerWarning + out
 		}
+		// The same check for this process's own binary, which nothing else
+		// covers: the server reports its own staleness over the wire, but a
+		// stale MCP process is invisible from the server's side. See
+		// selfStale.
+		if self.stale() {
+			out = staleMCPWarning + out
+		}
 		return out, isErr
 	}
 }
+
+// selfStale reports whether this process's executable has been replaced since
+// it started.
+//
+// An MCP process spawned by an agent session is long-lived — it lives as long
+// as the session, which can be days — so `make install` routinely leaves it
+// serving code from before the build, exactly as it does for the server. It is
+// worse here than there, though: a stale *server* is at least reported to
+// every client by ServerStale, whereas nothing at all observes the MCP process
+// from outside. A three-day-old one went unnoticed while every tool call
+// looked normal, its cached RPC handle answering `apply_edits` with
+// "rpc: connection closed" (fixed since, in the very build it wasn't running)
+// and its reads silently falling back to disk.
+//
+// Reported rather than acted on, matching the server: this process cannot
+// reload itself, and exiting mid-session to force a respawn would take the
+// tools away from a session that is using them. The user restarts it.
+type selfStale struct {
+	path  string
+	want  binstamp.Stamp
+	known bool
+}
+
+func newSelfStale() *selfStale {
+	exe, err := os.Executable()
+	if err != nil {
+		return &selfStale{}
+	}
+	want, ok := binstamp.Of(exe)
+	return &selfStale{path: exe, want: want, known: ok}
+}
+
+// stale re-stats per call rather than caching the answer: the replacement can
+// land at any point during a long session, and one stat is nothing next to the
+// RPC round trip the same call just made.
+func (s *selfStale) stale() bool {
+	if s == nil || !s.known {
+		return false // no baseline to compare against; see binstamp.Of
+	}
+	return binstamp.Replaced(s.path, s.want)
+}
+
+// staleMCPWarning prefixes every tool result once this process is running a
+// replaced binary. Worded to say what to do about it, since the fix is not
+// obvious: the process is spawned by the agent session, so it outlives every
+// editor window and is not restarted by anything the user would think to
+// restart.
+const staleMCPWarning = "WARNING: the indigo MCP server process is running an older build than " +
+	"what is installed, so these tools may behave differently from the current indigo source " +
+	"(and any recent fix to the tools themselves is absent). Reconnect it — in Claude Code, " +
+	"/mcp then reconnect `indigo` — before concluding anything about indigo's own behaviour.\n\n"
 
 // mcpConn hands out a live connection to the workspace's indigo server,
 // redialing (and restarting the server) whenever the previous one has gone

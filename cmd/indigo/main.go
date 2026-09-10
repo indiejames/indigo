@@ -15,6 +15,7 @@ import (
 	"github.com/indiejames/indigo/internal/app"
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
+	"github.com/indiejames/indigo/internal/debuglog"
 	"github.com/indiejames/indigo/internal/highlight"
 	"github.com/indiejames/indigo/internal/server"
 	"github.com/indiejames/indigo/internal/theme"
@@ -153,8 +154,10 @@ func startServer(workDir string) {
 	if err != nil {
 		fatalf("locate executable: %v", err)
 	}
-	logPath := filepath.Join(os.TempDir(), "indigo-plugins.log")
-	logFile, _ := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	// The server process keeps this descriptor as its stderr for its whole
+	// life, so its output stays in the day's file it was started under rather
+	// than following the daily rotation (see the debuglog package comment).
+	logFile, _ := debuglog.Open()
 	proc, err := os.StartProcess(exe, []string{exe, "--server", workDir}, &os.ProcAttr{
 		Dir:   workDir,
 		Files: []*os.File{nil, nil, logFile},

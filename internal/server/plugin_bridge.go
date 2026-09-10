@@ -3,14 +3,13 @@ package server
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
+	"github.com/indiejames/indigo/internal/debuglog"
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/lsp"
 	"github.com/indiejames/indigo/internal/plugin"
@@ -18,13 +17,7 @@ import (
 )
 
 func serverLog(format string, args ...any) {
-	path := filepath.Join(os.TempDir(), "indigo-plugins.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()                                  //nolint:errcheck
-	fmt.Fprintf(f, "[server] "+format+"\n", args...) //nolint:errcheck
+	debuglog.Write("server", format, args...)
 }
 
 // pluginClientID is the client ID used for edits applied by plugins.

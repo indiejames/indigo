@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"sync"
+
+	"github.com/indiejames/indigo/internal/binstamp"
 )
 
 // Staleness detection: is this server process running code that has since
@@ -26,22 +28,6 @@ import (
 // A stale *idle* server needs no special handling: the last client
 // disconnecting already shuts it down, so the next connection starts fresh.
 
-// binaryStamp identifies a file cheaply enough to check on every connect.
-// Size plus modification time, not a hash: this runs on a hot-ish path, and
-// the question is "was this replaced", not "is this byte-identical".
-type binaryStamp struct {
-	size    int64
-	modTime int64
-}
-
-func stampOf(path string) (binaryStamp, bool) {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return binaryStamp{}, false
-	}
-	return binaryStamp{size: fi.Size(), modTime: fi.ModTime().UnixNano()}, true
-}
-
 // staleWatch remembers what the binaries looked like when this process
 // started, so a later stat can tell whether they were replaced underneath it.
 type staleWatch struct {
@@ -54,13 +40,13 @@ type staleWatch struct {
 	// using it. A binary we could not stat then is not recorded — it can't be
 	// compared against anything, and guessing would produce spurious "stale"
 	// reports.
-	paths map[string]binaryStamp
+	paths map[string]binstamp.Stamp
 }
 
 func newStaleWatch() *staleWatch {
-	w := &staleWatch{paths: map[string]binaryStamp{}}
+	w := &staleWatch{paths: map[string]binstamp.Stamp{}}
 	if exe, err := os.Executable(); err == nil {
-		if st, ok := stampOf(exe); ok {
+		if st, ok := binstamp.Of(exe); ok {
 			w.paths[exe] = st
 		}
 	}
@@ -72,7 +58,7 @@ func newStaleWatch() *staleWatch {
 // earlier must use watchStamped, or a replacement made in between is baked in
 // as the baseline and never reported.
 func (w *staleWatch) watch(path string) {
-	if st, ok := stampOf(path); ok {
+	if st, ok := binstamp.Of(path); ok {
 		w.watchStamped(path, st)
 	}
 }
@@ -90,7 +76,7 @@ func (w *staleWatch) watch(path string) {
 // The first stamp for a path wins: later calls are the same binary being
 // re-registered on a subsequent Connect, and overwriting would erase the
 // baseline the comparison depends on.
-func (w *staleWatch) watchStamped(path string, st binaryStamp) {
+func (w *staleWatch) watchStamped(path string, st binstamp.Stamp) {
 	if w == nil || path == "" {
 		return
 	}
@@ -111,10 +97,10 @@ func (w *staleWatch) changed() []string {
 		return nil
 	}
 	w.mu.Lock()
-	// Copy under the lock and stat outside it: stampOf hits the filesystem
+	// Copy under the lock and stat outside it: binstamp.Of hits the filesystem
 	// once per watched binary, which has no business holding a lock that
 	// every Connect needs.
-	want := make(map[string]binaryStamp, len(w.paths))
+	want := make(map[string]binstamp.Stamp, len(w.paths))
 	for path, st := range w.paths {
 		want[path] = st
 	}
@@ -122,8 +108,7 @@ func (w *staleWatch) changed() []string {
 
 	var out []string
 	for path, st := range want {
-		got, ok := stampOf(path)
-		if !ok || got != st {
+		if binstamp.Replaced(path, st) {
 			out = append(out, path)
 		}
 	}

@@ -14,16 +14,11 @@ import (
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
+	"github.com/indiejames/indigo/internal/debuglog"
 )
 
 func appLog(format string, args ...any) {
-	path := filepath.Join(os.TempDir(), "indigo-plugins.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()                               //nolint:errcheck
-	fmt.Fprintf(f, "[app] "+format+"\n", args...) //nolint:errcheck
+	debuglog.Write("app", format, args...)
 }
 
 // appQuitMsg is returned by the cleanup cmd to trigger program exit.
@@ -84,6 +79,21 @@ type App struct {
 	buffers []client.Model
 	active  int
 	status  string // app-level transient message (e.g. ":qa" error)
+
+	// tabUse maps a buffer's BufID to the value tabSeq had when that buffer
+	// was last the active tab, which is what decides who keeps a tab when
+	// they no longer all fit (see tabLayout). Keyed by BufID rather than by
+	// index because opening and closing buffers renumbers indices, and a
+	// recency order that silently re-points at a different buffer is worse
+	// than none. Stamped once per Update from a single place, so no call site
+	// that assigns a.active has to remember to maintain it.
+	//
+	// The map is deliberately shared across App copies (Update returns a new
+	// App value on every message); entries for closed buffers are dropped in
+	// forgetTabUse, and one stale entry would cost a few bytes, not
+	// correctness — a BufID is never reused by the server within a session.
+	tabUse map[uint32]uint64
+	tabSeq uint64
 
 	// serverGone is set when the RPC connection to the server closes
 	// unexpectedly (server crashed or was killed) rather than via a normal
@@ -273,7 +283,43 @@ func withMousePos(msg tea.Msg, mouse tea.Mouse) tea.Msg {
 	return msg
 }
 
+// Update is a thin wrapper around update so that tab recency is stamped in
+// exactly one place. a.active is assigned from a dozen handlers (tab clicks,
+// buffer picker, jump list, search & replace, a plugin opening a file, ...),
+// and any of them forgetting to record "this buffer was just used" would show
+// up only as the wrong tab quietly disappearing off a crowded tab bar.
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := a.update(msg)
+	updated, ok := next.(App)
+	if !ok {
+		return next, cmd
+	}
+	return updated.stampActiveTab(), cmd
+}
+
+// stampActiveTab records the active buffer as the most recently used one.
+//
+// Called per message rather than only on a change of a.active: it costs a map
+// write, and "when did this buffer last have focus" is then simply the last
+// message it received, with no separate change-detection to get wrong.
+func (a App) stampActiveTab() App {
+	if a.active < 0 || a.active >= len(a.buffers) {
+		return a
+	}
+	if a.tabUse == nil {
+		a.tabUse = make(map[uint32]uint64, len(a.buffers))
+	}
+	a.tabSeq++
+	a.tabUse[a.buffers[a.active].BufID()] = a.tabSeq
+	return a
+}
+
+// forgetTabUse drops the recency entry for a buffer that has been closed.
+func (a App) forgetTabUse(bufID uint32) {
+	delete(a.tabUse, bufID)
+}
+
+func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Bubble Tea v2's tea.KeyMsg is an interface satisfied by both
 	// KeyPressMsg and KeyReleaseMsg, and every `msg.(tea.KeyMsg)` dispatch
 	// below (and throughout client.Model) matches either one. Releases are
@@ -285,12 +331,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// client.RoutableMsg (applyOpFailedMsg, savedMsg, savedAsMsg,
-	// discardRecoveryMsg, saveFailedMsg, discardRecoveryFailedMsg — see
-	// their doc comments) must reach the specific buffer they're about, even
-	// when it isn't the active tab: the generic fallback below only ever
-	// dispatches to a.buffers[a.active], so a result for a buffer the user
-	// has since switched away from would otherwise be silently dropped by
-	// that buffer's own bufID guard instead of actually being applied to it.
+	// discardRecoveryMsg, saveFailedMsg, discardRecoveryFailedMsg,
+	// highlightMsg — see their doc comments) must reach the specific buffer
+	// they're about, even when it isn't the active tab: the generic fallback
+	// below only ever dispatches to a.buffers[a.active], so a result for a
+	// buffer the user has since switched away from would otherwise be
+	// silently dropped by that buffer's own bufID guard instead of actually
+	// being applied to it — or, for highlightMsg, applied to the wrong
+	// buffer, since a per-Model sequence number can't detect the mismatch
+	// the way a bufID does.
 	if rm, ok := msg.(client.RoutableMsg); ok {
 		bufID := rm.RouteBufID()
 		for i := range a.buffers {
@@ -993,6 +1042,7 @@ func (a App) activeFileDir() string {
 
 // handleCloseBuffer closes the active buffer and switches to the next, or quits.
 func (a App) handleCloseBuffer() (tea.Model, tea.Cmd) {
+	a.forgetTabUse(a.buffers[a.active].BufID())
 	a.buffers = append(a.buffers[:a.active], a.buffers[a.active+1:]...)
 	if len(a.buffers) == 0 {
 		return a, a.doDisconnectAndQuit()

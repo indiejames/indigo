@@ -19,6 +19,7 @@ import (
 	"capnproto.org/go/capnp/v3/rpc"
 
 	"github.com/BurntSushi/toml"
+	"github.com/indiejames/indigo/internal/debuglog"
 	"github.com/indiejames/indigo/internal/proto/pluginproto"
 )
 
@@ -342,18 +343,16 @@ func (m *Manager) Start(ctx context.Context) error {
 }
 
 func pluginLog(format string, args ...any) {
-	path := filepath.Join(os.TempDir(), "indigo-plugins.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()                      //nolint:errcheck
-	fmt.Fprintf(f, format+"\n", args...) //nolint:errcheck
+	debuglog.Write("", format, args...)
 }
 
+// pluginLogFile is the file a plugin process's stderr is redirected to. The
+// process holds it for its whole life, so it keeps writing to the day's file
+// it was spawned under even after midnight rolls the log over — see the
+// package comment on debuglog for why that file isn't pruned while it's
+// still being written to.
 func pluginLogFile() *os.File {
-	path := filepath.Join(os.TempDir(), "indigo-plugins.log")
-	f, _ := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, _ := debuglog.Open()
 	return f
 }
 

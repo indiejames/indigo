@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/indiejames/indigo/internal/binstamp"
 )
 
 // TestStaleWatchDetectsReplacedBinary covers the mechanism behind a failure
@@ -20,7 +22,7 @@ func TestStaleWatchDetectsReplacedBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	w := &staleWatch{paths: map[string]binaryStamp{}}
+	w := &staleWatch{paths: map[string]binstamp.Stamp{}}
 	w.watch(bin)
 
 	if w.stale() {
@@ -49,7 +51,7 @@ func TestStaleWatchDetectsReplacedBinary(t *testing.T) {
 // stat is not watched at all, rather than being treated as permanently
 // changed — that would report every server as stale forever.
 func TestStaleWatchIgnoresUnstattableAtStartup(t *testing.T) {
-	w := &staleWatch{paths: map[string]binaryStamp{}}
+	w := &staleWatch{paths: map[string]binstamp.Stamp{}}
 	w.watch(filepath.Join(t.TempDir(), "does-not-exist"))
 	w.watch("")
 
@@ -69,7 +71,7 @@ func TestStaleWatchTreatsDeletionAsChanged(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	w := &staleWatch{paths: map[string]binaryStamp{}}
+	w := &staleWatch{paths: map[string]binstamp.Stamp{}}
 	w.watch(bin)
 	if err := os.Remove(bin); err != nil {
 		t.Fatal(err)
@@ -120,7 +122,7 @@ func TestStaleWatchConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			for _, p := range paths {
 				w.watch(p)
-				w.watchStamped(p, binaryStamp{size: 1, modTime: 1})
+				w.watchStamped(p, binstamp.Stamp{Size: 1, ModTime: 1})
 				w.changed()
 				w.stale()
 				w.staleDescription()
@@ -143,7 +145,7 @@ func TestWatchStampedKeepsTheLaunchTimeBaseline(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("v1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	launch, ok := stampOf(bin)
+	launch, ok := binstamp.Of(bin)
 	if !ok {
 		t.Fatal("could not stamp the binary")
 	}
@@ -154,7 +156,7 @@ func TestWatchStampedKeepsTheLaunchTimeBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	w := &staleWatch{paths: map[string]binaryStamp{}}
+	w := &staleWatch{paths: map[string]binstamp.Stamp{}}
 	w.watchStamped(bin, launch)
 	if !w.stale() {
 		t.Error("a plugin binary replaced between launch and registration was not reported " +

@@ -242,8 +242,11 @@ Open a file containing a `TODO` comment, then:
 ## Debugging
 
 A plugin's stdin/stdout are closed by the plugin manager, but **stderr is redirected into
-`/tmp/indigo-plugins.log`** (shared with indigo's own internal server/client logs). While
-developing, just:
+the day's log file in `$TMPDIR`** — `indigo-plugins-<YYYY-MM-DD>.log`, shared with indigo's
+own internal server/client logs. The log rotates daily and files untouched for 24h are
+deleted (see `internal/debuglog`); set `INDIGO_LOG_DIR` to put them somewhere else. Note
+that a plugin process keeps whichever file existed when it was spawned, so a plugin started
+before midnight keeps logging to the previous day's file. While developing, just:
 
 ```
 fmt.Fprintln(os.Stderr, "todo: decorate called, bufID=", bufID)
@@ -252,8 +255,11 @@ fmt.Fprintln(os.Stderr, "todo: decorate called, bufID=", bufID)
 and:
 
 ```
-tail -f /tmp/indigo-plugins.log
+tail -f "${INDIGO_LOG_DIR:-${TMPDIR:-/tmp}}/indigo-plugins-$(date +%Y-%m-%d).log"
 ```
+
+(the same directory Go's `os.TempDir()` resolves to — `$TMPDIR` if set, `/tmp`
+otherwise — unless `INDIGO_LOG_DIR` overrides it.)
 
 ## SDK reference
 

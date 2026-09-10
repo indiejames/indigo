@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -22,6 +23,13 @@ var (
 				Foreground(lipgloss.Color("#AABBCC"))
 	tabDirtyMark = "● "
 	tabBarFill   = lipgloss.NewStyle().Background(tabBarBg)
+	// tabOverflowStyle marks the "+N" count of tabs that didn't fit. Dimmer
+	// than an inactive tab so it reads as a note about the bar rather than as
+	// another buffer sitting on it.
+	tabOverflowStyle = lipgloss.NewStyle().
+				Background(tabBarBg).
+				Foreground(lipgloss.Color("#7788AA")).
+				Italic(true)
 )
 
 // View returns the frame plus the terminal modes indigo needs. v2 moved
@@ -402,17 +410,133 @@ func (a App) tabLabel(i int) (label string, width int) {
 	return label, lipgloss.Width(label)
 }
 
-// tabAtColumn returns the index of the buffer whose tab covers column x in
-// the rendered tab bar, or false if x falls past the last tab (the
-// fill/status area to its right).
-func (a App) tabAtColumn(x int) (int, bool) {
-	col := 0
+// tabSlot is one tab the bar actually shows: which buffer, and the label and
+// width it occupies (which may be a truncation of the full label).
+type tabSlot struct {
+	idx   int
+	label string
+	width int
+}
+
+// tabLayout decides which tabs fit on the bar and in what order they render.
+//
+// Tabs used to be emitted unconditionally, so past roughly ten buffers the row
+// overflowed the terminal width and the tabs beyond it were simply cut off —
+// including, quite often, the active one, leaving no indication of which
+// buffer you were actually in. Making every tab narrower instead trades that
+// for filenames too truncated to tell apart, which is not obviously better.
+//
+// So when they no longer all fit, tabs age off by recency: the ones admitted
+// are the most recently active (a.tabUse), the active tab first and therefore
+// always present. They are then rendered in buffer order, not recency order —
+// which tab is where must stay stable, or every buffer switch would reshuffle
+// the bar under the user's cursor. The ones left out are counted in an
+// overflow marker at the right end.
+//
+// Nothing becomes unreachable: switching to a hidden buffer (ctrl+tab, the
+// buffer picker, a jump) makes it the most recent, so it appears immediately.
+func (a App) tabLayout() (slots []tabSlot, hidden int) {
+	all := make([]tabSlot, len(a.buffers))
+	total := 0
 	for i := range a.buffers {
-		_, w := a.tabLabel(i)
-		if x < col+w {
-			return i, true
+		label, w := a.tabLabel(i)
+		all[i] = tabSlot{idx: i, label: label, width: w}
+		total += w
+	}
+
+	budget := a.tabBudget()
+	if a.width <= 0 || total <= budget {
+		return all, 0
+	}
+
+	// Reserve room for the widest marker this bar could end up showing, so
+	// admitting one more tab can't widen the marker and overflow the row.
+	marker := tabOverflowLabel(len(a.buffers) - 1)
+	room := budget - lipgloss.Width(marker)
+	if room < 0 {
+		room = 0
+	}
+
+	admitted := make(map[int]bool, len(all))
+	used := 0
+	for _, i := range a.tabsByRecency() {
+		if used+all[i].width <= room {
+			admitted[i] = true
+			used += all[i].width
+			continue
 		}
-		col += w
+		// Keep scanning rather than stopping at the first tab that doesn't
+		// fit: a narrower, more recent tab further down the list should still
+		// get a slot.
+	}
+
+	// The active tab is guaranteed a slot even when it alone is wider than the
+	// whole bar — truncated to fit rather than dropped, since a tab bar that
+	// can't show where you are is the failure being fixed here.
+	if !admitted[a.active] && a.active >= 0 && a.active < len(all) {
+		t := all[a.active]
+		t.label = ansi.Truncate(t.label, room, "")
+		t.width = lipgloss.Width(t.label)
+		all[a.active] = t
+		admitted[a.active] = true
+	}
+
+	for i := range all {
+		if admitted[i] {
+			slots = append(slots, all[i])
+		}
+	}
+	return slots, len(all) - len(slots)
+}
+
+// tabBudget is how many columns the tabs and the overflow marker have between
+// them. The status message shares this row, so it comes out of the budget.
+//
+// A width of 0 means the terminal size isn't known yet (startup, and the App
+// literals tests build), where laying out against a zero budget would hide
+// every tab; callers treat that as unconstrained instead.
+func (a App) tabBudget() int {
+	budget := a.width
+	if a.status != "" {
+		budget -= lipgloss.Width(a.status)
+	}
+	return budget
+}
+
+// tabsByRecency returns buffer indices most-recently-active first. Buffers
+// never recorded in tabUse (opened but never focused) sort last, in buffer
+// order, so the result is deterministic rather than map-iteration order.
+func (a App) tabsByRecency() []int {
+	order := make([]int, len(a.buffers))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(x, y int) bool {
+		return a.tabUse[a.buffers[order[x]].BufID()] > a.tabUse[a.buffers[order[y]].BufID()]
+	})
+	return order
+}
+
+// tabOverflowLabel is the marker shown at the right end of a bar that is
+// hiding tabs, sized to match the tab padding around it.
+func tabOverflowLabel(hidden int) string {
+	return fmt.Sprintf("  +%d  ", hidden)
+}
+
+// tabAtColumn returns the index of the buffer whose tab covers column x in
+// the rendered tab bar, or false if x falls past the last visible tab (the
+// overflow marker and the fill/status area to its right).
+//
+// Shares tabLayout with renderTabBar so a click can never land on a buffer
+// other than the one drawn there.
+func (a App) tabAtColumn(x int) (int, bool) {
+	slots, _ := a.tabLayout()
+	col := 0
+	for _, t := range slots {
+		if x < col+t.width {
+			return t.idx, true
+		}
+		col += t.width
 	}
 	return -1, false
 }
@@ -420,16 +544,29 @@ func (a App) tabAtColumn(x int) (int, bool) {
 func (a App) renderTabBar() string {
 	var sb strings.Builder
 	used := 0
-	for i := range a.buffers {
-		label, w := a.tabLabel(i)
+	slots, hidden := a.tabLayout()
+	for _, t := range slots {
 		var rendered string
-		if i == a.active {
-			rendered = tabActiveStyle.Render(label)
+		if t.idx == a.active {
+			rendered = tabActiveStyle.Render(t.label)
 		} else {
-			rendered = tabInactiveStyle.Render(label)
+			rendered = tabInactiveStyle.Render(t.label)
 		}
 		sb.WriteString(rendered)
-		used += w
+		used += t.width
+	}
+	if hidden > 0 {
+		// The marker is what's left over, not a reservation that must be
+		// honoured: with a long enough status message the budget can be
+		// narrower than the marker itself, and printing it whole would push
+		// the row past the terminal width and wrap it. Showing where you are
+		// beats showing how many tabs you can't see, so the truncated active
+		// tab keeps its columns and the marker takes what remains — down to
+		// nothing.
+		if marker := ansi.Truncate(tabOverflowLabel(hidden), max(0, a.tabBudget()-used), ""); marker != "" {
+			sb.WriteString(tabOverflowStyle.Render(marker))
+			used += lipgloss.Width(marker)
+		}
 	}
 	// Show app-level status at the right if set.
 	if a.status != "" {

@@ -15,6 +15,7 @@ import (
 	"github.com/indiejames/indigo/internal/app"
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
+	"github.com/indiejames/indigo/internal/debuglog"
 	"github.com/indiejames/indigo/internal/highlight"
 	"github.com/indiejames/indigo/internal/server"
 	"github.com/indiejames/indigo/internal/theme"
@@ -148,13 +149,45 @@ func main() {
 	reportIfServerDisconnected(finalModel)
 }
 
+// serverStderr returns the file the spawned server should use as its stderr:
+// the day's log, or /dev/null if that can't be opened.
+//
+// A log that won't open is reported but is not fatal. Refusing to start the
+// editor's server because a *diagnostic* file was unavailable would turn a
+// lost log into a lost session — an unwritable or full temp directory would
+// stop indigo from running at all.
+//
+// The fallback is an explicit /dev/null rather than a nil ProcAttr.Files
+// entry, which would leave the child's fd 2 closed. That happens to be
+// harmless here — the Go runtime reopens 0/1/2 on /dev/null at startup, and a
+// child spawned this way was confirmed to get fd 3 for its first open() — but
+// that is a property of the child being a Go program, not of this call, and a
+// process whose next open() lands on fd 2 has every later stderr write going
+// into that file instead.
+func serverStderr() *os.File {
+	logFile, err := debuglog.Open()
+	if err == nil {
+		return logFile
+	}
+	fmt.Fprintf(os.Stderr, "indigo: cannot open %s, server stderr will be discarded: %v\n", debuglog.Path(), err)
+	devNull, nerr := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if nerr != nil {
+		// Nothing left to hand it; see above for why this is still not worth
+		// failing startup over.
+		return nil
+	}
+	return devNull
+}
+
 func startServer(workDir string) {
 	exe, err := os.Executable()
 	if err != nil {
 		fatalf("locate executable: %v", err)
 	}
-	logPath := filepath.Join(os.TempDir(), "indigo-plugins.log")
-	logFile, _ := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	// The server process keeps this descriptor as its stderr for its whole
+	// life, so its output stays in the day's file it was started under rather
+	// than following the daily rotation (see the debuglog package comment).
+	logFile := serverStderr()
 	proc, err := os.StartProcess(exe, []string{exe, "--server", workDir}, &os.ProcAttr{
 		Dir:   workDir,
 		Files: []*os.File{nil, nil, logFile},

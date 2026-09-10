@@ -16,6 +16,7 @@ import (
 	"capnproto.org/go/capnp/v3/rpc"
 	"github.com/fsnotify/fsnotify"
 
+	"github.com/indiejames/indigo/internal/binstamp"
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/format"
@@ -424,9 +425,9 @@ func (s *editorService) Connect(_ context.Context, call proto.EditorService_conn
 	// file now would adopt a build installed since as the baseline and report
 	// a genuinely stale plugin as current.
 	for _, bin := range s.pluginMgr.BinaryStamps() {
-		s.staleWatch.watchStamped(bin.Path, binaryStamp{
-			size:    bin.Size,
-			modTime: bin.ModTimeUnixNano,
+		s.staleWatch.watchStamped(bin.Path, binstamp.Stamp{
+			Size:    bin.Size,
+			ModTime: bin.ModTimeUnixNano,
 		})
 	}
 	if desc := s.staleWatch.staleDescription(); desc != "" {

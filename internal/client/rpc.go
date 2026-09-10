@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/indiejames/indigo/internal/debuglog"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
 
@@ -33,13 +32,7 @@ func (l *rpcLogger) Error(msg string, args ...any) {
 }
 
 func clientLog(format string, args ...any) {
-	path := filepath.Join(os.TempDir(), "indigo-plugins.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()                                  //nolint:errcheck
-	fmt.Fprintf(f, "[client] "+format+"\n", args...) //nolint:errcheck
+	debuglog.Write("client", format, args...)
 }
 
 // PluginKeyResult is the client-side view of a plugin key handler response.

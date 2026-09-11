@@ -30,12 +30,33 @@ type tickMsg struct{}
 
 // updatesMsg carries ops received from the server, plus the sha256 of the
 // buffer content at its last save (for dirty-marker reconciliation).
+//
+// bufID is stamped at request time and both routed on and checked on
+// arrival. Only the active buffer polls, so without it a GetUpdates issued
+// by one tab and answered after the user switched tabs was dispatched to
+// whatever buffer was active by then — applying another file's ops to it,
+// and (worse) adopting that other buffer's version as its own polling
+// watermark, after which real ops for it read as already-seen and were
+// never delivered again. Routed rather than merely discarded so the
+// straggler still reaches the buffer it was actually about.
+//
+// version/generation are the server's values at the moment the response was
+// built, and responses can arrive out of order: polls go out every 120ms
+// with a 2s timeout and no in-flight guard, so several can be outstanding
+// at once, each carrying the same sinceVersion and therefore the same ops.
+// The handler treats both fields as monotonic and filters ops by
+// op.Version to make a late or duplicate response a no-op rather than a
+// second application of the same edit.
 type updatesMsg struct {
+	bufID      uint32
 	ops        []document.Op
 	version    uint64
 	savedHash  []byte
 	generation uint64
 }
+
+// RouteBufID implements RoutableMsg.
+func (m updatesMsg) RouteBufID() uint32 { return m.bufID }
 
 // errorMsg carries a non-fatal error to display in the status bar.
 type errorMsg struct{ err error }
@@ -51,7 +72,9 @@ type errorMsg struct{ err error }
 // inactive buffer's save/discard/resync still take effect. Deliberately
 // implemented by only a handful of message types (not every bufID-carrying
 // one) — see each type's doc comment for why routing matters for it
-// specifically.
+// specifically. updatesMsg is the one whose bufID also guards against
+// active-buffer misdelivery corrupting content, rather than merely losing a
+// result.
 type RoutableMsg interface {
 	RouteBufID() uint32
 }
@@ -1222,6 +1245,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case updatesMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
+		if m.generationKnown && msg.generation < m.generation {
+			// A response built before a buffer swap we have already learned
+			// about and resynced past. generation only ever increases, so
+			// this is unambiguously a straggler: its ops describe the old
+			// buffer object. Dropping it matters as much as the mismatch
+			// branch below does — treating it as a mismatch instead would
+			// send us round the resync loop a second time for a swap that
+			// has already been handled.
+			return m, nil
+		}
 		if m.generationKnown && msg.generation != m.generation {
 			// The server replaced this buffer's object wholesale since our
 			// last known generation (format-on-save, SaveAs, DiscardRecovery,
@@ -1237,8 +1273,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// GetUpdates never echoes this client's own ops back.
 		before := m.cursorSnap()
 		var inverses []document.Op
+		applied := 0
 		atLine, delta := -1, 0
 		for _, op := range msg.ops {
+			// Skip ops we have already applied. Polls are issued every
+			// 120ms with a 2s timeout and no in-flight guard, so two can
+			// easily be outstanding at once — and because m.version only
+			// advances when a response is *handled*, both carry the same
+			// sinceVersion and the server answers both with the same ops.
+			// Without this check the second response applies that edit a
+			// second time, duplicating an insert or deleting live text.
+			if op.Version != 0 && op.Version <= m.version {
+				continue
+			}
 			if op.Type == document.OpInsert || op.Type == document.OpDelete {
 				inverses = append(inverses, inverseOp(m, op)) // must precede Apply
 			}
@@ -1248,12 +1295,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			delta += d
 			m.buf.Apply(op)
+			applied++
 		}
 		if len(inverses) > 0 {
 			m.undoStack = append(m.undoStack, undoEntry{ops: inverses, before: before})
 			m.redoStack = nil
 		}
-		m.version = msg.version
+		// max, not assignment: a late response reports the version the
+		// buffer had when it was built, which can be behind what a response
+		// handled since has already moved us to. Taking it verbatim would
+		// rewind our polling watermark and re-request ops we just applied.
+		m.version = max(m.version, msg.version)
 		// Reconcile the dirty marker: if another client saved this buffer, our
 		// content now matches disk exactly when its hash equals savedHash. The
 		// hash check makes this race-free — an in-flight local keystroke means
@@ -1264,7 +1316,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.savedUndoDepth = len(m.undoStack)
 			}
 		}
-		if len(msg.ops) == 0 {
+		if applied == 0 {
+			// Either the server had nothing for us, or everything it sent
+			// was a duplicate we had already applied — in both cases the
+			// buffer is untouched, so there is nothing to reparse, shift,
+			// or clamp.
 			return m, nil
 		}
 		m.clampCursor()

@@ -330,7 +330,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// client.RoutableMsg (applyOpFailedMsg, savedMsg, savedAsMsg,
+	// client.RoutableMsg (updatesMsg, applyOpFailedMsg, savedMsg, savedAsMsg,
 	// discardRecoveryMsg, saveFailedMsg, discardRecoveryFailedMsg,
 	// highlightMsg — see their doc comments) must reach the specific buffer
 	// they're about, even when it isn't the active tab: the generic fallback

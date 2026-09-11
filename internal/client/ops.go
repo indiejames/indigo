@@ -418,16 +418,17 @@ func bufText(m Model, fromLine, fromCol, toLine, toCol int) string {
 }
 
 func (m Model) fetchUpdates() tea.Cmd {
+	bufID := m.bufID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		ops, ver, savedHash, generation, err := m.rpc.GetUpdates(ctx, m.bufID, m.version)
+		ops, ver, savedHash, generation, err := m.rpc.GetUpdates(ctx, bufID, m.version)
 		if err != nil {
 			return nil
 		}
 		// Deliver even with zero ops: savedHash keeps the dirty marker
 		// accurate when another client (e.g. an agent) saves this buffer.
-		return updatesMsg{ops: ops, version: ver, savedHash: savedHash, generation: generation}
+		return updatesMsg{bufID: bufID, ops: ops, version: ver, savedHash: savedHash, generation: generation}
 	}
 }
 

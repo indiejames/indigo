@@ -74,7 +74,7 @@ func TestNewEstablishesGenerationBaselineImmediately(t *testing.T) {
 
 	// A swap that happened between OpenFile and this client's very first
 	// poll must now be caught rather than silently adopted as baseline.
-	msg := updatesMsg{version: 0, generation: 4}
+	msg := updatesMsg{bufID: 1, version: 0, generation: 4}
 	updated, cmd := m.Update(msg)
 	m2 := updated.(Model)
 

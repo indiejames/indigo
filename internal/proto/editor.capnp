@@ -73,6 +73,16 @@ interface EditorService {
   # caller can retry. A read failure is also an error rather than an empty
   # buffer — a file momentarily unreadable must not blank the user's content.
   reloadBuffer @54 (clientId :UInt64, bufferId :UInt32) -> (content :Text, version :UInt64, generation :UInt64);
+  # getSyncState is a read-only projection of buffer bookkeeping the server
+  # already keeps, for diagnosing sync problems — which are otherwise close to
+  # impossible to report from another machine, since what would explain them is
+  # either transient (a status message long since overwritten) or invisible
+  # (two clients quietly disagreeing about a file).
+  #
+  # bufferId 0 means every open buffer; buffer ids start at 1, so 0 is never a
+  # real one. Content is reported as a sha256 and a byte count, never as text:
+  # this is the call whose output gets pasted into a bug report.
+  getSyncState @55 (bufferId :UInt32) -> (buffers :List(BufferSyncState));
   # generation must match the buffer's current generation (see openFile's
   # doc comment) or the op is rejected — a client unaware of a wholesale
   # buffer swap must not have its (now-meaningless) coordinates applied to
@@ -465,6 +475,42 @@ struct ActiveContext {
   col       @4 :UInt32;
   updatedAt @5 :Int64;  # Unix nanoseconds
   found     @6 :Bool;
+}
+
+# BufferSyncState is everything the server knows about one buffer's
+# synchronization bookkeeping. Every field is already tracked for its own
+# reasons; this just exposes it.
+struct BufferSyncState {
+  bufferId      @0 :UInt32;
+  path          @1 :Text;
+  version       @2 :UInt64;
+  # generation increments on every wholesale buffer-object swap — see
+  # openFile. A client whose remembered generation differs from this one is
+  # about to resync (or, if it never polls, is silently stale).
+  generation    @3 :UInt64;
+  dirty         @4 :Bool;
+  # sha256 of the buffer's current content, and its length in bytes. A client
+  # reporting a different hash for the same generation has diverged.
+  contentSha256 @5 :Data;
+  contentBytes  @6 :UInt64;
+  lineCount     @7 :UInt32;
+  # How many ops the buffer still retains. Unbounded growth here means some
+  # client has stopped acknowledging (see recordClientProgress/TrimHistory).
+  historyLen    @8 :UInt32;
+  clients       @9 :List(ClientSyncState);
+}
+
+# ClientSyncState is one client's position on a buffer.
+struct ClientSyncState {
+  clientId @0 :UInt64;
+  # The buffer version this client has acknowledged receiving ops up to. A
+  # value far behind the buffer's own version is a client that has stopped
+  # polling — the thing that both blocks history trimming and means the
+  # window is showing stale content.
+  ackedVersion @1 :UInt64;
+  # The connection it registered on; 0 for a client registered outside a real
+  # connection. Two clients sharing a connId came from one process.
+  connId @2 :UInt64;
 }
 
 struct EditOp {

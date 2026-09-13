@@ -35,8 +35,10 @@ func TestWriteGoesToDatedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading %s: %v", want, err)
 	}
-	if got := string(content); got != "[app] hello 7\n" {
-		t.Errorf("log content = %q, want %q", got, "[app] hello 7\n")
+	// The line is timestamped, so match the tag and message rather than the
+	// whole line; TestWriteTimestampsLines covers the timestamp itself.
+	if got := string(content); !strings.HasSuffix(got, " [app] hello 7\n") {
+		t.Errorf("log content = %q, want it to end with %q", got, " [app] hello 7\n")
 	}
 }
 
@@ -48,8 +50,8 @@ func TestWriteWithoutTagIsUnprefixed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading %s: %v", Path(), err)
 	}
-	if got := string(content); got != "plain line\n" {
-		t.Errorf("log content = %q, want %q", got, "plain line\n")
+	if got := string(content); !strings.HasSuffix(got, " plain line\n") || strings.Contains(got, "[") {
+		t.Errorf("log content = %q, want a timestamp then %q with no bracketed tag", got, "plain line")
 	}
 }
 

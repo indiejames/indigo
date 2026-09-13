@@ -266,6 +266,78 @@ func (r *RPC) ReloadBuffer(ctx context.Context, bufID uint32) (content string, v
 	return content, res.Version(), res.Generation(), nil
 }
 
+// BufferSyncState is one buffer's synchronization bookkeeping as the server
+// sees it. Content appears only as a hash and a length, never as text.
+type BufferSyncState struct {
+	BufID         uint32
+	Path          string
+	Version       uint64
+	Generation    uint64
+	Dirty         bool
+	ContentSha256 []byte
+	ContentBytes  uint64
+	LineCount     uint32
+	HistoryLen    uint32
+	Clients       []ClientSyncState
+}
+
+// ClientSyncState is one client's position on a buffer.
+type ClientSyncState struct {
+	ClientID     uint64
+	AckedVersion uint64
+	ConnID       uint64
+}
+
+// GetSyncState reports the server's buffer-sync bookkeeping. bufID 0 means
+// every open buffer.
+func (r *RPC) GetSyncState(ctx context.Context, bufID uint32) ([]BufferSyncState, error) {
+	fut, rel := r.svc.GetSyncState(ctx, func(p proto.EditorService_getSyncState_Params) error {
+		p.SetBufferId(bufID)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, err
+	}
+	list, err := res.Buffers()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BufferSyncState, list.Len())
+	for i := range out {
+		item := list.At(i)
+		path, _ := item.Path()
+		sum, _ := item.ContentSha256()
+		b := BufferSyncState{
+			BufID:         item.BufferId(),
+			Path:          path,
+			Version:       item.Version(),
+			Generation:    item.Generation(),
+			Dirty:         item.Dirty(),
+			ContentSha256: append([]byte(nil), sum...),
+			ContentBytes:  item.ContentBytes(),
+			LineCount:     item.LineCount(),
+			HistoryLen:    item.HistoryLen(),
+		}
+		clients, err := item.Clients()
+		if err != nil {
+			return nil, err
+		}
+		b.Clients = make([]ClientSyncState, clients.Len())
+		for j := range b.Clients {
+			ci := clients.At(j)
+			b.Clients[j] = ClientSyncState{
+				ClientID:     ci.ClientId(),
+				AckedVersion: ci.AckedVersion(),
+				ConnID:       ci.ConnId(),
+			}
+		}
+		out[i] = b
+	}
+	return out, nil
+}
+
 // GetBufferSnapshot fetches bufID's current authoritative content, version,
 // generation, and path directly by ID. Used to resync after a failed
 // ApplyOp or a detected generation mismatch — unlike OpenFile, this doesn't

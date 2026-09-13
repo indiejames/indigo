@@ -101,20 +101,35 @@ func Open() (*os.File, error) {
 	return os.OpenFile(Path(), logOpenFlags, logFileMode)
 }
 
+// TimeLayout is the timestamp every Write-produced line begins with. Chosen to
+// sort lexically in the same order it sorts chronologically, to carry the UTC
+// offset (so a log shared from another machine is unambiguous), and to keep
+// milliseconds, since the events worth correlating here — a client's ApplyOp
+// and the server's handling of it — happen well inside one second.
+const TimeLayout = "2006-01-02T15:04:05.000Z07:00"
+
 // Write appends one formatted line to the current day's log file, prefixed
-// with tag in brackets ("app" → "[app] ..."). An empty tag writes the line
-// unprefixed. Errors are deliberately swallowed: this is diagnostic output,
-// and a failure to log must never change what the editor does.
+// with a timestamp and with tag in brackets ("app" → "<ts> [app] ..."). An
+// empty tag omits the bracketed part. Errors are deliberately swallowed: this
+// is diagnostic output, and a failure to log must never change what the editor
+// does.
+//
+// The timestamp is what makes the log usable as evidence rather than just as a
+// narrative: without it there is no way to filter to "the minute it broke", and
+// no way to line a client-side symptom up against what the server did. Lines
+// written straight to the fd returned by Open — a plugin's or the server's
+// stderr — have no timestamp, which readers must tolerate; see Read.
 func Write(tag, format string, args ...any) {
 	f, err := Open()
 	if err != nil {
 		return
 	}
 	defer f.Close() //nolint:errcheck
+	prefix := time.Now().Format(TimeLayout) + " "
 	if tag != "" {
-		format = "[" + tag + "] " + format
+		prefix += "[" + tag + "] "
 	}
-	fmt.Fprintf(f, format+"\n", args...) //nolint:errcheck
+	fmt.Fprintf(f, prefix+format+"\n", args...) //nolint:errcheck
 }
 
 // maybePrune runs Prune at most once per pruneInterval per process.

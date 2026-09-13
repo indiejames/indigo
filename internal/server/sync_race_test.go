@@ -65,11 +65,12 @@ func newRaceTestService(t *testing.T, path string) (*editorService, proto.Editor
 // the read with. What's under test is the locking discipline on these fields,
 // and this writer exercises exactly that.
 // bumpGeneration mirrors what the production sites do alongside the swap. It
-// is a parameter because ApplyOp reads entry.generation only while holding
-// s.mu (both for its check and for the rejection log), so entry.buf is its
-// sole unlocked read — and a swapper that bumps the generation makes every
-// call bail out at the check before it ever reaches that read, hiding the bug
-// rather than exposing it.
+// is a parameter because ApplyOp and ApplyOps both read entry.generation only
+// while holding s.mu (for the check and for the rejection log), so entry.buf is
+// their sole unlocked read — and a swapper that bumps the generation makes
+// every call bail out at that check before it ever reaches the read, hiding the
+// bug rather than exposing it. GetUpdates has no such check and is driven by a
+// real SaveAs instead.
 func swapBufferRepeatedly(s *editorService, path string, iters int, bumpGeneration bool) {
 	for i := 0; i < iters; i++ {
 		s.mu.Lock()
@@ -162,8 +163,7 @@ func TestApplyOpNoRaceWithConcurrentBufferSwap(t *testing.T) {
 
 // TestApplyOpsNoRaceWithConcurrentBufferSwap covers ApplyOps, which read
 // entry.buf for the path, for every op's Apply, and for the trailing
-// Content() — all after unlocking. Unlike ApplyOp it has no generation check,
-// so every call here reaches the apply.
+// Content() — all after unlocking.
 func TestApplyOpsNoRaceWithConcurrentBufferSwap(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "a.go")
@@ -173,7 +173,7 @@ func TestApplyOpsNoRaceWithConcurrentBufferSwap(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		swapBufferRepeatedly(s, path, raceIters, true)
+		swapBufferRepeatedly(s, path, raceIters, false)
 	}()
 	go func() {
 		defer wg.Done()

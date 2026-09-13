@@ -62,7 +62,16 @@ interface EditorService {
   save            @5 (clientId :UInt64, bufferId :UInt32)                      -> ();
   closeBuffer     @6 (clientId :UInt64, bufferId :UInt32)                      -> ();
   bufferClientCount @7 (bufferId :UInt32)                                      -> (count :UInt32);
-  discardRecovery @8 (clientId :UInt64, bufferId :UInt32)                      -> (content :Text);
+  # generation: DiscardRecovery replaces the buffer object wholesale (it loads
+  # the on-disk content into a fresh document.New), so it bumps the buffer's
+  # generation exactly as format/saveAs do. Returning it is not optional
+  # bookkeeping: a caller that doesn't adopt it into its own remembered
+  # generation sees a mismatch on its very next getUpdates poll and triggers a
+  # resync it doesn't need — one that also marks the buffer dirty, which is
+  # flatly wrong here, since discarding recovery is precisely the operation
+  # that makes the buffer match what's on disk. Same contract as format's
+  # generation; see openFile's doc comment.
+  discardRecovery @8 (clientId :UInt64, bufferId :UInt32)                      -> (content :Text, generation :UInt64);
   getDiagnostics  @9  (bufId :UInt32)                                          -> (items :List(LspDiagnostic), lspReady :Bool);
   hover           @10 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :HoverResult);
   signatureHelp   @11 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :SignatureHelp);
@@ -103,7 +112,15 @@ interface EditorService {
   setStatusBarText   @35 (key :Text, text :Text) -> ();
   # Apply a batch of ops atomically: once the server receives the call, all
   # ops are applied even if the client dies mid-request.
-  applyOps           @36 (clientId :UInt64, bufferId :UInt32, ops :List(EditOp)) -> (version :UInt64);
+  # generation: same contract and same reason as applyOp's. This is arguably
+  # more important here, not less: an applyOps batch is by definition
+  # position-dependent (a delete paired with the insert that replaces it), and
+  # its callers compute those coordinates from content they read in an earlier,
+  # separate round trip — a workspace search-and-replace hit, or an agent's
+  # read_file. A wholesale buffer swap landing in that gap leaves every
+  # coordinate in the batch meaningless, and applying it anyway corrupts the
+  # new buffer at the wrong offsets.
+  applyOps           @36 (clientId :UInt64, bufferId :UInt32, ops :List(EditOp), generation :UInt64) -> (version :UInt64);
   # Report / query the active editor selection (start/end in document order,
   # end column inclusive; isLine = whole-line selection; active=false clears).
   setActiveSelection @37 (clientId :UInt64, bufId :UInt32, startLine :UInt32, startCol :UInt32, endLine :UInt32, endCol :UInt32, isLine :Bool, active :Bool) -> ();

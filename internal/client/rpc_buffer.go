@@ -29,8 +29,15 @@ func (r *RPC) OpenFile(ctx context.Context, path string) (uint32, string, uint64
 }
 
 // DiscardRecovery tells the server to delete the recovery file and reload the
-// original file content into the buffer. Returns the original file content.
-func (r *RPC) DiscardRecovery(ctx context.Context, bufID uint32) (string, error) {
+// original file content into the buffer. Returns the original file content and
+// the buffer's new generation.
+//
+// The generation must be adopted by the caller: this call replaces the buffer
+// object server-side, so a caller still holding the old value sees a mismatch
+// on its next GetUpdates poll and resyncs for no reason — a resync that also
+// marks the buffer dirty, which is exactly backwards here, since discarding
+// recovery is what makes the buffer match disk.
+func (r *RPC) DiscardRecovery(ctx context.Context, bufID uint32) (string, uint64, error) {
 	fut, rel := r.svc.DiscardRecovery(ctx, func(p proto.EditorService_discardRecovery_Params) error {
 		p.SetClientId(r.clientID)
 		p.SetBufferId(bufID)
@@ -39,13 +46,13 @@ func (r *RPC) DiscardRecovery(ctx context.Context, bufID uint32) (string, error)
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	content, err := res.Content()
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return content, nil
+	return content, res.Generation(), nil
 }
 
 // encodeOp writes a document.Op into a wire EditOp.
@@ -93,10 +100,17 @@ func (r *RPC) ApplyOp(ctx context.Context, bufID uint32, op document.Op, generat
 // ApplyOps sends a batch of edit operations in one request. The server applies
 // the whole batch even if this client dies mid-call, so paired ops (e.g. a
 // delete+insert replace) can never be left half-applied.
-func (r *RPC) ApplyOps(ctx context.Context, bufID uint32, ops []document.Op) (uint64, error) {
+//
+// generation must be the buffer's generation as of whenever the caller read the
+// content it computed these coordinates against — normally the value returned
+// by the OpenFile/GetBufferSnapshot that produced that content. The server
+// rejects the batch if the buffer has been swapped since; retrying with the
+// same coordinates is wrong, so a caller should re-read and recompute.
+func (r *RPC) ApplyOps(ctx context.Context, bufID uint32, ops []document.Op, generation uint64) (uint64, error) {
 	fut, rel := r.svc.ApplyOps(ctx, func(p proto.EditorService_applyOps_Params) error {
 		p.SetClientId(r.clientID)
 		p.SetBufferId(bufID)
+		p.SetGeneration(generation)
 		list, err := p.NewOps(int32(len(ops)))
 		if err != nil {
 			return err

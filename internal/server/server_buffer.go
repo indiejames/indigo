@@ -210,12 +210,16 @@ func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorServ
 	}
 	entry.buf = document.New(path, content)
 	entry.generation++
+	generation := entry.generation
 	s.mu.Unlock()
 
 	res, err := call.AllocResults()
 	if err != nil {
 		return err
 	}
+	// Read under the lock above, not re-read here: entry.generation is guarded
+	// by s.mu and every other swap site writes it.
+	res.SetGeneration(generation)
 	return res.SetContent(content)
 }
 
@@ -544,6 +548,7 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 	args := call.Args()
 	clientID := args.ClientId()
 	bufID := args.BufferId()
+	clientGeneration := args.Generation()
 	protoOps, err := args.Ops()
 	if err != nil {
 		return err
@@ -554,8 +559,9 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
 	var buf *document.Buffer
+	var generation uint64
 	if ok {
-		buf = entry.buf
+		buf, generation = entry.buf, entry.generation
 	}
 	s.mu.Unlock()
 	if !ok {
@@ -564,6 +570,14 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 		// is the only place that knows it happened.
 		serverLog("ApplyOps REJECTED: unknown buffer %d (client %d)", bufID, clientID)
 		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	if generation != clientGeneration {
+		// Same guard, same logging reasoning as ApplyOp's — see there. %q for
+		// the path because it traces back to a client-supplied OpenFile
+		// argument and this log is line-oriented.
+		serverLog("ApplyOps REJECTED: buffer %d (%q) generation mismatch: client has %d, server has %d",
+			bufID, buf.Path(), clientGeneration, generation)
+		return fmt.Errorf("buffer %d generation mismatch: client has %d, server has %d", bufID, clientGeneration, generation)
 	}
 	path := buf.Path()
 

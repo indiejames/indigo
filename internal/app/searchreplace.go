@@ -388,11 +388,15 @@ func (a App) acceptSearchReplaceMatch(d *searchReplaceDialog) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		bufID, _, _, _, _, err := rpc.OpenFile(ctx, absPath)
+		// gen is what the batch below is validated against: these coordinates
+		// came from the grep hit, so if the buffer has been swapped wholesale
+		// since this OpenFile, they no longer mean anything and the server
+		// rejects rather than applying them at the wrong offsets.
+		bufID, _, _, _, gen, err := rpc.OpenFile(ctx, absPath)
 		if err != nil {
 			return sraSingleResultMsg{err: err}
 		}
-		if _, err := rpc.ApplyOps(ctx, bufID, []document.Op{delOp, insOp}); err != nil {
+		if _, err := rpc.ApplyOps(ctx, bufID, []document.Op{delOp, insOp}, gen); err != nil {
 			return sraSingleResultMsg{err: err}
 		}
 		bufID, content, version, fromRecovery, generation, err := rpc.OpenFile(ctx, absPath)

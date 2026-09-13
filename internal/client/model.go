@@ -213,6 +213,14 @@ type discardRecoveryMsg struct {
 	bufID   uint32
 	version uint64
 	content string
+	// generation is the buffer's new generation after the server's swap. It
+	// must be adopted, not ignored: DiscardRecovery replaces the buffer object
+	// server-side, so leaving m.generation stale made the very next
+	// updatesMsg poll see a mismatch and fire a resync that wasn't needed —
+	// and resyncFromServer marks the buffer dirty, which is precisely wrong
+	// here, since discarding recovery is the operation that makes the buffer
+	// match what's on disk. Same contract as formatResultMsg's generation.
+	generation uint64
 }
 
 // RouteBufID implements RoutableMsg.
@@ -1515,9 +1523,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.buf = document.New(m.filePath, msg.content)
 		m.version = 0
+		m.generation = msg.generation
+		m.generationKnown = true
 		m.undoStack = nil
 		m.redoStack = nil
 		m.currentGroup = nil
+		// savedUndoDepth = 0 (matching the just-emptied undo stack) is correct
+		// here, unlike in formatResultMsg's handler: msg.content came straight
+		// off disk, so the buffer genuinely does match the file and a fresh,
+		// clean document.New is the accurate state.
 		m.savedUndoDepth = 0
 		return m, m.reparseHighlight()
 

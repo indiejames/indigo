@@ -508,8 +508,13 @@ func execApplyEdits(ctx context.Context, rpc *client.RPC, ap Approver, workDir s
 		return "edit rejected by user", true
 	}
 
-	// Open the buffer (idempotent if already open).
-	bufID, content, version, _, _, err := rpc.OpenFile(ctx, abs)
+	// Open the buffer (idempotent if already open). generation pins the batch
+	// below to the buffer object this content came from: an agent computing
+	// offsets from `content` here while a format-on-save or SaveAs swaps the
+	// buffer underneath is exactly the race the server's check exists for, and
+	// it's more likely through this path than a keystroke, since a tool call
+	// takes its time between reading and writing.
+	bufID, content, version, _, generation, err := rpc.OpenFile(ctx, abs)
 	if err != nil {
 		return fmt.Sprintf("cannot open %s: %v", in.Path, err), true
 	}
@@ -545,7 +550,7 @@ func execApplyEdits(ctx context.Context, rpc *client.RPC, ap Approver, workDir s
 			InsertCol:  startCol,
 			InsertText: in.NewText,
 		},
-	}); err != nil {
+	}, generation); err != nil {
 		if weOpened {
 			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
 		}

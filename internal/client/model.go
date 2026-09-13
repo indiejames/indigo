@@ -1698,7 +1698,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.undoStack = nil
 			m.redoStack = nil
 			m.currentGroup = nil
-			m.savedUndoDepth = 0
+			// The server marks its swapped-in buffer dirty (Format's
+			// newBuf.MarkDirty(), server_lsp.go), so mirror that here or the
+			// two disagree about whether there is anything to save. A fresh
+			// document.New is clean, and leaving it that way meant ":format"
+			// then ":q" exited with no unsaved-changes prompt and threw the
+			// formatting away. Unconditional rather than gated on
+			// !msg.thenSave: with thenSave the buffer really is dirty at this
+			// instant too, and the save that follows immediately cleans it
+			// again (doSaveNow captures version 0, which still matches by the
+			// time savedMsg's check runs, so SetClean is reached).
+			m.buf.MarkDirty()
+			// -1, not 0: savedUndoDepth is compared against len(undoStack) to
+			// re-clear dirty when the user undoes back to the last saved
+			// state, and 0 against a just-emptied stack would wrongly call
+			// the formatted-but-unsaved buffer "saved" as soon as the user
+			// typed once and undid it. Same idiom and reason as
+			// bufferResyncMsg's handler above.
+			m.savedUndoDepth = -1
 			m.cursor = document.Pos{
 				Line: min(m.cursor.Line, m.buf.LineCount()-1),
 			}

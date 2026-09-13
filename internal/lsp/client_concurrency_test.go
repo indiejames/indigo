@@ -98,6 +98,15 @@ func TestRenameAfterChangeIsAtomicWithConcurrentDidChange(t *testing.T) {
 	var mu sync.Mutex
 	var events []string
 
+	// Both channels are how this test synchronizes with the fake server
+	// instead of sleeping and hoping. They are buffered well past the number
+	// of sends (two didChange, one rename) because the notification handler
+	// runs synchronously on the connection's readLoop goroutine
+	// (jsonrpc.go's readLoop) — a send that blocked there would wedge the
+	// reader and deadlock the test rather than fail it.
+	didChanged := make(chan struct{}, 4)
+	renameStarted := make(chan struct{}, 1)
+
 	fakeServer := newJSONRPCConn(serverEnd, serverEnd,
 		func(method string, params json.RawMessage) {
 			if method != "textDocument/didChange" {
@@ -111,6 +120,7 @@ func TestRenameAfterChangeIsAtomicWithConcurrentDidChange(t *testing.T) {
 			mu.Lock()
 			events = append(events, "didChange")
 			mu.Unlock()
+			didChanged <- struct{}{}
 		},
 		func(method string, _ json.RawMessage) (any, error) {
 			if method != "textDocument/rename" {
@@ -119,6 +129,10 @@ func TestRenameAfterChangeIsAtomicWithConcurrentDidChange(t *testing.T) {
 			mu.Lock()
 			events = append(events, "rename-start")
 			mu.Unlock()
+			// Signalled before the sleep, so the concurrent DidChange gets its
+			// chance to interleave *during* the rename — which is the whole
+			// scenario under test.
+			renameStarted <- struct{}{}
 			time.Sleep(100 * time.Millisecond) // simulate a slow rename computation
 			mu.Lock()
 			events = append(events, "rename-end")
@@ -144,12 +158,44 @@ func TestRenameAfterChangeIsAtomicWithConcurrentDidChange(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		time.Sleep(20 * time.Millisecond) // let RenameAfterChange start first
+		// Wait until the rename is genuinely in flight rather than sleeping
+		// 20ms and hoping RenameAfterChange won the start. A sleep makes the
+		// interleaving under test merely likely: if the scheduler ran this
+		// goroutine first, its didChange landed before the rename and the
+		// order assertion failed on a test that had not actually exercised
+		// anything.
+		select {
+		case <-renameStarted:
+		case <-time.After(5 * time.Second):
+			t.Error("rename never started")
+			return
+		}
 		if err := c.DidChange("/a.go", "content2"); err != nil {
 			t.Errorf("DidChange: %v", err)
 		}
 	}()
 	wg.Wait()
+
+	// Wait for both didChange notifications to actually be *observed* by the
+	// fake server before asserting on what it saw. This is what the test was
+	// missing: DidChange sends a notification, so it returns as soon as the
+	// bytes are written to the pipe, while the server processes them on its
+	// own readLoop goroutine. wg.Wait() therefore proves only that both
+	// notifications were sent — and the assertion below regularly ran first,
+	// reporting 3 events instead of 4. It showed up under -race because the
+	// instrumentation slows the readLoop enough to lose that footrace most of
+	// the time; the bug was always there. Its sibling test above already does
+	// this correctly with its own `received` channel.
+	for i := 0; i < 2; i++ {
+		select {
+		case <-didChanged:
+		case <-time.After(5 * time.Second):
+			mu.Lock()
+			seen := append([]string(nil), events...)
+			mu.Unlock()
+			t.Fatalf("timed out waiting for both didChange notifications to be observed; events so far = %v", seen)
+		}
+	}
 
 	mu.Lock()
 	defer mu.Unlock()

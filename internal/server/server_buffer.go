@@ -259,14 +259,39 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 	since := args.SinceVersion()
 	callerID := args.ClientId()
 
+	// Snapshot both fields under the lock, then work from the snapshot.
+	// entry.buf and entry.generation are written together (under s.mu) by
+	// every wholesale-swap site — Save's format-on-save branch, SaveAs,
+	// DiscardRecovery, Format — so reading either one unlocked is a genuine
+	// data race, reproducible under -race by polling while a SaveAs lands.
+	//
+	// Taking them together also makes the response internally consistent.
+	// Previously the ops came from whatever entry.buf pointed at on one line
+	// and the generation from whatever it was several lines later, so a swap
+	// landing in between produced a response describing two different buffer
+	// objects. Reading them as a pair means a concurrent swap yields a
+	// coherent pre-swap answer — correct for a client that has not seen the
+	// swap either — and the client learns about it on its next poll, whose
+	// generation mismatch triggers the resync.
+	//
+	// document.Buffer is internally synchronized, so calling its methods on
+	// the snapshotted pointer after unlocking is safe. Nothing acquires
+	// s.mu while holding a Buffer lock, so calling into the buffer under
+	// s.mu would also be safe — the snapshot just keeps s.mu held for less
+	// time.
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
+	var buf *document.Buffer
+	var generation uint64
+	if ok {
+		buf, generation = entry.buf, entry.generation
+	}
 	s.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 
-	ops, ver := entry.buf.OpsSinceAndVersion(since)
+	ops, ver := buf.OpsSinceAndVersion(since)
 	// Filter out ops that originated from the caller.
 	filtered := ops[:0:0]
 	for _, op := range ops {
@@ -275,22 +300,26 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 		}
 	}
 
-	s.recordClientProgress(entry, callerID, ver)
-
 	res, err := call.AllocResults()
 	if err != nil {
 		return err
 	}
 	res.SetVersion(ver)
-	res.SetGeneration(entry.generation)
+	res.SetGeneration(generation)
 	// Saved-content hash lets clients keep their dirty markers accurate when
 	// another client (e.g. an agent) saves the buffer.
-	h := entry.buf.SavedHash()
+	h := buf.SavedHash()
 	if err := res.SetSavedHash(h[:]); err != nil {
 		return err
 	}
 
 	if len(filtered) == 0 {
+		// recordClientProgress only after the response is fully built. It
+		// advances this client's watermark to ver, which is what lets
+		// TrimHistory reclaim those ops — so recording it before the
+		// response exists means a failure below (or a response that never
+		// reaches the client) can retire ops the client never received.
+		s.recordClientProgress(entry, callerID, ver)
 		return nil
 	}
 
@@ -318,6 +347,9 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 			item.SetToCol(uint32(op.ToCol))
 		}
 	}
+	// See the note on the early return above: the watermark moves only once
+	// the whole response is encoded.
+	s.recordClientProgress(entry, callerID, ver)
 	return nil
 }
 
@@ -429,10 +461,22 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 		return err
 	}
 
+	// buf is snapshotted alongside the generation check for the same reason
+	// GetUpdates snapshots it: entry.buf is replaced under s.mu by every
+	// wholesale-swap site, so reading the field after unlocking races them.
+	// Snapshotting it here also means the generation we validated against and
+	// the buffer we go on to apply the op to are the same pair — re-reading
+	// entry.buf afterwards could apply a client's coordinates to a buffer
+	// swapped in after its generation was approved, which is exactly what the
+	// generation check exists to prevent.
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
+	var buf *document.Buffer
+	if ok {
+		buf = entry.buf
+	}
 	if ok && entry.generation != clientGeneration {
-		gen, path := entry.generation, entry.buf.Path()
+		gen, path := entry.generation, buf.Path()
 		s.mu.Unlock()
 		// Logged, not just returned. A rejection here makes the client discard
 		// the edit and resync, which the user sees as an error modal — and the
@@ -454,7 +498,7 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	}
 
 	op := protoToOp(protoOp, clientID)
-	newVersion := entry.buf.Apply(op)
+	newVersion := buf.Apply(op)
 	s.recordClientProgress(entry, clientID, newVersion)
 
 	res, err := call.AllocResults()
@@ -463,8 +507,8 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	}
 	res.SetVersion(newVersion)
 
-	path := entry.buf.Path()
-	content := entry.buf.Content()
+	path := buf.Path()
+	content := buf.Content()
 	go s.lspMgr.DidChange(path, content)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 
@@ -505,8 +549,14 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 		return err
 	}
 
+	// Snapshotted under the lock, same as ApplyOp/GetUpdates — every
+	// wholesale-swap site replaces entry.buf under s.mu.
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
+	var buf *document.Buffer
+	if ok {
+		buf = entry.buf
+	}
 	s.mu.Unlock()
 	if !ok {
 		// Same reasoning as ApplyOp's rejections: the caller (an agent tool, or
@@ -515,12 +565,12 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 		serverLog("ApplyOps REJECTED: unknown buffer %d (client %d)", bufID, clientID)
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
-	path := entry.buf.Path()
+	path := buf.Path()
 
 	var newVersion uint64
 	for i := 0; i < protoOps.Len(); i++ {
 		op := protoToOp(protoOps.At(i), clientID)
-		newVersion = entry.buf.Apply(op)
+		newVersion = buf.Apply(op)
 
 		// Notify edit-event handlers when the line count changed.
 		var lineDelta int32
@@ -552,7 +602,7 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 	}
 	res.SetVersion(newVersion)
 
-	content := entry.buf.Content()
+	content := buf.Content()
 	go s.lspMgr.DidChange(path, content)
 	s.lintMgr.RunOnEdit(path, content)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)

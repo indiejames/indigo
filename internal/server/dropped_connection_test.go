@@ -193,13 +193,25 @@ func TestDroppedConnectionKeepsBufferHeldByAnotherClient(t *testing.T) {
 		return !stillThere
 	})
 
+	// Read entry.clients *under* the lock, not just the map lookup that finds
+	// the entry. dropClients mutates that map (delete(e.clients, id)) while
+	// holding s.mu, so taking the lock only long enough to snapshot the entry
+	// pointer and then reading the map afterwards is a data race — the
+	// detector caught it a run or two in twenty. The waitFor above is not
+	// enough to make it safe: it establishes that the dying client is gone,
+	// not that every writer has finished, and an unsynchronized map read has
+	// no ordering guarantee against one that hasn't.
 	srv.svc.mu.Lock()
 	entry, ok := srv.svc.buffers[sharedBufID]
+	var heldBySurvivor bool
+	if ok {
+		_, heldBySurvivor = entry.clients[survivorID]
+	}
 	srv.svc.mu.Unlock()
 	if !ok {
 		t.Fatal("buffer was freed while another client still had it open")
 	}
-	if _, held := entry.clients[survivorID]; !held {
+	if !heldBySurvivor {
 		t.Error("surviving client lost its hold on the buffer")
 	}
 }

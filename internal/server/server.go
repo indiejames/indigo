@@ -317,16 +317,30 @@ func (s *editorService) handleExternalWrite(path string) {
 	s.mu.Unlock()
 
 	serverLog("handleExternalWrite: notifying %d clients for bufID=%d dirty=%v", len(callbacks), bufID, dirty)
-	ctx := context.Background()
+	// Fan out concurrently, each client with its own timeout — the same shape
+	// PluginDecorationsChanged uses, and for a sharper reason here. This runs
+	// on watchLoop's single goroutine, so the previous serial
+	// context.Background() version let one wedged or slow client stall
+	// external-change detection for *every* file the server watches, not just
+	// its own: no further fsnotify event was processed until it answered.
+	//
+	// No dispatch-ordering lock (unlike the popup path's popupDispatchMu):
+	// FileChanged carries no server-side state that a later call invalidates.
+	// Two writes to one file mean two reload prompts, and receiving them in
+	// either order is the same outcome.
 	for i, cb := range callbacks {
-		fut, rel := cb.FileChanged(ctx, func(p proto.ClientCallback_fileChanged_Params) error {
-			p.SetBufId(bufID)
-			p.SetDirty(dirty)
-			return nil
-		})
-		_, err := fut.Struct()
-		rel()
-		serverLog("handleExternalWrite: client[%d] FileChanged returned err=%v", i, err)
+		go func(i int, cb proto.ClientCallback) {
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
+			fut, rel := cb.FileChanged(ctx, func(p proto.ClientCallback_fileChanged_Params) error {
+				p.SetBufId(bufID)
+				p.SetDirty(dirty)
+				return nil
+			})
+			_, err := fut.Struct()
+			rel()
+			serverLog("handleExternalWrite: client[%d] FileChanged returned err=%v", i, err)
+		}(i, cb)
 	}
 }
 

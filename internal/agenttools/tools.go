@@ -203,6 +203,19 @@ func AllTools() []ToolDef {
 			},
 		},
 		{
+			Name: "check_buffer_consistency",
+			Description: "Ask every editor window holding a buffer what content it actually has and compare it against the server's, to detect client/server divergence. " +
+				"This is the only way to observe that class of bug: it produces no error, no version mismatch and no generation change — two windows just quietly disagree about a file. " +
+				"Samples twice so ordinary mid-edit differences aren't reported as divergence. Compares hashes only; no buffer text is transferred.",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]SchemaProp{
+					"path":      {Type: "string", Description: "Limit to one file. Omit for every open buffer."},
+					"settle_ms": {Type: "integer", Description: "Gap between the two samples, in milliseconds. Default 300, max 5000. Raise it if results come back inconclusive during heavy editing."},
+				},
+			},
+		},
+		{
 			Name: "report_bundle",
 			Description: "Write a single diagnostic file combining sync state for every open buffer with the recent log, and return its path. " +
 				"Use this to capture evidence for a bug report — especially one from another machine, where the useful detail is otherwise unreachable. No buffer contents are included.",
@@ -303,6 +316,12 @@ func ExecTool(ctx context.Context, rpc *client.RPC, ap Approver, workDir, name s
 			return fmt.Sprintf("bad input: %v", err), true
 		}
 		return execGetSyncState(ctx, rpc, workDir, in)
+	case "check_buffer_consistency":
+		var in checkConsistencyInput
+		if err := json.Unmarshal(rawInput, &in); err != nil {
+			return fmt.Sprintf("bad input: %v", err), true
+		}
+		return execCheckConsistency(ctx, rpc, workDir, in)
 	case "report_bundle":
 		var in reportBundleInput
 		if err := json.Unmarshal(rawInput, &in); err != nil {

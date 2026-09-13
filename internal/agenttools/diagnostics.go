@@ -1,6 +1,7 @@
 package agenttools
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -236,4 +237,150 @@ func buffersWithLaggingClients(states []client.BufferSyncState) int {
 		}
 	}
 	return n
+}
+
+// ─── check_buffer_consistency ─────────────────────────────────────────────────
+
+type checkConsistencyInput struct {
+	Path     string `json:"path"`
+	SettleMs int    `json:"settle_ms"`
+}
+
+const (
+	defaultSettleMs = 300
+	maxSettleMs     = 5000
+)
+
+// execCheckConsistency samples consistency twice and reports only mismatches
+// that survive both samples unchanged.
+//
+// One sample cannot tell divergence from ordinary editing. A client applies its
+// own edit locally before the server orders it, and its version only catches up
+// on the next poll, so at any instant a window being typed in legitimately holds
+// different content from the server. What is *not* legitimate is a mismatch that
+// persists while neither side's version moves: nothing is in flight, both sides
+// have stopped changing, and they still disagree. That is divergence, and it is
+// otherwise invisible — no error, no version mismatch, no generation change.
+func execCheckConsistency(ctx context.Context, rpc *client.RPC, workDir string, in checkConsistencyInput) (string, bool) {
+	settle := time.Duration(defaultSettleMs) * time.Millisecond
+	if in.SettleMs > 0 {
+		if in.SettleMs > maxSettleMs {
+			return fmt.Sprintf("settle_ms %d is too large (max %d)", in.SettleMs, maxSettleMs), true
+		}
+		settle = time.Duration(in.SettleMs) * time.Millisecond
+	}
+
+	first, err := rpc.CheckBufferConsistency(ctx, 0)
+	if err != nil {
+		return fmt.Sprintf("consistency check failed: %v", err), true
+	}
+	select {
+	case <-time.After(settle):
+	case <-ctx.Done():
+		return "consistency check cancelled while settling", true
+	}
+	second, err := rpc.CheckBufferConsistency(ctx, 0)
+	if err != nil {
+		return fmt.Sprintf("second consistency sample failed: %v", err), true
+	}
+
+	if in.Path != "" {
+		want := absPath(workDir, in.Path)
+		first, second = filterByPath(first, want), filterByPath(second, want)
+		if len(second) == 0 {
+			return fmt.Sprintf("%s is not open on the server", in.Path), false
+		}
+	}
+	if len(second) == 0 {
+		return "no buffers are open on the server", false
+	}
+	return formatConsistency(first, second, settle), false
+}
+
+func filterByPath(in []client.BufferConsistency, path string) []client.BufferConsistency {
+	out := in[:0:0]
+	for _, b := range in {
+		if b.Path == path {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+func formatConsistency(first, second []client.BufferConsistency, settle time.Duration) string {
+	firstByBuf := map[uint32]client.BufferConsistency{}
+	for _, b := range first {
+		firstByBuf[b.BufID] = b
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "consistency check across %d buffer(s), two samples %s apart\n", len(second), settle)
+	problems := 0
+
+	for _, cur := range second {
+		path := cur.Path
+		if path == "" {
+			path = "(untitled)"
+		}
+		fmt.Fprintf(&b, "\nbuffer %d  %s\n", cur.BufID, path)
+		fmt.Fprintf(&b, "  server: version=%d generation=%d sha256=%s\n",
+			cur.ServerVersion, cur.ServerGeneration, shortHash(cur.ServerSha256))
+		if len(cur.Clients) == 0 {
+			b.WriteString("  no clients hold this buffer\n")
+			continue
+		}
+		prev, hadPrev := firstByBuf[cur.BufID]
+		for _, c := range cur.Clients {
+			switch {
+			case !c.Answered:
+				fmt.Fprintf(&b, "  client %d: NO ANSWER (window wedged, or shutting down)\n", c.ClientID)
+				problems++
+				continue
+			case !c.Known:
+				fmt.Fprintf(&b, "  client %d: does not hold this buffer\n", c.ClientID)
+				continue
+			}
+			match := bytes.Equal(c.ContentSha256, cur.ServerSha256)
+			fmt.Fprintf(&b, "  client %d: version=%d generation=%d dirty=%v sha256=%s",
+				c.ClientID, c.Version, c.Generation, c.Dirty, shortHash(c.ContentSha256))
+			switch {
+			case match:
+				b.WriteString("  OK\n")
+			case c.Generation != cur.ServerGeneration:
+				// Expected and self-correcting: the buffer was swapped
+				// wholesale and this client hasn't polled yet, so it is about
+				// to resync. Not divergence.
+				b.WriteString("  differs (stale generation — resync pending)\n")
+			case !hadPrev || stillSettling(prev, cur, c):
+				b.WriteString("  differs (edit in flight — inconclusive)\n")
+			default:
+				b.WriteString("  DIVERGED (mismatch persisted with nothing in flight)\n")
+				problems++
+			}
+		}
+	}
+
+	if problems == 0 {
+		b.WriteString("\nNo divergence found.\n")
+	} else {
+		fmt.Fprintf(&b, "\n%d problem(s) found — see the DIVERGED / NO ANSWER lines above.\n", problems)
+	}
+	return b.String()
+}
+
+// stillSettling reports whether anything changed between the two samples for
+// this client, which makes a mismatch inconclusive rather than divergence.
+func stillSettling(prev, cur client.BufferConsistency, c client.ClientBufferReport) bool {
+	if prev.ServerVersion != cur.ServerVersion {
+		return true // the server was still applying ops
+	}
+	for _, p := range prev.Clients {
+		if p.ClientID != c.ClientID {
+			continue
+		}
+		// Its own version moving, or its content changing, both mean the client
+		// was mid-edit rather than stuck holding something wrong.
+		return p.Version != c.Version || !bytes.Equal(p.ContentSha256, c.ContentSha256)
+	}
+	return true // not present in the first sample; no baseline to compare
 }

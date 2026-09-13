@@ -134,7 +134,7 @@ func TestBuffersWithLaggingClients(t *testing.T) {
 func TestDiagnosticToolsAreRegisteredAndDispatched(t *testing.T) {
 	t.Setenv("INDIGO_LOG_DIR", t.TempDir())
 
-	for _, name := range []string{"get_logs", "get_sync_state", "report_bundle"} {
+	for _, name := range []string{"get_logs", "get_sync_state", "check_buffer_consistency", "report_bundle"} {
 		var def *ToolDef
 		for i, td := range AllTools() {
 			if td.Name == name {
@@ -160,5 +160,118 @@ func TestDiagnosticToolsAreRegisteredAndDispatched(t *testing.T) {
 
 	if out, isErr := ExecTool(context.Background(), nil, nil, t.TempDir(), "get_logs", json.RawMessage(`{bad`)); !isErr {
 		t.Errorf("malformed input accepted: %q", out)
+	}
+}
+
+func consistencySample(serverVer uint64, serverSum []byte, clients ...client.ClientBufferReport) []client.BufferConsistency {
+	return []client.BufferConsistency{{
+		BufID: 1, Path: "/tmp/a.go", ServerVersion: serverVer,
+		ServerGeneration: 2, ServerSha256: serverSum, Clients: clients,
+	}}
+}
+
+var (
+	sumServer = []byte{0xaa, 0xbb}
+	sumOther  = []byte{0xcc, 0xdd}
+)
+
+// TestConsistencyReportsPersistentMismatchAsDiverged is the case the tool
+// exists for: nothing moved between the two samples and the hashes still
+// disagree, so nothing was in flight and the two really do hold different
+// content.
+func TestConsistencyReportsPersistentMismatchAsDiverged(t *testing.T) {
+	c := client.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: sumOther}
+	out := formatConsistency(
+		consistencySample(5, sumServer, c),
+		consistencySample(5, sumServer, c),
+		300*time.Millisecond,
+	)
+	if !strings.Contains(out, "DIVERGED") {
+		t.Errorf("a mismatch that persisted with nothing in flight must be reported as divergence:\n%s", out)
+	}
+	if strings.Contains(out, "No divergence found") {
+		t.Errorf("summary contradicts the finding:\n%s", out)
+	}
+}
+
+// TestConsistencyDoesNotReportMidEditAsDiverged is the false positive that
+// would make this tool useless: a client applies its own edit locally before
+// the server orders it, so a window being typed in legitimately holds different
+// content at any instant.
+func TestConsistencyDoesNotReportMidEditAsDiverged(t *testing.T) {
+	first := consistencySample(5, sumServer,
+		client.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: sumOther})
+	// Same mismatch, but the client's own content changed between samples — it
+	// is being typed in, not stuck.
+	second := consistencySample(5, sumServer,
+		client.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: []byte{0xee, 0xff}})
+
+	out := formatConsistency(first, second, 300*time.Millisecond)
+	if strings.Contains(out, "DIVERGED") {
+		t.Errorf("an edit in flight must not be reported as divergence:\n%s", out)
+	}
+	if !strings.Contains(out, "inconclusive") {
+		t.Errorf("expected the mismatch to be called inconclusive:\n%s", out)
+	}
+}
+
+// TestConsistencyServerStillApplyingIsInconclusive covers the other in-flight
+// direction: the server's own version moved between samples.
+func TestConsistencyServerStillApplyingIsInconclusive(t *testing.T) {
+	c := client.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: sumOther}
+	out := formatConsistency(consistencySample(5, sumServer, c), consistencySample(6, sumServer, c), 300*time.Millisecond)
+	if strings.Contains(out, "DIVERGED") {
+		t.Errorf("the server was still applying ops; that is not divergence:\n%s", out)
+	}
+}
+
+// TestConsistencyStaleGenerationIsNotDivergence covers the expected,
+// self-correcting case: the buffer was swapped wholesale and this client hasn't
+// polled yet, so it is about to resync on its own.
+func TestConsistencyStaleGenerationIsNotDivergence(t *testing.T) {
+	c := client.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 1, ContentSha256: sumOther}
+	out := formatConsistency(consistencySample(5, sumServer, c), consistencySample(5, sumServer, c), 300*time.Millisecond)
+	if strings.Contains(out, "DIVERGED") {
+		t.Errorf("a stale generation means a resync is pending, not divergence:\n%s", out)
+	}
+	if !strings.Contains(out, "resync pending") {
+		t.Errorf("expected the stale generation to be named:\n%s", out)
+	}
+}
+
+func TestConsistencyMatchingClientIsOK(t *testing.T) {
+	c := client.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: sumServer}
+	out := formatConsistency(consistencySample(5, sumServer, c), consistencySample(5, sumServer, c), 300*time.Millisecond)
+	if !strings.Contains(out, "OK") || !strings.Contains(out, "No divergence found") {
+		t.Errorf("a matching client should read as OK:\n%s", out)
+	}
+}
+
+// TestConsistencyDistinguishesNoAnswerFromNotHolding guards the distinction a
+// diagnosis depends on: a wedged window and a closed tab are different findings.
+func TestConsistencyDistinguishesNoAnswerFromNotHolding(t *testing.T) {
+	wedged := client.ClientBufferReport{ClientID: 1, Answered: false}
+	closed := client.ClientBufferReport{ClientID: 2, Answered: true, Known: false}
+	out := formatConsistency(
+		consistencySample(5, sumServer, wedged, closed),
+		consistencySample(5, sumServer, wedged, closed),
+		300*time.Millisecond,
+	)
+	if !strings.Contains(out, "NO ANSWER") {
+		t.Errorf("a client that never answered must be called out:\n%s", out)
+	}
+	if !strings.Contains(out, "does not hold this buffer") {
+		t.Errorf("a client without the buffer must be reported as such, not as unresponsive:\n%s", out)
+	}
+	// Only the wedged one counts as a problem.
+	if !strings.Contains(out, "1 problem(s) found") {
+		t.Errorf("expected exactly one problem:\n%s", out)
+	}
+}
+
+func TestExecCheckConsistencyRejectsHugeSettle(t *testing.T) {
+	out, isErr := execCheckConsistency(context.Background(), nil, "", checkConsistencyInput{SettleMs: maxSettleMs + 1})
+	if !isErr || !strings.Contains(out, "too large") {
+		t.Errorf("got (%q, %v), want an error about settle_ms being too large", out, isErr)
 	}
 }

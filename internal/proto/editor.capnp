@@ -22,6 +22,18 @@ interface ClientCallback {
   # client to refetch decorations for bufId now rather than on the next poll
   # tick. A client not currently viewing bufId ignores it.
   decorationsChanged   @10 (bufId :UInt32)                       -> ();
+  # Asks this client what it currently holds for bufId. The one callback that
+  # returns data rather than just pushing a notification, which is the point:
+  # the server owns the authoritative buffer but has no way to know whether a
+  # window's copy still matches it, and divergence between the two produces no
+  # error, no version mismatch and no generation change — it is invisible
+  # except by comparing content.
+  #
+  # known is false when this client holds no buffer with that id (it closed the
+  # tab, or never had it). Content comes back as a sha256 only; a consistency
+  # check must not move buffer text over the wire.
+  reportBufferState    @11 (bufId :UInt32)
+      -> (known :Bool, version :UInt64, generation :UInt64, dirty :Bool, contentSha256 :Data);
 }
 
 interface EditorService {
@@ -83,6 +95,18 @@ interface EditorService {
   # real one. Content is reported as a sha256 and a byte count, never as text:
   # this is the call whose output gets pasted into a bug report.
   getSyncState @55 (bufferId :UInt32) -> (buffers :List(BufferSyncState));
+  # checkBufferConsistency asks every client holding the buffer what it actually
+  # holds (ClientCallback.reportBufferState) and reports each answer against the
+  # server's own. This is the only way to observe client/server divergence at
+  # all: it produces no error, no version mismatch and no generation change.
+  #
+  # It reports facts, not a verdict. A hash mismatch is entirely normal while
+  # someone is typing — a client applies its edit locally before the server
+  # orders it, and its version only catches up on its next poll — so a single
+  # sample cannot distinguish "diverged" from "mid-edit". Deciding that is the
+  # caller's job, by sampling twice and looking for a mismatch that persists
+  # while neither side's version moved. bufferId 0 means every open buffer.
+  checkBufferConsistency @56 (bufferId :UInt32) -> (buffers :List(BufferConsistency));
   # generation must match the buffer's current generation (see openFile's
   # doc comment) or the op is rejected — a client unaware of a wholesale
   # buffer swap must not have its (now-meaningless) coordinates applied to
@@ -475,6 +499,32 @@ struct ActiveContext {
   col       @4 :UInt32;
   updatedAt @5 :Int64;  # Unix nanoseconds
   found     @6 :Bool;
+}
+
+# BufferConsistency pairs the server's view of one buffer with what each client
+# holding it says it has.
+struct BufferConsistency {
+  bufferId         @0 :UInt32;
+  path             @1 :Text;
+  serverVersion    @2 :UInt64;
+  serverGeneration @3 :UInt64;
+  serverSha256     @4 :Data;
+  clients          @5 :List(ClientBufferReport);
+}
+
+# ClientBufferReport is one client's answer, or the absence of one.
+struct ClientBufferReport {
+  clientId @0 :UInt64;
+  # answered is false when the callback failed or timed out — a wedged or
+  # departing window. Distinct from known, which is the client answering "I do
+  # not have that buffer"; conflating the two would report a closed tab as an
+  # unresponsive one.
+  answered      @1 :Bool;
+  known         @2 :Bool;
+  version       @3 :UInt64;
+  generation    @4 :UInt64;
+  dirty         @5 :Bool;
+  contentSha256 @6 :Data;
 }
 
 # BufferSyncState is everything the server knows about one buffer's

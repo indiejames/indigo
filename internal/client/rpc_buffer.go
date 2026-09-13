@@ -444,3 +444,81 @@ func (r *RPC) MoveTextToFile(ctx context.Context, bufID uint32, fromLine, fromCo
 	_, err := fut.Struct()
 	return err
 }
+
+// BufferConsistency pairs the server's view of one buffer with what each client
+// holding it reports.
+type BufferConsistency struct {
+	BufID            uint32
+	Path             string
+	ServerVersion    uint64
+	ServerGeneration uint64
+	ServerSha256     []byte
+	Clients          []ClientBufferReport
+}
+
+// ClientBufferReport is one client's answer, or the absence of one.
+type ClientBufferReport struct {
+	ClientID      uint64
+	Answered      bool // false when the callback failed or timed out
+	Known         bool // client answered but holds no such buffer
+	Version       uint64
+	Generation    uint64
+	Dirty         bool
+	ContentSha256 []byte
+}
+
+// CheckBufferConsistency asks every client holding the buffer what it holds and
+// returns each answer against the server's own. bufID 0 means every buffer.
+//
+// This reports facts, not a verdict: a hash mismatch is normal mid-edit, since a
+// client applies its edit locally before the server orders it. Deciding whether
+// a mismatch is real divergence needs two samples — see the get_sync_state /
+// check_buffer_consistency tooling in internal/agenttools.
+func (r *RPC) CheckBufferConsistency(ctx context.Context, bufID uint32) ([]BufferConsistency, error) {
+	fut, rel := r.svc.CheckBufferConsistency(ctx, func(p proto.EditorService_checkBufferConsistency_Params) error {
+		p.SetBufferId(bufID)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, err
+	}
+	list, err := res.Buffers()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BufferConsistency, list.Len())
+	for i := range out {
+		item := list.At(i)
+		path, _ := item.Path()
+		sum, _ := item.ServerSha256()
+		b := BufferConsistency{
+			BufID:            item.BufferId(),
+			Path:             path,
+			ServerVersion:    item.ServerVersion(),
+			ServerGeneration: item.ServerGeneration(),
+			ServerSha256:     append([]byte(nil), sum...),
+		}
+		clients, err := item.Clients()
+		if err != nil {
+			return nil, err
+		}
+		b.Clients = make([]ClientBufferReport, clients.Len())
+		for j := range b.Clients {
+			ci := clients.At(j)
+			csum, _ := ci.ContentSha256()
+			b.Clients[j] = ClientBufferReport{
+				ClientID:      ci.ClientId(),
+				Answered:      ci.Answered(),
+				Known:         ci.Known(),
+				Version:       ci.Version(),
+				Generation:    ci.Generation(),
+				Dirty:         ci.Dirty(),
+				ContentSha256: append([]byte(nil), csum...),
+			}
+		}
+		out[i] = b
+	}
+	return out, nil
+}

@@ -735,6 +735,30 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Quit
 
 	// ---- external file change notification from server ----
+	case client.ReportBufferStateMsg:
+		// Handled here rather than in client.Model because only App sees every
+		// buffer: the generic fallback would route this to the active tab,
+		// which would answer "no such buffer" for any backgrounded one and make
+		// a consistency check across tabs useless.
+		//
+		// The send is non-blocking by construction (Reply is buffered and
+		// written once). That matters: the callback abandons its wait when the
+		// server's timeout expires, so there may be no reader left, and
+		// blocking here would wedge the update loop — the editor would stop
+		// accepting keystrokes because a diagnostic asked it a question.
+		var rep client.BufferStateReport
+		for _, m := range a.buffers {
+			if m.BufID() == msg.BufID {
+				rep = m.BufferStateFor()
+				break
+			}
+		}
+		select {
+		case msg.Reply <- rep: // rep.Known stays false when no tab holds it
+		default:
+		}
+		return a, nil
+
 	case client.FileChangedMsg:
 		appLog("FileChangedMsg received: BufID=%d dirty=%v numBufs=%d", msg.BufID, msg.Dirty, len(a.buffers))
 		idx := -1

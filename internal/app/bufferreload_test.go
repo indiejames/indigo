@@ -21,14 +21,18 @@ func TestBufferReloadedMsgAppliesOnMatchingBufID(t *testing.T) {
 		height:  24,
 		cfg:     &config.Config{},
 	}
-	newModel := newReloadTestModel(2, "/tmp/a.go") // reload always gets a fresh bufID (CloseBuffer+OpenFile)
+	// ReloadBuffer reloads in place, so the reloaded model keeps the same
+	// bufID — unlike the old CloseBuffer+OpenFile flow, which always produced
+	// a fresh one.
+	newModel := newReloadTestModel(1, "/tmp/a.go")
 	msg := bufferReloadedMsg{idx: 0, oldBufID: 1, model: newModel}
 
 	updated, cmd := a.Update(msg)
 	a2 := updated.(App)
 
-	if a2.buffers[0].BufID() != 2 {
-		t.Errorf("buffers[0].BufID() = %d, want 2 (reloaded model applied)", a2.buffers[0].BufID())
+	if a2.buffers[0].BufID() != 1 || a2.buffers[0].FilePath() != "/tmp/a.go" {
+		t.Errorf("buffers[0] = {BufID:%d, FilePath:%q}, want the reloaded model {1, /tmp/a.go}",
+			a2.buffers[0].BufID(), a2.buffers[0].FilePath())
 	}
 	if cmd == nil {
 		t.Error("expected a non-nil command (model.Init()) on the happy path")
@@ -36,8 +40,8 @@ func TestBufferReloadedMsgAppliesOnMatchingBufID(t *testing.T) {
 }
 
 // TestBufferReloadedMsgIgnoredOnStaleIndex is a regression test: idx alone
-// isn't a safe identity check — doReloadBuffer's CloseBuffer+OpenFile round
-// trip can take up to 5s, during which closing an earlier tab shifts every
+// isn't a safe identity check — doReloadBuffer's ReloadBuffer round trip can
+// take up to 5s, during which closing an earlier tab shifts every
 // later index down. Before this fix, bufferReloadedMsg only checked idx
 // bounds, so it could silently overwrite whatever unrelated buffer now sits
 // at that index with a reload result for a completely different file.
@@ -60,10 +64,13 @@ func TestBufferReloadedMsgIgnoredOnStaleIndex(t *testing.T) {
 		t.Errorf("buffers[0] = {BufID:%d, FilePath:%q}, want unchanged {5, /tmp/other.go} (stale oldBufID)",
 			a2.buffers[0].BufID(), a2.buffers[0].FilePath())
 	}
-	// The reload already opened bufID 2 server-side; the handler must still
-	// return a command to close it rather than leaking it.
-	if cmd == nil {
-		t.Error("expected a non-nil command to close the now-orphaned reloaded buffer")
+	// No close command, unlike when this reloaded via CloseBuffer+OpenFile.
+	// ReloadBuffer opens nothing — it mutates the existing buffer in place and
+	// returns the same bufID — so there is no orphan to reap, and issuing a
+	// CloseBuffer here would instead drop this client's hold on a buffer that
+	// may still be open in another tab or another window.
+	if cmd != nil {
+		t.Error("expected no command: an in-place reload leaves no orphaned buffer to close")
 	}
 }
 
@@ -85,7 +92,7 @@ func TestBufferReloadedMsgIgnoredOnOutOfRangeIndex(t *testing.T) {
 	if len(a2.buffers) != 1 || a2.buffers[0].BufID() != 5 {
 		t.Errorf("buffers mutated on an out-of-range idx: %+v", a2.buffers)
 	}
-	if cmd == nil {
-		t.Error("expected a non-nil command to close the now-orphaned reloaded buffer")
+	if cmd != nil {
+		t.Error("expected no command: an in-place reload leaves no orphaned buffer to close")
 	}
 }

@@ -53,6 +53,26 @@ interface EditorService {
   # for the (possibly now-nonexistent) old path instead of finding the
   # existing one.
   getBufferSnapshot @49 (bufferId :UInt32) -> (content :Text, version :UInt64, generation :UInt64, path :Text);
+  # reloadBuffer re-reads bufferId's file from disk and replaces the buffer's
+  # content with it, bumping generation (it is one of the wholesale-swap sites
+  # — see openFile's doc comment).
+  #
+  # This exists because the obvious client-side spelling of "reload" —
+  # closeBuffer followed by openFile — silently does nothing whenever a second
+  # window has the same file open: closeBuffer only drops the calling client,
+  # so the entry survives with its client set non-empty, and openFile's
+  # attach path then serves that same in-memory content straight back without
+  # ever touching disk. A reload that reloads nothing.
+  #
+  # Every *other* client holding the buffer learns about this through the
+  # generation bump on its next getUpdates poll, which resyncs it — no extra
+  # push is needed, and reloading in one window correctly updates all of them.
+  #
+  # Rejected (rather than silently clobbering) if the buffer changed while the
+  # disk read was in flight, matching discardRecovery's compare-and-swap: the
+  # caller can retry. A read failure is also an error rather than an empty
+  # buffer — a file momentarily unreadable must not blank the user's content.
+  reloadBuffer @54 (clientId :UInt64, bufferId :UInt32) -> (content :Text, version :UInt64, generation :UInt64);
   # generation must match the buffer's current generation (see openFile's
   # doc comment) or the op is rejected — a client unaware of a wholesale
   # buffer swap must not have its (now-meaningless) coordinates applied to

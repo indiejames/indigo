@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -58,11 +57,14 @@ type configTickMsg struct {
 
 // bufferReloadedMsg replaces a buffer model in-place after an external-change
 // reload. oldBufID is the BufID of the buffer doReloadBuffer(idx) was called
-// against, captured before its CloseBuffer/OpenFile round trip (up to 5s);
-// it's checked against a.buffers[idx]'s current BufID on arrival, mirroring
+// against, captured before its ReloadBuffer round trip (up to 5s); it's checked
+// against a.buffers[idx]'s current BufID on arrival, mirroring
 // sraSingleResultMsg's am.idx staleness check, since idx alone isn't enough —
 // closing an earlier tab while this reload is in flight shifts every later
 // index down, so idx could by then point at a different, unrelated buffer.
+//
+// Since ReloadBuffer reloads in place, oldBufID is also the *new* model's
+// BufID; the name is kept for continuity with the check's purpose.
 type bufferReloadedMsg struct {
 	idx      int
 	oldBufID uint32
@@ -759,20 +761,19 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case bufferReloadedMsg:
 		if msg.idx < 0 || msg.idx >= len(a.buffers) || a.buffers[msg.idx].BufID() != msg.oldBufID {
 			// The tab at idx closed, or tabs shifted (e.g. an earlier tab
-			// closed while this reload's CloseBuffer/OpenFile round trip was
-			// in flight), so idx no longer names the buffer this reload was
-			// for — applying msg.model here would silently overwrite
-			// whatever unrelated buffer now sits at that index. The reload
-			// already opened a fresh buffer server-side; close it rather
-			// than leaking it.
-			rpc := a.rpc
-			bufID := msg.model.BufID()
-			return a, func() tea.Msg {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
-				return nil
-			}
+			// closed while this reload's round trip was in flight), so idx no
+			// longer names the buffer this reload was for — applying
+			// msg.model here would silently overwrite whatever unrelated
+			// buffer now sits at that index.
+			//
+			// Just drop it. This used to also CloseBuffer, because the old
+			// CloseBuffer+OpenFile reload left a freshly-opened buffer that
+			// nothing displayed. ReloadBuffer opens nothing — it mutates the
+			// existing buffer in place and returns the same bufID — so there
+			// is nothing to leak, and closing it here would instead drop this
+			// client's hold on a buffer that may still be open in another tab
+			// or another window.
+			return a, nil
 		}
 		a.buffers[msg.idx] = msg.model
 		if msg.idx == a.active {

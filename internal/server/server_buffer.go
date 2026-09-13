@@ -223,6 +223,90 @@ func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorServ
 	return res.SetContent(content)
 }
 
+// ReloadBuffer re-reads the buffer's file from disk and replaces its content,
+// bumping generation so every other client holding it resyncs on its next poll.
+//
+// The client-side spelling this replaces — CloseBuffer then OpenFile — is
+// broken whenever a second window has the file open: CloseBuffer only drops the
+// calling client, so the entry survives and OpenFile's attach path serves the
+// same in-memory content back without reading disk. See editor.capnp.
+func (s *editorService) ReloadBuffer(_ context.Context, call proto.EditorService_reloadBuffer) error {
+	// Disk reads can stall; call.Go() so a slow one doesn't block other RPCs
+	// on this connection, matching Save/SaveAs/Format.
+	call.Go()
+
+	bufID := call.Args().BufferId()
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	baseBuf := entry.buf
+	path := baseBuf.Path()
+	baseVersion := baseBuf.Version()
+	s.mu.Unlock()
+
+	if path == "" {
+		return fmt.Errorf("buffer %d has no file to reload", bufID)
+	}
+
+	// A read failure is reported, not swallowed into an empty buffer. Reload's
+	// whole job is to replace live content, so treating an unreadable file as
+	// "" would blank the user's buffer on a transient error — during someone
+	// else's atomic save, say — which is far worse than declining to reload.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		serverLog("ReloadBuffer: reading %q failed: %v", path, err)
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	content := string(data)
+
+	s.mu.Lock()
+	entry, ok = s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	if entry.buf != baseBuf || entry.buf.Version() != baseVersion {
+		// An edit landed while we were reading, so swapping in the disk
+		// content now would discard it. Reject rather than clobber; the caller
+		// can retry. Same compare-and-swap as DiscardRecovery/Save/SaveAs, and
+		// both halves matter: document.New always starts at version 0, so a
+		// buffer swapped in by something else could match baseVersion by
+		// coincidence while being a different object entirely.
+		s.mu.Unlock()
+		return fmt.Errorf("buffer %d changed while reloading; try again", bufID)
+	}
+	entry.buf = document.New(path, content)
+	entry.generation++
+	version := entry.buf.Version()
+	generation := entry.generation
+	s.mu.Unlock()
+
+	// The reload deliberately discards whatever was in memory, so a recovery
+	// file still holding it must go too — otherwise the next open would offer
+	// to restore the very content the user just chose to throw away.
+	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
+
+	// DidChange/DispatchBufferChange rather than the close+open pair the old
+	// client-side flow produced: the document is the same one, its content
+	// just changed wholesale, which is exactly what a full-sync didChange
+	// says. No watch churn either, since the path never changed.
+	go s.lspMgr.DidChange(path, content)
+	s.lintMgr.RunOnEdit(path, content)
+	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	res.SetVersion(version)
+	res.SetGeneration(generation)
+	return res.SetContent(content)
+}
+
 // loadContent reads a file's content, preferring a newer recovery file if one
 // exists.
 //

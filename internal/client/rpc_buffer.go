@@ -239,6 +239,33 @@ func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]doc
 	return ops, res.Version(), savedHash, res.Generation(), nil
 }
 
+// ReloadBuffer asks the server to re-read bufID's file from disk and replace
+// the buffer's content with it, returning the new content, version and
+// generation.
+//
+// Use this rather than CloseBuffer + OpenFile: the latter silently reloads
+// nothing whenever another window has the same file open, because CloseBuffer
+// only drops this client and OpenFile then re-attaches to the surviving
+// in-memory buffer. Other windows pick the change up via the generation bump on
+// their next poll.
+func (r *RPC) ReloadBuffer(ctx context.Context, bufID uint32) (content string, version, generation uint64, err error) {
+	fut, rel := r.svc.ReloadBuffer(ctx, func(p proto.EditorService_reloadBuffer_Params) error {
+		p.SetClientId(r.clientID)
+		p.SetBufferId(bufID)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return "", 0, 0, err
+	}
+	content, err = res.Content()
+	if err != nil {
+		return "", 0, 0, err
+	}
+	return content, res.Version(), res.Generation(), nil
+}
+
 // GetBufferSnapshot fetches bufID's current authoritative content, version,
 // generation, and path directly by ID. Used to resync after a failed
 // ApplyOp or a detected generation mismatch — unlike OpenFile, this doesn't

@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,8 +50,29 @@ func (c *otClient) runCmd(t *testing.T, cmd func() any) {
 		return
 	}
 	if msg := cmd(); msg != nil {
-		updated, _ := c.m.Update(msg)
-		c.m = updated.(Model)
+		c.integrate(t, msg)
+	}
+}
+
+// integrate folds one message into the Model and asserts that no resync was
+// provoked.
+//
+// This is the property the resync fallback was narrowed to, checked directly
+// rather than inferred: after operational transform, ordinary concurrent
+// editing converges on its own, so a resync should only ever follow a wholesale
+// buffer swap or a genuine RPC failure — and this fuzz does neither. Without
+// this assertion the harness would happily pass while every other keystroke
+// silently round-tripped the whole buffer.
+func (c *otClient) integrate(t *testing.T, msg any) {
+	t.Helper()
+	if f, ok := msg.(applyOpFailedMsg); ok {
+		t.Fatalf("%s: an edit failed to reach the server (%v); ordinary concurrent editing must not fail",
+			c.name, f.err)
+	}
+	updated, _ := c.m.Update(msg)
+	c.m = updated.(Model)
+	if strings.Contains(strings.ToLower(c.m.status), "resync") {
+		t.Fatalf("%s: a resync was triggered during ordinary concurrent editing: %q", c.name, c.m.status)
 	}
 }
 
@@ -107,8 +129,7 @@ func (c *otClient) pollWithEditInFlight(t *testing.T, op document.Op) {
 	msg := fetch() // round trip done; not yet integrated
 	c.edit(t, op)  // typed in the window
 	if msg != nil {
-		updated, _ := c.m.Update(msg)
-		c.m = updated.(Model)
+		c.integrate(t, msg)
 	}
 }
 

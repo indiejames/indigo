@@ -1429,6 +1429,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// would rebase future incoming ops past edits that no longer exist.
 		m.sendQ.discard()
 		m.pending = nil
+		// Reset alongside pending: the server clears its count of ops applied
+		// from this client when the buffer is replaced, and that count is what
+		// retires pending entries. Leaving seq numbering where it was would
+		// have every later entry look unacknowledged forever.
+		m.nextSeq = 0
 		m.buf.MarkDirty() // server's content may itself be unsaved-to-disk; err toward "unsaved" rather than a false-clean marker
 		m.version = msg.version
 		m.generation = msg.generation
@@ -1574,6 +1579,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.buf = document.New(m.filePath, msg.content)
 		m.sendQ.discard()
 		m.pending = nil
+		// Reset alongside pending: the server clears its count of ops applied
+		// from this client when the buffer is replaced, and that count is what
+		// retires pending entries. Leaving seq numbering where it was would
+		// have every later entry look unacknowledged forever.
+		m.nextSeq = 0
 		m.version = 0
 		m.generation = msg.generation
 		m.generationKnown = true
@@ -1776,6 +1786,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// time savedMsg's check runs, so SetClean is reached).
 			m.sendQ.discard()
 			m.pending = nil
+			m.nextSeq = 0
 			m.buf.MarkDirty()
 			// -1, not 0: savedUndoDepth is compared against len(undoStack) to
 			// re-clear dirty when the user undoes back to the last saved

@@ -47,10 +47,17 @@ func newOTTestService(t *testing.T, content string, clientIDs ...uint64) (*edito
 
 func sendOp(t *testing.T, cl proto.EditorService, clientID uint64, baseVersion uint64, op document.Op) error {
 	t.Helper()
+	return sendOpGen(t, cl, clientID, 0, baseVersion, op)
+}
+
+// sendOpGen is sendOp with an explicit generation, for tests that edit a buffer
+// after a wholesale swap has bumped it.
+func sendOpGen(t *testing.T, cl proto.EditorService, clientID, generation, baseVersion uint64, op document.Op) error {
+	t.Helper()
 	fut, rel := cl.ApplyOp(context.Background(), func(p proto.EditorService_applyOp_Params) error {
 		p.SetClientId(clientID)
 		p.SetBufferId(1)
-		p.SetGeneration(0)
+		p.SetGeneration(generation)
 		p.SetBaseVersion(baseVersion)
 		po, err := p.NewOp()
 		if err != nil {

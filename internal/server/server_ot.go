@@ -1,6 +1,10 @@
 package server
 
-import "github.com/indiejames/indigo/internal/document"
+import (
+	"fmt"
+
+	"github.com/indiejames/indigo/internal/document"
+)
 
 // This file holds the server half of indigo's operational transform, in the
 // Jupiter arrangement (Nichols et al., 1995) — the right fit because the server
@@ -59,18 +63,46 @@ func dropAcknowledged(queue []document.Op, ackedVersion uint64) []document.Op {
 // concurrent insert) or shorter, including empty when every character an op
 // meant to delete was already deleted by someone else. An empty result is a
 // normal outcome, not an error: the op's intent was already satisfied.
-func rebaseIncoming(entry *bufferEntry, clientID uint64, baseVersion uint64, ops []document.Op) []document.Op {
+func rebaseIncoming(entry *bufferEntry, clientID uint64, baseVersion uint64, ops []document.Op) ([]document.Op, error) {
+	// An op based on a version below what this client has already acknowledged
+	// cannot be rebased: the ops it would need to be rebased past were dropped
+	// from its queue when it acknowledged them. Applying it anyway is silent
+	// corruption — coordinates describing content the server no longer has —
+	// so it is refused instead, and the caller resyncs.
+	//
+	// A well-behaved client cannot produce this: it only polls when its send
+	// queue is idle, so it never acknowledges past an op it has not sent. This
+	// guards everything else — a plugin, an agent tool, a future change to that
+	// rule — and turns the one remaining way to corrupt a buffer quietly into
+	// the visible fallback that exists for exactly this.
+	if pruned, ok := entry.prunedThrough[clientID]; ok && baseVersion < pruned {
+		return nil, fmt.Errorf("base version %d is older than the acknowledged version %d; "+
+			"the ops needed to rebase it are no longer retained", baseVersion, pruned)
+	}
 	if entry.outgoing == nil {
 		entry.outgoing = make(map[uint64][]document.Op)
 	}
 	pending := dropAcknowledged(entry.outgoing[clientID], baseVersion)
 	if len(pending) == 0 {
 		entry.outgoing[clientID] = nil
-		return ops
+		return ops, nil
 	}
 	rebased, rewritten := document.TransformSeq(ops, pending, incomingOpLosesTies)
 	entry.outgoing[clientID] = rewritten
-	return rebased
+	return rebased, nil
+}
+
+// recordPruned notes how far a client has acknowledged, which is how far its
+// outgoing queue has been discarded. Monotonic: a poll reporting an older
+// version than one already seen must not widen what the server claims it can
+// still rebase against. Callers must hold s.mu.
+func recordPruned(entry *bufferEntry, clientID, since uint64) {
+	if entry.prunedThrough == nil {
+		entry.prunedThrough = make(map[uint64]uint64)
+	}
+	if since > entry.prunedThrough[clientID] {
+		entry.prunedThrough[clientID] = since
+	}
 }
 
 // broadcast appends applied ops to every client's queue except the one that
@@ -95,13 +127,26 @@ func broadcast(entry *bufferEntry, fromClientID uint64, ops []document.Op) {
 	}
 }
 
-// resetOutgoing clears every client's queue, for when the buffer object is
-// replaced wholesale (format-on-save, SaveAs, DiscardRecovery, Format, reload).
-// Queued ops describe the old buffer and cannot be rebased onto the new one;
-// clients learn about the swap from the generation bump and resync instead.
-// Callers must hold s.mu.
+// resetOutgoing clears every client's queue and per-client watermarks, for when
+// the buffer object is replaced wholesale (format-on-save, SaveAs,
+// DiscardRecovery, Format, reload). Callers must hold s.mu.
+//
+// The queues go because their ops describe the old buffer and cannot be rebased
+// onto the new one; clients learn of the swap from the generation bump and
+// resync instead.
+//
+// The watermarks go for a sharper reason. They are counted in the *replaced*
+// buffer's version space, and the new buffer restarts at version 0 — so a
+// client that resyncs and edits, legitimately based on version 0, looks to
+// prunedThrough like it is working from something older than it already
+// acknowledged, and is refused. It resyncs, tries again, is refused again: the
+// buffer becomes permanently unwritable. Clearing them is what keeps the
+// stale-base guard from firing on the one event that is supposed to reset
+// everything.
 func resetOutgoing(entry *bufferEntry) {
 	entry.outgoing = nil
+	entry.prunedThrough = nil
+	entry.appliedFromClient = nil
 }
 
 // applyServerOriginated applies ops that did not arrive through a client's

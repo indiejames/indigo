@@ -110,3 +110,27 @@ func TestUpdatesMsgRetiresPendingBeforeRebasing(t *testing.T) {
 			got, "AAheRllo\n")
 	}
 }
+
+// TestResyncResetsSeqNumbering pairs with the server clearing its per-client
+// counts on a buffer swap. That count is what retires pending entries, so if
+// seq numbering carried on from where it was, every entry after a swap would
+// look unacknowledged forever and incoming ops would be rebased past edits the
+// server had long since applied.
+func TestResyncResetsSeqNumbering(t *testing.T) {
+	m := newTestModel("hello\n")
+	m.rpc = &RPC{}
+	m.nextSeq = 42
+	m.pending = []pendingOp{{seq: 42, ops: []document.Op{opIns(0, 0, "A")}}}
+
+	updated, _ := m.Update(bufferResyncMsg{
+		bufID: m.bufID, content: "fresh\n", version: 0, generation: 3, path: m.filePath,
+	})
+	m2 := updated.(Model)
+
+	if len(m2.pending) != 0 {
+		t.Errorf("pending = %+v, want empty after a resync", m2.pending)
+	}
+	if m2.nextSeq != 0 {
+		t.Errorf("nextSeq = %d, want 0 — the server's matching count restarts at zero", m2.nextSeq)
+	}
+}

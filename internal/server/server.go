@@ -131,6 +131,11 @@ type bufferEntry struct {
 	// its own in-flight ops the server has accounted for without depending on
 	// the order two independent RPC responses happen to be processed in.
 	appliedFromClient map[uint64]uint64
+	// prunedThrough records, per client, the highest version that client has
+	// acknowledged — and therefore the point below which its outgoing queue has
+	// been discarded. An op arriving with a baseVersion below this cannot be
+	// rebased, because the ops it would need to be rebased past are gone.
+	prunedThrough map[uint64]uint64
 	// pluginDiags holds each plugin's most recently published diagnostics
 	// for this buffer, keyed by plugin name (see PluginPublishDiagnostics),
 	// alongside the buffer version they were computed against. GetDiagnostics
@@ -578,6 +583,7 @@ func (s *editorService) dropClients(ids []uint64) (remaining int) {
 			delete(e.sinceByClient, id)
 			delete(e.outgoing, id)
 			delete(e.appliedFromClient, id)
+			delete(e.prunedThrough, id)
 			if len(e.clients) > 0 {
 				continue
 			}

@@ -383,6 +383,7 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 			// than on delivery: a response that never arrives must not retire
 			// ops the client will ask for again.
 			entry.outgoing[callerID] = dropAcknowledged(entry.outgoing[callerID], since)
+			recordPruned(entry, callerID, since)
 			pending = append(pending, entry.outgoing[callerID]...)
 		}
 	}
@@ -585,10 +586,15 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 		return fmt.Errorf("buffer %d generation mismatch: client has %d, server has %d", bufID, clientGeneration, gen)
 	}
 	buf := entry.buf
-	applied, newVersion := applyRebased(entry, buf, clientID, baseVersion, []document.Op{op})
+	applied, newVersion, rebaseErr := applyRebased(entry, buf, clientID, baseVersion, []document.Op{op})
 	path := buf.Path()
 	content := buf.Content()
 	s.mu.Unlock()
+
+	if rebaseErr != nil {
+		serverLog("ApplyOp REJECTED: buffer %d (%q) %v", bufID, path, rebaseErr)
+		return fmt.Errorf("buffer %d: %w", bufID, rebaseErr)
+	}
 
 	s.recordClientProgress(entry, clientID, newVersion)
 
@@ -613,9 +619,15 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 // deleted character another client had already deleted rebases away to nothing.
 // That is success, not failure — the op's intent is already satisfied — so the
 // version returned is simply the buffer's unchanged current one.
-func applyRebased(entry *bufferEntry, buf *document.Buffer, clientID, baseVersion uint64, ops []document.Op) ([]document.Op, uint64) {
+func applyRebased(entry *bufferEntry, buf *document.Buffer, clientID, baseVersion uint64, ops []document.Op) ([]document.Op, uint64, error) {
+	rebased, err := rebaseIncoming(entry, clientID, baseVersion, ops)
+	if err != nil {
+		// Counted only once the op is actually going to be applied: a rejected
+		// op never reaches the buffer, and reporting it as applied would have
+		// the client retire a pending entry that the server does not have.
+		return nil, buf.Version(), err
+	}
 	recordAppliedFrom(entry, clientID, len(ops))
-	rebased := rebaseIncoming(entry, clientID, baseVersion, ops)
 	applied := make([]document.Op, 0, len(rebased))
 	newVersion := buf.Version()
 	for _, r := range rebased {
@@ -628,7 +640,7 @@ func applyRebased(entry *bufferEntry, buf *document.Buffer, clientID, baseVersio
 		applied = append(applied, r)
 	}
 	broadcast(entry, clientID, applied)
-	return applied, newVersion
+	return applied, newVersion, nil
 }
 
 // dispatchLineDeltas notifies plugin edit-event handlers for any op that
@@ -695,10 +707,15 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 		return fmt.Errorf("buffer %d generation mismatch: client has %d, server has %d", bufID, clientGeneration, gen)
 	}
 	buf := entry.buf
-	applied, newVersion := applyRebased(entry, buf, clientID, baseVersion, ops)
+	applied, newVersion, rebaseErr := applyRebased(entry, buf, clientID, baseVersion, ops)
 	path := buf.Path()
 	content := buf.Content()
 	s.mu.Unlock()
+
+	if rebaseErr != nil {
+		serverLog("ApplyOps REJECTED: buffer %d (%q) %v", bufID, path, rebaseErr)
+		return fmt.Errorf("buffer %d: %w", bufID, rebaseErr)
+	}
 
 	if len(ops) > 0 {
 		s.recordClientProgress(entry, clientID, newVersion)

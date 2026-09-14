@@ -200,7 +200,7 @@ func (r *RPC) ApplyWorkspaceEdits(ctx context.Context, edits []WorkspaceEdit) (a
 // GetUpdates polls for ops on bufID that arrived after sinceVersion.
 // generation increments every time the server replaces the buffer's object
 // wholesale — see OpenFile.
-func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]document.Op, uint64, []byte, uint64, error) {
+func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]document.Op, uint64, []byte, uint64, uint64, error) {
 	fut, rel := r.svc.GetUpdates(ctx, func(p proto.EditorService_getUpdates_Params) error {
 		p.SetClientId(r.clientID)
 		p.SetBufferId(bufID)
@@ -210,13 +210,20 @@ func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]doc
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return nil, 0, nil, 0, err
+		return nil, 0, nil, 0, 0, err
 	}
-	savedHash, _ := res.SavedHash()
+	// Copied, not aliased. A Data field points into the capnp message, and the
+	// deferred rel() above releases that message when this function returns —
+	// after which the transport's reader goroutine reuses the memory. Returning
+	// the slice itself hands the caller a window onto a buffer that is about to
+	// hold something else: a data race, and a dirty marker computed against
+	// whatever landed there. Surfaced by the convergence fuzz under -race.
+	rawHash, _ := res.SavedHash()
+	savedHash := append([]byte(nil), rawHash...)
 
 	opList, err := res.Ops()
 	if err != nil {
-		return nil, 0, nil, 0, err
+		return nil, 0, nil, 0, 0, err
 	}
 
 	ops := make([]document.Op, opList.Len())
@@ -244,7 +251,7 @@ func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]doc
 		}
 		ops[i] = op
 	}
-	return ops, res.Version(), savedHash, res.Generation(), nil
+	return ops, res.Version(), savedHash, res.Generation(), res.AppliedFromCaller(), nil
 }
 
 // ReloadBuffer asks the server to re-read bufID's file from disk and replace

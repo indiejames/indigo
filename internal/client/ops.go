@@ -86,27 +86,35 @@ func (m Model) sendToServer(op document.Op) (Model, tea.Cmd) {
 	return m, m.drainCmd()
 }
 
-// pendingOp is one op this client has sent whose fate the server has not yet
-// confirmed, or has confirmed at a version this client has not yet integrated.
+// pendingOp is one op this client has sent whose effect the server has not yet
+// confirmed in a poll response.
 //
 // ops is a list, not a single op, because rebasing past an incoming remote edit
-// can split a delete in two. seq identifies the op the server was actually sent
-// — that never splits — so acknowledgements still land on the right entry.
+// can split a delete in two. seq is the op's index in this client's send order,
+// which is what lets the server's count of ops it has applied from this client
+// identify exactly which entries are still outstanding.
 type pendingOp struct {
 	seq uint64
-	// version the server assigned, or 0 while unacknowledged.
-	version uint64
-	ops     []document.Op
+	ops []document.Op
 }
 
-// prunePending drops entries the client has now integrated from the server:
-// acknowledged, and at or below the version this client has caught up to. An
-// unacknowledged entry is never dropped, however old — the server has not told
-// us where it landed, so incoming ops still have to be rebased past it.
-func prunePending(pending []pendingOp, upTo uint64) []pendingOp {
+// dropAckedBySeq removes pending entries the server has confirmed applying.
+//
+// Acknowledgement is taken from the poll that delivers the ops, and from
+// nowhere else. That is the whole point: the server rewrites a client's
+// outgoing queue past each op it accepts from that client, so a poll response
+// and the count it carries describe the same instant — whatever is left in
+// pending afterwards is exactly what those ops do not account for.
+//
+// An earlier version also retired entries from the applyOp response, which is a
+// second source of truth and disagreed with the first. A poll already in flight
+// was generated before the server processed that op, so its ops do not account
+// for it, yet the entry had already been retired and was skipped. Under-rebasing
+// diverges just as surely as over-rebasing; the convergence fuzz found both.
+func dropAckedBySeq(pending []pendingOp, appliedFromCaller uint64) []pendingOp {
 	keep := pending[:0:0]
 	for _, p := range pending {
-		if p.version != 0 && p.version <= upTo {
+		if p.seq <= appliedFromCaller {
 			continue
 		}
 		keep = append(keep, p)
@@ -115,26 +123,16 @@ func prunePending(pending []pendingOp, upTo uint64) []pendingOp {
 }
 
 // rebasePastPending rebases an incoming remote op past everything this client
-// has in flight that the server had not yet applied when it applied that op,
-// and rewrites those pending entries to account for it. It returns the ops to
-// apply locally.
+// still has outstanding, and rewrites those pending entries to account for it.
+// It returns the ops to apply locally.
 //
-// Which entries count is decided by version, not by position: an entry the
-// server applied *before* the incoming op is already reflected in that op's
-// coordinates and must not be transformed against again, while an entry it
-// applied after — or has not applied at all — must be. Versions are assigned in
-// the order this client sent, so those entries are exactly a suffix.
+// No filtering: dropAckedBySeq has already removed everything the incoming ops
+// account for, so every remaining entry is one the server had not applied when
+// it produced them.
 func rebasePastPending(pending []pendingOp, remote document.Op) ([]pendingOp, []document.Op) {
-	idx := len(pending)
-	for i, p := range pending {
-		if p.version == 0 || p.version > remote.Version {
-			idx = i
-			break
-		}
-	}
 	cur := []document.Op{remote}
 	out := append(pending[:0:0], pending...)
-	for i := idx; i < len(out); i++ {
+	for i := range out {
 		// The remote op wins ties: the server ordered it before anything still
 		// pending here, which is the same rule the server applies from its side.
 		rebased, rewritten := document.TransformSeq(cur, out[i].ops, true)
@@ -482,13 +480,16 @@ func (m Model) fetchUpdates() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		ops, ver, savedHash, generation, err := m.rpc.GetUpdates(ctx, bufID, m.version)
+		ops, ver, savedHash, generation, appliedFromCaller, err := m.rpc.GetUpdates(ctx, bufID, m.version)
 		if err != nil {
 			return nil
 		}
 		// Deliver even with zero ops: savedHash keeps the dirty marker
 		// accurate when another client (e.g. an agent) saves this buffer.
-		return updatesMsg{bufID: bufID, ops: ops, version: ver, savedHash: savedHash, generation: generation}
+		return updatesMsg{
+			bufID: bufID, ops: ops, version: ver, savedHash: savedHash,
+			generation: generation, appliedFromCaller: appliedFromCaller,
+		}
 	}
 }
 

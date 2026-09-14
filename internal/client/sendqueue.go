@@ -38,24 +38,6 @@ type queuedSend struct {
 	baseVersion uint64
 }
 
-// opAck records that the server applied one queued op, and at which version.
-type opAck struct {
-	seq     uint64
-	version uint64
-}
-
-// opsAckedMsg reports the acknowledgements from one drain pass.
-type opsAckedMsg struct {
-	bufID uint32
-	acks  []opAck
-}
-
-// RouteBufID implements RoutableMsg: acknowledgements must reach the buffer
-// they belong to even when the user has switched tabs, or its pending queue
-// never drains and every later op is rebased against ops the server already
-// has.
-func (m opsAckedMsg) RouteBufID() uint32 { return m.bufID }
-
 // enqueue adds an op to the tail and reports whether the caller must start a
 // drain. Only one drain runs at a time; an enqueue arriving during one is
 // picked up by the drain already in progress.
@@ -85,6 +67,21 @@ func (q *sendQueue) next() (queuedSend, bool) {
 	return s, true
 }
 
+// idle reports that nothing is queued and no drain is running.
+//
+// Polling is gated on this, and the reason is subtle enough to be worth stating
+// where it is enforced. An op carries the baseVersion its coordinates were
+// computed against, and the server rebases it past everything applied since —
+// but the server prunes a client's outgoing queue at whatever sinceVersion that
+// client's last poll reported. Poll first and the queue is pruned past the very
+// ops a still-unsent edit needed rebasing against, and the server applies it at
+// coordinates that no longer mean anything. Sending first keeps the two in step.
+func (q *sendQueue) idle() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.queued) == 0 && !q.draining
+}
+
 // discard drops everything queued and stops the drain, for when the ops are no
 // longer meaningful — a failed send that forces a resync, or a wholesale buffer
 // swap. Their coordinates describe content the client is about to throw away.
@@ -95,8 +92,11 @@ func (q *sendQueue) discard() {
 	q.draining = false
 }
 
-// drainCmd sends queued ops in order, one round trip at a time, and reports the
-// versions the server assigned them.
+// drainCmd sends queued ops in order, one round trip at a time.
+//
+// Success reports nothing. Which ops the server has taken is learned from the
+// next poll instead, so that fact and the ops delivered alongside it come from
+// one consistent view — see dropAckedBySeq.
 //
 // It stops at the first failure rather than continuing. Later ops were computed
 // against a document that includes the failed one, so sending them next would
@@ -107,18 +107,15 @@ func (m Model) drainCmd() tea.Cmd {
 	q := m.sendQ
 	rpc := m.rpc
 	bufID := m.bufID
+	_ = bufID
 	return func() tea.Msg {
-		var acks []opAck
 		for {
 			s, ok := q.next()
 			if !ok {
-				if len(acks) == 0 {
-					return nil
-				}
-				return opsAckedMsg{bufID: bufID, acks: acks}
+				return nil
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), applyOpTimeout)
-			version, err := rpc.ApplyOp(ctx, s.bufID, s.op, s.generation, s.baseVersion)
+			_, err := rpc.ApplyOp(ctx, s.bufID, s.op, s.generation, s.baseVersion)
 			cancel()
 			if err != nil {
 				clientLog("ApplyOp FAILED buf=%d gen=%d base=%d op=%s: %v",
@@ -126,7 +123,6 @@ func (m Model) drainCmd() tea.Cmd {
 				q.discard()
 				return applyOpFailedMsg{bufID: s.bufID, err: err}
 			}
-			acks = append(acks, opAck{seq: s.seq, version: version})
 		}
 	}
 }

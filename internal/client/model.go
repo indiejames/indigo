@@ -53,6 +53,10 @@ type updatesMsg struct {
 	version    uint64
 	savedHash  []byte
 	generation uint64
+	// appliedFromCaller is how many of this client's own ops the server has
+	// applied — see dropAckedBySeq for why acknowledgement is derived from a
+	// count here rather than taken from the applyOp response.
+	appliedFromCaller uint64
 }
 
 // RouteBufID implements RoutableMsg.
@@ -1248,7 +1252,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.flashTick > 0 {
 			m.flashTick--
 		}
-		cmds := []tea.Cmd{m.fetchUpdates(), tick()}
+		cmds := []tea.Cmd{tick()}
+		// Only poll when nothing is waiting to be sent. A poll advances the
+		// version this client acknowledges, and the server prunes that client's
+		// outgoing queue to match — so polling ahead of an unsent edit throws
+		// away exactly the ops that edit still needed rebasing against. Ops
+		// typed *during* a poll's round trip are fine and still exercise the
+		// client-side rebase: they are queued immediately, so the server sees
+		// the poll and then the op, in that order, on this connection.
+		if m.sendQ.idle() {
+			cmds = append(cmds, m.fetchUpdates())
+		}
 		if m.diagTick%10 == 0 {
 			cmds = append(cmds, m.fetchDiagnostics())
 		}
@@ -1290,6 +1304,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.generation = msg.generation
 		m.generationKnown = true
+		// Retire in-flight ops the server has confirmed *before* rebasing
+		// anything past them: what it delivers below already accounts for them.
+		m.pending = dropAckedBySeq(m.pending, msg.appliedFromCaller)
 		// Ops from other clients (agents, other windows) are undoable locally:
 		// record inverses as a single undo entry so `u` reverts the whole batch.
 		// GetUpdates never echoes this client's own ops back.
@@ -1343,10 +1360,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// handled since has already moved us to. Taking it verbatim would
 		// rewind our polling watermark and re-request ops we just applied.
 		m.version = max(m.version, msg.version)
-		// Anything the server has confirmed at or below where we have now
-		// caught up is reflected in our buffer and in the server's alike, so it
-		// no longer needs rebasing against.
-		m.pending = prunePending(m.pending, m.version)
 		// Reconcile the dirty marker: if another client saved this buffer, our
 		// content now matches disk exactly when its hash equals savedHash. The
 		// hash check makes this race-free — an in-flight local keystroke means
@@ -1377,25 +1390,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errorMsg:
 		m = m.pushStatus("ERR: " + msg.err.Error())
-		return m, nil
-
-	case opsAckedMsg:
-		if msg.bufID != m.bufID {
-			return m, nil // stale result from a previous buffer switch; discard
-		}
-		// An acknowledgement records where the server put one of our ops. That
-		// is what later lets an incoming op be matched against the right slice
-		// of what is still in flight — everything the server applied *after*
-		// this one, and nothing it applied before.
-		for _, a := range msg.acks {
-			for i := range m.pending {
-				if m.pending[i].seq == a.seq {
-					m.pending[i].version = a.version
-					break
-				}
-			}
-		}
-		m.pending = prunePending(m.pending, m.version)
 		return m, nil
 
 	case applyOpFailedMsg:

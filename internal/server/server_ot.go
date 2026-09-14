@@ -119,6 +119,18 @@ func resetOutgoing(entry *bufferEntry) {
 // excludeClientID is not delivered to, matching ApplyOp's rule that a client
 // already has what it sent. Pass the reserved pluginClientID (0, never a real
 // client) to deliver to everyone.
+func recordAppliedFrom(entry *bufferEntry, clientID uint64, n int) {
+	if n == 0 {
+		return
+	}
+	if entry.appliedFromClient == nil {
+		entry.appliedFromClient = make(map[uint64]uint64)
+	}
+	// Counted in ops the client *sent*, not ops applied: rebasing can split one
+	// into two or cancel it entirely, and the client counts what it sent.
+	entry.appliedFromClient[clientID] += uint64(n)
+}
+
 func applyServerOriginated(entry *bufferEntry, excludeClientID uint64, ops ...document.Op) uint64 {
 	applied := make([]document.Op, 0, len(ops))
 	version := entry.buf.Version()

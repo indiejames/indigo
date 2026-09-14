@@ -366,10 +366,11 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
 	var buf *document.Buffer
-	var generation, ver uint64
+	var generation, ver, appliedFromCaller uint64
 	var pending []document.Op
 	if ok {
 		buf, generation = entry.buf, entry.generation
+		appliedFromCaller = entry.appliedFromClient[callerID]
 		// ver is read here, inside the same critical section as the queue
 		// snapshot, and not afterwards. The client treats it as "I now hold
 		// everything up to this version", so a concurrent apply landing between
@@ -396,6 +397,7 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 	}
 	res.SetVersion(ver)
 	res.SetGeneration(generation)
+	res.SetAppliedFromCaller(appliedFromCaller)
 	// Saved-content hash lets clients keep their dirty markers accurate when
 	// another client (e.g. an agent) saves the buffer.
 	h := buf.SavedHash()
@@ -612,6 +614,7 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 // That is success, not failure — the op's intent is already satisfied — so the
 // version returned is simply the buffer's unchanged current one.
 func applyRebased(entry *bufferEntry, buf *document.Buffer, clientID, baseVersion uint64, ops []document.Op) ([]document.Op, uint64) {
+	recordAppliedFrom(entry, clientID, len(ops))
 	rebased := rebaseIncoming(entry, clientID, baseVersion, ops)
 	applied := make([]document.Op, 0, len(rebased))
 	newVersion := buf.Version()

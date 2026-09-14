@@ -126,6 +126,11 @@ type bufferEntry struct {
 	// A client's own ops never enter its own queue: it applied them locally
 	// before sending them.
 	outgoing map[uint64][]document.Op
+	// appliedFromClient counts, per client, how many ops the server has applied
+	// that came from it. Reported by GetUpdates so a client can tell which of
+	// its own in-flight ops the server has accounted for without depending on
+	// the order two independent RPC responses happen to be processed in.
+	appliedFromClient map[uint64]uint64
 	// pluginDiags holds each plugin's most recently published diagnostics
 	// for this buffer, keyed by plugin name (see PluginPublishDiagnostics),
 	// alongside the buffer version they were computed against. GetDiagnostics
@@ -572,6 +577,7 @@ func (s *editorService) dropClients(ids []uint64) (remaining int) {
 			delete(e.clients, id)
 			delete(e.sinceByClient, id)
 			delete(e.outgoing, id)
+			delete(e.appliedFromClient, id)
 			if len(e.clients) > 0 {
 				continue
 			}

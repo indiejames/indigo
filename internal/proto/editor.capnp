@@ -55,7 +55,18 @@ interface EditorService {
   # generation doesn't match this must discard ops and do a full resync
   # (e.g. via getBufferSnapshot) instead of applying them — they describe
   # changes to a different buffer object than the one it has locally.
-  getUpdates      @3 (clientId :UInt64, bufferId :UInt32, sinceVersion :UInt64) -> (ops :List(EditOp), version :UInt64, savedHash :Data, generation :UInt64);
+  # appliedFromCaller is how many ops the server has applied that came from the
+  # caller. It exists so a client can tell which of its own in-flight ops the
+  # server has already accounted for without depending on the order two
+  # independent responses happen to be processed in.
+  #
+  # That ordering is a real hazard, not a theoretical one: the server rewrites a
+  # client's outgoing queue past each op it accepts from that client, so anything
+  # delivered afterwards already accounts for it. A client that rebases past the
+  # same op again because its applyOp response had not been processed yet
+  # double-counts it, and double-counting diverges exactly as badly as not
+  # rebasing at all.
+  getUpdates      @3 (clientId :UInt64, bufferId :UInt32, sinceVersion :UInt64) -> (ops :List(EditOp), version :UInt64, savedHash :Data, generation :UInt64, appliedFromCaller :UInt64);
   # getBufferSnapshot fetches a buffer's current authoritative content by
   # ID rather than path — used to resync after a failed ApplyOp or a
   # detected generation mismatch. Path lookup (openFile) can't be used for

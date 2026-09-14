@@ -513,6 +513,11 @@ func (m Model) applyFixCmd(idx int) tea.Cmd {
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
+			// baseVersion advances between the two: the insert's coordinates
+			// are expressed against the document *after* the delete, so it must
+			// be rebased from the version the delete produced, not from the one
+			// this pair started at.
+			baseVersion := m.version
 			if item.FromLine != item.ToLine || item.FromCol != item.ToCol {
 				delOp := document.Op{
 					Type:     document.OpDelete,
@@ -522,9 +527,11 @@ func (m Model) applyFixCmd(idx int) tea.Cmd {
 					ToCol:    item.ToCol,
 					ClientID: m.rpc.ClientID(),
 				}
-				if _, err := m.rpc.ApplyOp(ctx, m.bufID, delOp, m.generation); err != nil {
+				v, err := m.rpc.ApplyOp(ctx, m.bufID, delOp, m.generation, baseVersion)
+				if err != nil {
 					return errorMsg{err}
 				}
+				baseVersion = v
 			}
 			insOp := document.Op{
 				Type:       document.OpInsert,
@@ -533,7 +540,7 @@ func (m Model) applyFixCmd(idx int) tea.Cmd {
 				InsertText: item.Replace,
 				ClientID:   m.rpc.ClientID(),
 			}
-			if _, err := m.rpc.ApplyOp(ctx, m.bufID, insOp, m.generation); err != nil {
+			if _, err := m.rpc.ApplyOp(ctx, m.bufID, insOp, m.generation, baseVersion); err != nil {
 				return errorMsg{err}
 			}
 			return nil

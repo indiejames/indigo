@@ -1071,6 +1071,7 @@ func (s *editorService) Format(_ context.Context, call proto.EditorService_forma
 			newBuf.MarkDirty()
 			entry.buf = newBuf
 			entry.generation++
+			resetOutgoing(entry)
 			generation = entry.generation
 			s.buffers[bufID] = entry
 			s.mu.Unlock()

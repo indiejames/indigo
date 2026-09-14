@@ -201,3 +201,44 @@ func transformDeleteDelete(a, b Op) []Op {
 	}
 	return []Op{deleteRangeOp(a, from, to)}
 }
+
+// TransformSeq rebases the concurrent op sequences a and b against each other,
+// returning (a', b') such that applying a then b' reaches the same document as
+// applying b then a'. It is the sequence-level form of TP1, and the form the
+// server actually needs: a client's outgoing queue holds several ops, and an
+// incoming op must be rebased past all of them.
+//
+// A sequence form is required rather than a simple fold because Transform is
+// not 1:1 — a delete splitting around a concurrent insert turns one op into
+// two, so after the first queue entry the left side is already a sequence.
+//
+// aWins carries the same contract as Transform's: stable, and complementary
+// between the two directions.
+//
+// The recursion is well founded. Splitting the left sequence recurses on a
+// strictly shorter left; splitting the right recurses on a strictly shorter
+// right; and the base case is one op against one op, which is Transform itself.
+// Splits can make a sequence longer, but only on the side that is not being
+// shortened at that step, so the pair still descends to the base case.
+func TransformSeq(a, b []Op, aWins bool) (aPrime, bPrime []Op) {
+	if len(a) == 0 {
+		return nil, b
+	}
+	if len(b) == 0 {
+		return a, nil
+	}
+	if len(a) == 1 && len(b) == 1 {
+		return Transform(a[0], b[0], aWins), Transform(b[0], a[0], !aWins)
+	}
+	if len(a) > 1 {
+		// a = a1 ++ rest. Rebase a1 past all of b, then rebase the rest past
+		// b as that first step left it.
+		head, viaHead := TransformSeq(a[:1], b, aWins)
+		tail, out := TransformSeq(a[1:], viaHead, aWins)
+		return append(head, tail...), out
+	}
+	// len(b) > 1: mirror of the above.
+	viaHead, headOut := TransformSeq(a, b[:1], aWins)
+	out, tailOut := TransformSeq(viaHead, b[1:], aWins)
+	return out, append(headOut, tailOut...)
+}

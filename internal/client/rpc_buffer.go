@@ -78,11 +78,18 @@ func encodeOp(protoOp proto.EditOp, op document.Op) error {
 }
 
 // ApplyOp sends an edit operation to the server and returns the new version.
-func (r *RPC) ApplyOp(ctx context.Context, bufID uint32, op document.Op, generation uint64) (uint64, error) {
+//
+// baseVersion is the last server version this client had integrated when it
+// computed op's coordinates. The server rebases op past every other client's
+// ops applied since then, so a stale or omitted baseVersion makes it rebase
+// past ops this client already had — corrupting the very coordinates the
+// mechanism exists to protect.
+func (r *RPC) ApplyOp(ctx context.Context, bufID uint32, op document.Op, generation, baseVersion uint64) (uint64, error) {
 	fut, rel := r.svc.ApplyOp(ctx, func(p proto.EditorService_applyOp_Params) error {
 		p.SetClientId(r.clientID)
 		p.SetBufferId(bufID)
 		p.SetGeneration(generation)
+		p.SetBaseVersion(baseVersion)
 		protoOp, err := p.NewOp()
 		if err != nil {
 			return err
@@ -106,11 +113,12 @@ func (r *RPC) ApplyOp(ctx context.Context, bufID uint32, op document.Op, generat
 // by the OpenFile/GetBufferSnapshot that produced that content. The server
 // rejects the batch if the buffer has been swapped since; retrying with the
 // same coordinates is wrong, so a caller should re-read and recompute.
-func (r *RPC) ApplyOps(ctx context.Context, bufID uint32, ops []document.Op, generation uint64) (uint64, error) {
+func (r *RPC) ApplyOps(ctx context.Context, bufID uint32, ops []document.Op, generation, baseVersion uint64) (uint64, error) {
 	fut, rel := r.svc.ApplyOps(ctx, func(p proto.EditorService_applyOps_Params) error {
 		p.SetClientId(r.clientID)
 		p.SetBufferId(bufID)
 		p.SetGeneration(generation)
+		p.SetBaseVersion(baseVersion)
 		list, err := p.NewOps(int32(len(ops)))
 		if err != nil {
 			return err

@@ -483,7 +483,9 @@ func applyInsertTextToAllCursors(m Model, textFor func(line, col int) string) (M
 		}
 		m.redoStack = nil
 		m.buf.Apply(op)
-		cmds = append(cmds, m.sendToServer(op))
+		var sendCmd tea.Cmd
+		m, sendCmd = m.sendToServer(op)
+		cmds = append(cmds, sendCmd)
 
 		if isNewline {
 			newPositions[i] = newPos{adjLine + 1, 0}
@@ -573,7 +575,9 @@ func applyBackspaceToAllCursors(m Model) (Model, tea.Cmd) {
 		}
 		m.redoStack = nil
 		m.buf.Apply(op)
-		cmds = append(cmds, m.sendToServer(op))
+		var sendCmd tea.Cmd
+		m, sendCmd = m.sendToServer(op)
+		cmds = append(cmds, sendCmd)
 		newPositions[i] = newPos{fromLine, fromCol}
 	}
 

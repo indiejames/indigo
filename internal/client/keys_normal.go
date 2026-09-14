@@ -195,7 +195,9 @@ func executeUndo(m Model) (tea.Model, tea.Cmd) {
 		al, d := opLineDelta(inv)
 		m = m.shiftLSPOverlayLines(al, d)
 		m.buf.Apply(inv)
-		cmds = append(cmds, m.sendToServer(inv))
+		var sendCmd tea.Cmd
+		m, sendCmd = m.sendToServer(inv)
+		cmds = append(cmds, sendCmd)
 		redoEntry.ops = append(redoEntry.ops, reInv)
 	}
 	m.redoStack = append(m.redoStack, redoEntry)
@@ -248,7 +250,9 @@ func executeRedo(m Model) (tea.Model, tea.Cmd) {
 		al, d := opLineDelta(op)
 		m = m.shiftLSPOverlayLines(al, d)
 		m.buf.Apply(op)
-		cmds = append(cmds, m.sendToServer(op))
+		var sendCmd tea.Cmd
+		m, sendCmd = m.sendToServer(op)
+		cmds = append(cmds, sendCmd)
 		newUndoEntry.ops = append(newUndoEntry.ops, inv)
 	}
 	m.undoStack = append(m.undoStack, newUndoEntry)

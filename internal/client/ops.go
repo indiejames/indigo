@@ -49,41 +49,99 @@ func (m Model) ReportActiveContextCmd() tea.Cmd {
 }
 
 // sendOp applies the op locally and sends it to the server.
-func (m Model) sendOp(op document.Op) tea.Cmd {
+func (m Model) sendOp(op document.Op) (Model, tea.Cmd) {
 	m.buf.Apply(op)
 	return m.sendToServer(op)
 }
 
-// sendToServer sends op to the server without applying it locally.
-// Used by undo when local apply is handled separately.
+// sendToServer queues op for the server without applying it locally (undo
+// applies its own ops), records it as pending, and returns a command to drain
+// the queue when one is not already running.
 //
-// If the RPC fails, the local buffer has already applied op (or, for undo,
-// whatever produced it) while the server never received it — client and
-// server have now diverged. Rather than leave that silent and permanent,
-// this returns applyOpFailedMsg, whose handler triggers a hard resync from
-// the server's authoritative content. Unix-socket network blips are rare
-// enough that a resync (visible, but never silently corrupting/losing
-// content) is preferable to a retry: a retried op's line/col coordinates
-// may no longer be valid if the user kept typing before the retry lands.
-func (m Model) sendToServer(op document.Op) tea.Cmd {
-	bufID, generation, path := m.bufID, m.generation, m.filePath
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), applyOpTimeout)
-		defer cancel()
-		_, err := m.rpc.ApplyOp(ctx, bufID, op, generation)
-		if err != nil {
-			// Logged, not just shown. The popup this produces is transient and
-			// cannot be copied, so an intermittent failure leaves nothing behind
-			// to diagnose from — the reason this path has only ever been
-			// reported anecdotally. The line below is the evidence the next
-			// occurrence needs: which buffer, which op, and the server's own
-			// words for what went wrong.
-			clientLog("ApplyOp FAILED buf=%d gen=%d path=%s op=%s: %v",
-				bufID, generation, path, describeOp(op), err)
-			return applyOpFailedMsg{bufID: bufID, err: err}
-		}
-		return nil
+// Ops are queued rather than sent directly so they reach the server in the
+// order they were produced — see sendQueue. They are recorded as pending
+// because the server rebases an incoming op past other clients' ops but never
+// past the sender's own: this client is therefore responsible for rebasing
+// *incoming* ops past whatever it has sent that the server had not yet applied.
+// That is the other half of the transform, and without it a remote edit is
+// applied locally at coordinates that predate everything still in flight.
+func (m Model) sendToServer(op document.Op) (Model, tea.Cmd) {
+	m.nextSeq++
+	seq := m.nextSeq
+	m.pending = append(m.pending, pendingOp{seq: seq, ops: []document.Op{op}})
+	needsDrain := m.sendQ.enqueue(queuedSend{
+		seq:        seq,
+		bufID:      m.bufID,
+		op:         op,
+		generation: m.generation,
+		// The version this op's coordinates were computed against. Captured
+		// here, in Update, rather than at send time: by the time the queue
+		// drains, m.version may have moved on and the server would rebase this
+		// op past ops it already accounts for.
+		baseVersion: m.version,
+	})
+	if !needsDrain {
+		return m, nil
 	}
+	return m, m.drainCmd()
+}
+
+// pendingOp is one op this client has sent whose fate the server has not yet
+// confirmed, or has confirmed at a version this client has not yet integrated.
+//
+// ops is a list, not a single op, because rebasing past an incoming remote edit
+// can split a delete in two. seq identifies the op the server was actually sent
+// — that never splits — so acknowledgements still land on the right entry.
+type pendingOp struct {
+	seq uint64
+	// version the server assigned, or 0 while unacknowledged.
+	version uint64
+	ops     []document.Op
+}
+
+// prunePending drops entries the client has now integrated from the server:
+// acknowledged, and at or below the version this client has caught up to. An
+// unacknowledged entry is never dropped, however old — the server has not told
+// us where it landed, so incoming ops still have to be rebased past it.
+func prunePending(pending []pendingOp, upTo uint64) []pendingOp {
+	keep := pending[:0:0]
+	for _, p := range pending {
+		if p.version != 0 && p.version <= upTo {
+			continue
+		}
+		keep = append(keep, p)
+	}
+	return keep
+}
+
+// rebasePastPending rebases an incoming remote op past everything this client
+// has in flight that the server had not yet applied when it applied that op,
+// and rewrites those pending entries to account for it. It returns the ops to
+// apply locally.
+//
+// Which entries count is decided by version, not by position: an entry the
+// server applied *before* the incoming op is already reflected in that op's
+// coordinates and must not be transformed against again, while an entry it
+// applied after — or has not applied at all — must be. Versions are assigned in
+// the order this client sent, so those entries are exactly a suffix.
+func rebasePastPending(pending []pendingOp, remote document.Op) ([]pendingOp, []document.Op) {
+	idx := len(pending)
+	for i, p := range pending {
+		if p.version == 0 || p.version > remote.Version {
+			idx = i
+			break
+		}
+	}
+	cur := []document.Op{remote}
+	out := append(pending[:0:0], pending...)
+	for i := idx; i < len(out); i++ {
+		// The remote op wins ties: the server ordered it before anything still
+		// pending here, which is the same rule the server applies from its side.
+		rebased, rewritten := document.TransformSeq(cur, out[i].ops, true)
+		cur = rebased
+		out[i].ops = rewritten
+	}
+	return out, cur
 }
 
 // applyOpTimeout bounds one edit's round trip to the server, and
@@ -204,7 +262,7 @@ func applyOp(m Model, op document.Op) (Model, tea.Cmd) {
 	// here (rather than at every applyOp call site) keeps every
 	// applyOp-routed edit — self-insert, backspace, tab, Enter, auto-pair,
 	// ... — from ever leaving the cursor rendered off-screen.
-	sendCmd := m.sendOp(op)
+	m, sendCmd := m.sendOp(op)
 	m.scrollToCursor()
 	return m, tea.Batch(sendCmd, m.reparseHighlight(), recordCmd, refreshCmd)
 }
@@ -312,7 +370,9 @@ func applyBatch(m Model, ops []document.Op) (Model, tea.Cmd) {
 	atLine, delta := -1, 0
 	for i, op := range ops {
 		inverses[i] = inverseOp(m, op) // must be before Apply
-		sendCmds = append(sendCmds, m.sendOp(op))
+		var sendCmd tea.Cmd
+		m, sendCmd = m.sendOp(op)
+		sendCmds = append(sendCmds, sendCmd)
 		al, d := opLineDelta(op)
 		if atLine < 0 || al < atLine {
 			atLine = al

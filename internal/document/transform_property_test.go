@@ -182,3 +182,66 @@ func TestTransformTieBreakIsStableAndComplementary(t *testing.T) {
 		t.Errorf("result = %q, want %q (lower client id first)", left, "aABb\n")
 	}
 }
+
+// randomSeq builds a short sequence of ops applied in order to content, each
+// generated against the document as the previous ones left it — so it is a
+// realistic edit sequence rather than a set of independent ops.
+func randomSeq(rnd *rand.Rand, content string, clientID uint64, n int) []Op {
+	ops := make([]Op, 0, n)
+	cur := content
+	for i := 0; i < n; i++ {
+		op := randomOp(rnd, cur, clientID)
+		ops = append(ops, op)
+		cur = applyOps(cur, []Op{op})
+	}
+	return ops
+}
+
+// TestTransformSeqTP1 is TP1 at the sequence level, which is what the server
+// actually relies on: a client's outgoing queue holds several ops, and an
+// incoming op has to be rebased past all of them.
+//
+// This is not implied by the single-op property test. Transform is not 1:1 — a
+// delete can split into two — so sequence composition has its own arithmetic,
+// and an error there would produce convergent-looking single ops that diverge
+// the moment a queue holds more than one.
+func TestTransformSeqTP1(t *testing.T) {
+	rnd := rand.New(rand.NewSource(20260914))
+	const iterations = 20000
+
+	for i := 0; i < iterations; i++ {
+		doc := randomDoc(rnd)
+		a := randomSeq(rnd, doc, 1, 1+rnd.Intn(3))
+		b := randomSeq(rnd, doc, 2, 1+rnd.Intn(3))
+
+		aPrime, bPrime := TransformSeq(a, b, true)
+		left := applyOps(applyOps(doc, a), bPrime)
+		right := applyOps(applyOps(doc, b), aPrime)
+
+		if left != right {
+			t.Fatalf("sequence TP1 violated on iteration %d\n doc:  %q\n a:    %s\n b:    %s\n a→b′: %q\n b→a′: %q",
+				i, doc, describeSeq(a), describeSeq(b), left, right)
+		}
+	}
+}
+
+func describeSeq(ops []Op) string {
+	parts := make([]string, len(ops))
+	for i, op := range ops {
+		parts[i] = describe(op)
+	}
+	return "[" + strings.Join(parts, "; ") + "]"
+}
+
+// TestTransformSeqEmptySides covers the degenerate ends of the recursion.
+func TestTransformSeqEmptySides(t *testing.T) {
+	a := []Op{ins(1, 0, 0, "X")}
+	b := []Op{ins(2, 0, 0, "Y")}
+
+	if got, other := TransformSeq(nil, b, true); len(got) != 0 || len(other) != len(b) {
+		t.Errorf("empty left: got (%v, %v), want (nothing, b unchanged)", got, other)
+	}
+	if got, other := TransformSeq(a, nil, true); len(got) != len(a) || len(other) != 0 {
+		t.Errorf("empty right: got (%v, %v), want (a unchanged, nothing)", got, other)
+	}
+}

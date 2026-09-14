@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/lint"
 	"github.com/indiejames/indigo/internal/lsp"
 	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
@@ -107,41 +109,65 @@ func TestHistoryTrimBlockedByLaggingClient(t *testing.T) {
 
 // TestGetUpdatesVersionMatchesReturnedOps is GetUpdates' integration-level
 // counterpart to TestOpsSinceAndVersionAtomicUnderConcurrentApply
-// (internal/document): it drives a concurrent direct buf.Apply — the same
-// pattern plugin_bridge.go and server_move_to_file.go use, which bypasses
-// the capnp call queue entirely and so can genuinely interleave with a
-// GetUpdates RPC in flight — against repeated GetUpdates polls, and asserts
-// the response's reported version always matches the version of the last op
-// it actually returned. Before GetUpdates switched to the atomic
-// OpsSinceAndVersion, a concurrent Apply landing between the old separate
-// OpsSince/Version reads could report a version the returned ops didn't
-// cover, permanently desyncing the polling client.
+// (internal/document): it drives concurrent applies against repeated GetUpdates
+// polls and asserts the response's reported version always matches the version
+// of the last op it actually returned. A concurrent apply landing between the
+// two reads could otherwise report a version the returned ops didn't cover,
+// permanently desyncing the polling client — it only ever moves its watermark
+// forward, so the skipped op is never sent again.
+//
+// The hazard outlived the original fix: switching delivery to per-client queues
+// reintroduced it in a new shape (the queue snapshot and the version read drifted
+// apart again), so this test guards a property, not one implementation of it.
 func TestGetUpdatesVersionMatchesReturnedOps(t *testing.T) {
+	dir := t.TempDir()
 	entry := &bufferEntry{
-		buf:           document.New("/tmp/x.go", ""),
+		buf:           document.New(filepath.Join(dir, "x.go"), ""),
 		clients:       map[uint64]struct{}{1: {}, 2: {}},
 		sinceByClient: map[uint64]uint64{1: 0, 2: 0},
 	}
 	s := &editorService{
-		buffers: map[uint32]*bufferEntry{1: entry},
+		buffers:   map[uint32]*bufferEntry{1: entry},
+		lspMgr:    lsp.NewManager(dir, nil),
+		lintMgr:   &lint.Manager{},
+		pluginMgr: &plugin.Manager{},
 	}
 	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 
-	const n = 1500
+	// Ops are driven through ApplyOp on a *second* capnp capability rather than
+	// straight into the buffer. That matters twice over: delivery is fed by
+	// per-client queues now, so a direct buf.Apply reaches no client and this
+	// test would pass vacuously with every poll returning nothing; and separate
+	// capabilities are what let the two calls genuinely interleave, since one
+	// capability serializes its own non-Go() methods.
+	writer := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 2})
+	defer writer.Release()
+
+	const n = 400
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for i := 0; i < n; i++ {
-			entry.buf.Apply(document.Op{
-				ClientID:   1,
-				Type:       document.OpInsert,
-				InsertLine: 0,
-				InsertCol:  0,
-				InsertText: "x",
+			fut, rel := writer.ApplyOp(context.Background(), func(p proto.EditorService_applyOp_Params) error {
+				p.SetClientId(1)
+				p.SetBufferId(1)
+				p.SetGeneration(0)
+				p.SetBaseVersion(0)
+				op, err := p.NewOp()
+				if err != nil {
+					return err
+				}
+				op.SetType(proto.EditOp_OpType_insert)
+				op.SetInsertLine(0)
+				op.SetInsertCol(0)
+				return op.SetInsertText("x")
 			})
+			fut.Struct() //nolint:errcheck
+			rel()
 		}
 	}()
 
+	sawOps := false
 	for i := 0; i < n; i++ {
 		fut, rel := client.GetUpdates(context.Background(), func(p proto.EditorService_getUpdates_Params) error {
 			p.SetClientId(2)
@@ -167,11 +193,17 @@ func TestGetUpdatesVersionMatchesReturnedOps(t *testing.T) {
 		}
 		rel()
 		if !hasOps {
-			continue // Apply goroutine hasn't landed its first op yet
+			continue // the writer hasn't landed its first op yet
 		}
+		sawOps = true
 		if lastOpVersion != ver {
-			t.Fatalf("GetUpdates: last returned op version=%d, reported version=%d — must always match under a concurrent Apply", lastOpVersion, ver)
+			t.Fatalf("GetUpdates: last returned op version=%d, reported version=%d — must always match under a concurrent apply", lastOpVersion, ver)
 		}
 	}
 	<-done
+	// Without this the test could pass having asserted nothing at all, which is
+	// exactly how it survived the switch to queue-based delivery unnoticed.
+	if !sawOps {
+		t.Fatal("no poll ever returned ops; this test asserted nothing")
+	}
 }

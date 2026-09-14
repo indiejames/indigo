@@ -777,11 +777,24 @@ type undoEntry struct {
 
 // Model is the Bubble Tea model for a single buffer view.
 type Model struct {
-	rpc             *RPC
-	buf             *document.Buffer
-	cfg             *config.Config
-	bufID           uint32
-	version         uint64
+	rpc     *RPC
+	buf     *document.Buffer
+	cfg     *config.Config
+	bufID   uint32
+	version uint64
+	// sendQ serialises this buffer's outbound edits. A pointer, deliberately
+	// shared across every copy of the Model: ordering is only meaningful if all
+	// copies enqueue into the same queue.
+	sendQ *sendQueue
+	// nextSeq numbers outbound ops so acknowledgements can be matched back to
+	// the pending entry they belong to.
+	nextSeq uint64
+	// pending holds ops sent to the server whose effect this client has not yet
+	// seen reflected in a poll. Incoming remote ops are rebased past these —
+	// the client's half of the transform, since the server rebases past other
+	// clients' ops but never past the sender's own.
+	pending []pendingOp
+
 	generation      uint64 // last-known buffer generation; see updatesMsg's handler
 	generationKnown bool   // false until the first updatesMsg/bufferResyncMsg establishes a baseline
 	mode            Mode
@@ -1002,6 +1015,7 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 	m := Model{
 		rpc:                 rpc,
 		buf:                 buf,
+		sendQ:               &sendQueue{},
 		cfg:                 cfg,
 		status:              status,
 		bufID:               bufID,
@@ -1294,16 +1308,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if op.Version != 0 && op.Version <= m.version {
 				continue
 			}
-			if op.Type == document.OpInsert || op.Type == document.OpDelete {
-				inverses = append(inverses, inverseOp(m, op)) // must precede Apply
+			// Rebase past anything still in flight from this client before
+			// applying. The server rebased this op past other clients' ops but
+			// not past ours — it had not seen ours yet — so its coordinates
+			// describe a document without them, while our buffer has them.
+			var rebased []document.Op
+			m.pending, rebased = rebasePastPending(m.pending, op)
+			for _, r := range rebased {
+				// Rebase the undo history past r before applying it. Those
+				// stored ops are coordinates into the document as it stands
+				// now; r is about to change it under them, and an undo
+				// afterwards would otherwise apply at stale positions. The
+				// inverses collected below are for r itself and land on top of
+				// the stack, so they need no rebasing.
+				m = m.rebaseUndoHistory(r)
+				if r.Type == document.OpInsert || r.Type == document.OpDelete {
+					inverses = append(inverses, inverseOp(m, r)) // must precede Apply
+				}
+				al, d := opLineDelta(r)
+				if atLine < 0 || al < atLine {
+					atLine = al
+				}
+				delta += d
+				m.buf.Apply(r)
+				applied++
 			}
-			al, d := opLineDelta(op)
-			if atLine < 0 || al < atLine {
-				atLine = al
-			}
-			delta += d
-			m.buf.Apply(op)
-			applied++
 		}
 		if len(inverses) > 0 {
 			m.undoStack = append(m.undoStack, undoEntry{ops: inverses, before: before})
@@ -1314,6 +1343,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// handled since has already moved us to. Taking it verbatim would
 		// rewind our polling watermark and re-request ops we just applied.
 		m.version = max(m.version, msg.version)
+		// Anything the server has confirmed at or below where we have now
+		// caught up is reflected in our buffer and in the server's alike, so it
+		// no longer needs rebasing against.
+		m.pending = prunePending(m.pending, m.version)
 		// Reconcile the dirty marker: if another client saved this buffer, our
 		// content now matches disk exactly when its hash equals savedHash. The
 		// hash check makes this race-free — an in-flight local keystroke means
@@ -1344,6 +1377,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errorMsg:
 		m = m.pushStatus("ERR: " + msg.err.Error())
+		return m, nil
+
+	case opsAckedMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
+		// An acknowledgement records where the server put one of our ops. That
+		// is what later lets an incoming op be matched against the right slice
+		// of what is still in flight — everything the server applied *after*
+		// this one, and nothing it applied before.
+		for _, a := range msg.acks {
+			for i := range m.pending {
+				if m.pending[i].seq == a.seq {
+					m.pending[i].version = a.version
+					break
+				}
+			}
+		}
+		m.pending = prunePending(m.pending, m.version)
 		return m, nil
 
 	case applyOpFailedMsg:
@@ -1379,6 +1431,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.buf = document.New(m.filePath, msg.content)
+		// Everything in flight described the pre-resync content. Keeping it
+		// would rebase future incoming ops past edits that no longer exist.
+		m.sendQ.discard()
+		m.pending = nil
 		m.buf.MarkDirty() // server's content may itself be unsaved-to-disk; err toward "unsaved" rather than a false-clean marker
 		m.version = msg.version
 		m.generation = msg.generation
@@ -1522,6 +1578,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.buf = document.New(m.filePath, msg.content)
+		m.sendQ.discard()
+		m.pending = nil
 		m.version = 0
 		m.generation = msg.generation
 		m.generationKnown = true
@@ -1722,6 +1780,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// instant too, and the save that follows immediately cleans it
 			// again (doSaveNow captures version 0, which still matches by the
 			// time savedMsg's check runs, so SetClean is reached).
+			m.sendQ.discard()
+			m.pending = nil
 			m.buf.MarkDirty()
 			// -1, not 0: savedUndoDepth is compared against len(undoStack) to
 			// re-clear dirty when the user undoes back to the last saved

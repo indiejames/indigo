@@ -623,7 +623,7 @@ func execApplyEdits(ctx context.Context, rpc *client.RPC, ap Approver, workDir s
 			InsertCol:  startCol,
 			InsertText: in.NewText,
 		},
-	}, generation); err != nil {
+	}, generation, version); err != nil {
 		if weOpened {
 			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
 		}
@@ -679,14 +679,16 @@ func execInsertAtLine(ctx context.Context, rpc *client.RPC, ap Approver, workDir
 		return "edit rejected by user", true
 	}
 
-	bufID, content, _, _, generation, err := rpc.OpenFile(ctx, abs)
+	// version doubles as the op's baseVersion: the line offsets below are
+	// computed from this content, so that is the version they are relative to.
+	bufID, content, version, _, generation, err := rpc.OpenFile(ctx, abs)
 	if err != nil {
 		return fmt.Sprintf("cannot open %s: %v", in.Path, err), true
 	}
 	count, _ := rpc.BufferClientCount(ctx, bufID)
 	weOpened := count == 1
 
-	if _, err := rpc.ApplyOp(ctx, bufID, insertLineOp(content, in.Text, in.Line), generation); err != nil {
+	if _, err := rpc.ApplyOp(ctx, bufID, insertLineOp(content, in.Text, in.Line), generation, version); err != nil {
 		if weOpened {
 			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
 		}

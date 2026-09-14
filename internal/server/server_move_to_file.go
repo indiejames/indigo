@@ -48,7 +48,7 @@ func (s *editorService) MoveTextToFile(_ context.Context, call proto.EditorServi
 		s.mu.Unlock()
 		return err
 	}
-	entry.buf.Apply(document.Op{
+	applyServerOriginated(entry, clientID, document.Op{
 		ClientID: clientID,
 		Type:     document.OpDelete,
 		FromLine: fromLine, FromCol: fromCol,
@@ -156,9 +156,7 @@ func (s *editorService) appendTextToFile(clientID uint64, path, text string) err
 		}
 	}
 	if entry != nil {
-		for _, op := range appendOpsForBuffer(entry.buf, clientID, text) {
-			entry.buf.Apply(op)
-		}
+		applyServerOriginated(entry, clientID, appendOpsForBuffer(entry.buf, clientID, text)...)
 		content := entry.buf.Content()
 		s.mu.Unlock()
 		go s.lspMgr.DidChange(path, content)

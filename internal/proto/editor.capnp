@@ -112,7 +112,18 @@ interface EditorService {
   # buffer swap must not have its (now-meaningless) coordinates applied to
   # the new buffer object. The client should resync (getBufferSnapshot) on
   # rejection rather than retry.
-  applyOp         @4 (clientId :UInt64, bufferId :UInt32, op :EditOp, generation :UInt64) -> (version :UInt64);
+  # baseVersion is the buffer version this op's coordinates were computed
+  # against — the last version the sender had integrated, NOT counting its own
+  # unacknowledged ops (the server knows which of the intervening ops are the
+  # sender's own and must not rebase against those; the sender already had them
+  # locally when it computed these coordinates).
+  #
+  # The server rebases the op past every *other* client's ops applied since
+  # baseVersion before applying it. Without that, a remote edit landing in
+  # between leaves these coordinates pointing at the wrong text — the divergence
+  # that made concurrent editing unsafe. generation still guards the separate
+  # case of the buffer object being replaced wholesale.
+  applyOp         @4 (clientId :UInt64, bufferId :UInt32, op :EditOp, generation :UInt64, baseVersion :UInt64) -> (version :UInt64);
   save            @5 (clientId :UInt64, bufferId :UInt32)                      -> ();
   closeBuffer     @6 (clientId :UInt64, bufferId :UInt32)                      -> ();
   bufferClientCount @7 (bufferId :UInt32)                                      -> (count :UInt32);
@@ -174,7 +185,7 @@ interface EditorService {
   # read_file. A wholesale buffer swap landing in that gap leaves every
   # coordinate in the batch meaningless, and applying it anyway corrupts the
   # new buffer at the wrong offsets.
-  applyOps           @36 (clientId :UInt64, bufferId :UInt32, ops :List(EditOp), generation :UInt64) -> (version :UInt64);
+  applyOps           @36 (clientId :UInt64, bufferId :UInt32, ops :List(EditOp), generation :UInt64, baseVersion :UInt64) -> (version :UInt64);
   # Report / query the active editor selection (start/end in document order,
   # end column inclusive; isLine = whole-line selection; active=false clears).
   setActiveSelection @37 (clientId :UInt64, bufId :UInt32, startLine :UInt32, startCol :UInt32, endLine :UInt32, endCol :UInt32, isLine :Bool, active :Bool) -> ();

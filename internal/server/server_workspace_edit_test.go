@@ -18,7 +18,7 @@ func TestApplyWorkspaceEditsToBuffer(t *testing.T) {
 		{origIdx: 2, line: 1, col: 7, oldText: "foo", newText: "quux"},
 	}
 
-	applied, skipped := applyWorkspaceEditsToBuffer(buf, 1, items)
+	applied, skipped := applyWorkspaceEditsToBuffer(&bufferEntry{buf: buf}, 1, items)
 	if applied != 3 {
 		t.Fatalf("applied = %d, want 3", applied)
 	}
@@ -43,7 +43,7 @@ func TestApplyWorkspaceEditsToBufferSkipsStaleMatch(t *testing.T) {
 		{origIdx: 1, line: 0, col: 4, oldText: "baz", newText: "nope"}, // stale: actual text is "bar"
 	}
 
-	applied, skipped := applyWorkspaceEditsToBuffer(buf, 1, items)
+	applied, skipped := applyWorkspaceEditsToBuffer(&bufferEntry{buf: buf}, 1, items)
 	if applied != 1 {
 		t.Fatalf("applied = %d, want 1", applied)
 	}

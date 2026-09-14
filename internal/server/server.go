@@ -111,6 +111,21 @@ type bufferEntry struct {
 	// safe watermark for document.Buffer.TrimHistory — see that function's
 	// doc comment.
 	sinceByClient map[uint64]uint64
+	// outgoing holds, per connected clientID, the ops applied to this buffer
+	// that the client has not yet acknowledged — already rebased into that
+	// client's context, ready to apply as-is.
+	//
+	// This is why a single shared history cannot serve delivery under
+	// operational transform. Rebasing an incoming op past a client's pending
+	// ops also *rewrites* those pending ops, so every client's view of the
+	// same original op diverges as soon as their edits interleave differently.
+	// buf.history still records what was applied to the buffer (and still
+	// needs trimming, since Apply always appends), but it is no longer what
+	// clients are served from.
+	//
+	// A client's own ops never enter its own queue: it applied them locally
+	// before sending them.
+	outgoing map[uint64][]document.Op
 	// pluginDiags holds each plugin's most recently published diagnostics
 	// for this buffer, keyed by plugin name (see PluginPublishDiagnostics),
 	// alongside the buffer version they were computed against. GetDiagnostics
@@ -556,6 +571,7 @@ func (s *editorService) dropClients(ids []uint64) (remaining int) {
 			}
 			delete(e.clients, id)
 			delete(e.sinceByClient, id)
+			delete(e.outgoing, id)
 			if len(e.clients) > 0 {
 				continue
 			}

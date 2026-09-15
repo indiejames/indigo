@@ -1313,6 +1313,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		before := m.cursorSnap()
 		var inverses []document.Op
 		applied := 0
+		groupClosed := false
 		atLine, delta := -1, 0
 		for _, op := range msg.ops {
 			// Skip ops we have already applied. Polls are issued every
@@ -1332,6 +1333,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var rebased []document.Op
 			m.pending, rebased = rebasePastPending(m.pending, op)
 			for _, r := range rebased {
+				// Close any open insert session first, as its own undo entry.
+				//
+				// Without this the stack's order stops matching the order edits
+				// were actually applied. A session that spans a remote op keeps
+				// collecting into one currentGroup — typing from before the op
+				// and after it alike — and that group is pushed as a single
+				// entry at Esc, *above* the entry recorded here. The stack then
+				// claims the remote op came first when half the session
+				// predates it. Undoing the session removes ops this op's
+				// inverse depends on, and the next undo applies at coordinates
+				// that no longer describe anything: it starts eating whatever
+				// text now occupies them.
+				//
+				// Splitting the session in two costs a little undo granularity
+				// across someone else's edit, which is the honest granularity
+				// anyway — those keystrokes were not one atomic action.
+				if !groupClosed && m.currentGroup != nil {
+					if len(m.currentGroup) > 0 {
+						m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: m.groupBefore})
+					}
+					m.currentGroup = []document.Op{}
+					m.groupBefore = m.cursorSnap()
+					groupClosed = true
+				}
 				// Rebase the undo history past r before applying it. Those
 				// stored ops are coordinates into the document as it stands
 				// now; r is about to change it under them, and an undo
@@ -1339,6 +1364,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// inverses collected below are for r itself and land on top of
 				// the stack, so they need no rebasing.
 				m = m.rebaseUndoHistory(r)
+				// Positions the buffer does not own move too: the caret, any
+				// selection, the extra cursors, and the caret snapshots stored
+				// in undo entries. All of them name a spot in the text, and this
+				// op moves the text they name.
+				m = m.shiftPositionsPastRemoteOp(r)
 				if r.Type == document.OpInsert || r.Type == document.OpDelete {
 					inverses = append(inverses, inverseOp(m, r)) // must precede Apply
 				}

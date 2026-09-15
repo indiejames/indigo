@@ -242,3 +242,29 @@ func TransformSeq(a, b []Op, aWins bool) (aPrime, bPrime []Op) {
 	out, tailOut := TransformSeq(viaHead, b[1:], aWins)
 	return out, append(headOut, tailOut...)
 }
+
+// ShiftPos maps a position through an op applied to the document it refers to,
+// returning where that position ends up.
+//
+// This is the same arithmetic Transform uses to move an op's coordinates, made
+// available for the positions a buffer does not own: a cursor, a selection, the
+// caret snapshots stored in undo entries. Those all name a spot in the text, and
+// an edit landing before them moves the text they name — so leaving them alone
+// makes them quietly point at something else.
+//
+// A position inside a deleted range collapses to the range's start, that text
+// being gone. A position exactly at an insertion point moves past the inserted
+// text, which is what a caret should do: type ahead of someone and their caret
+// stays with what they were about to type, not in front of your new text.
+func ShiftPos(p Pos, op Op) Pos {
+	if isNoop(op) {
+		return p
+	}
+	switch op.Type {
+	case OpInsert:
+		return shiftForward(p, op)
+	case OpDelete:
+		return shiftBackward(p, op)
+	}
+	return p
+}

@@ -61,9 +61,12 @@ func rebaseEntryOps(stored, carried []document.Op) (newStored, newCarried []docu
 // remote op carried on past that entry, since a deeper entry is expressed
 // against the document as it will be once the ones above it have been applied.
 func (m Model) rebaseUndoHistory(remote document.Op) Model {
-	if len(m.currentGroup) > 0 {
-		m.currentGroup, _ = rebaseEntryOps(m.currentGroup, []document.Op{remote})
-	}
+	// currentGroup is deliberately not rebased. The updatesMsg handler closes
+	// any open session into its own entry *before* calling this, precisely so
+	// the stack's order matches the order edits were applied — which puts those
+	// ops below this remote op, where LIFO makes them valid again once it is
+	// undone. Rebasing them as well would count the remote op twice, the same
+	// mistake as rebasing the undo stack.
 
 	// Copied before being written to. Model is a value type, so the slice header
 	// is copied on every Update but the backing array is not — mutating entries

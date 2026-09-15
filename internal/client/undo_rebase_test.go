@@ -83,10 +83,11 @@ func TestRebaseUndoHistoryDoesNotMutateSharedBacking(t *testing.T) {
 	}
 }
 
-// TestRebaseUndoHistoryCoversRedoAndCurrentGroup: all three holders of stored
-// coordinates need rebasing, and missing any one of them is a silent wrong-place
-// edit later rather than an error.
-func TestRebaseUndoHistoryCoversRedoAndCurrentGroup(t *testing.T) {
+// TestRebaseUndoHistoryCoversRedoOnly. currentGroup is deliberately excluded:
+// the updatesMsg handler closes an open session into its own entry before a
+// remote op is applied, which puts those ops below it in the stack where LIFO
+// makes them valid again. Rebasing them too would count the remote op twice.
+func TestRebaseUndoHistoryCoversRedoOnly(t *testing.T) {
 	del := document.Op{Type: document.OpDelete, FromLine: 0, FromCol: 5, ToLine: 0, ToCol: 7}
 	m := newTestModel("hello\n")
 	m.rpc = &RPC{}
@@ -97,26 +98,27 @@ func TestRebaseUndoHistoryCoversRedoAndCurrentGroup(t *testing.T) {
 		Version: 1, Type: document.OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "R",
 	})
 
-	if m.currentGroup[0].FromCol != 6 {
-		t.Errorf("currentGroup was not rebased: FromCol = %d, want 6", m.currentGroup[0].FromCol)
+	if m.currentGroup[0].FromCol != 5 {
+		t.Errorf("currentGroup was rebased (FromCol = %d); it is closed into an entry instead",
+			m.currentGroup[0].FromCol)
 	}
 	if m.redoStack[0].ops[0].FromCol != 6 {
 		t.Errorf("redoStack was not rebased: FromCol = %d, want 6", m.redoStack[0].ops[0].FromCol)
 	}
 }
 
-// TestUndoAfterRemoteOpMidInsertSession is the case currentGroup exists for: a
-// remote edit lands while an insert session is open, so the session's inverses
-// end up *above* the remote op's entry and are applied to a document that still
-// contains it.
+// TestUndoAfterRemoteOpMidInsertSession covers a remote edit landing while an
+// insert session is open. The session is split at that point: what was typed
+// before the remote op becomes its own entry beneath it, and what follows
+// becomes another above. Undoing back through all three must restore the
+// original document, with each step landing where it should.
 func TestUndoAfterRemoteOpMidInsertSession(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.rpc = &RPC{}
 	m.generation = 1
 	m.generationKnown = true
 
-	// Mid-session: "XY" typed at column 5, its inverse held in currentGroup
-	// rather than pushed, exactly as insert mode does.
+	// Mid-session: "XY" typed at column 5, held in currentGroup.
 	local := document.Op{Type: document.OpInsert, InsertLine: 0, InsertCol: 5, InsertText: "XY"}
 	m.currentGroup = []document.Op{inverseOp(m, local)}
 	m.buf.Apply(local)
@@ -128,14 +130,18 @@ func TestUndoAfterRemoteOpMidInsertSession(t *testing.T) {
 	if got := m2.buf.Content(); got != "RhelloXY\n" {
 		t.Fatalf("after the remote op: %q, want %q", got, "RhelloXY\n")
 	}
+	// The session was closed into its own entry, and a fresh group opened.
+	if len(m2.currentGroup) != 0 {
+		t.Errorf("currentGroup still holds %d op(s); it should have been closed", len(m2.currentGroup))
+	}
 
-	// End the session: the group becomes the top undo entry.
-	m2.undoStack = append(m2.undoStack, undoEntry{ops: m2.currentGroup, before: m2.cursorSnap()})
-	m2.currentGroup = nil
-
-	next, _ := executeUndo(m2)
-	if got := next.(Model).buf.Content(); got != "Rhello\n" {
-		t.Errorf("after undoing the insert session: %q, want %q — the group's inverse must be rebased past "+
-			"the remote op, since it is applied to a document that still contains it", got, "Rhello\n")
+	// Undo everything: the remote op's entry, then the session's.
+	next := m2
+	for len(next.undoStack) > 0 {
+		updated, _ := executeUndo(next)
+		next = updated.(Model)
+	}
+	if got := next.buf.Content(); got != "hello\n" {
+		t.Errorf("after undoing everything: %q, want %q", got, "hello\n")
 	}
 }

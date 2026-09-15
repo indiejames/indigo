@@ -246,10 +246,24 @@ type workspaceDiagSummaryMsg struct {
 }
 
 // hoverMsg carries a hover result.
-type hoverMsg struct{ result ClientHoverResult }
+// hoverMsg carries a hover result. bufID and at are stamped at request time and
+// both checked on arrival: hover describes one position, so a result landing
+// after the cursor moved documents something the user is no longer pointing at —
+// the same defect fixItemsMsg carried, reported from real use.
+type hoverMsg struct {
+	result ClientHoverResult
+	bufID  uint32
+	at     document.Pos
+}
 
 // sigHelpMsg carries a signature-help result (nil Signatures = dismiss).
-type sigHelpMsg struct{ help *ClientSigHelp }
+// sigHelpMsg carries a signature-help result (nil Signatures = dismiss).
+// Position-sensitive in the same way as hoverMsg; see there.
+type sigHelpMsg struct {
+	help  *ClientSigHelp
+	bufID uint32
+	at    document.Pos
+}
 
 // pluginBindingsMsg delivers fresh plugin key bindings for the help popup.
 type pluginBindingsMsg struct{ bindings []ClientPluginBinding }
@@ -273,7 +287,17 @@ type fixItemsMsg struct {
 }
 
 // completionsMsg carries fresh completion items.
-type completionsMsg struct{ items []ClientCompletion }
+// completionsMsg carries fresh completion items.
+//
+// bufID only, deliberately — no cursor check. Auto-triggered completions are
+// fetched on a debounce and the cursor legitimately advances while the request
+// is in flight; that is why the handler re-derives the prefix from the live
+// buffer rather than trusting the request-time one. A strict position check
+// would discard exactly the results typing is meant to produce.
+type completionsMsg struct {
+	items []ClientCompletion
+	bufID uint32
+}
 
 // lspOverlayRefreshMsg fires after the post-edit debounce delay to re-fetch
 // semantic tokens/inlay hints. seq is the lspOverlaySeq captured when it was
@@ -304,15 +328,21 @@ type completionResolvedMsg struct {
 }
 
 // renameSymbolDoneMsg carries the result of an LSP-driven rename.
+// renameSymbolDoneMsg carries the result of an LSP-driven rename. bufID keeps
+// the status message on the buffer the rename was started from.
 type renameSymbolDoneMsg struct {
 	applied, files int
 	err            error
+	bufID          uint32
 }
 
 // moveFunctionDoneMsg carries the result of moving a function to another file.
+// moveFunctionDoneMsg carries the result of moving a function to another file.
+// bufID keeps the status message on the buffer the move was started from.
 type moveFunctionDoneMsg struct {
 	destPath string
 	err      error
+	bufID    uint32
 }
 
 // organizeImportsMsg carries the result of an LSP "source.organizeImports"
@@ -338,19 +368,33 @@ type organizeImportsMsg struct {
 type triggerCompletionMsg struct{ seq int }
 
 // definitionMsg carries the result of a go-to-definition request.
+// definitionMsg carries the result of a go-to-definition request.
+//
+// bufID only: the jump must not land in whatever buffer is now active, but the
+// user asked about a symbol and moving the cursor afterwards does not retract
+// that — swallowing the jump would be worse than performing it.
 type definitionMsg struct {
 	loc   ClientLocation
 	found bool
+	bufID uint32
 }
 
 // referencesMsg carries find-references results from the server.
+// referencesMsg carries find-references results from the server. bufID only,
+// same reasoning as definitionMsg.
 type referencesMsg struct {
-	refs []ClientReference
+	refs  []ClientReference
+	bufID uint32
 }
 
 // docSymbolsMsg carries document symbol results.
+// docSymbolsMsg carries document symbol results. Whole-file, so no position —
+// but bufID matters twice over here: the handler also passes a bufID on to the
+// picker, and passing the *current* one would label another file's symbols with
+// the active buffer.
 type docSymbolsMsg struct {
-	syms []ClientSymbol
+	syms  []ClientSymbol
+	bufID uint32
 }
 
 // OpenSymbolPickerMsg signals the App to open the workspace symbol picker.
@@ -1699,6 +1743,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case hoverMsg:
+		if msg.bufID != m.bufID || m.cursor != msg.at {
+			return m, nil // stale: different buffer, or the cursor has moved on
+		}
 		if msg.result.Found && msg.result.Contents != "" {
 			m.hoverContent = &msg.result.Contents
 			m.hoverScroll = 0
@@ -1715,10 +1762,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case sigHelpMsg:
+		if msg.bufID != m.bufID || m.cursor != msg.at {
+			return m, nil // stale: different buffer, or the cursor has moved on
+		}
 		m.sigHelp = msg.help
 		return m, nil
 
 	case completionsMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
 		// Recompute the prefix from the live buffer: the fetch was async and the
 		// cursor may have advanced (auto-trigger debounce), so filter against
 		// what's actually typed now, not what was typed when the fetch started.
@@ -1764,6 +1817,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case renameSymbolDoneMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale: status belongs to the buffer it was started from
+		}
 		switch {
 		case msg.err != nil:
 			m = m.pushStatus(fmt.Sprintf("E: rename failed: %v", msg.err))
@@ -1775,6 +1831,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case moveFunctionDoneMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale: status belongs to the buffer it was started from
+		}
 		if msg.err != nil {
 			m = m.pushStatus(fmt.Sprintf("E: move failed: %v", msg.err))
 		} else {
@@ -1896,6 +1955,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, refreshCmd
 
 	case definitionMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale: would jump whatever buffer is now active
+		}
 		if !msg.found {
 			m = m.pushStatus("No definition found")
 			return m, nil
@@ -1912,6 +1974,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case referencesMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
 		if len(msg.refs) == 0 {
 			m = m.pushStatus("No references found")
 			return m, nil
@@ -1920,13 +1985,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return OpenRefPickerMsg{Title: "References", Refs: refs} }
 
 	case docSymbolsMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
 		if len(msg.syms) == 0 {
 			m = m.pushStatus("No symbols found")
 			return m, nil
 		}
 		syms := msg.syms
-		bufID := m.bufID
-		_ = bufID
+		// msg.bufID rather than m.bufID. The guard above makes them equal here,
+		// so this is not load-bearing today — but it was the second half of the
+		// same bug (one file's symbols labelled with another file's id), and
+		// taking the id from the message keeps that true without depending on a
+		// check three lines up.
+		bufID := msg.bufID
 		return m, func() tea.Msg { return OpenDocSymbolPickerMsg{BufID: bufID, Syms: syms} }
 
 	case tea.FocusMsg:

@@ -22,6 +22,18 @@ interface ClientCallback {
   # client to refetch decorations for bufId now rather than on the next poll
   # tick. A client not currently viewing bufId ignores it.
   decorationsChanged   @10 (bufId :UInt32)                       -> ();
+  # Asks this client what it currently holds for bufId. The one callback that
+  # returns data rather than just pushing a notification, which is the point:
+  # the server owns the authoritative buffer but has no way to know whether a
+  # window's copy still matches it, and divergence between the two produces no
+  # error, no version mismatch and no generation change — it is invisible
+  # except by comparing content.
+  #
+  # known is false when this client holds no buffer with that id (it closed the
+  # tab, or never had it). Content comes back as a sha256 only; a consistency
+  # check must not move buffer text over the wire.
+  reportBufferState    @11 (bufId :UInt32)
+      -> (known :Bool, version :UInt64, generation :UInt64, dirty :Bool, contentSha256 :Data);
 }
 
 interface EditorService {
@@ -43,7 +55,18 @@ interface EditorService {
   # generation doesn't match this must discard ops and do a full resync
   # (e.g. via getBufferSnapshot) instead of applying them — they describe
   # changes to a different buffer object than the one it has locally.
-  getUpdates      @3 (clientId :UInt64, bufferId :UInt32, sinceVersion :UInt64) -> (ops :List(EditOp), version :UInt64, savedHash :Data, generation :UInt64);
+  # appliedFromCaller is how many ops the server has applied that came from the
+  # caller. It exists so a client can tell which of its own in-flight ops the
+  # server has already accounted for without depending on the order two
+  # independent responses happen to be processed in.
+  #
+  # That ordering is a real hazard, not a theoretical one: the server rewrites a
+  # client's outgoing queue past each op it accepts from that client, so anything
+  # delivered afterwards already accounts for it. A client that rebases past the
+  # same op again because its applyOp response had not been processed yet
+  # double-counts it, and double-counting diverges exactly as badly as not
+  # rebasing at all.
+  getUpdates      @3 (clientId :UInt64, bufferId :UInt32, sinceVersion :UInt64) -> (ops :List(EditOp), version :UInt64, savedHash :Data, generation :UInt64, appliedFromCaller :UInt64);
   # getBufferSnapshot fetches a buffer's current authoritative content by
   # ID rather than path — used to resync after a failed ApplyOp or a
   # detected generation mismatch. Path lookup (openFile) can't be used for
@@ -53,16 +76,78 @@ interface EditorService {
   # for the (possibly now-nonexistent) old path instead of finding the
   # existing one.
   getBufferSnapshot @49 (bufferId :UInt32) -> (content :Text, version :UInt64, generation :UInt64, path :Text);
+  # reloadBuffer re-reads bufferId's file from disk and replaces the buffer's
+  # content with it, bumping generation (it is one of the wholesale-swap sites
+  # — see openFile's doc comment).
+  #
+  # This exists because the obvious client-side spelling of "reload" —
+  # closeBuffer followed by openFile — silently does nothing whenever a second
+  # window has the same file open: closeBuffer only drops the calling client,
+  # so the entry survives with its client set non-empty, and openFile's
+  # attach path then serves that same in-memory content straight back without
+  # ever touching disk. A reload that reloads nothing.
+  #
+  # Every *other* client holding the buffer learns about this through the
+  # generation bump on its next getUpdates poll, which resyncs it — no extra
+  # push is needed, and reloading in one window correctly updates all of them.
+  #
+  # Rejected (rather than silently clobbering) if the buffer changed while the
+  # disk read was in flight, matching discardRecovery's compare-and-swap: the
+  # caller can retry. A read failure is also an error rather than an empty
+  # buffer — a file momentarily unreadable must not blank the user's content.
+  reloadBuffer @54 (clientId :UInt64, bufferId :UInt32) -> (content :Text, version :UInt64, generation :UInt64);
+  # getSyncState is a read-only projection of buffer bookkeeping the server
+  # already keeps, for diagnosing sync problems — which are otherwise close to
+  # impossible to report from another machine, since what would explain them is
+  # either transient (a status message long since overwritten) or invisible
+  # (two clients quietly disagreeing about a file).
+  #
+  # bufferId 0 means every open buffer; buffer ids start at 1, so 0 is never a
+  # real one. Content is reported as a sha256 and a byte count, never as text:
+  # this is the call whose output gets pasted into a bug report.
+  getSyncState @55 (bufferId :UInt32) -> (buffers :List(BufferSyncState));
+  # checkBufferConsistency asks every client holding the buffer what it actually
+  # holds (ClientCallback.reportBufferState) and reports each answer against the
+  # server's own. This is the only way to observe client/server divergence at
+  # all: it produces no error, no version mismatch and no generation change.
+  #
+  # It reports facts, not a verdict. A hash mismatch is entirely normal while
+  # someone is typing — a client applies its edit locally before the server
+  # orders it, and its version only catches up on its next poll — so a single
+  # sample cannot distinguish "diverged" from "mid-edit". Deciding that is the
+  # caller's job, by sampling twice and looking for a mismatch that persists
+  # while neither side's version moved. bufferId 0 means every open buffer.
+  checkBufferConsistency @56 (bufferId :UInt32) -> (buffers :List(BufferConsistency));
   # generation must match the buffer's current generation (see openFile's
   # doc comment) or the op is rejected — a client unaware of a wholesale
   # buffer swap must not have its (now-meaningless) coordinates applied to
   # the new buffer object. The client should resync (getBufferSnapshot) on
   # rejection rather than retry.
-  applyOp         @4 (clientId :UInt64, bufferId :UInt32, op :EditOp, generation :UInt64) -> (version :UInt64);
+  # baseVersion is the buffer version this op's coordinates were computed
+  # against — the last version the sender had integrated, NOT counting its own
+  # unacknowledged ops (the server knows which of the intervening ops are the
+  # sender's own and must not rebase against those; the sender already had them
+  # locally when it computed these coordinates).
+  #
+  # The server rebases the op past every *other* client's ops applied since
+  # baseVersion before applying it. Without that, a remote edit landing in
+  # between leaves these coordinates pointing at the wrong text — the divergence
+  # that made concurrent editing unsafe. generation still guards the separate
+  # case of the buffer object being replaced wholesale.
+  applyOp         @4 (clientId :UInt64, bufferId :UInt32, op :EditOp, generation :UInt64, baseVersion :UInt64) -> (version :UInt64);
   save            @5 (clientId :UInt64, bufferId :UInt32)                      -> ();
   closeBuffer     @6 (clientId :UInt64, bufferId :UInt32)                      -> ();
   bufferClientCount @7 (bufferId :UInt32)                                      -> (count :UInt32);
-  discardRecovery @8 (clientId :UInt64, bufferId :UInt32)                      -> (content :Text);
+  # generation: DiscardRecovery replaces the buffer object wholesale (it loads
+  # the on-disk content into a fresh document.New), so it bumps the buffer's
+  # generation exactly as format/saveAs do. Returning it is not optional
+  # bookkeeping: a caller that doesn't adopt it into its own remembered
+  # generation sees a mismatch on its very next getUpdates poll and triggers a
+  # resync it doesn't need — one that also marks the buffer dirty, which is
+  # flatly wrong here, since discarding recovery is precisely the operation
+  # that makes the buffer match what's on disk. Same contract as format's
+  # generation; see openFile's doc comment.
+  discardRecovery @8 (clientId :UInt64, bufferId :UInt32)                      -> (content :Text, generation :UInt64);
   getDiagnostics  @9  (bufId :UInt32)                                          -> (items :List(LspDiagnostic), lspReady :Bool);
   hover           @10 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :HoverResult);
   signatureHelp   @11 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :SignatureHelp);
@@ -103,7 +188,15 @@ interface EditorService {
   setStatusBarText   @35 (key :Text, text :Text) -> ();
   # Apply a batch of ops atomically: once the server receives the call, all
   # ops are applied even if the client dies mid-request.
-  applyOps           @36 (clientId :UInt64, bufferId :UInt32, ops :List(EditOp)) -> (version :UInt64);
+  # generation: same contract and same reason as applyOp's. This is arguably
+  # more important here, not less: an applyOps batch is by definition
+  # position-dependent (a delete paired with the insert that replaces it), and
+  # its callers compute those coordinates from content they read in an earlier,
+  # separate round trip — a workspace search-and-replace hit, or an agent's
+  # read_file. A wholesale buffer swap landing in that gap leaves every
+  # coordinate in the batch meaningless, and applying it anyway corrupts the
+  # new buffer at the wrong offsets.
+  applyOps           @36 (clientId :UInt64, bufferId :UInt32, ops :List(EditOp), generation :UInt64, baseVersion :UInt64) -> (version :UInt64);
   # Report / query the active editor selection (start/end in document order,
   # end column inclusive; isLine = whole-line selection; active=false clears).
   setActiveSelection @37 (clientId :UInt64, bufId :UInt32, startLine :UInt32, startCol :UInt32, endLine :UInt32, endCol :UInt32, isLine :Bool, active :Bool) -> ();
@@ -430,6 +523,68 @@ struct ActiveContext {
   found     @6 :Bool;
 }
 
+# BufferConsistency pairs the server's view of one buffer with what each client
+# holding it says it has.
+struct BufferConsistency {
+  bufferId         @0 :UInt32;
+  path             @1 :Text;
+  serverVersion    @2 :UInt64;
+  serverGeneration @3 :UInt64;
+  serverSha256     @4 :Data;
+  clients          @5 :List(ClientBufferReport);
+}
+
+# ClientBufferReport is one client's answer, or the absence of one.
+struct ClientBufferReport {
+  clientId @0 :UInt64;
+  # answered is false when the callback failed or timed out — a wedged or
+  # departing window. Distinct from known, which is the client answering "I do
+  # not have that buffer"; conflating the two would report a closed tab as an
+  # unresponsive one.
+  answered      @1 :Bool;
+  known         @2 :Bool;
+  version       @3 :UInt64;
+  generation    @4 :UInt64;
+  dirty         @5 :Bool;
+  contentSha256 @6 :Data;
+}
+
+# BufferSyncState is everything the server knows about one buffer's
+# synchronization bookkeeping. Every field is already tracked for its own
+# reasons; this just exposes it.
+struct BufferSyncState {
+  bufferId      @0 :UInt32;
+  path          @1 :Text;
+  version       @2 :UInt64;
+  # generation increments on every wholesale buffer-object swap — see
+  # openFile. A client whose remembered generation differs from this one is
+  # about to resync (or, if it never polls, is silently stale).
+  generation    @3 :UInt64;
+  dirty         @4 :Bool;
+  # sha256 of the buffer's current content, and its length in bytes. A client
+  # reporting a different hash for the same generation has diverged.
+  contentSha256 @5 :Data;
+  contentBytes  @6 :UInt64;
+  lineCount     @7 :UInt32;
+  # How many ops the buffer still retains. Unbounded growth here means some
+  # client has stopped acknowledging (see recordClientProgress/TrimHistory).
+  historyLen    @8 :UInt32;
+  clients       @9 :List(ClientSyncState);
+}
+
+# ClientSyncState is one client's position on a buffer.
+struct ClientSyncState {
+  clientId @0 :UInt64;
+  # The buffer version this client has acknowledged receiving ops up to. A
+  # value far behind the buffer's own version is a client that has stopped
+  # polling — the thing that both blocks history trimming and means the
+  # window is showing stale content.
+  ackedVersion @1 :UInt64;
+  # The connection it registered on; 0 for a client registered outside a real
+  # connection. Two clients sharing a connId came from one process.
+  connId @2 :UInt64;
+}
+
 struct EditOp {
   clientId  @0 :UInt64;
   version   @1 :UInt64;
@@ -445,6 +600,23 @@ struct EditOp {
   fromCol  @7 :UInt32;
   toLine   @8 :UInt32;
   toCol    @9 :UInt32;
+
+  # expectText, when non-empty on a delete, is the text the caller believes
+  # occupies that range. The server checks it after rebasing and immediately
+  # before applying, and refuses the whole batch if it does not match.
+  #
+  # This guards a failure the transform cannot: coordinates are rebased
+  # correctly, but a caller that computed them from content it read earlier may
+  # be describing text that has since become something else. An agent tool
+  # reading a file, thinking, and then writing back offsets derived from that
+  # read is the case — the gap there is however long the thinking took, not a
+  # scheduling window. Rebased coordinates land in the right *place* and replace
+  # the wrong *thing*.
+  #
+  # Verified against the buffer as it stands before the batch, so it describes
+  # the batch's starting state. For the delete+insert pair a replace compiles
+  # to, that is exactly the intended meaning.
+  expectText @10 :Text;
 
   enum OpType {
     noop   @0;

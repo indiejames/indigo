@@ -25,7 +25,11 @@ type workspaceEditItem struct {
 // position still equals oldText — a concurrent edit since the caller queued
 // this edit skips it rather than corrupting unrelated text. colShift accounts
 // for earlier same-line edits changing the length of the line.
-func applyWorkspaceEditsToBuffer(buf *document.Buffer, clientID uint64, items []workspaceEditItem) (applied int, skippedIdx []int) {
+// It takes the entry rather than the bare buffer so the ops it applies also
+// reach every client's delivery queue: applying straight to the buffer would
+// leave a replace-all visible on the server and in no window at all.
+func applyWorkspaceEditsToBuffer(entry *bufferEntry, clientID uint64, items []workspaceEditItem) (applied int, skippedIdx []int) {
+	buf := entry.buf
 	colShift := make(map[int]int)
 	for i, it := range items {
 		lineRunes := []rune(buf.Line(it.line))
@@ -36,18 +40,21 @@ func applyWorkspaceEditsToBuffer(buf *document.Buffer, clientID uint64, items []
 			skippedIdx = append(skippedIdx, i)
 			continue
 		}
-		buf.Apply(document.Op{
-			ClientID: clientID,
-			Type:     document.OpDelete,
-			FromLine: it.line, FromCol: col,
-			ToLine: it.line, ToCol: end,
-		})
-		buf.Apply(document.Op{
-			ClientID:   clientID,
-			Type:       document.OpInsert,
-			InsertLine: it.line, InsertCol: col,
-			InsertText: it.newText,
-		})
+		// Applied per item, not batched: colShift below depends on each edit
+		// having landed before the next item reads the line again.
+		applyServerOriginated(entry, clientID,
+			document.Op{
+				ClientID: clientID,
+				Type:     document.OpDelete,
+				FromLine: it.line, FromCol: col,
+				ToLine: it.line, ToCol: end,
+			},
+			document.Op{
+				ClientID:   clientID,
+				Type:       document.OpInsert,
+				InsertLine: it.line, InsertCol: col,
+				InsertText: it.newText,
+			})
 		colShift[it.line] += len([]rune(it.newText)) - len(oldRunes)
 		applied++
 	}
@@ -78,7 +85,7 @@ func (s *editorService) applyItemsToPath(clientID uint64, path string, items []w
 		}
 	}
 	if entry != nil {
-		applied, skippedIdx = applyWorkspaceEditsToBuffer(entry.buf, clientID, items)
+		applied, skippedIdx = applyWorkspaceEditsToBuffer(entry, clientID, items)
 		content := entry.buf.Content()
 		s.mu.Unlock()
 		go s.lspMgr.DidChange(path, content)
@@ -182,8 +189,13 @@ func (s *editorService) applyWorkspaceEditsOnDisk(path string, clientID uint64, 
 		return 0, nil, err
 	}
 
+	// Wrapped in a throwaway entry purely to share the verify-then-apply logic
+	// with the live-buffer path. It has no clients, so the delivery queueing
+	// inside is a no-op — which is correct: nothing has this file open, so
+	// there is nobody to deliver to.
 	buf := document.New(path, string(data))
-	applied, skippedIdx = applyWorkspaceEditsToBuffer(buf, clientID, items)
+	entry := &bufferEntry{buf: buf}
+	applied, skippedIdx = applyWorkspaceEditsToBuffer(entry, clientID, items)
 	if applied == 0 {
 		return applied, skippedIdx, nil
 	}

@@ -177,6 +177,55 @@ func AllTools() []ToolDef {
 				Required: []string{"path"},
 			},
 		},
+		{
+			Name: "get_logs",
+			Description: "Read indigo's shared diagnostic log — every process (editor client, server, and plugins) appends to it, so this is where a sync failure, a rejected edit, or a plugin crash actually shows up. " +
+				"Logging is always on, so the evidence for something that already happened is usually here without needing to reproduce it. Use it when the editor misbehaved and you need to know why.",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]SchemaProp{
+					"since":     {Type: "string", Description: "How far back to look, as a duration like \"15m\" or \"2h\". Default 30m."},
+					"tag":       {Type: "string", Description: "Keep only lines from one component: \"client\", \"server\", or \"app\". Omit for all."},
+					"contains":  {Type: "string", Description: "Keep only lines containing this substring, e.g. a buffer id or \"REJECTED\"."},
+					"max_lines": {Type: "integer", Description: "Newest N lines to return. Default 200, capped at 2000."},
+				},
+			},
+		},
+		{
+			Name: "get_sync_state",
+			Description: "Report how the server and its connected editor windows currently stand on each open buffer: version, generation, dirty flag, content hash, retained ops, and every attached client's acknowledged version. " +
+				"Use it to diagnose buffers that look stale, out of sync between two windows, or that didn't pick up an external change. Reports content as a hash only, never as text.",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]SchemaProp{
+					"path": {Type: "string", Description: "Limit to one file. Omit for every open buffer."},
+				},
+			},
+		},
+		{
+			Name: "check_buffer_consistency",
+			Description: "Ask every editor window holding a buffer what content it actually has and compare it against the server's, to detect client/server divergence. " +
+				"This is the only way to observe that class of bug: it produces no error, no version mismatch and no generation change — two windows just quietly disagree about a file. " +
+				"Samples twice so ordinary mid-edit differences aren't reported as divergence. Compares hashes only; no buffer text is transferred.",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]SchemaProp{
+					"path":      {Type: "string", Description: "Limit to one file. Omit for every open buffer."},
+					"settle_ms": {Type: "integer", Description: "Gap between the two samples, in milliseconds. Default 300, max 5000. Raise it if results come back inconclusive during heavy editing."},
+				},
+			},
+		},
+		{
+			Name: "report_bundle",
+			Description: "Write a single diagnostic file combining sync state for every open buffer with the recent log, and return its path. " +
+				"Use this to capture evidence for a bug report — especially one from another machine, where the useful detail is otherwise unreachable. No buffer contents are included.",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]SchemaProp{
+					"since": {Type: "string", Description: "How much log history to include, as a duration like \"1h\". Default 1h."},
+				},
+			},
+		},
 	}
 }
 
@@ -255,6 +304,30 @@ func ExecTool(ctx context.Context, rpc *client.RPC, ap Approver, workDir, name s
 			return fmt.Sprintf("bad input: %v", err), true
 		}
 		return execGotoFile(ctx, rpc, workDir, in)
+	case "get_logs":
+		var in getLogsInput
+		if err := json.Unmarshal(rawInput, &in); err != nil {
+			return fmt.Sprintf("bad input: %v", err), true
+		}
+		return execGetLogs(in)
+	case "get_sync_state":
+		var in getSyncStateInput
+		if err := json.Unmarshal(rawInput, &in); err != nil {
+			return fmt.Sprintf("bad input: %v", err), true
+		}
+		return execGetSyncState(ctx, rpc, workDir, in)
+	case "check_buffer_consistency":
+		var in checkConsistencyInput
+		if err := json.Unmarshal(rawInput, &in); err != nil {
+			return fmt.Sprintf("bad input: %v", err), true
+		}
+		return execCheckConsistency(ctx, rpc, workDir, in)
+	case "report_bundle":
+		var in reportBundleInput
+		if err := json.Unmarshal(rawInput, &in); err != nil {
+			return fmt.Sprintf("bad input: %v", err), true
+		}
+		return execReportBundle(ctx, rpc, workDir, in)
 	case "get_diagnostics":
 		var in readFileInput
 		if err := json.Unmarshal(rawInput, &in); err != nil {
@@ -508,8 +581,13 @@ func execApplyEdits(ctx context.Context, rpc *client.RPC, ap Approver, workDir s
 		return "edit rejected by user", true
 	}
 
-	// Open the buffer (idempotent if already open).
-	bufID, content, version, _, _, err := rpc.OpenFile(ctx, abs)
+	// Open the buffer (idempotent if already open). generation pins the batch
+	// below to the buffer object this content came from: an agent computing
+	// offsets from `content` here while a format-on-save or SaveAs swaps the
+	// buffer underneath is exactly the race the server's check exists for, and
+	// it's more likely through this path than a keystroke, since a tool call
+	// takes its time between reading and writing.
+	bufID, content, version, _, generation, err := rpc.OpenFile(ctx, abs)
 	if err != nil {
 		return fmt.Sprintf("cannot open %s: %v", in.Path, err), true
 	}
@@ -538,6 +616,13 @@ func execApplyEdits(ctx context.Context, rpc *client.RPC, ap Approver, workDir s
 			ToLine:   endLine,
 			ToCol:    endCol,
 			Version:  version,
+			// The server re-checks this after rebasing, immediately before
+			// applying. Finding old_text in `content` above is not enough on its
+			// own: that content was read before this tool call did any of its
+			// work, and a window or another agent editing in the meantime can
+			// leave the rebased coordinates pointing at something else. Without
+			// this, such an edit succeeds and replaces the wrong text.
+			ExpectText: in.OldText,
 		},
 		{
 			Type:       document.OpInsert,
@@ -545,9 +630,15 @@ func execApplyEdits(ctx context.Context, rpc *client.RPC, ap Approver, workDir s
 			InsertCol:  startCol,
 			InsertText: in.NewText,
 		},
-	}); err != nil {
+	}, generation, version); err != nil {
 		if weOpened {
 			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
+		}
+		if strings.Contains(err.Error(), "has changed since it was read") {
+			// Worth distinguishing from a transport failure: this one is
+			// recoverable, and says how.
+			return fmt.Sprintf("edit not applied — %s changed while this edit was being prepared: %v\n"+
+				"Re-read the file and recompute old_text before retrying.", in.Path, err), true
 		}
 		return fmt.Sprintf("edit ops failed: %v", err), true
 	}
@@ -601,14 +692,16 @@ func execInsertAtLine(ctx context.Context, rpc *client.RPC, ap Approver, workDir
 		return "edit rejected by user", true
 	}
 
-	bufID, content, _, _, generation, err := rpc.OpenFile(ctx, abs)
+	// version doubles as the op's baseVersion: the line offsets below are
+	// computed from this content, so that is the version they are relative to.
+	bufID, content, version, _, generation, err := rpc.OpenFile(ctx, abs)
 	if err != nil {
 		return fmt.Sprintf("cannot open %s: %v", in.Path, err), true
 	}
 	count, _ := rpc.BufferClientCount(ctx, bufID)
 	weOpened := count == 1
 
-	if _, err := rpc.ApplyOp(ctx, bufID, insertLineOp(content, in.Text, in.Line), generation); err != nil {
+	if _, err := rpc.ApplyOp(ctx, bufID, insertLineOp(content, in.Text, in.Line), generation, version); err != nil {
 		if weOpened {
 			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
 		}

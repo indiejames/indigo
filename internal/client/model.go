@@ -30,12 +30,37 @@ type tickMsg struct{}
 
 // updatesMsg carries ops received from the server, plus the sha256 of the
 // buffer content at its last save (for dirty-marker reconciliation).
+//
+// bufID is stamped at request time and both routed on and checked on
+// arrival. Only the active buffer polls, so without it a GetUpdates issued
+// by one tab and answered after the user switched tabs was dispatched to
+// whatever buffer was active by then — applying another file's ops to it,
+// and (worse) adopting that other buffer's version as its own polling
+// watermark, after which real ops for it read as already-seen and were
+// never delivered again. Routed rather than merely discarded so the
+// straggler still reaches the buffer it was actually about.
+//
+// version/generation are the server's values at the moment the response was
+// built, and responses can arrive out of order: polls go out every 120ms
+// with a 2s timeout and no in-flight guard, so several can be outstanding
+// at once, each carrying the same sinceVersion and therefore the same ops.
+// The handler treats both fields as monotonic and filters ops by
+// op.Version to make a late or duplicate response a no-op rather than a
+// second application of the same edit.
 type updatesMsg struct {
+	bufID      uint32
 	ops        []document.Op
 	version    uint64
 	savedHash  []byte
 	generation uint64
+	// appliedFromCaller is how many of this client's own ops the server has
+	// applied — see dropAckedBySeq for why acknowledgement is derived from a
+	// count here rather than taken from the applyOp response.
+	appliedFromCaller uint64
 }
+
+// RouteBufID implements RoutableMsg.
+func (m updatesMsg) RouteBufID() uint32 { return m.bufID }
 
 // errorMsg carries a non-fatal error to display in the status bar.
 type errorMsg struct{ err error }
@@ -51,7 +76,9 @@ type errorMsg struct{ err error }
 // inactive buffer's save/discard/resync still take effect. Deliberately
 // implemented by only a handful of message types (not every bufID-carrying
 // one) — see each type's doc comment for why routing matters for it
-// specifically.
+// specifically. updatesMsg is the one whose bufID also guards against
+// active-buffer misdelivery corrupting content, rather than merely losing a
+// result.
 type RoutableMsg interface {
 	RouteBufID() uint32
 }
@@ -190,6 +217,14 @@ type discardRecoveryMsg struct {
 	bufID   uint32
 	version uint64
 	content string
+	// generation is the buffer's new generation after the server's swap. It
+	// must be adopted, not ignored: DiscardRecovery replaces the buffer object
+	// server-side, so leaving m.generation stale made the very next
+	// updatesMsg poll see a mismatch and fire a resync that wasn't needed —
+	// and resyncFromServer marks the buffer dirty, which is precisely wrong
+	// here, since discarding recovery is the operation that makes the buffer
+	// match what's on disk. Same contract as formatResultMsg's generation.
+	generation uint64
 }
 
 // RouteBufID implements RoutableMsg.
@@ -211,10 +246,33 @@ type workspaceDiagSummaryMsg struct {
 }
 
 // hoverMsg carries a hover result.
-type hoverMsg struct{ result ClientHoverResult }
+// hoverMsg carries a hover result. bufID and at are stamped at request time and
+// both checked on arrival: hover describes one position, so a result landing
+// after the cursor moved documents something the user is no longer pointing at —
+// the same defect fixItemsMsg carried, reported from real use.
+// lineShift is one edit's effect on line numbering: everything at or after
+// atLine moves by delta. A sequence of these is kept rather than a single
+// summed shift because they are not commutative with the positions they move —
+// see the updatesMsg handler.
+type lineShift struct {
+	atLine int
+	delta  int
+}
+
+type hoverMsg struct {
+	result ClientHoverResult
+	bufID  uint32
+	at     document.Pos
+}
 
 // sigHelpMsg carries a signature-help result (nil Signatures = dismiss).
-type sigHelpMsg struct{ help *ClientSigHelp }
+// sigHelpMsg carries a signature-help result (nil Signatures = dismiss).
+// Position-sensitive in the same way as hoverMsg; see there.
+type sigHelpMsg struct {
+	help  *ClientSigHelp
+	bufID uint32
+	at    document.Pos
+}
 
 // pluginBindingsMsg delivers fresh plugin key bindings for the help popup.
 type pluginBindingsMsg struct{ bindings []ClientPluginBinding }
@@ -238,7 +296,17 @@ type fixItemsMsg struct {
 }
 
 // completionsMsg carries fresh completion items.
-type completionsMsg struct{ items []ClientCompletion }
+// completionsMsg carries fresh completion items.
+//
+// bufID only, deliberately — no cursor check. Auto-triggered completions are
+// fetched on a debounce and the cursor legitimately advances while the request
+// is in flight; that is why the handler re-derives the prefix from the live
+// buffer rather than trusting the request-time one. A strict position check
+// would discard exactly the results typing is meant to produce.
+type completionsMsg struct {
+	items []ClientCompletion
+	bufID uint32
+}
 
 // lspOverlayRefreshMsg fires after the post-edit debounce delay to re-fetch
 // semantic tokens/inlay hints. seq is the lspOverlaySeq captured when it was
@@ -269,15 +337,21 @@ type completionResolvedMsg struct {
 }
 
 // renameSymbolDoneMsg carries the result of an LSP-driven rename.
+// renameSymbolDoneMsg carries the result of an LSP-driven rename. bufID keeps
+// the status message on the buffer the rename was started from.
 type renameSymbolDoneMsg struct {
 	applied, files int
 	err            error
+	bufID          uint32
 }
 
 // moveFunctionDoneMsg carries the result of moving a function to another file.
+// moveFunctionDoneMsg carries the result of moving a function to another file.
+// bufID keeps the status message on the buffer the move was started from.
 type moveFunctionDoneMsg struct {
 	destPath string
 	err      error
+	bufID    uint32
 }
 
 // organizeImportsMsg carries the result of an LSP "source.organizeImports"
@@ -303,19 +377,33 @@ type organizeImportsMsg struct {
 type triggerCompletionMsg struct{ seq int }
 
 // definitionMsg carries the result of a go-to-definition request.
+// definitionMsg carries the result of a go-to-definition request.
+//
+// bufID only: the jump must not land in whatever buffer is now active, but the
+// user asked about a symbol and moving the cursor afterwards does not retract
+// that — swallowing the jump would be worse than performing it.
 type definitionMsg struct {
 	loc   ClientLocation
 	found bool
+	bufID uint32
 }
 
 // referencesMsg carries find-references results from the server.
+// referencesMsg carries find-references results from the server. bufID only,
+// same reasoning as definitionMsg.
 type referencesMsg struct {
-	refs []ClientReference
+	refs  []ClientReference
+	bufID uint32
 }
 
 // docSymbolsMsg carries document symbol results.
+// docSymbolsMsg carries document symbol results. Whole-file, so no position —
+// but bufID matters twice over here: the handler also passes a bufID on to the
+// picker, and passing the *current* one would label another file's symbols with
+// the active buffer.
 type docSymbolsMsg struct {
-	syms []ClientSymbol
+	syms  []ClientSymbol
+	bufID uint32
 }
 
 // OpenSymbolPickerMsg signals the App to open the workspace symbol picker.
@@ -387,6 +475,22 @@ type EditRecordMsg struct {
 	AtLine    int // adjustment boundary
 	LineDelta int // net lines added (>0) or removed (<0)
 	UndoDepth int // undo stack depth at which this entry was created
+}
+
+// RemoteEditMsg tells the App that another client's edit changed this buffer's
+// line count, so jump-list entries below it can be shifted.
+//
+// Deliberately distinct from EditRecordMsg, which also *records* a new jump
+// destination and truncates forward history. Neither is right for a remote
+// edit: the user did not edit there, so it is not somewhere to jump back to,
+// and their forward history is still theirs. Without this the jump list simply
+// goes stale — the same class as the cursor not following a remote edit, and
+// invisible until a jump lands in the wrong place.
+type RemoteEditMsg struct {
+	FilePath  string
+	AtLine    int // adjustment boundary
+	LineDelta int // net lines added (>0) or removed (<0)
+	UndoDepth int // undo depth after the remote op was recorded
 }
 
 // UndoMsg signals the App that an undo was performed in the given buffer.
@@ -746,11 +850,24 @@ type undoEntry struct {
 
 // Model is the Bubble Tea model for a single buffer view.
 type Model struct {
-	rpc             *RPC
-	buf             *document.Buffer
-	cfg             *config.Config
-	bufID           uint32
-	version         uint64
+	rpc     *RPC
+	buf     *document.Buffer
+	cfg     *config.Config
+	bufID   uint32
+	version uint64
+	// sendQ serialises this buffer's outbound edits. A pointer, deliberately
+	// shared across every copy of the Model: ordering is only meaningful if all
+	// copies enqueue into the same queue.
+	sendQ *sendQueue
+	// nextSeq numbers outbound ops so acknowledgements can be matched back to
+	// the pending entry they belong to.
+	nextSeq uint64
+	// pending holds ops sent to the server whose effect this client has not yet
+	// seen reflected in a poll. Incoming remote ops are rebased past these —
+	// the client's half of the transform, since the server rebases past other
+	// clients' ops but never past the sender's own.
+	pending []pendingOp
+
 	generation      uint64 // last-known buffer generation; see updatesMsg's handler
 	generationKnown bool   // false until the first updatesMsg/bufferResyncMsg establishes a baseline
 	mode            Mode
@@ -971,6 +1088,7 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 	m := Model{
 		rpc:                 rpc,
 		buf:                 buf,
+		sendQ:               &sendQueue{},
 		cfg:                 cfg,
 		status:              status,
 		bufID:               bufID,
@@ -1203,7 +1321,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.flashTick > 0 {
 			m.flashTick--
 		}
-		cmds := []tea.Cmd{m.fetchUpdates(), tick()}
+		cmds := []tea.Cmd{tick()}
+		// Only poll when nothing is waiting to be sent. A poll advances the
+		// version this client acknowledges, and the server prunes that client's
+		// outgoing queue to match — so polling ahead of an unsent edit throws
+		// away exactly the ops that edit still needed rebasing against. Ops
+		// typed *during* a poll's round trip are fine and still exercise the
+		// client-side rebase: they are queued immediately, so the server sees
+		// the poll and then the op, in that order, on this connection.
+		if m.sendQ.idle() {
+			cmds = append(cmds, m.fetchUpdates())
+		}
 		if m.diagTick%10 == 0 {
 			cmds = append(cmds, m.fetchDiagnostics())
 		}
@@ -1222,6 +1350,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case updatesMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
+		if m.generationKnown && msg.generation < m.generation {
+			// A response built before a buffer swap we have already learned
+			// about and resynced past. generation only ever increases, so
+			// this is unambiguously a straggler: its ops describe the old
+			// buffer object. Dropping it matters as much as the mismatch
+			// branch below does — treating it as a mismatch instead would
+			// send us round the resync loop a second time for a swap that
+			// has already been handled.
+			return m, nil
+		}
 		if m.generationKnown && msg.generation != m.generation {
 			// The server replaced this buffer's object wholesale since our
 			// last known generation (format-on-save, SaveAs, DiscardRecovery,
@@ -1232,28 +1373,99 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.generation = msg.generation
 		m.generationKnown = true
+		// Retire in-flight ops the server has confirmed *before* rebasing
+		// anything past them: what it delivers below already accounts for them.
+		m.pending = dropAckedBySeq(m.pending, msg.appliedFromCaller)
 		// Ops from other clients (agents, other windows) are undoable locally:
 		// record inverses as a single undo entry so `u` reverts the whole batch.
 		// GetUpdates never echoes this client's own ops back.
 		before := m.cursorSnap()
 		var inverses []document.Op
-		atLine, delta := -1, 0
+		applied := 0
+		groupClosed := false
+		var lineShifts []lineShift
 		for _, op := range msg.ops {
-			if op.Type == document.OpInsert || op.Type == document.OpDelete {
-				inverses = append(inverses, inverseOp(m, op)) // must precede Apply
+			// Skip ops we have already applied. Polls are issued every
+			// 120ms with a 2s timeout and no in-flight guard, so two can
+			// easily be outstanding at once — and because m.version only
+			// advances when a response is *handled*, both carry the same
+			// sinceVersion and the server answers both with the same ops.
+			// Without this check the second response applies that edit a
+			// second time, duplicating an insert or deleting live text.
+			if op.Version != 0 && op.Version <= m.version {
+				continue
 			}
-			al, d := opLineDelta(op)
-			if atLine < 0 || al < atLine {
-				atLine = al
+			// Rebase past anything still in flight from this client before
+			// applying. The server rebased this op past other clients' ops but
+			// not past ours — it had not seen ours yet — so its coordinates
+			// describe a document without them, while our buffer has them.
+			var rebased []document.Op
+			m.pending, rebased = rebasePastPending(m.pending, op)
+			for _, r := range rebased {
+				// Close any open insert session first, as its own undo entry.
+				//
+				// Without this the stack's order stops matching the order edits
+				// were actually applied. A session that spans a remote op keeps
+				// collecting into one currentGroup — typing from before the op
+				// and after it alike — and that group is pushed as a single
+				// entry at Esc, *above* the entry recorded here. The stack then
+				// claims the remote op came first when half the session
+				// predates it. Undoing the session removes ops this op's
+				// inverse depends on, and the next undo applies at coordinates
+				// that no longer describe anything: it starts eating whatever
+				// text now occupies them.
+				//
+				// Splitting the session in two costs a little undo granularity
+				// across someone else's edit, which is the honest granularity
+				// anyway — those keystrokes were not one atomic action.
+				if !groupClosed && m.currentGroup != nil {
+					if len(m.currentGroup) > 0 {
+						m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: m.groupBefore})
+					}
+					m.currentGroup = []document.Op{}
+					m.groupBefore = m.cursorSnap()
+					groupClosed = true
+				}
+				// Rebase the undo history past r before applying it. Those
+				// stored ops are coordinates into the document as it stands
+				// now; r is about to change it under them, and an undo
+				// afterwards would otherwise apply at stale positions. The
+				// inverses collected below are for r itself and land on top of
+				// the stack, so they need no rebasing.
+				m = m.rebaseUndoHistory(r)
+				// Positions the buffer does not own move too: the caret, any
+				// selection, the extra cursors, and the caret snapshots stored
+				// in undo entries. All of them name a spot in the text, and this
+				// op moves the text they name.
+				m = m.shiftPositionsPastRemoteOp(r)
+				if r.Type == document.OpInsert || r.Type == document.OpDelete {
+					inverses = append(inverses, inverseOp(m, r)) // must precede Apply
+				}
+				// Recorded per op, in application order, not collapsed into a
+				// minimum line and a net delta. Collapsing is wrong for the
+				// same reason it was wrong for multicursor and for undo/redo:
+				// an overlay (or jump entry) sitting *between* two ops' edit
+				// points is moved by one of them and not the other, and a
+				// single combined shift cannot express that. Two ops that
+				// cancel in total — one inserting a line, another deleting one
+				// lower down — collapse to a delta of zero and shift nothing,
+				// leaving everything between them a line out.
+				if al, d := opLineDelta(r); d != 0 {
+					lineShifts = append(lineShifts, lineShift{atLine: al, delta: d})
+				}
+				m.buf.Apply(r)
+				applied++
 			}
-			delta += d
-			m.buf.Apply(op)
 		}
 		if len(inverses) > 0 {
 			m.undoStack = append(m.undoStack, undoEntry{ops: inverses, before: before})
 			m.redoStack = nil
 		}
-		m.version = msg.version
+		// max, not assignment: a late response reports the version the
+		// buffer had when it was built, which can be behind what a response
+		// handled since has already moved us to. Taking it verbatim would
+		// rewind our polling watermark and re-request ops we just applied.
+		m.version = max(m.version, msg.version)
 		// Reconcile the dirty marker: if another client saved this buffer, our
 		// content now matches disk exactly when its hash equals savedHash. The
 		// hash check makes this race-free — an in-flight local keystroke means
@@ -1264,13 +1476,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.savedUndoDepth = len(m.undoStack)
 			}
 		}
-		if len(msg.ops) == 0 {
+		if applied == 0 {
+			// Either the server had nothing for us, or everything it sent
+			// was a duplicate we had already applied — in both cases the
+			// buffer is untouched, so there is nothing to reparse, shift,
+			// or clamp.
 			return m, nil
 		}
 		m.clampCursor()
-		m = m.shiftLSPOverlayLines(max(atLine, 0), delta)
+		// Tell the App to shift jump entries below the edit. Local edits do
+		// this via EditRecordMsg; remote ones emitted nothing, so the jump list
+		// silently went stale.
+		// One message per shift, in order. The jump list adjusts entries the
+		// same way LSP overlays are adjusted, so it has the same problem with a
+		// combined shift, and the App applies each message at its own edit
+		// point rather than trying to reconstruct them from a total.
+		var remoteEditCmds []tea.Cmd
+		if m.filePath != "" {
+			for _, s := range lineShifts {
+				rec := RemoteEditMsg{
+					FilePath: m.filePath, AtLine: max(s.atLine, 0),
+					LineDelta: s.delta, UndoDepth: len(m.undoStack),
+				}
+				remoteEditCmds = append(remoteEditCmds, func() tea.Msg { return rec })
+			}
+		}
+		// Search results are derived from the buffer, so a remote edit can
+		// invalidate them — both the positions and the text those positions
+		// cover. Re-derive rather than leaving a highlight over characters that
+		// no longer match.
+		m.refreshSearchMatches()
+		for _, s := range lineShifts {
+			m = m.shiftLSPOverlayLines(max(s.atLine, 0), s.delta)
+		}
 		m, refreshCmd := m.scheduleLSPOverlayRefresh()
-		return m, tea.Batch(m.reparseHighlight(), refreshCmd)
+		return m, tea.Batch(append([]tea.Cmd{m.reparseHighlight(), refreshCmd}, remoteEditCmds...)...)
 
 	case saveAsPromptMsg:
 		s := m.filePath
@@ -1315,6 +1555,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.buf = document.New(m.filePath, msg.content)
+		// Everything in flight described the pre-resync content. Keeping it
+		// would rebase future incoming ops past edits that no longer exist.
+		m.sendQ.discard()
+		m.pending = nil
+		// Reset alongside pending: the server clears its count of ops applied
+		// from this client when the buffer is replaced, and that count is what
+		// retires pending entries. Leaving seq numbering where it was would
+		// have every later entry look unacknowledged forever.
+		m.nextSeq = 0
 		m.buf.MarkDirty() // server's content may itself be unsaved-to-disk; err toward "unsaved" rather than a false-clean marker
 		m.version = msg.version
 		m.generation = msg.generation
@@ -1458,10 +1707,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.buf = document.New(m.filePath, msg.content)
+		m.sendQ.discard()
+		m.pending = nil
+		// Reset alongside pending: the server clears its count of ops applied
+		// from this client when the buffer is replaced, and that count is what
+		// retires pending entries. Leaving seq numbering where it was would
+		// have every later entry look unacknowledged forever.
+		m.nextSeq = 0
 		m.version = 0
+		m.generation = msg.generation
+		m.generationKnown = true
 		m.undoStack = nil
 		m.redoStack = nil
 		m.currentGroup = nil
+		// savedUndoDepth = 0 (matching the just-emptied undo stack) is correct
+		// here, unlike in formatResultMsg's handler: msg.content came straight
+		// off disk, so the buffer genuinely does match the file and a fresh,
+		// clean document.New is the accurate state.
 		m.savedUndoDepth = 0
 		return m, m.reparseHighlight()
 
@@ -1505,6 +1767,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case hoverMsg:
+		if msg.bufID != m.bufID || m.cursor != msg.at {
+			return m, nil // stale: different buffer, or the cursor has moved on
+		}
 		if msg.result.Found && msg.result.Contents != "" {
 			m.hoverContent = &msg.result.Contents
 			m.hoverScroll = 0
@@ -1521,10 +1786,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case sigHelpMsg:
+		if msg.bufID != m.bufID || m.cursor != msg.at {
+			return m, nil // stale: different buffer, or the cursor has moved on
+		}
 		m.sigHelp = msg.help
 		return m, nil
 
 	case completionsMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
 		// Recompute the prefix from the live buffer: the fetch was async and the
 		// cursor may have advanced (auto-trigger debounce), so filter against
 		// what's actually typed now, not what was typed when the fetch started.
@@ -1570,6 +1841,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case renameSymbolDoneMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale: status belongs to the buffer it was started from
+		}
 		switch {
 		case msg.err != nil:
 			m = m.pushStatus(fmt.Sprintf("E: rename failed: %v", msg.err))
@@ -1581,6 +1855,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case moveFunctionDoneMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale: status belongs to the buffer it was started from
+		}
 		if msg.err != nil {
 			m = m.pushStatus(fmt.Sprintf("E: move failed: %v", msg.err))
 		} else {
@@ -1642,7 +1919,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.undoStack = nil
 			m.redoStack = nil
 			m.currentGroup = nil
-			m.savedUndoDepth = 0
+			// The server marks its swapped-in buffer dirty (Format's
+			// newBuf.MarkDirty(), server_lsp.go), so mirror that here or the
+			// two disagree about whether there is anything to save. A fresh
+			// document.New is clean, and leaving it that way meant ":format"
+			// then ":q" exited with no unsaved-changes prompt and threw the
+			// formatting away. Unconditional rather than gated on
+			// !msg.thenSave: with thenSave the buffer really is dirty at this
+			// instant too, and the save that follows immediately cleans it
+			// again (doSaveNow captures version 0, which still matches by the
+			// time savedMsg's check runs, so SetClean is reached).
+			m.sendQ.discard()
+			m.pending = nil
+			m.nextSeq = 0
+			m.buf.MarkDirty()
+			// -1, not 0: savedUndoDepth is compared against len(undoStack) to
+			// re-clear dirty when the user undoes back to the last saved
+			// state, and 0 against a just-emptied stack would wrongly call
+			// the formatted-but-unsaved buffer "saved" as soon as the user
+			// typed once and undid it. Same idiom and reason as
+			// bufferResyncMsg's handler above.
+			m.savedUndoDepth = -1
 			m.cursor = document.Pos{
 				Line: min(m.cursor.Line, m.buf.LineCount()-1),
 			}
@@ -1682,6 +1979,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, refreshCmd
 
 	case definitionMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale: would jump whatever buffer is now active
+		}
 		if !msg.found {
 			m = m.pushStatus("No definition found")
 			return m, nil
@@ -1698,6 +1998,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case referencesMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
 		if len(msg.refs) == 0 {
 			m = m.pushStatus("No references found")
 			return m, nil
@@ -1706,13 +2009,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return OpenRefPickerMsg{Title: "References", Refs: refs} }
 
 	case docSymbolsMsg:
+		if msg.bufID != m.bufID {
+			return m, nil // stale result from a previous buffer switch; discard
+		}
 		if len(msg.syms) == 0 {
 			m = m.pushStatus("No symbols found")
 			return m, nil
 		}
 		syms := msg.syms
-		bufID := m.bufID
-		_ = bufID
+		// msg.bufID rather than m.bufID. The guard above makes them equal here,
+		// so this is not load-bearing today — but it was the second half of the
+		// same bug (one file's symbols labelled with another file's id), and
+		// taking the id from the message keeps that true without depending on a
+		// check three lines up.
+		bufID := msg.bufID
 		return m, func() tea.Msg { return OpenDocSymbolPickerMsg{BufID: bufID, Syms: syms} }
 
 	case tea.FocusMsg:

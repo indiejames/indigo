@@ -356,6 +356,27 @@ func (a App) openSearchReplaceMatch(d *searchReplaceDialog) tea.Cmd {
 	return a.doOpenFileAtMatch(absPath, r.Line, r.Col, matchLen)
 }
 
+// replaceOpsFor builds the delete/insert pair that replaces oldText at
+// (line, col) with newText.
+//
+// The delete carries ExpectText. The generation check on the apply only catches
+// a wholesale buffer swap; an ordinary edit between the grep that produced
+// these coordinates and the apply that uses them leaves the coordinates
+// rebasing correctly onto whatever now occupies that range — right as a
+// transform, wrong as an edit, and silent either way. The expectation is
+// verified server-side after rebasing, which is the only place it can be: a
+// check here could not survive one. See verifyExpectedText.
+func replaceOpsFor(line, col int, oldText, newText string) (del, ins document.Op) {
+	del = document.Op{
+		Type:     document.OpDelete,
+		FromLine: line, FromCol: col,
+		ToLine: line, ToCol: col + len([]rune(oldText)),
+		ExpectText: oldText,
+	}
+	ins = document.Op{Type: document.OpInsert, InsertLine: line, InsertCol: col, InsertText: newText}
+	return del, ins
+}
+
 func (a App) acceptSearchReplaceMatch(d *searchReplaceDialog) tea.Cmd {
 	if d.focus != sraFocusResults || d.cursor < 0 || d.cursor >= len(d.results) {
 		return nil
@@ -366,8 +387,7 @@ func (a App) acceptSearchReplaceMatch(d *searchReplaceDialog) tea.Cmd {
 	absPath := filepath.Join(d.workDir, r.RelPath)
 	line, col := r.Line, r.Col
 
-	delOp := document.Op{Type: document.OpDelete, FromLine: line, FromCol: col, ToLine: line, ToCol: col + len([]rune(oldText))}
-	insOp := document.Op{Type: document.OpInsert, InsertLine: line, InsertCol: col, InsertText: newText}
+	delOp, insOp := replaceOpsFor(line, col, oldText, newText)
 
 	// Already open in this App: apply through that Model's normal local-apply
 	// + undo + server-send path so the tab and undo stack stay correct.
@@ -388,11 +408,15 @@ func (a App) acceptSearchReplaceMatch(d *searchReplaceDialog) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		bufID, _, _, _, _, err := rpc.OpenFile(ctx, absPath)
+		// gen is what the batch below is validated against: these coordinates
+		// came from the grep hit, so if the buffer has been swapped wholesale
+		// since this OpenFile, they no longer mean anything and the server
+		// rejects rather than applying them at the wrong offsets.
+		bufID, _, baseVersion, _, gen, err := rpc.OpenFile(ctx, absPath)
 		if err != nil {
 			return sraSingleResultMsg{err: err}
 		}
-		if _, err := rpc.ApplyOps(ctx, bufID, []document.Op{delOp, insOp}); err != nil {
+		if _, err := rpc.ApplyOps(ctx, bufID, []document.Op{delOp, insOp}, gen, baseVersion); err != nil {
 			return sraSingleResultMsg{err: err}
 		}
 		bufID, content, version, fromRecovery, generation, err := rpc.OpenFile(ctx, absPath)

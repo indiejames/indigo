@@ -29,8 +29,15 @@ func (r *RPC) OpenFile(ctx context.Context, path string) (uint32, string, uint64
 }
 
 // DiscardRecovery tells the server to delete the recovery file and reload the
-// original file content into the buffer. Returns the original file content.
-func (r *RPC) DiscardRecovery(ctx context.Context, bufID uint32) (string, error) {
+// original file content into the buffer. Returns the original file content and
+// the buffer's new generation.
+//
+// The generation must be adopted by the caller: this call replaces the buffer
+// object server-side, so a caller still holding the old value sees a mismatch
+// on its next GetUpdates poll and resyncs for no reason — a resync that also
+// marks the buffer dirty, which is exactly backwards here, since discarding
+// recovery is what makes the buffer match disk.
+func (r *RPC) DiscardRecovery(ctx context.Context, bufID uint32) (string, uint64, error) {
 	fut, rel := r.svc.DiscardRecovery(ctx, func(p proto.EditorService_discardRecovery_Params) error {
 		p.SetClientId(r.clientID)
 		p.SetBufferId(bufID)
@@ -39,13 +46,13 @@ func (r *RPC) DiscardRecovery(ctx context.Context, bufID uint32) (string, error)
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	content, err := res.Content()
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return content, nil
+	return content, res.Generation(), nil
 }
 
 // encodeOp writes a document.Op into a wire EditOp.
@@ -64,6 +71,9 @@ func encodeOp(protoOp proto.EditOp, op document.Op) error {
 		protoOp.SetFromCol(uint32(op.FromCol))
 		protoOp.SetToLine(uint32(op.ToLine))
 		protoOp.SetToCol(uint32(op.ToCol))
+		if op.ExpectText != "" {
+			return protoOp.SetExpectText(op.ExpectText)
+		}
 	default:
 		protoOp.SetType(proto.EditOp_OpType_noop)
 	}
@@ -71,11 +81,18 @@ func encodeOp(protoOp proto.EditOp, op document.Op) error {
 }
 
 // ApplyOp sends an edit operation to the server and returns the new version.
-func (r *RPC) ApplyOp(ctx context.Context, bufID uint32, op document.Op, generation uint64) (uint64, error) {
+//
+// baseVersion is the last server version this client had integrated when it
+// computed op's coordinates. The server rebases op past every other client's
+// ops applied since then, so a stale or omitted baseVersion makes it rebase
+// past ops this client already had — corrupting the very coordinates the
+// mechanism exists to protect.
+func (r *RPC) ApplyOp(ctx context.Context, bufID uint32, op document.Op, generation, baseVersion uint64) (uint64, error) {
 	fut, rel := r.svc.ApplyOp(ctx, func(p proto.EditorService_applyOp_Params) error {
 		p.SetClientId(r.clientID)
 		p.SetBufferId(bufID)
 		p.SetGeneration(generation)
+		p.SetBaseVersion(baseVersion)
 		protoOp, err := p.NewOp()
 		if err != nil {
 			return err
@@ -93,10 +110,18 @@ func (r *RPC) ApplyOp(ctx context.Context, bufID uint32, op document.Op, generat
 // ApplyOps sends a batch of edit operations in one request. The server applies
 // the whole batch even if this client dies mid-call, so paired ops (e.g. a
 // delete+insert replace) can never be left half-applied.
-func (r *RPC) ApplyOps(ctx context.Context, bufID uint32, ops []document.Op) (uint64, error) {
+//
+// generation must be the buffer's generation as of whenever the caller read the
+// content it computed these coordinates against — normally the value returned
+// by the OpenFile/GetBufferSnapshot that produced that content. The server
+// rejects the batch if the buffer has been swapped since; retrying with the
+// same coordinates is wrong, so a caller should re-read and recompute.
+func (r *RPC) ApplyOps(ctx context.Context, bufID uint32, ops []document.Op, generation, baseVersion uint64) (uint64, error) {
 	fut, rel := r.svc.ApplyOps(ctx, func(p proto.EditorService_applyOps_Params) error {
 		p.SetClientId(r.clientID)
 		p.SetBufferId(bufID)
+		p.SetGeneration(generation)
+		p.SetBaseVersion(baseVersion)
 		list, err := p.NewOps(int32(len(ops)))
 		if err != nil {
 			return err
@@ -178,7 +203,7 @@ func (r *RPC) ApplyWorkspaceEdits(ctx context.Context, edits []WorkspaceEdit) (a
 // GetUpdates polls for ops on bufID that arrived after sinceVersion.
 // generation increments every time the server replaces the buffer's object
 // wholesale — see OpenFile.
-func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]document.Op, uint64, []byte, uint64, error) {
+func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]document.Op, uint64, []byte, uint64, uint64, error) {
 	fut, rel := r.svc.GetUpdates(ctx, func(p proto.EditorService_getUpdates_Params) error {
 		p.SetClientId(r.clientID)
 		p.SetBufferId(bufID)
@@ -188,13 +213,20 @@ func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]doc
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return nil, 0, nil, 0, err
+		return nil, 0, nil, 0, 0, err
 	}
-	savedHash, _ := res.SavedHash()
+	// Copied, not aliased. A Data field points into the capnp message, and the
+	// deferred rel() above releases that message when this function returns —
+	// after which the transport's reader goroutine reuses the memory. Returning
+	// the slice itself hands the caller a window onto a buffer that is about to
+	// hold something else: a data race, and a dirty marker computed against
+	// whatever landed there. Surfaced by the convergence fuzz under -race.
+	rawHash, _ := res.SavedHash()
+	savedHash := append([]byte(nil), rawHash...)
 
 	opList, err := res.Ops()
 	if err != nil {
-		return nil, 0, nil, 0, err
+		return nil, 0, nil, 0, 0, err
 	}
 
 	ops := make([]document.Op, opList.Len())
@@ -222,7 +254,106 @@ func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]doc
 		}
 		ops[i] = op
 	}
-	return ops, res.Version(), savedHash, res.Generation(), nil
+	return ops, res.Version(), savedHash, res.Generation(), res.AppliedFromCaller(), nil
+}
+
+// ReloadBuffer asks the server to re-read bufID's file from disk and replace
+// the buffer's content with it, returning the new content, version and
+// generation.
+//
+// Use this rather than CloseBuffer + OpenFile: the latter silently reloads
+// nothing whenever another window has the same file open, because CloseBuffer
+// only drops this client and OpenFile then re-attaches to the surviving
+// in-memory buffer. Other windows pick the change up via the generation bump on
+// their next poll.
+func (r *RPC) ReloadBuffer(ctx context.Context, bufID uint32) (content string, version, generation uint64, err error) {
+	fut, rel := r.svc.ReloadBuffer(ctx, func(p proto.EditorService_reloadBuffer_Params) error {
+		p.SetClientId(r.clientID)
+		p.SetBufferId(bufID)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return "", 0, 0, err
+	}
+	content, err = res.Content()
+	if err != nil {
+		return "", 0, 0, err
+	}
+	return content, res.Version(), res.Generation(), nil
+}
+
+// BufferSyncState is one buffer's synchronization bookkeeping as the server
+// sees it. Content appears only as a hash and a length, never as text.
+type BufferSyncState struct {
+	BufID         uint32
+	Path          string
+	Version       uint64
+	Generation    uint64
+	Dirty         bool
+	ContentSha256 []byte
+	ContentBytes  uint64
+	LineCount     uint32
+	HistoryLen    uint32
+	Clients       []ClientSyncState
+}
+
+// ClientSyncState is one client's position on a buffer.
+type ClientSyncState struct {
+	ClientID     uint64
+	AckedVersion uint64
+	ConnID       uint64
+}
+
+// GetSyncState reports the server's buffer-sync bookkeeping. bufID 0 means
+// every open buffer.
+func (r *RPC) GetSyncState(ctx context.Context, bufID uint32) ([]BufferSyncState, error) {
+	fut, rel := r.svc.GetSyncState(ctx, func(p proto.EditorService_getSyncState_Params) error {
+		p.SetBufferId(bufID)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, err
+	}
+	list, err := res.Buffers()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BufferSyncState, list.Len())
+	for i := range out {
+		item := list.At(i)
+		path, _ := item.Path()
+		sum, _ := item.ContentSha256()
+		b := BufferSyncState{
+			BufID:         item.BufferId(),
+			Path:          path,
+			Version:       item.Version(),
+			Generation:    item.Generation(),
+			Dirty:         item.Dirty(),
+			ContentSha256: append([]byte(nil), sum...),
+			ContentBytes:  item.ContentBytes(),
+			LineCount:     item.LineCount(),
+			HistoryLen:    item.HistoryLen(),
+		}
+		clients, err := item.Clients()
+		if err != nil {
+			return nil, err
+		}
+		b.Clients = make([]ClientSyncState, clients.Len())
+		for j := range b.Clients {
+			ci := clients.At(j)
+			b.Clients[j] = ClientSyncState{
+				ClientID:     ci.ClientId(),
+				AckedVersion: ci.AckedVersion(),
+				ConnID:       ci.ConnId(),
+			}
+		}
+		out[i] = b
+	}
+	return out, nil
 }
 
 // GetBufferSnapshot fetches bufID's current authoritative content, version,
@@ -330,4 +461,82 @@ func (r *RPC) MoveTextToFile(ctx context.Context, bufID uint32, fromLine, fromCo
 	defer rel()
 	_, err := fut.Struct()
 	return err
+}
+
+// BufferConsistency pairs the server's view of one buffer with what each client
+// holding it reports.
+type BufferConsistency struct {
+	BufID            uint32
+	Path             string
+	ServerVersion    uint64
+	ServerGeneration uint64
+	ServerSha256     []byte
+	Clients          []ClientBufferReport
+}
+
+// ClientBufferReport is one client's answer, or the absence of one.
+type ClientBufferReport struct {
+	ClientID      uint64
+	Answered      bool // false when the callback failed or timed out
+	Known         bool // client answered but holds no such buffer
+	Version       uint64
+	Generation    uint64
+	Dirty         bool
+	ContentSha256 []byte
+}
+
+// CheckBufferConsistency asks every client holding the buffer what it holds and
+// returns each answer against the server's own. bufID 0 means every buffer.
+//
+// This reports facts, not a verdict: a hash mismatch is normal mid-edit, since a
+// client applies its edit locally before the server orders it. Deciding whether
+// a mismatch is real divergence needs two samples — see the get_sync_state /
+// check_buffer_consistency tooling in internal/agenttools.
+func (r *RPC) CheckBufferConsistency(ctx context.Context, bufID uint32) ([]BufferConsistency, error) {
+	fut, rel := r.svc.CheckBufferConsistency(ctx, func(p proto.EditorService_checkBufferConsistency_Params) error {
+		p.SetBufferId(bufID)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, err
+	}
+	list, err := res.Buffers()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BufferConsistency, list.Len())
+	for i := range out {
+		item := list.At(i)
+		path, _ := item.Path()
+		sum, _ := item.ServerSha256()
+		b := BufferConsistency{
+			BufID:            item.BufferId(),
+			Path:             path,
+			ServerVersion:    item.ServerVersion(),
+			ServerGeneration: item.ServerGeneration(),
+			ServerSha256:     append([]byte(nil), sum...),
+		}
+		clients, err := item.Clients()
+		if err != nil {
+			return nil, err
+		}
+		b.Clients = make([]ClientBufferReport, clients.Len())
+		for j := range b.Clients {
+			ci := clients.At(j)
+			csum, _ := ci.ContentSha256()
+			b.Clients[j] = ClientBufferReport{
+				ClientID:      ci.ClientId(),
+				Answered:      ci.Answered(),
+				Known:         ci.Known(),
+				Version:       ci.Version(),
+				Generation:    ci.Generation(),
+				Dirty:         ci.Dirty(),
+				ContentSha256: append([]byte(nil), csum...),
+			}
+		}
+		out[i] = b
+	}
+	return out, nil
 }

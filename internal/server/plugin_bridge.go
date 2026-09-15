@@ -361,26 +361,29 @@ func (s *editorService) PluginDecorationsChanged(bufID uint32) {
 // Applies a sequence of text edits to a buffer. Edits are applied as ops with
 // a reserved plugin client ID.
 func (s *editorService) PluginApplyEdit(bufID uint32, edits []plugin.TextEdit) error {
+	// The lock is held across the whole application, not just the lookup.
+	//
+	// Two reasons. It has to be, now that applying also queues the ops for
+	// delivery — broadcast writes entry.outgoing, which is guarded by s.mu. And
+	// it fixes the older problem this function was already an instance of: it
+	// read entry.buf after unlocking, so a concurrent wholesale swap (a
+	// format-on-save, a SaveAs) could have it apply a plugin's coordinates to a
+	// different buffer object than the one it looked up.
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
-	s.mu.Unlock()
 	if !ok {
+		s.mu.Unlock()
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 
+	// Built as one list and applied together so a replace's delete and insert
+	// reach every client's queue as an adjacent pair, never split by something
+	// else landing between them.
+	ops := make([]document.Op, 0, len(edits)+1)
 	for _, e := range edits {
-		if e.FromLine == e.ToLine && e.FromCol == e.ToCol {
-			// Pure insert.
-			entry.buf.Apply(document.Op{
-				ClientID:   pluginClientID,
-				Type:       document.OpInsert,
-				InsertLine: int(e.FromLine),
-				InsertCol:  int(e.FromCol),
-				InsertText: e.NewText,
-			})
-		} else if e.NewText == "" {
-			// Pure delete.
-			entry.buf.Apply(document.Op{
+		isInsert := e.FromLine == e.ToLine && e.FromCol == e.ToCol
+		if !isInsert {
+			ops = append(ops, document.Op{
 				ClientID: pluginClientID,
 				Type:     document.OpDelete,
 				FromLine: int(e.FromLine),
@@ -388,17 +391,9 @@ func (s *editorService) PluginApplyEdit(bufID uint32, edits []plugin.TextEdit) e
 				ToLine:   int(e.ToLine),
 				ToCol:    int(e.ToCol),
 			})
-		} else {
-			// Replace: delete then insert at the same position.
-			entry.buf.Apply(document.Op{
-				ClientID: pluginClientID,
-				Type:     document.OpDelete,
-				FromLine: int(e.FromLine),
-				FromCol:  int(e.FromCol),
-				ToLine:   int(e.ToLine),
-				ToCol:    int(e.ToCol),
-			})
-			entry.buf.Apply(document.Op{
+		}
+		if e.NewText != "" {
+			ops = append(ops, document.Op{
 				ClientID:   pluginClientID,
 				Type:       document.OpInsert,
 				InsertLine: int(e.FromLine),
@@ -407,6 +402,9 @@ func (s *editorService) PluginApplyEdit(bufID uint32, edits []plugin.TextEdit) e
 			})
 		}
 	}
+	// pluginClientID is never a real client id, so every client is delivered to.
+	applyServerOriginated(entry, pluginClientID, ops...)
+	s.mu.Unlock()
 	return nil
 }
 

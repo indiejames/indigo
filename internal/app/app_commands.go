@@ -75,12 +75,21 @@ func (a *App) applyEditRecord(msg client.EditRecordMsg) {
 	if msg.FilePath == "" {
 		return
 	}
-	if msg.LineDelta != 0 {
-		atLine := msg.AtLine
-		delta := msg.LineDelta
+	a.shiftJumpEntries(msg.FilePath, msg.AtLine, msg.LineDelta, msg.UndoDepth)
+	a.recordEdit(msg.FilePath, msg.Line, msg.Col, msg.UndoDepth)
+}
+
+// shiftJumpEntries moves jump entries in filePath to account for a line-count
+// change at atLine, without recording a new entry. Shared by a local edit (via
+// applyEditRecord, which also records one) and a remote edit (which must not).
+func (a *App) shiftJumpEntries(filePath string, atLine, delta, undoDepth int) {
+	if filePath == "" {
+		return
+	}
+	if delta != 0 {
 		n := 0
 		for _, e := range a.jumpList {
-			if e.filePath != msg.FilePath {
+			if e.filePath != filePath {
 				a.jumpList[n] = e
 				n++
 				continue
@@ -94,7 +103,7 @@ func (a *App) applyEditRecord(msg client.EditRecordMsg) {
 					// Active entry inside the deleted range: suspend it rather
 					// than discarding. It will be restored if the delete is undone.
 					e.active = false
-					e.deactivatedDepth = msg.UndoDepth
+					e.deactivatedDepth = undoDepth
 				}
 				// Inactive entries in the range keep their stored position and
 				// deactivatedDepth; they're already suspended by an earlier delete.
@@ -111,7 +120,6 @@ func (a *App) applyEditRecord(msg client.EditRecordMsg) {
 		}
 		a.jumpList = a.jumpList[:n]
 	}
-	a.recordEdit(msg.FilePath, msg.Line, msg.Col, msg.UndoDepth)
 }
 
 // recordEdit appends {filePath, line, col, undoDepth} to the jump list.
@@ -256,8 +264,17 @@ func (a App) doOpenFileAtPos(absPath string, line, col int) tea.Cmd {
 	}
 }
 
-// doReloadBuffer closes the server-side buffer and reopens it so the server
-// re-reads the file from disk. The result replaces the buffer at idx in-place.
+// doReloadBuffer asks the server to re-read the file from disk and replace the
+// buffer's content. The result replaces the buffer at idx in-place.
+//
+// This used to be CloseBuffer + OpenFile, which was silently a no-op whenever a
+// second window had the same file open: CloseBuffer only drops the calling
+// client, so the entry survived with a non-empty client set and OpenFile's
+// attach path handed the same in-memory content straight back, never touching
+// disk. One RPC now does the reload server-side, so it works with any number of
+// clients attached — and the other windows pick the new content up through the
+// generation bump on their next poll, which is a behaviour improvement too:
+// reloading in one window used to leave the others showing stale content.
 func (a App) doReloadBuffer(idx int) tea.Cmd {
 	if idx < 0 || idx >= len(a.buffers) {
 		appLog("doReloadBuffer: idx %d out of range (len=%d)", idx, len(a.buffers))
@@ -265,36 +282,26 @@ func (a App) doReloadBuffer(idx int) tea.Cmd {
 	}
 	m := a.buffers[idx]
 	path := m.FilePath()
-	oldBufID := m.BufID()
+	bufID := m.BufID()
 	langOverride := m.LangOverride()
 	rpc := a.rpc
 	cfg := a.cfg
-	appLog("doReloadBuffer: queuing cmd for idx=%d path=%q oldBufID=%d", idx, path, oldBufID)
+	appLog("doReloadBuffer: queuing cmd for idx=%d path=%q bufID=%d", idx, path, bufID)
 	return func() tea.Msg {
-		appLog("doReloadBuffer: cmd running, calling CloseBuffer bufID=%d", oldBufID)
-		// Each RPC gets its own 5s budget rather than sharing one context
-		// across both sequential calls — a slow CloseBuffer would otherwise
-		// eat into (or exhaust) the time OpenFile has left, producing a
-		// spurious "context deadline exceeded" on OpenFile even though the
-		// server would have answered fine given a fresh timeout.
-		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		closeErr := rpc.CloseBuffer(closeCtx, oldBufID)
-		closeCancel()
-		if closeErr != nil {
-			appLog("doReloadBuffer: CloseBuffer error: %v", closeErr)
-		}
-		appLog("doReloadBuffer: CloseBuffer done, calling OpenFile path=%q", path)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		bufID, content, version, fromRecovery, generation, err := rpc.OpenFile(ctx, path)
+		content, version, generation, err := rpc.ReloadBuffer(ctx, bufID)
 		if err != nil {
-			appLog("doReloadBuffer: OpenFile error: %v", err)
+			appLog("doReloadBuffer: ReloadBuffer error: %v", err)
 			return errorOpenMsg{err}
 		}
-		appLog("doReloadBuffer: OpenFile done, new bufID=%d contentLen=%d", bufID, len(content))
-		newModel := client.New(rpc, bufID, content, version, path, a.workDir, cfg, fromRecovery, generation).
+		appLog("doReloadBuffer: reloaded bufID=%d contentLen=%d generation=%d", bufID, len(content), generation)
+		// fromRecovery is false: this content came from the file itself, and
+		// ReloadBuffer deletes any recovery file precisely because the reload
+		// discards whatever was in memory.
+		newModel := client.New(rpc, bufID, content, version, path, a.workDir, cfg, false, generation).
 			WithLangOverride(langOverride)
-		return bufferReloadedMsg{idx: idx, oldBufID: oldBufID, model: newModel}
+		return bufferReloadedMsg{idx: idx, oldBufID: bufID, model: newModel}
 	}
 }
 

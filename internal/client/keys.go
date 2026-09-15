@@ -629,11 +629,11 @@ func (m Model) handleRecoveryPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			content, err := m.rpc.DiscardRecovery(ctx, m.bufID)
+			content, generation, err := m.rpc.DiscardRecovery(ctx, m.bufID)
 			if err != nil {
 				return discardRecoveryFailedMsg{bufID: m.bufID, err: err}
 			}
-			return discardRecoveryMsg{bufID: m.bufID, version: startVersion, content: content}
+			return discardRecoveryMsg{bufID: m.bufID, version: startVersion, content: content, generation: generation}
 		}
 	}
 	return m, nil

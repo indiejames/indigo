@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -58,11 +57,14 @@ type configTickMsg struct {
 
 // bufferReloadedMsg replaces a buffer model in-place after an external-change
 // reload. oldBufID is the BufID of the buffer doReloadBuffer(idx) was called
-// against, captured before its CloseBuffer/OpenFile round trip (up to 5s);
-// it's checked against a.buffers[idx]'s current BufID on arrival, mirroring
+// against, captured before its ReloadBuffer round trip (up to 5s); it's checked
+// against a.buffers[idx]'s current BufID on arrival, mirroring
 // sraSingleResultMsg's am.idx staleness check, since idx alone isn't enough —
 // closing an earlier tab while this reload is in flight shifts every later
 // index down, so idx could by then point at a different, unrelated buffer.
+//
+// Since ReloadBuffer reloads in place, oldBufID is also the *new* model's
+// BufID; the name is kept for continuity with the check's purpose.
 type bufferReloadedMsg struct {
 	idx      int
 	oldBufID uint32
@@ -330,7 +332,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// client.RoutableMsg (applyOpFailedMsg, savedMsg, savedAsMsg,
+	// client.RoutableMsg (updatesMsg, applyOpFailedMsg, savedMsg, savedAsMsg,
 	// discardRecoveryMsg, saveFailedMsg, discardRecoveryFailedMsg,
 	// highlightMsg — see their doc comments) must reach the specific buffer
 	// they're about, even when it isn't the active tab: the generic fallback
@@ -733,6 +735,30 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Quit
 
 	// ---- external file change notification from server ----
+	case client.ReportBufferStateMsg:
+		// Handled here rather than in client.Model because only App sees every
+		// buffer: the generic fallback would route this to the active tab,
+		// which would answer "no such buffer" for any backgrounded one and make
+		// a consistency check across tabs useless.
+		//
+		// The send is non-blocking by construction (Reply is buffered and
+		// written once). That matters: the callback abandons its wait when the
+		// server's timeout expires, so there may be no reader left, and
+		// blocking here would wedge the update loop — the editor would stop
+		// accepting keystrokes because a diagnostic asked it a question.
+		var rep client.BufferStateReport
+		for _, m := range a.buffers {
+			if m.BufID() == msg.BufID {
+				rep = m.BufferStateFor()
+				break
+			}
+		}
+		select {
+		case msg.Reply <- rep: // rep.Known stays false when no tab holds it
+		default:
+		}
+		return a, nil
+
 	case client.FileChangedMsg:
 		appLog("FileChangedMsg received: BufID=%d dirty=%v numBufs=%d", msg.BufID, msg.Dirty, len(a.buffers))
 		idx := -1
@@ -747,7 +773,22 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if idx < 0 {
 			return a, nil
 		}
-		if !msg.Dirty {
+		// Both must agree the buffer is clean before reloading without asking.
+		//
+		// msg.Dirty is the server's answer, sampled when it dispatched this
+		// notification, and the fan-out is concurrent with its own per-client
+		// timeout — so two external writes can be reported out of order, and an
+		// older dirty=false can arrive after the user has started typing.
+		// Acting on it alone silently discards their unsaved edits, since this
+		// branch reloads with no prompt. This client's own buffer is the
+		// authority on its unsaved state and is read here, at handling time,
+		// which no ordering of the server's messages can invalidate.
+		//
+		// The server's answer still matters and is still required: another
+		// window may hold unsaved changes to the same buffer that this one
+		// cannot see. A stale dirty=true only costs a prompt that could have
+		// been skipped, which is the harmless direction.
+		if !msg.Dirty && !a.buffers[idx].Dirty() {
 			// Buffer is clean — reload silently.
 			appLog("FileChangedMsg: calling doReloadBuffer(%d)", idx)
 			return a, a.doReloadBuffer(idx)
@@ -759,20 +800,19 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case bufferReloadedMsg:
 		if msg.idx < 0 || msg.idx >= len(a.buffers) || a.buffers[msg.idx].BufID() != msg.oldBufID {
 			// The tab at idx closed, or tabs shifted (e.g. an earlier tab
-			// closed while this reload's CloseBuffer/OpenFile round trip was
-			// in flight), so idx no longer names the buffer this reload was
-			// for — applying msg.model here would silently overwrite
-			// whatever unrelated buffer now sits at that index. The reload
-			// already opened a fresh buffer server-side; close it rather
-			// than leaking it.
-			rpc := a.rpc
-			bufID := msg.model.BufID()
-			return a, func() tea.Msg {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
-				return nil
-			}
+			// closed while this reload's round trip was in flight), so idx no
+			// longer names the buffer this reload was for — applying
+			// msg.model here would silently overwrite whatever unrelated
+			// buffer now sits at that index.
+			//
+			// Just drop it. This used to also CloseBuffer, because the old
+			// CloseBuffer+OpenFile reload left a freshly-opened buffer that
+			// nothing displayed. ReloadBuffer opens nothing — it mutates the
+			// existing buffer in place and returns the same bufID — so there
+			// is nothing to leak, and closing it here would instead drop this
+			// client's hold on a buffer that may still be open in another tab
+			// or another window.
+			return a, nil
 		}
 		a.buffers[msg.idx] = msg.model
 		if msg.idx == a.active {
@@ -785,6 +825,12 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ---- edit jump list ----
 	case client.EditRecordMsg:
 		a.applyEditRecord(msg)
+		return a, nil
+
+	case client.RemoteEditMsg:
+		// Shift only. A remote edit moves the lines existing jump entries point
+		// at, but is not itself somewhere the user jumped from.
+		a.shiftJumpEntries(msg.FilePath, msg.AtLine, msg.LineDelta, msg.UndoDepth)
 		return a, nil
 
 	case client.JumpBackMsg:

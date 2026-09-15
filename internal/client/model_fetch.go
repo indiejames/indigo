@@ -128,7 +128,8 @@ func (m Model) fetchSemanticTokens() tea.Cmd {
 
 func (m Model) fetchHover() tea.Cmd {
 	bufID := m.bufID
-	line, col := m.cursor.Line, m.cursor.Col
+	at := m.cursor
+	line, col := at.Line, at.Col
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -136,21 +137,22 @@ func (m Model) fetchHover() tea.Cmd {
 		if err != nil {
 			return errorMsg{err}
 		}
-		return hoverMsg{result}
+		return hoverMsg{result: result, bufID: bufID, at: at}
 	}
 }
 
 func (m Model) fetchSignatureHelp() tea.Cmd {
 	bufID := m.bufID
-	line, col := m.cursor.Line, m.cursor.Col
+	at := m.cursor
+	line, col := at.Line, at.Col
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		sh, err := m.rpc.SignatureHelp(ctx, bufID, line, col)
 		if err != nil || len(sh.Signatures) == 0 {
-			return sigHelpMsg{nil}
+			return sigHelpMsg{help: nil, bufID: bufID, at: at}
 		}
-		return sigHelpMsg{&sh}
+		return sigHelpMsg{help: &sh, bufID: bufID, at: at}
 	}
 }
 
@@ -164,7 +166,7 @@ func (m Model) fetchCompletions() tea.Cmd {
 		if err != nil {
 			return nil
 		}
-		return completionsMsg{items}
+		return completionsMsg{items: items, bufID: bufID}
 	}
 }
 
@@ -199,7 +201,7 @@ func (m Model) fetchDefinition() tea.Cmd {
 		if err != nil {
 			return nil
 		}
-		return definitionMsg{loc: loc, found: found}
+		return definitionMsg{loc: loc, found: found, bufID: bufID}
 	}
 }
 
@@ -213,7 +215,7 @@ func (m Model) fetchReferences() tea.Cmd {
 		if err != nil {
 			return nil
 		}
-		return referencesMsg{refs: refs}
+		return referencesMsg{refs: refs, bufID: bufID}
 	}
 }
 
@@ -226,7 +228,7 @@ func (m Model) fetchDocSymbols() tea.Cmd {
 		if err != nil {
 			return nil
 		}
-		return docSymbolsMsg{syms: syms}
+		return docSymbolsMsg{syms: syms, bufID: bufID}
 	}
 }
 
@@ -278,15 +280,19 @@ func (m Model) fetchPluginBindings() tea.Cmd {
 // is created if it doesn't exist yet). Imports and other cross-file
 // references are not fixed up.
 func (m Model) doMoveFunctionToFile(destPath string) tea.Cmd {
+	// Captured before the early returns below, so every outcome — including the
+	// ones that never reach the server — is attributed to the buffer the move
+	// was started from rather than whichever is active when it lands.
+	msgBufID := m.bufID
 	if m.hlr == nil {
 		return func() tea.Msg {
-			return moveFunctionDoneMsg{err: fmt.Errorf("no syntax support for this file type")}
+			return moveFunctionDoneMsg{err: fmt.Errorf("no syntax support for this file type"), bufID: msgBufID}
 		}
 	}
 	to, ok := m.hlr.TextObjectAround([]byte(m.buf.Content()), m.cursor.Line, m.cursor.Col, "function")
 	if !ok {
 		return func() tea.Msg {
-			return moveFunctionDoneMsg{err: fmt.Errorf("no function found around the cursor")}
+			return moveFunctionDoneMsg{err: fmt.Errorf("no function found around the cursor"), bufID: msgBufID}
 		}
 	}
 	rpc := m.rpc
@@ -297,14 +303,14 @@ func (m Model) doMoveFunctionToFile(destPath string) tea.Cmd {
 	return func() tea.Msg {
 		abs, err := resolveDestPath(workDir, destPath)
 		if err != nil {
-			return moveFunctionDoneMsg{err: err}
+			return moveFunctionDoneMsg{err: err, bufID: msgBufID}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := rpc.MoveTextToFile(ctx, bufID, fromLine, fromCol, toLine, toCol, abs); err != nil {
-			return moveFunctionDoneMsg{err: err}
+			return moveFunctionDoneMsg{err: err, bufID: msgBufID}
 		}
-		return moveFunctionDoneMsg{destPath: abs}
+		return moveFunctionDoneMsg{destPath: abs, bufID: msgBufID}
 	}
 }
 
@@ -330,7 +336,7 @@ func (m Model) doRenameSymbol(newName string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		applied, files, err := rpc.LspRename(ctx, bufID, line, col, newName)
-		return renameSymbolDoneMsg{applied: applied, files: files, err: err}
+		return renameSymbolDoneMsg{applied: applied, files: files, err: err, bufID: bufID}
 	}
 }
 
@@ -513,6 +519,24 @@ func (m Model) applyFixCmd(idx int) tea.Cmd {
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
+			// Both ops carry the same baseVersion, and it does not advance
+			// between them.
+			//
+			// baseVersion is not "the document these coordinates follow on
+			// from" — it is "the version this client has seen", which is what
+			// the server uses to decide which queued ops the incoming one must
+			// still be rebased past. ApplyOp returns the buffer version after
+			// applying, which counts other clients' ops too; adopting it here
+			// would claim we had seen a concurrent edit we have not, and the
+			// server would drop it from the rebase set and land the insert at a
+			// position that does not account for it.
+			//
+			// Nothing is lost by not advancing it. The server rebases an
+			// incoming op past other clients' queued ops but never past the
+			// sender's own, so the insert is not rebased past our delete under
+			// either value — and it does not need to be: it is positioned at
+			// the delete's start, which the delete does not move.
+			baseVersion := m.version
 			if item.FromLine != item.ToLine || item.FromCol != item.ToCol {
 				delOp := document.Op{
 					Type:     document.OpDelete,
@@ -522,7 +546,7 @@ func (m Model) applyFixCmd(idx int) tea.Cmd {
 					ToCol:    item.ToCol,
 					ClientID: m.rpc.ClientID(),
 				}
-				if _, err := m.rpc.ApplyOp(ctx, m.bufID, delOp, m.generation); err != nil {
+				if _, err := m.rpc.ApplyOp(ctx, m.bufID, delOp, m.generation, baseVersion); err != nil {
 					return errorMsg{err}
 				}
 			}
@@ -533,7 +557,7 @@ func (m Model) applyFixCmd(idx int) tea.Cmd {
 				InsertText: item.Replace,
 				ClientID:   m.rpc.ClientID(),
 			}
-			if _, err := m.rpc.ApplyOp(ctx, m.bufID, insOp, m.generation); err != nil {
+			if _, err := m.rpc.ApplyOp(ctx, m.bufID, insOp, m.generation, baseVersion); err != nil {
 				return errorMsg{err}
 			}
 			return nil

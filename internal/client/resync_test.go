@@ -19,8 +19,9 @@ var errTest = errors.New("test error")
 func TestSendToServerReturnsApplyOpFailedMsgOnError(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.rpc = &RPC{} // zero-value RPC: the underlying capnp call fails immediately
+	m.sendQ = &sendQueue{}
 
-	cmd := m.sendToServer(document.Op{Type: document.OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "x"})
+	_, cmd := m.sendToServer(document.Op{Type: document.OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "x"})
 	if cmd == nil {
 		t.Fatal("sendToServer returned a nil command")
 	}

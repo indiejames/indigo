@@ -33,6 +33,7 @@ func fakeKey(s string) tea.KeyMsg {
 func newTestModel(content string) Model {
 	return Model{
 		buf:     document.New("test.go", content),
+		sendQ:   &sendQueue{},
 		metrics: &metricsData{},
 		height:  24,
 		width:   80,

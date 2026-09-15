@@ -2,7 +2,10 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -233,4 +236,80 @@ func (s *callbackServer) FileChanged(_ context.Context, call proto.ClientCallbac
 	s.dispatch(msg)
 	_, err := call.AllocResults()
 	return err
+}
+
+// BufferStateReport is one client's answer to ReportBufferStateMsg.
+type BufferStateReport struct {
+	Known         bool
+	Version       uint64
+	Generation    uint64
+	Dirty         bool
+	ContentSha256 []byte
+}
+
+// ReportBufferStateMsg asks the App what it currently holds for BufID, for the
+// server's consistency check. Unlike every other push message this one expects
+// an answer, which it collects on Reply.
+//
+// Reply must be buffered (size 1 is enough) and the handler must never block on
+// it: the callback below abandons the wait when its context expires, so by the
+// time the App answers there may be no reader left. A blocking send there would
+// wedge the whole Bubble Tea update loop — the editor would stop responding to
+// keystrokes because a diagnostic asked it a question.
+type ReportBufferStateMsg struct {
+	BufID uint32
+	Reply chan<- BufferStateReport
+}
+
+// reportBufferStateTimeout bounds how long the callback waits for the update
+// loop to answer. The server calls this with its own (shorter) timeout, so this
+// is a backstop for the case where there is no program to answer at all —
+// during startup before the sender is wired, or while shutting down.
+const reportBufferStateTimeout = 2 * time.Second
+
+// ReportBufferState answers the server's consistency check with a hash of what
+// this client holds for the requested buffer.
+func (s *callbackServer) ReportBufferState(ctx context.Context, call proto.ClientCallback_reportBufferState) error {
+	bufID := call.Args().BufId()
+
+	reply := make(chan BufferStateReport, 1)
+	s.dispatch(ReportBufferStateMsg{BufID: bufID, Reply: reply})
+
+	var rep BufferStateReport
+	var answered bool
+	select {
+	case rep = <-reply:
+		answered = true
+	case <-ctx.Done():
+	case <-time.After(reportBufferStateTimeout):
+	}
+	if !answered {
+		// An error rather than a zero-valued answer: "I could not answer" and
+		// "I do not have that buffer" are different findings, and reporting a
+		// wedged window as one with no such buffer would send whoever is
+		// diagnosing it in the wrong direction entirely.
+		return fmt.Errorf("client did not answer for buffer %d", bufID)
+	}
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	res.SetKnown(rep.Known)
+	res.SetVersion(rep.Version)
+	res.SetGeneration(rep.Generation)
+	res.SetDirty(rep.Dirty)
+	return res.SetContentSha256(rep.ContentSha256)
+}
+
+// BufferStateFor builds this model's answer to a consistency check.
+func (m Model) BufferStateFor() BufferStateReport {
+	sum := sha256.Sum256([]byte(m.buf.Content()))
+	return BufferStateReport{
+		Known:         true,
+		Version:       m.version,
+		Generation:    m.generation,
+		Dirty:         m.buf.Dirty(),
+		ContentSha256: sum[:],
+	}
 }

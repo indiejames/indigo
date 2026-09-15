@@ -208,19 +208,44 @@ func TestFormatDiscardsStaleResultAfterBufferSwap(t *testing.T) {
 	dir := t.TempDir()
 	startedA := filepath.Join(dir, "started-a")
 	releaseA := filepath.Join(dir, "release-a")
-	// Formatter A: signals it has started, then blocks until told to
-	// proceed, then uppercases — simulating a slow format on the buffer's
-	// original (version 0) content.
-	scriptA := filepath.Join(dir, "formatter-a.sh")
-	if err := os.WriteFile(scriptA, []byte(
-		"#!/bin/sh\ntouch "+startedA+"\nwhile [ ! -f "+releaseA+" ]; do sleep 0.02; done\ntr a-z A-Z\n",
+	useFast := filepath.Join(dir, "use-fast")
+
+	// One formatter script serves both calls, branching on the useFast marker
+	// file rather than on reconfigured cfg.
+	//
+	// This test used to reassign cfg.Formatters[0].Command/.Args between the
+	// two calls to swap in a fast formatter. That was a data race, and a real
+	// one the detector caught a few runs in ten: Format call A reads
+	// cfg.Formatters on the capnp server goroutine (format.Manager.Format),
+	// and waiting for the startedA marker tells us A's *subprocess* has
+	// started but creates no happens-before edge with that read — polling for
+	// a file gives no memory-ordering guarantee between goroutines. Nothing in
+	// production mutates cfg.Formatters after construction, so the config is
+	// treated as immutable here too and the switch moved out of memory and
+	// into the filesystem.
+	//
+	// The script is written once and never rewritten. Rewriting it while A's
+	// shell is mid-execution would be its own bug: sh reads a script
+	// incrementally from a file offset, so editing one in place under a
+	// running interpreter can make it resume at the wrong byte.
+	//
+	// A passes the useFast branch before touching startedA, so by the time the
+	// test creates the marker, A is deterministically already committed to the
+	// slow path — this is ordering, not luck.
+	script := filepath.Join(dir, "formatter.sh")
+	if err := os.WriteFile(script, []byte(
+		"#!/bin/sh\n"+
+			"if [ -f "+useFast+" ]; then exec rev; fi\n"+
+			"touch "+startedA+"\n"+
+			"while [ ! -f "+releaseA+" ]; do sleep 0.02; done\n"+
+			"tr a-z A-Z\n",
 	), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
 	cfg := &config.Config{
 		Formatters: []config.FormatterConfig{
-			{Extensions: []string{"swap"}, Command: scriptA},
+			{Extensions: []string{"swap"}, Command: script},
 		},
 	}
 	fmtMgr := format.NewManager(nil, cfg, dir)
@@ -261,12 +286,13 @@ func TestFormatDiscardsStaleResultAfterBufferSwap(t *testing.T) {
 	}
 
 	// Format A is now genuinely blocked, holding baseVersion=0 from the
-	// original buffer object. Swap the formatter to one that runs
-	// instantly and produces different output, then run Format again
+	// original buffer object. Flip the script onto its fast branch so the next
+	// call returns instantly with different output, then run Format again
 	// (call B) to completion — this installs a brand-new *document.Buffer
 	// (also version 0) before A ever resumes.
-	cfg.Formatters[0].Command = "sh"
-	cfg.Formatters[0].Args = []string{"-c", "rev"}
+	if err := os.WriteFile(useFast, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	fut, rel := client.Format(context.Background(), func(p proto.EditorService_format_Params) error {
 		p.SetBufId(1)
 		return nil

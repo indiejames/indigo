@@ -135,6 +135,12 @@ func (s *editorService) attachToOpenBufferLocked(path string, clientID uint64) (
 			e.sinceByClient = make(map[uint64]uint64)
 		}
 		e.sinceByClient[clientID] = ver
+		// A client attaching gets the buffer's full current content, so it
+		// starts caught up and its queue starts empty. Clearing rather than
+		// assuming absence matters for a client that closed this buffer and
+		// reopened it: a leftover queue would replay ops against content that
+		// already contains them.
+		delete(e.outgoing, clientID)
 		return id, e.buf.Content(), ver, e.generation, true
 	}
 	return 0, "", 0, 0, false
@@ -210,12 +216,104 @@ func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorServ
 	}
 	entry.buf = document.New(path, content)
 	entry.generation++
+	// Queued ops describe the old buffer object and cannot be rebased onto the
+	// new one; clients learn of the swap from the generation bump and resync.
+	resetOutgoing(entry)
+	generation := entry.generation
 	s.mu.Unlock()
 
 	res, err := call.AllocResults()
 	if err != nil {
 		return err
 	}
+	// Read under the lock above, not re-read here: entry.generation is guarded
+	// by s.mu and every other swap site writes it.
+	res.SetGeneration(generation)
+	return res.SetContent(content)
+}
+
+// ReloadBuffer re-reads the buffer's file from disk and replaces its content,
+// bumping generation so every other client holding it resyncs on its next poll.
+//
+// The client-side spelling this replaces — CloseBuffer then OpenFile — is
+// broken whenever a second window has the file open: CloseBuffer only drops the
+// calling client, so the entry survives and OpenFile's attach path serves the
+// same in-memory content back without reading disk. See editor.capnp.
+func (s *editorService) ReloadBuffer(_ context.Context, call proto.EditorService_reloadBuffer) error {
+	// Disk reads can stall; call.Go() so a slow one doesn't block other RPCs
+	// on this connection, matching Save/SaveAs/Format.
+	call.Go()
+
+	bufID := call.Args().BufferId()
+
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	baseBuf := entry.buf
+	path := baseBuf.Path()
+	baseVersion := baseBuf.Version()
+	s.mu.Unlock()
+
+	if path == "" {
+		return fmt.Errorf("buffer %d has no file to reload", bufID)
+	}
+
+	// A read failure is reported, not swallowed into an empty buffer. Reload's
+	// whole job is to replace live content, so treating an unreadable file as
+	// "" would blank the user's buffer on a transient error — during someone
+	// else's atomic save, say — which is far worse than declining to reload.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		serverLog("ReloadBuffer: reading %q failed: %v", path, err)
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	content := string(data)
+
+	s.mu.Lock()
+	entry, ok = s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	if entry.buf != baseBuf || entry.buf.Version() != baseVersion {
+		// An edit landed while we were reading, so swapping in the disk
+		// content now would discard it. Reject rather than clobber; the caller
+		// can retry. Same compare-and-swap as DiscardRecovery/Save/SaveAs, and
+		// both halves matter: document.New always starts at version 0, so a
+		// buffer swapped in by something else could match baseVersion by
+		// coincidence while being a different object entirely.
+		s.mu.Unlock()
+		return fmt.Errorf("buffer %d changed while reloading; try again", bufID)
+	}
+	entry.buf = document.New(path, content)
+	entry.generation++
+	resetOutgoing(entry)
+	version := entry.buf.Version()
+	generation := entry.generation
+	s.mu.Unlock()
+
+	// The reload deliberately discards whatever was in memory, so a recovery
+	// file still holding it must go too — otherwise the next open would offer
+	// to restore the very content the user just chose to throw away.
+	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
+
+	// DidChange/DispatchBufferChange rather than the close+open pair the old
+	// client-side flow produced: the document is the same one, its content
+	// just changed wholesale, which is exactly what a full-sync didChange
+	// says. No watch churn either, since the path never changed.
+	go s.lspMgr.DidChange(path, content)
+	s.lintMgr.RunOnEdit(path, content)
+	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
+
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	res.SetVersion(version)
+	res.SetGeneration(generation)
 	return res.SetContent(content)
 }
 
@@ -259,46 +357,70 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 	since := args.SinceVersion()
 	callerID := args.ClientId()
 
+	// Everything is snapshotted under the lock, including the queue itself:
+	// entry.buf, entry.generation and entry.outgoing are all written under s.mu
+	// by applies and by every wholesale-swap site, so reading any of them after
+	// unlocking races them. Taking them together also keeps the response
+	// internally consistent — ops and generation describing the same buffer
+	// object rather than two different ones straddling a swap.
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
+	var buf *document.Buffer
+	var generation, ver, appliedFromCaller uint64
+	var pending []document.Op
+	if ok {
+		buf, generation = entry.buf, entry.generation
+		appliedFromCaller = entry.appliedFromClient[callerID]
+		// ver is read here, inside the same critical section as the queue
+		// snapshot, and not afterwards. The client treats it as "I now hold
+		// everything up to this version", so a concurrent apply landing between
+		// the two reads would have it adopt a version covering an op that was
+		// never in the response — and since the watermark only moves forward,
+		// that op would never be sent again. Silent, permanent desync.
+		ver = buf.Version()
+		if entry.outgoing != nil {
+			// Ops this client has now confirmed seeing are dropped here rather
+			// than on delivery: a response that never arrives must not retire
+			// ops the client will ask for again.
+			entry.outgoing[callerID] = dropAcknowledged(entry.outgoing[callerID], since)
+			recordPruned(entry, callerID, since)
+			pending = append(pending, entry.outgoing[callerID]...)
+		}
+	}
 	s.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
-
-	ops, ver := entry.buf.OpsSinceAndVersion(since)
-	// Filter out ops that originated from the caller.
-	filtered := ops[:0:0]
-	for _, op := range ops {
-		if op.ClientID != callerID {
-			filtered = append(filtered, op)
-		}
-	}
-
-	s.recordClientProgress(entry, callerID, ver)
 
 	res, err := call.AllocResults()
 	if err != nil {
 		return err
 	}
 	res.SetVersion(ver)
-	res.SetGeneration(entry.generation)
+	res.SetGeneration(generation)
+	res.SetAppliedFromCaller(appliedFromCaller)
 	// Saved-content hash lets clients keep their dirty markers accurate when
 	// another client (e.g. an agent) saves the buffer.
-	h := entry.buf.SavedHash()
+	h := buf.SavedHash()
 	if err := res.SetSavedHash(h[:]); err != nil {
 		return err
 	}
 
-	if len(filtered) == 0 {
+	if len(pending) == 0 {
+		// recordClientProgress only after the response is fully built. It
+		// advances this client's watermark to ver, which is what lets
+		// TrimHistory reclaim buffer history — so recording it before the
+		// response exists means a failure below (or a response that never
+		// reaches the client) can retire ops the client never received.
+		s.recordClientProgress(entry, callerID, ver)
 		return nil
 	}
 
-	list, err := res.NewOps(int32(len(filtered)))
+	list, err := res.NewOps(int32(len(pending)))
 	if err != nil {
 		return err
 	}
-	for i, op := range filtered {
+	for i, op := range pending {
 		item := list.At(i)
 		item.SetClientId(op.ClientID)
 		item.SetVersion(op.Version)
@@ -318,6 +440,9 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 			item.SetToCol(uint32(op.ToCol))
 		}
 	}
+	// See the note on the early return above: the watermark moves only once
+	// the whole response is encoded.
+	s.recordClientProgress(entry, callerID, ver)
 	return nil
 }
 
@@ -398,11 +523,13 @@ func (s *editorService) GetBufferSnapshot(_ context.Context, call proto.EditorSe
 // protoToOp converts a wire EditOp into a document.Op for the given client.
 func protoToOp(protoOp proto.EditOp, clientID uint64) document.Op {
 	insertText, _ := protoOp.InsertText()
+	expectText, _ := protoOp.ExpectText()
 	op := document.Op{
 		ClientID:   clientID,
 		InsertLine: int(protoOp.InsertLine()),
 		InsertCol:  int(protoOp.InsertCol()),
 		InsertText: insertText,
+		ExpectText: expectText,
 		FromLine:   int(protoOp.FromLine()),
 		FromCol:    int(protoOp.FromCol()),
 		ToLine:     int(protoOp.ToLine()),
@@ -424,14 +551,28 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	clientID := args.ClientId()
 	bufID := args.BufferId()
 	clientGeneration := args.Generation()
+	baseVersion := args.BaseVersion()
 	protoOp, err := args.Op()
 	if err != nil {
 		return err
 	}
+	op := protoToOp(protoOp, clientID)
 
+	// Lookup, generation check, rebase, apply and broadcast are one critical
+	// section. They have to be: the op's assigned version and the rewritten
+	// client queues are a single consistent step, and two concurrent applies
+	// interleaving between them would leave a queue describing a document state
+	// that never existed. It also closes the older gap where the generation was
+	// validated in one lock acquisition and the op applied after it.
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
-	if ok && entry.generation != clientGeneration {
+	if !ok {
+		s.mu.Unlock()
+		serverLog("ApplyOp REJECTED: unknown buffer %d (client %d) — the buffer was closed or "+
+			"the server restarted while a client still held it", bufID, clientID)
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	if entry.generation != clientGeneration {
 		gen, path := entry.generation, entry.buf.Path()
 		s.mu.Unlock()
 		// Logged, not just returned. A rejection here makes the client discard
@@ -446,15 +587,17 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 			bufID, path, clientGeneration, gen)
 		return fmt.Errorf("buffer %d generation mismatch: client has %d, server has %d", bufID, clientGeneration, gen)
 	}
+	buf := entry.buf
+	applied, newVersion, rebaseErr := applyRebased(entry, buf, clientID, baseVersion, []document.Op{op})
+	path := buf.Path()
+	content := buf.Content()
 	s.mu.Unlock()
-	if !ok {
-		serverLog("ApplyOp REJECTED: unknown buffer %d (client %d) — the buffer was closed or "+
-			"the server restarted while a client still held it", bufID, clientID)
-		return fmt.Errorf("unknown buffer %d", bufID)
+
+	if rebaseErr != nil {
+		serverLog("ApplyOp REJECTED: buffer %d (%q) %v", bufID, path, rebaseErr)
+		return fmt.Errorf("buffer %d: %w", bufID, rebaseErr)
 	}
 
-	op := protoToOp(protoOp, clientID)
-	newVersion := entry.buf.Apply(op)
 	s.recordClientProgress(entry, clientID, newVersion)
 
 	res, err := call.AllocResults()
@@ -463,66 +606,54 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	}
 	res.SetVersion(newVersion)
 
-	path := entry.buf.Path()
-	content := entry.buf.Content()
 	go s.lspMgr.DidChange(path, content)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
-
-	// Notify edit-event handlers when the line count changed.
-	var lineDelta int32
-	var atLine uint32
-	switch op.Type {
-	case document.OpInsert:
-		delta := int32(strings.Count(op.InsertText, "\n"))
-		if delta != 0 {
-			lineDelta = delta
-			atLine = uint32(op.InsertLine)
-		}
-	case document.OpDelete:
-		delta := int32(op.FromLine - op.ToLine) // negative: lines removed
-		if delta != 0 {
-			lineDelta = delta
-			atLine = uint32(op.FromLine)
-		}
-	}
-	if lineDelta != 0 {
-		go s.pluginMgr.DispatchEditEvent(context.Background(), bufID, path, atLine, lineDelta)
-	}
-
+	s.dispatchLineDeltas(bufID, path, applied)
 	return nil
 }
 
-// ApplyOps applies a batch of ops back-to-back. The atomicity guarantee is at
-// the request level: once the call arrives, every op is applied even if the
-// client disconnects mid-request — so a delete+insert pair can never be left
-// half-done by a client crash.
-func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_applyOps) error {
-	args := call.Args()
-	clientID := args.ClientId()
-	bufID := args.BufferId()
-	protoOps, err := args.Ops()
+// applyRebased rebases ops into the server's current context, applies them,
+// stamps each with the version it was applied at, and queues them for every
+// other client. It returns what was actually applied and the buffer's resulting
+// version. Callers must hold s.mu.
+//
+// The applied slice can be empty even for a non-empty input: an op whose every
+// deleted character another client had already deleted rebases away to nothing.
+// That is success, not failure — the op's intent is already satisfied — so the
+// version returned is simply the buffer's unchanged current one.
+func applyRebased(entry *bufferEntry, buf *document.Buffer, clientID, baseVersion uint64, ops []document.Op) ([]document.Op, uint64, error) {
+	rebased, err := rebaseIncoming(entry, clientID, baseVersion, ops)
 	if err != nil {
-		return err
+		// Counted only once the op is actually going to be applied: a rejected
+		// op never reaches the buffer, and reporting it as applied would have
+		// the client retire a pending entry that the server does not have.
+		return nil, buf.Version(), err
 	}
-
-	s.mu.Lock()
-	entry, ok := s.buffers[bufID]
-	s.mu.Unlock()
-	if !ok {
-		// Same reasoning as ApplyOp's rejections: the caller (an agent tool, or
-		// a client replaying a batch) gets a string it may not surface, and this
-		// is the only place that knows it happened.
-		serverLog("ApplyOps REJECTED: unknown buffer %d (client %d)", bufID, clientID)
-		return fmt.Errorf("unknown buffer %d", bufID)
+	if err := verifyExpectedText(buf, ops, rebased); err != nil {
+		// Counted only once the batch is actually going to be applied, same as
+		// the rebase rejection above: a refused batch never reaches the buffer.
+		return nil, buf.Version(), err
 	}
-	path := entry.buf.Path()
+	recordAppliedFrom(entry, clientID, len(ops))
+	applied := make([]document.Op, 0, len(rebased))
+	newVersion := buf.Version()
+	for _, r := range rebased {
+		// Version is stamped onto our copy as well as the buffer's history:
+		// the queues use it to decide what a client has acknowledged, and it
+		// has to survive any later rebasing of the queued op.
+		v := buf.Apply(r)
+		r.Version = v
+		newVersion = v
+		applied = append(applied, r)
+	}
+	broadcast(entry, clientID, applied)
+	return applied, newVersion, nil
+}
 
-	var newVersion uint64
-	for i := 0; i < protoOps.Len(); i++ {
-		op := protoToOp(protoOps.At(i), clientID)
-		newVersion = entry.buf.Apply(op)
-
-		// Notify edit-event handlers when the line count changed.
+// dispatchLineDeltas notifies plugin edit-event handlers for any op that
+// changed the line count.
+func (s *editorService) dispatchLineDeltas(bufID uint32, path string, ops []document.Op) {
+	for _, op := range ops {
 		var lineDelta int32
 		var atLine uint32
 		switch op.Type {
@@ -541,8 +672,59 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 			go s.pluginMgr.DispatchEditEvent(context.Background(), bufID, path, atLine, lineDelta)
 		}
 	}
+}
 
-	if protoOps.Len() > 0 {
+// ApplyOps applies a batch of ops back-to-back. The atomicity guarantee is at
+// the request level: once the call arrives, every op is applied even if the
+// client disconnects mid-request — so a delete+insert pair can never be left
+// half-done by a client crash.
+func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_applyOps) error {
+	args := call.Args()
+	clientID := args.ClientId()
+	bufID := args.BufferId()
+	clientGeneration := args.Generation()
+	baseVersion := args.BaseVersion()
+	protoOps, err := args.Ops()
+	if err != nil {
+		return err
+	}
+	ops := make([]document.Op, protoOps.Len())
+	for i := range ops {
+		ops[i] = protoToOp(protoOps.At(i), clientID)
+	}
+
+	// One critical section, for the same reason as ApplyOp's — and here it also
+	// delivers the batch's stated guarantee, that a paired delete+insert can
+	// never be observed half-applied.
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	if !ok {
+		s.mu.Unlock()
+		// Same reasoning as ApplyOp's rejections: the caller (an agent tool, or
+		// a client replaying a batch) gets a string it may not surface, and this
+		// is the only place that knows it happened.
+		serverLog("ApplyOps REJECTED: unknown buffer %d (client %d)", bufID, clientID)
+		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	if entry.generation != clientGeneration {
+		gen, path := entry.generation, entry.buf.Path()
+		s.mu.Unlock()
+		serverLog("ApplyOps REJECTED: buffer %d (%q) generation mismatch: client has %d, server has %d",
+			bufID, path, clientGeneration, gen)
+		return fmt.Errorf("buffer %d generation mismatch: client has %d, server has %d", bufID, clientGeneration, gen)
+	}
+	buf := entry.buf
+	applied, newVersion, rebaseErr := applyRebased(entry, buf, clientID, baseVersion, ops)
+	path := buf.Path()
+	content := buf.Content()
+	s.mu.Unlock()
+
+	if rebaseErr != nil {
+		serverLog("ApplyOps REJECTED: buffer %d (%q) %v", bufID, path, rebaseErr)
+		return fmt.Errorf("buffer %d: %w", bufID, rebaseErr)
+	}
+
+	if len(ops) > 0 {
 		s.recordClientProgress(entry, clientID, newVersion)
 	}
 
@@ -552,10 +734,10 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 	}
 	res.SetVersion(newVersion)
 
-	content := entry.buf.Content()
 	go s.lspMgr.DidChange(path, content)
 	s.lintMgr.RunOnEdit(path, content)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
+	s.dispatchLineDeltas(bufID, path, applied)
 	return nil
 }
 
@@ -593,6 +775,7 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 				newBuf.MarkDirty()
 				entry.buf = newBuf
 				entry.generation++
+				resetOutgoing(entry)
 				baseBuf = newBuf
 				baseVersion = newBuf.Version()
 				content = formatted
@@ -710,6 +893,7 @@ func (s *editorService) SaveAs(_ context.Context, call proto.EditorService_saveA
 		s.addPathWatch(newPath)
 	}
 	entry.buf = document.New(newPath, content)
+	resetOutgoing(entry)
 	entry.buf.SetClean()
 	entry.canonPath = canonicalPath(newPath)
 	entry.generation++
@@ -753,6 +937,7 @@ func (s *editorService) CloseBuffer(_ context.Context, call proto.EditorService_
 	if entry, ok := s.buffers[bufID]; ok {
 		delete(entry.clients, clientID)
 		delete(entry.sinceByClient, clientID)
+		delete(entry.outgoing, clientID)
 		if len(entry.clients) == 0 {
 			removedPath = entry.buf.Path()
 			delete(s.buffers, bufID)

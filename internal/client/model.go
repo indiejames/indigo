@@ -1408,6 +1408,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.clampCursor()
+		// Search results are derived from the buffer, so a remote edit can
+		// invalidate them — both the positions and the text those positions
+		// cover. Re-derive rather than leaving a highlight over characters that
+		// no longer match.
+		m.refreshSearchMatches()
 		m = m.shiftLSPOverlayLines(max(atLine, 0), delta)
 		m, refreshCmd := m.scheduleLSPOverlayRefresh()
 		return m, tea.Batch(m.reparseHighlight(), refreshCmd)

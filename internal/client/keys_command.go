@@ -128,6 +128,61 @@ func (m Model) handleSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// refreshSearchMatches recomputes the current search against the buffer without
+// moving the cursor, for when the buffer changed underneath rather than because
+// the user typed.
+//
+// Search results are derived state: a match is a position *and* the text at it,
+// and a remote edit can invalidate either. Leaving them alone leaves a highlight
+// sitting over characters that no longer match what was searched for — insert an
+// "a" into "main" from another window and the highlight still covers four
+// characters, now reading "maai". Shifting the positions would not be enough,
+// because the matched text itself changed; the only correct answer is to
+// re-derive them.
+//
+// searchIdx is preserved where it still points at something, so an active
+// search does not jump to a different match because someone else typed.
+func (m *Model) refreshSearchMatches() {
+	if m.searchQuery == "" {
+		return
+	}
+	prev := -1
+	if m.searchIdx >= 0 && m.searchIdx < len(m.searchMatches) {
+		prev = m.searchMatches[m.searchIdx].line
+	}
+
+	pattern, replacement, isReplace := splitSearchQuery(m.searchQuery)
+	repl := ""
+	if isReplace {
+		repl = replacement
+	}
+	var bounds *substituteBounds
+	if m.sel != nil {
+		from, to := m.sel.ordered()
+		bounds = &substituteBounds{from: from, to: to}
+	}
+	matches, err := findSubstituteMatches(m.buf, pattern, repl, bounds)
+	if err != nil {
+		// Leave searchErr alone: the pattern did not change, so a failure here
+		// is not something the user just did and has nothing new to report.
+		m.searchMatches = nil
+		m.searchIdx = -1
+		return
+	}
+	m.searchMatches = matches
+	switch {
+	case len(matches) == 0:
+		m.searchIdx = -1
+	case prev >= 0:
+		m.searchIdx = matchIdxAtOrAfter(matches, prev, 0)
+		if m.searchIdx < 0 {
+			m.searchIdx = 0
+		}
+	case m.searchIdx >= len(matches):
+		m.searchIdx = len(matches) - 1
+	}
+}
+
 // updateSearch reparses searchQuery (see splitSearchQuery) and recomputes
 // matches — and, once a search-and-replace delimiter has been typed, each
 // match's replacement text — scoped to the active selection if one exists,

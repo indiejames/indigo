@@ -3,6 +3,8 @@ package client
 import (
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/indiejames/indigo/internal/document"
 )
 
@@ -69,5 +71,73 @@ func TestUndoSnapshotIsNotShifted(t *testing.T) {
 
 	if got := m2.undoStack[0].before.cursor.Col; got != 5 {
 		t.Errorf("stored cursor col = %d, want it left at 5", got)
+	}
+}
+
+// collectMsgs runs a command, unwrapping tea.Batch, and returns every message
+// it produces. Used to assert on a message emitted alongside several others.
+func collectMsgs(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var out []tea.Msg
+		for _, c := range batch {
+			out = append(out, collectMsgs(c)...)
+		}
+		return out
+	}
+	if msg == nil {
+		return nil
+	}
+	return []tea.Msg{msg}
+}
+
+// TestRemoteEditMsgIsEmittedForLineCountChanges covers the wiring, not the
+// handler. internal/app's test feeds RemoteEditMsg in directly, so it passes
+// just as happily if nothing ever sends one — and a jump list that silently
+// stops being adjusted produces no error, only a jump that lands in the wrong
+// place much later.
+func TestRemoteEditMsgIsEmittedForLineCountChanges(t *testing.T) {
+	m := newTestModel("one\ntwo\n")
+	m.rpc = &RPC{}
+	m.filePath = "/tmp/a.go"
+	m.generation = 1
+	m.generationKnown = true
+
+	remote := document.Op{Version: 1, Type: document.OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "new\n"}
+	_, cmd := m.Update(updatesMsg{bufID: m.bufID, ops: []document.Op{remote}, version: 1, generation: 1})
+
+	var got *RemoteEditMsg
+	for _, msg := range collectMsgs(cmd) {
+		if r, ok := msg.(RemoteEditMsg); ok {
+			got = &r
+		}
+	}
+	if got == nil {
+		t.Fatal("no RemoteEditMsg emitted for a remote edit that added a line")
+	}
+	if got.FilePath != "/tmp/a.go" || got.LineDelta != 1 || got.AtLine != 0 {
+		t.Errorf("RemoteEditMsg = %+v, want {/tmp/a.go, AtLine 0, LineDelta 1}", *got)
+	}
+}
+
+// TestRemoteEditMsgNotEmittedWithoutLineChange: an edit within one line moves no
+// jump entry, so there is nothing to tell the App about.
+func TestRemoteEditMsgNotEmittedWithoutLineChange(t *testing.T) {
+	m := newTestModel("one\ntwo\n")
+	m.rpc = &RPC{}
+	m.filePath = "/tmp/a.go"
+	m.generation = 1
+	m.generationKnown = true
+
+	remote := document.Op{Version: 1, Type: document.OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "X"}
+	_, cmd := m.Update(updatesMsg{bufID: m.bufID, ops: []document.Op{remote}, version: 1, generation: 1})
+
+	for _, msg := range collectMsgs(cmd) {
+		if _, ok := msg.(RemoteEditMsg); ok {
+			t.Error("RemoteEditMsg emitted for a single-line edit, which shifts nothing")
+		}
 	}
 }

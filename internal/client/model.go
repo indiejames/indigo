@@ -424,6 +424,22 @@ type EditRecordMsg struct {
 	UndoDepth int // undo stack depth at which this entry was created
 }
 
+// RemoteEditMsg tells the App that another client's edit changed this buffer's
+// line count, so jump-list entries below it can be shifted.
+//
+// Deliberately distinct from EditRecordMsg, which also *records* a new jump
+// destination and truncates forward history. Neither is right for a remote
+// edit: the user did not edit there, so it is not somewhere to jump back to,
+// and their forward history is still theirs. Without this the jump list simply
+// goes stale — the same class as the cursor not following a remote edit, and
+// invisible until a jump lands in the wrong place.
+type RemoteEditMsg struct {
+	FilePath  string
+	AtLine    int // adjustment boundary
+	LineDelta int // net lines added (>0) or removed (<0)
+	UndoDepth int // undo depth after the remote op was recorded
+}
+
 // UndoMsg signals the App that an undo was performed in the given buffer.
 // NewDepth is len(undoStack) after the undo; all jump entries with
 // undoDepth > NewDepth are removed.
@@ -1408,6 +1424,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.clampCursor()
+		// Tell the App to shift jump entries below the edit. Local edits do
+		// this via EditRecordMsg; remote ones emitted nothing, so the jump list
+		// silently went stale.
+		var remoteEditCmd tea.Cmd
+		if delta != 0 && m.filePath != "" {
+			rec := RemoteEditMsg{
+				FilePath: m.filePath, AtLine: max(atLine, 0),
+				LineDelta: delta, UndoDepth: len(m.undoStack),
+			}
+			remoteEditCmd = func() tea.Msg { return rec }
+		}
 		// Search results are derived from the buffer, so a remote edit can
 		// invalidate them — both the positions and the text those positions
 		// cover. Re-derive rather than leaving a highlight over characters that
@@ -1415,7 +1442,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshSearchMatches()
 		m = m.shiftLSPOverlayLines(max(atLine, 0), delta)
 		m, refreshCmd := m.scheduleLSPOverlayRefresh()
-		return m, tea.Batch(m.reparseHighlight(), refreshCmd)
+		return m, tea.Batch(m.reparseHighlight(), refreshCmd, remoteEditCmd)
 
 	case saveAsPromptMsg:
 		s := m.filePath

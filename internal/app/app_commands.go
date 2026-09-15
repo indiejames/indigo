@@ -75,12 +75,21 @@ func (a *App) applyEditRecord(msg client.EditRecordMsg) {
 	if msg.FilePath == "" {
 		return
 	}
-	if msg.LineDelta != 0 {
-		atLine := msg.AtLine
-		delta := msg.LineDelta
+	a.shiftJumpEntries(msg.FilePath, msg.AtLine, msg.LineDelta, msg.UndoDepth)
+	a.recordEdit(msg.FilePath, msg.Line, msg.Col, msg.UndoDepth)
+}
+
+// shiftJumpEntries moves jump entries in filePath to account for a line-count
+// change at atLine, without recording a new entry. Shared by a local edit (via
+// applyEditRecord, which also records one) and a remote edit (which must not).
+func (a *App) shiftJumpEntries(filePath string, atLine, delta, undoDepth int) {
+	if filePath == "" {
+		return
+	}
+	if delta != 0 {
 		n := 0
 		for _, e := range a.jumpList {
-			if e.filePath != msg.FilePath {
+			if e.filePath != filePath {
 				a.jumpList[n] = e
 				n++
 				continue
@@ -94,7 +103,7 @@ func (a *App) applyEditRecord(msg client.EditRecordMsg) {
 					// Active entry inside the deleted range: suspend it rather
 					// than discarding. It will be restored if the delete is undone.
 					e.active = false
-					e.deactivatedDepth = msg.UndoDepth
+					e.deactivatedDepth = undoDepth
 				}
 				// Inactive entries in the range keep their stored position and
 				// deactivatedDepth; they're already suspended by an earlier delete.
@@ -111,7 +120,6 @@ func (a *App) applyEditRecord(msg client.EditRecordMsg) {
 		}
 		a.jumpList = a.jumpList[:n]
 	}
-	a.recordEdit(msg.FilePath, msg.Line, msg.Col, msg.UndoDepth)
 }
 
 // recordEdit appends {filePath, line, col, undoDepth} to the jump list.

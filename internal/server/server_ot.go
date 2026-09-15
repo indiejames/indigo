@@ -147,6 +147,14 @@ func resetOutgoing(entry *bufferEntry) {
 	entry.outgoing = nil
 	entry.prunedThrough = nil
 	entry.appliedFromClient = nil
+	// sinceByClient is counted in the replaced buffer's version space too. It
+	// feeds TrimHistory's watermark rather than the rebase guard, so a stale
+	// value here fails the other way round: too *high*, so it stops holding
+	// history back and lets ops be reclaimed that a client which has not polled
+	// since the swap still needs. Clearing it is conservative — an absent entry
+	// reads as 0, which blocks trimming until every client reports progress
+	// against the new buffer.
+	entry.sinceByClient = nil
 }
 
 // applyServerOriginated applies ops that did not arrive through a client's

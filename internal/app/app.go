@@ -812,6 +812,12 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.applyEditRecord(msg)
 		return a, nil
 
+	case client.RemoteEditMsg:
+		// Shift only. A remote edit moves the lines existing jump entries point
+		// at, but is not itself somewhere the user jumped from.
+		a.shiftJumpEntries(msg.FilePath, msg.AtLine, msg.LineDelta, msg.UndoDepth)
+		return a, nil
+
 	case client.JumpBackMsg:
 		return a.doJumpBack()
 

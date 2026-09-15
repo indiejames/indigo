@@ -74,9 +74,22 @@ func TestGetUpdatesRecordsProgressOnBothReturnPaths(t *testing.T) {
 		t.Errorf("after empty poll: sinceByClient[1] = %d, want 0", got)
 	}
 
-	// Path 2: a foreign op (client 2) survives the filter, so the response
+	// Path 2: a foreign op (client 2) is queued for client 1, so the response
 	// carries ops and GetUpdates takes the encoded return.
-	buf.Apply(document.Op{ClientID: 2, Type: document.OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "x"})
+	//
+	// Applied through applyServerOriginated, not buf.Apply. Delivery reads
+	// entry.outgoing, not the buffer's history, so a bare buf.Apply puts
+	// nothing in client 1's queue: the response comes back empty and
+	// GetUpdates takes the *early* return, leaving this half of the test
+	// exercising the same path as the half above it. It still passed, because
+	// both paths record progress — verified by deleting the encoded path's
+	// recordClientProgress call and watching this test stay green.
+	s.mu.Lock()
+	applyServerOriginated(entry, 2, document.Op{
+		ClientID: 2, Type: document.OpInsert,
+		InsertLine: 0, InsertCol: 0, InsertText: "x",
+	})
+	s.mu.Unlock()
 	ver := poll(0)
 	if ver != 1 {
 		t.Fatalf("after a foreign op: reported version = %d, want 1", ver)

@@ -250,6 +250,15 @@ type workspaceDiagSummaryMsg struct {
 // both checked on arrival: hover describes one position, so a result landing
 // after the cursor moved documents something the user is no longer pointing at —
 // the same defect fixItemsMsg carried, reported from real use.
+// lineShift is one edit's effect on line numbering: everything at or after
+// atLine moves by delta. A sequence of these is kept rather than a single
+// summed shift because they are not commutative with the positions they move —
+// see the updatesMsg handler.
+type lineShift struct {
+	atLine int
+	delta  int
+}
+
 type hoverMsg struct {
 	result ClientHoverResult
 	bufID  uint32
@@ -1374,7 +1383,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var inverses []document.Op
 		applied := 0
 		groupClosed := false
-		atLine, delta := -1, 0
+		var lineShifts []lineShift
 		for _, op := range msg.ops {
 			// Skip ops we have already applied. Polls are issued every
 			// 120ms with a 2s timeout and no in-flight guard, so two can
@@ -1432,11 +1441,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if r.Type == document.OpInsert || r.Type == document.OpDelete {
 					inverses = append(inverses, inverseOp(m, r)) // must precede Apply
 				}
-				al, d := opLineDelta(r)
-				if atLine < 0 || al < atLine {
-					atLine = al
+				// Recorded per op, in application order, not collapsed into a
+				// minimum line and a net delta. Collapsing is wrong for the
+				// same reason it was wrong for multicursor and for undo/redo:
+				// an overlay (or jump entry) sitting *between* two ops' edit
+				// points is moved by one of them and not the other, and a
+				// single combined shift cannot express that. Two ops that
+				// cancel in total — one inserting a line, another deleting one
+				// lower down — collapse to a delta of zero and shift nothing,
+				// leaving everything between them a line out.
+				if al, d := opLineDelta(r); d != 0 {
+					lineShifts = append(lineShifts, lineShift{atLine: al, delta: d})
 				}
-				delta += d
 				m.buf.Apply(r)
 				applied++
 			}
@@ -1471,22 +1487,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Tell the App to shift jump entries below the edit. Local edits do
 		// this via EditRecordMsg; remote ones emitted nothing, so the jump list
 		// silently went stale.
-		var remoteEditCmd tea.Cmd
-		if delta != 0 && m.filePath != "" {
-			rec := RemoteEditMsg{
-				FilePath: m.filePath, AtLine: max(atLine, 0),
-				LineDelta: delta, UndoDepth: len(m.undoStack),
+		// One message per shift, in order. The jump list adjusts entries the
+		// same way LSP overlays are adjusted, so it has the same problem with a
+		// combined shift, and the App applies each message at its own edit
+		// point rather than trying to reconstruct them from a total.
+		var remoteEditCmds []tea.Cmd
+		if m.filePath != "" {
+			for _, s := range lineShifts {
+				rec := RemoteEditMsg{
+					FilePath: m.filePath, AtLine: max(s.atLine, 0),
+					LineDelta: s.delta, UndoDepth: len(m.undoStack),
+				}
+				remoteEditCmds = append(remoteEditCmds, func() tea.Msg { return rec })
 			}
-			remoteEditCmd = func() tea.Msg { return rec }
 		}
 		// Search results are derived from the buffer, so a remote edit can
 		// invalidate them — both the positions and the text those positions
 		// cover. Re-derive rather than leaving a highlight over characters that
 		// no longer match.
 		m.refreshSearchMatches()
-		m = m.shiftLSPOverlayLines(max(atLine, 0), delta)
+		for _, s := range lineShifts {
+			m = m.shiftLSPOverlayLines(max(s.atLine, 0), s.delta)
+		}
 		m, refreshCmd := m.scheduleLSPOverlayRefresh()
-		return m, tea.Batch(m.reparseHighlight(), refreshCmd, remoteEditCmd)
+		return m, tea.Batch(append([]tea.Cmd{m.reparseHighlight(), refreshCmd}, remoteEditCmds...)...)
 
 	case saveAsPromptMsg:
 		s := m.filePath

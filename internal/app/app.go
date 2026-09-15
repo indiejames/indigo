@@ -773,7 +773,22 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if idx < 0 {
 			return a, nil
 		}
-		if !msg.Dirty {
+		// Both must agree the buffer is clean before reloading without asking.
+		//
+		// msg.Dirty is the server's answer, sampled when it dispatched this
+		// notification, and the fan-out is concurrent with its own per-client
+		// timeout — so two external writes can be reported out of order, and an
+		// older dirty=false can arrive after the user has started typing.
+		// Acting on it alone silently discards their unsaved edits, since this
+		// branch reloads with no prompt. This client's own buffer is the
+		// authority on its unsaved state and is read here, at handling time,
+		// which no ordering of the server's messages can invalidate.
+		//
+		// The server's answer still matters and is still required: another
+		// window may hold unsaved changes to the same buffer that this one
+		// cannot see. A stale dirty=true only costs a prompt that could have
+		// been skipped, which is the harmless direction.
+		if !msg.Dirty && !a.buffers[idx].Dirty() {
 			// Buffer is clean — reload silently.
 			appLog("FileChangedMsg: calling doReloadBuffer(%d)", idx)
 			return a, a.doReloadBuffer(idx)

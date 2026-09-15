@@ -183,10 +183,35 @@ func resetOutgoing(entry *bufferEntry) {
 // because there is no rollback: a check interleaved with the applies could
 // refuse a batch it had already half-written.
 func verifyExpectedText(buf *document.Buffer, input, rebased []document.Op) error {
+	// Counted per distinct expectation text rather than compared one-to-one.
+	// Transform carries ExpectText onto both halves of a split, which is what
+	// makes "more than one survivor" mean "someone edited inside it" — but a
+	// batch carrying the same expectation twice (two occurrences of one string)
+	// would then see both its survivors against each expectation and be
+	// rejected as a split, refusing work that is entirely valid.
+	//
+	// Comparing counts distinguishes the cases that actually arise: as many
+	// survivors as expectations means each one came through whole. It does not
+	// make the match unambiguous — one expectation cancelled while another
+	// splits leaves the counts equal — and closing that needs an identity on
+	// Op, carried through the transform and across the wire. Not worth a schema
+	// change for a case no caller can currently produce: every batch that sets
+	// ExpectText today carries exactly one delete.
+	wantCount := make(map[string]int)
+	for _, want := range input {
+		if want.Type == document.OpDelete && want.ExpectText != "" {
+			wantCount[want.ExpectText]++
+		}
+	}
+	seen := make(map[string]bool)
 	for _, want := range input {
 		if want.Type != document.OpDelete || want.ExpectText == "" {
 			continue
 		}
+		if seen[want.ExpectText] {
+			continue // already checked every survivor for this text
+		}
+		seen[want.ExpectText] = true
 		var survivors []document.Op
 		for _, op := range rebased {
 			if op.Type == document.OpDelete && op.ExpectText == want.ExpectText {
@@ -197,24 +222,39 @@ func verifyExpectedText(buf *document.Buffer, input, rebased []document.Op) erro
 		case len(survivors) == 0:
 			return fmt.Errorf("text %q is no longer present: another client removed it "+
 				"since it was read", truncateForError(want.ExpectText))
-		case len(survivors) > 1:
+		case len(survivors) < wantCount[want.ExpectText]:
+			return fmt.Errorf("text %q is no longer present at every place this edit "+
+				"expected it: another client removed some of them since it was read",
+				truncateForError(want.ExpectText))
+		case len(survivors) > wantCount[want.ExpectText]:
 			return fmt.Errorf("text %q was edited by another client since it was read, "+
 				"so this edit would apply to only part of it", truncateForError(want.ExpectText))
 		}
-		op := survivors[0]
-		actual, err := extractRange(buf, op.FromLine, op.FromCol, op.ToLine, op.ToCol)
-		if err != nil {
-			return fmt.Errorf("cannot verify expected text at %d:%d-%d:%d: %w",
-				op.FromLine, op.FromCol, op.ToLine, op.ToCol, err)
+		// Every survivor is checked, not just the first: with more than one
+		// expectation of this text there is more than one range to confirm.
+		for _, op := range survivors {
+			if err := verifyRangeText(buf, op); err != nil {
+				return err
+			}
 		}
-		if actual != op.ExpectText {
-			// Both texts are reported, truncated: the caller's recovery is to
-			// re-read and recompute, and knowing what is actually there tells it
-			// whether that is worth doing or whether its premise is stale.
-			return fmt.Errorf("text at %d:%d-%d:%d has changed since it was read: expected %q, found %q",
-				op.FromLine, op.FromCol, op.ToLine, op.ToCol,
-				truncateForError(op.ExpectText), truncateForError(actual))
-		}
+	}
+	return nil
+}
+
+// verifyRangeText confirms the text actually at op's range is what op expected.
+func verifyRangeText(buf *document.Buffer, op document.Op) error {
+	actual, err := extractRange(buf, op.FromLine, op.FromCol, op.ToLine, op.ToCol)
+	if err != nil {
+		return fmt.Errorf("cannot verify expected text at %d:%d-%d:%d: %w",
+			op.FromLine, op.FromCol, op.ToLine, op.ToCol, err)
+	}
+	if actual != op.ExpectText {
+		// Both texts are reported, truncated: the caller's recovery is to
+		// re-read and recompute, and knowing what is actually there tells it
+		// whether that is worth doing or whether its premise is stale.
+		return fmt.Errorf("text at %d:%d-%d:%d has changed since it was read: expected %q, found %q",
+			op.FromLine, op.FromCol, op.ToLine, op.ToCol,
+			truncateForError(op.ExpectText), truncateForError(actual))
 	}
 	return nil
 }

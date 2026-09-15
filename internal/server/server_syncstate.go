@@ -245,6 +245,13 @@ func (s *editorService) CheckBufferConsistency(ctx context.Context, call proto.E
 			select {
 			case r := <-ch:
 				answers[r.j] = r.a
+			case <-ctx.Done():
+				// The collect deadline alone is not enough. It is per buffer, so
+				// a cancelled caller would still wait it out once for every
+				// buffer in the report before returning. The launched goroutines
+				// are left to finish into the buffered channel, as they already
+				// are on the deadline path.
+				return ctx.Err()
 			case <-deadline:
 				break collect // whoever hasn't answered is reported as not having
 			}

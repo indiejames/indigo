@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -211,9 +210,28 @@ func execReportBundle(ctx context.Context, rpc *client.RPC, workDir string, in r
 	// Written into the log directory rather than the workspace: a bundle is
 	// throwaway diagnostic output and has no business turning up in someone's
 	// git status.
-	name := filepath.Join(debuglog.Dir(), "indigo-report-"+time.Now().Format("20060102-150405")+".txt")
-	if err := os.WriteFile(name, []byte(b.String()), 0o600); err != nil {
-		return fmt.Sprintf("cannot write bundle: %v", err), true
+	// os.CreateTemp rather than os.WriteFile to a name built from the clock.
+	// That name is entirely predictable and this directory is os.TempDir(),
+	// which on a multi-user Linux box is a shared /tmp — the same reasoning
+	// that makes debuglog open its files O_NOFOLLOW. CreateTemp opens with
+	// O_CREATE|O_EXCL and a random suffix, so it cannot be made to follow a
+	// symlink another user planted or to append into a file they pre-created.
+	// It also removes the collision between two bundles written in one second.
+	// Named separately from err: that one still holds the log-read result,
+	// which the summary below reports on.
+	f, createErr := os.CreateTemp(debuglog.Dir(), "indigo-report-"+time.Now().Format("20060102-150405")+"-*.txt")
+	if createErr != nil {
+		return fmt.Sprintf("cannot write bundle: %v", createErr), true
+	}
+	name := f.Name()
+	if _, writeErr := f.WriteString(b.String()); writeErr != nil {
+		f.Close() //nolint:errcheck
+		return fmt.Sprintf("cannot write bundle: %v", writeErr), true
+	}
+	// Close is checked: a write can fail on flush, and reporting a path that
+	// holds a truncated bundle is worse than reporting the failure.
+	if closeErr := f.Close(); closeErr != nil {
+		return fmt.Sprintf("cannot write bundle: %v", closeErr), true
 	}
 
 	summary := fmt.Sprintf("wrote %s (%d bytes)\n  buffers: %d\n  log lines: %d (last %s)",

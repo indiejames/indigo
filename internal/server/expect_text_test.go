@@ -137,3 +137,71 @@ func TestExpectedTextIgnoredWhenAbsent(t *testing.T) {
 		t.Errorf("content = %q, want %q", got, "alpha  gamma\n")
 	}
 }
+
+// TestVerifyExpectedTextAllowsRepeatedExpectations covers a batch carrying the
+// same expected text twice — two occurrences of one string being replaced
+// together.
+//
+// Transform carries ExpectText onto both halves when a delete splits, which is
+// what makes "more than one survivor" mean "someone edited inside it". Matching
+// survivors by text alone then counts the *other* expectation's delete as a
+// split of this one, and refuses a batch in which nothing is wrong.
+//
+// No caller can produce this today — every batch that sets ExpectText carries
+// exactly one delete — so this guards the invariant rather than a live path.
+func TestVerifyExpectedTextAllowsRepeatedExpectations(t *testing.T) {
+	buf := document.New("a.go", "foo bar foo\n")
+
+	// Two deletes of "foo", at columns 0 and 8. Nothing concurrent happened, so
+	// rebasing left them exactly as sent.
+	ops := []document.Op{
+		{Type: document.OpDelete, FromLine: 0, FromCol: 0, ToLine: 0, ToCol: 3, ExpectText: "foo"},
+		{Type: document.OpDelete, FromLine: 0, FromCol: 8, ToLine: 0, ToCol: 11, ExpectText: "foo"},
+	}
+
+	if err := verifyExpectedText(buf, ops, ops); err != nil {
+		t.Fatalf("a batch replacing two occurrences of one string was refused: %v", err)
+	}
+}
+
+// TestVerifyExpectedTextStillDetectsASplitAmongRepeats is the complement: with
+// two expectations of one text, three survivors still means one of them was
+// split by a concurrent edit, and the batch must still be refused.
+func TestVerifyExpectedTextStillDetectsASplitAmongRepeats(t *testing.T) {
+	buf := document.New("a.go", "foo bar foo\n")
+	input := []document.Op{
+		{Type: document.OpDelete, FromLine: 0, FromCol: 0, ToLine: 0, ToCol: 3, ExpectText: "foo"},
+		{Type: document.OpDelete, FromLine: 0, FromCol: 8, ToLine: 0, ToCol: 11, ExpectText: "foo"},
+	}
+	rebased := append(append([]document.Op{}, input...), document.Op{
+		Type: document.OpDelete, FromLine: 0, FromCol: 4, ToLine: 0, ToCol: 5, ExpectText: "foo",
+	})
+
+	err := verifyExpectedText(buf, input, rebased)
+	if err == nil {
+		t.Fatal("a split among repeated expectations was accepted")
+	}
+	if !strings.Contains(err.Error(), "only part of it") {
+		t.Errorf("error = %q, want it to report a partial application", err)
+	}
+}
+
+// TestVerifyExpectedTextDetectsOneOfSeveralRemoved covers the other direction:
+// two expectations, one survivor. One of the two occurrences is gone, so the
+// batch would apply to only half of what it described.
+func TestVerifyExpectedTextDetectsOneOfSeveralRemoved(t *testing.T) {
+	buf := document.New("a.go", "foo bar foo\n")
+	input := []document.Op{
+		{Type: document.OpDelete, FromLine: 0, FromCol: 0, ToLine: 0, ToCol: 3, ExpectText: "foo"},
+		{Type: document.OpDelete, FromLine: 0, FromCol: 8, ToLine: 0, ToCol: 11, ExpectText: "foo"},
+	}
+	rebased := input[:1]
+
+	err := verifyExpectedText(buf, input, rebased)
+	if err == nil {
+		t.Fatal("a batch missing one of its two expectations was accepted")
+	}
+	if !strings.Contains(err.Error(), "every place") {
+		t.Errorf("error = %q, want it to say not every occurrence survived", err)
+	}
+}

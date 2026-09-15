@@ -48,7 +48,13 @@ func (s *editorService) MoveTextToFile(_ context.Context, call proto.EditorServi
 		s.mu.Unlock()
 		return err
 	}
-	applyServerOriginated(entry, clientID, document.Op{
+	// pluginClientID, not clientID: the exclusion argument means "this client
+	// already has the op locally", which is true of an op a client sent via
+	// ApplyOp and false here — the server computed and applied this delete, and
+	// the initiating client only asked for it. Excluding that client left the
+	// text on screen in the very window that requested the move, diverging from
+	// the server until something forced a resync.
+	applyServerOriginated(entry, pluginClientID, document.Op{
 		ClientID: clientID,
 		Type:     document.OpDelete,
 		FromLine: fromLine, FromCol: fromCol,
@@ -156,7 +162,11 @@ func (s *editorService) appendTextToFile(clientID uint64, path, text string) err
 		}
 	}
 	if entry != nil {
-		applyServerOriginated(entry, clientID, appendOpsForBuffer(entry.buf, clientID, text)...)
+		// pluginClientID for the same reason as the delete in MoveTextToFile:
+		// this append is the server's own work, so no client already holds it —
+		// including the one that asked, which may well have the destination
+		// file open in another tab.
+		applyServerOriginated(entry, pluginClientID, appendOpsForBuffer(entry.buf, clientID, text)...)
 		content := entry.buf.Content()
 		s.mu.Unlock()
 		go s.lspMgr.DidChange(path, content)

@@ -603,3 +603,39 @@ func TestStartSearchReplaceSearchUsesIncludeExclude(t *testing.T) {
 		t.Errorf("results = %+v, want only main.go", results)
 	}
 }
+
+// TestReplaceOpsCarryTheExpectedText is a regression test: the delete built for
+// a search-and-replace hit had no ExpectText, so the only staleness check on
+// this path was the generation, which catches a wholesale buffer swap and
+// nothing else.
+//
+// Coordinates from a grep hit rebase correctly past an ordinary concurrent
+// edit — that is what OT is for — and the delete then removes whatever now
+// occupies the range. Right place, wrong text, no error. Carrying the matched
+// text through the transform is what turns that into a refusal.
+func TestReplaceOpsCarryTheExpectedText(t *testing.T) {
+	del, ins := replaceOpsFor(3, 7, "oldName", "newName")
+
+	if del.ExpectText != "oldName" {
+		t.Errorf("delete ExpectText = %q, want %q — without it a stale grep hit is "+
+			"applied to whatever now sits at those coordinates", del.ExpectText, "oldName")
+	}
+	if del.FromLine != 3 || del.FromCol != 7 || del.ToLine != 3 || del.ToCol != 14 {
+		t.Errorf("delete range = %d:%d-%d:%d, want 3:7-3:14",
+			del.FromLine, del.FromCol, del.ToLine, del.ToCol)
+	}
+	if ins.InsertLine != 3 || ins.InsertCol != 7 || ins.InsertText != "newName" {
+		t.Errorf("insert = %d:%d %q, want 3:7 %q",
+			ins.InsertLine, ins.InsertCol, ins.InsertText, "newName")
+	}
+}
+
+// TestReplaceOpsExpectTextCountsRunes guards the range against multibyte text:
+// columns here are runes, so a byte length would overshoot and the expectation
+// would never match.
+func TestReplaceOpsExpectTextCountsRunes(t *testing.T) {
+	del, _ := replaceOpsFor(0, 0, "héllo", "x")
+	if del.ToCol != 5 {
+		t.Errorf("ToCol = %d, want 5 runes (not bytes)", del.ToCol)
+	}
+}

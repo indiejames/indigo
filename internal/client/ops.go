@@ -69,7 +69,7 @@ func (m Model) sendToServer(op document.Op) (Model, tea.Cmd) {
 	m.nextSeq++
 	seq := m.nextSeq
 	m.pending = append(m.pending, pendingOp{seq: seq, ops: []document.Op{op}})
-	needsDrain := m.sendQ.enqueue(queuedSend{
+	needsDrain, epoch := m.sendQ.enqueue(queuedSend{
 		seq:        seq,
 		bufID:      m.bufID,
 		op:         op,
@@ -83,7 +83,7 @@ func (m Model) sendToServer(op document.Op) (Model, tea.Cmd) {
 	if !needsDrain {
 		return m, nil
 	}
-	return m, m.drainCmd()
+	return m, m.drainCmd(epoch)
 }
 
 // pendingOp is one op this client has sent whose effect the server has not yet

@@ -32,7 +32,7 @@ func (c *otClient) undo(t *testing.T) {
 // where — drainCmd pops from the shared queue.
 func (c *otClient) drainNow(t *testing.T) {
 	t.Helper()
-	cmd := c.m.drainCmd()
+	cmd := c.m.drainCmd(c.m.sendQ.currentEpoch())
 	c.runCmd(t, func() any { return cmd() })
 }
 

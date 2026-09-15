@@ -146,9 +146,14 @@ func (m *Model) refreshSearchMatches() {
 	if m.searchQuery == "" {
 		return
 	}
-	prev := -1
+	// Line *and* column: several matches can share a line, and resolving with
+	// the line alone always lands on the first of them, so a remote edit
+	// anywhere in the buffer would quietly move the selection to a different
+	// occurrence on the same line.
+	prevLine, prevCol := -1, 0
 	if m.searchIdx >= 0 && m.searchIdx < len(m.searchMatches) {
-		prev = m.searchMatches[m.searchIdx].line
+		prevLine = m.searchMatches[m.searchIdx].line
+		prevCol = m.searchMatches[m.searchIdx].col
 	}
 
 	pattern, replacement, isReplace := splitSearchQuery(m.searchQuery)
@@ -173,8 +178,8 @@ func (m *Model) refreshSearchMatches() {
 	switch {
 	case len(matches) == 0:
 		m.searchIdx = -1
-	case prev >= 0:
-		m.searchIdx = matchIdxAtOrAfter(matches, prev, 0)
+	case prevLine >= 0:
+		m.searchIdx = matchIdxAtOrAfter(matches, prevLine, prevCol)
 		if m.searchIdx < 0 {
 			m.searchIdx = 0
 		}

@@ -519,10 +519,23 @@ func (m Model) applyFixCmd(idx int) tea.Cmd {
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			// baseVersion advances between the two: the insert's coordinates
-			// are expressed against the document *after* the delete, so it must
-			// be rebased from the version the delete produced, not from the one
-			// this pair started at.
+			// Both ops carry the same baseVersion, and it does not advance
+			// between them.
+			//
+			// baseVersion is not "the document these coordinates follow on
+			// from" — it is "the version this client has seen", which is what
+			// the server uses to decide which queued ops the incoming one must
+			// still be rebased past. ApplyOp returns the buffer version after
+			// applying, which counts other clients' ops too; adopting it here
+			// would claim we had seen a concurrent edit we have not, and the
+			// server would drop it from the rebase set and land the insert at a
+			// position that does not account for it.
+			//
+			// Nothing is lost by not advancing it. The server rebases an
+			// incoming op past other clients' queued ops but never past the
+			// sender's own, so the insert is not rebased past our delete under
+			// either value — and it does not need to be: it is positioned at
+			// the delete's start, which the delete does not move.
 			baseVersion := m.version
 			if item.FromLine != item.ToLine || item.FromCol != item.ToCol {
 				delOp := document.Op{
@@ -533,11 +546,9 @@ func (m Model) applyFixCmd(idx int) tea.Cmd {
 					ToCol:    item.ToCol,
 					ClientID: m.rpc.ClientID(),
 				}
-				v, err := m.rpc.ApplyOp(ctx, m.bufID, delOp, m.generation, baseVersion)
-				if err != nil {
+				if _, err := m.rpc.ApplyOp(ctx, m.bufID, delOp, m.generation, baseVersion); err != nil {
 					return errorMsg{err}
 				}
-				baseVersion = v
 			}
 			insOp := document.Op{
 				Type:       document.OpInsert,

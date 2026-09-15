@@ -28,6 +28,18 @@ type sendQueue struct {
 	mu       sync.Mutex
 	queued   []queuedSend
 	draining bool
+	// epoch invalidates a drain that is still running when discard happens.
+	//
+	// discard clears the draining flag, but it cannot stop the goroutine that
+	// was draining — that goroutine is typically parked in ApplyOp. Without an
+	// epoch the next enqueue sees draining == false, starts a second drain, and
+	// two goroutines then pop from one queue and send concurrently. That
+	// destroys the ordering this whole type exists to provide, and it happens
+	// on exactly the paths discard is for: a failed send forcing a resync, or a
+	// wholesale buffer swap, both of which are immediately followed by new
+	// edits. A drain compares the epoch it started in before every step and
+	// stops as soon as it is stale.
+	epoch uint64
 }
 
 type queuedSend struct {
@@ -41,23 +53,29 @@ type queuedSend struct {
 // enqueue adds an op to the tail and reports whether the caller must start a
 // drain. Only one drain runs at a time; an enqueue arriving during one is
 // picked up by the drain already in progress.
-func (q *sendQueue) enqueue(s queuedSend) (needsDrain bool) {
+func (q *sendQueue) enqueue(s queuedSend) (needsDrain bool, epoch uint64) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.queued = append(q.queued, s)
 	if q.draining {
-		return false
+		return false, q.epoch
 	}
 	q.draining = true
-	return true
+	return true, q.epoch
 }
 
 // next pops the head, or reports done and clears the draining flag. Both happen
 // under one lock hold: checking for emptiness and releasing the flag separately
 // would let an op enqueued in between sit forever with nobody draining it.
-func (q *sendQueue) next() (queuedSend, bool) {
+// A drain from a superseded epoch gets nothing and does not touch the flag: the
+// epoch it belonged to is over, and the drain that replaced it owns draining
+// now. Clearing the flag here would strand whatever that newer drain has queued.
+func (q *sendQueue) next(epoch uint64) (queuedSend, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if epoch != q.epoch {
+		return queuedSend{}, false
+	}
 	if len(q.queued) == 0 {
 		q.draining = false
 		return queuedSend{}, false
@@ -90,6 +108,35 @@ func (q *sendQueue) discard() {
 	defer q.mu.Unlock()
 	q.queued = nil
 	q.draining = false
+	// Retires any drain still running. It cannot be stopped directly — it is
+	// probably parked in ApplyOp — so it is made to recognise itself as stale
+	// instead, before it can send another op or report a failure that belongs
+	// to content the client has already thrown away.
+	q.epoch++
+}
+
+// currentEpoch reports the live epoch, for a caller that drains without having
+// just enqueued — the test harness, which flushes the shared queue directly
+// rather than through the command an enqueue handed back.
+func (q *sendQueue) currentEpoch() uint64 {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.epoch
+}
+
+// retire is discard, but only if epoch is still the current one. It reports
+// whether it acted, which is how a failing drain learns whether the failure it
+// is holding still refers to anything the client cares about.
+func (q *sendQueue) retire(epoch uint64) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if epoch != q.epoch {
+		return false
+	}
+	q.queued = nil
+	q.draining = false
+	q.epoch++
+	return true
 }
 
 // drainCmd sends queued ops in order, one round trip at a time.
@@ -103,14 +150,12 @@ func (q *sendQueue) discard() {
 // apply them at coordinates the server's content does not match — corrupting
 // the buffer instead of merely failing to update it. The failure routes into
 // the existing resync path, which is the only safe recovery.
-func (m Model) drainCmd() tea.Cmd {
+func (m Model) drainCmd(epoch uint64) tea.Cmd {
 	q := m.sendQ
 	rpc := m.rpc
-	bufID := m.bufID
-	_ = bufID
 	return func() tea.Msg {
 		for {
-			s, ok := q.next()
+			s, ok := q.next(epoch)
 			if !ok {
 				return nil
 			}
@@ -120,7 +165,14 @@ func (m Model) drainCmd() tea.Cmd {
 			if err != nil {
 				clientLog("ApplyOp FAILED buf=%d gen=%d base=%d op=%s: %v",
 					s.bufID, s.generation, s.baseVersion, describeOp(s.op), err)
-				q.discard()
+				// A failure from a superseded epoch is dropped rather than
+				// reported. Its op described content the client has already
+				// discarded, and the resync that discarded it is either done or
+				// under way — reporting it would start a second one, against a
+				// buffer that has moved on.
+				if !q.retire(epoch) {
+					return nil
+				}
 				return applyOpFailedMsg{bufID: s.bufID, err: err}
 			}
 		}

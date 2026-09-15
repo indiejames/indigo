@@ -54,12 +54,17 @@ func Read(opts ReadOptions) ([]Entry, error) {
 			}
 		}
 		entries, err := readFile(p)
-		if err != nil {
+		if err != nil && len(entries) == 0 {
 			// One unreadable file must not lose the others — a log directory
 			// shared with other users (the os.TempDir default) can easily hold
 			// a file this process can't open.
 			continue
 		}
+		// A scan error with entries already parsed is kept, not discarded.
+		// readFile returns both on purpose, and the realistic error here is a
+		// line past the 4MB scanner limit — one oversized line of plugin
+		// stderr, which would otherwise take the whole day's log down with it
+		// and hide exactly the output someone is looking for.
 		for _, e := range entries {
 			if !opts.Since.IsZero() && !e.Time.IsZero() && e.Time.Before(opts.Since) {
 				continue

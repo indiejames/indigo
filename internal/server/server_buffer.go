@@ -523,11 +523,13 @@ func (s *editorService) GetBufferSnapshot(_ context.Context, call proto.EditorSe
 // protoToOp converts a wire EditOp into a document.Op for the given client.
 func protoToOp(protoOp proto.EditOp, clientID uint64) document.Op {
 	insertText, _ := protoOp.InsertText()
+	expectText, _ := protoOp.ExpectText()
 	op := document.Op{
 		ClientID:   clientID,
 		InsertLine: int(protoOp.InsertLine()),
 		InsertCol:  int(protoOp.InsertCol()),
 		InsertText: insertText,
+		ExpectText: expectText,
 		FromLine:   int(protoOp.FromLine()),
 		FromCol:    int(protoOp.FromCol()),
 		ToLine:     int(protoOp.ToLine()),
@@ -625,6 +627,11 @@ func applyRebased(entry *bufferEntry, buf *document.Buffer, clientID, baseVersio
 		// Counted only once the op is actually going to be applied: a rejected
 		// op never reaches the buffer, and reporting it as applied would have
 		// the client retire a pending entry that the server does not have.
+		return nil, buf.Version(), err
+	}
+	if err := verifyExpectedText(buf, ops, rebased); err != nil {
+		// Counted only once the batch is actually going to be applied, same as
+		// the rebase rejection above: a refused batch never reaches the buffer.
 		return nil, buf.Version(), err
 	}
 	recordAppliedFrom(entry, clientID, len(ops))

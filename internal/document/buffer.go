@@ -34,6 +34,12 @@ type Op struct {
 	// Delete
 	FromLine, FromCol int
 	ToLine, ToCol     int
+
+	// ExpectText, when non-empty on a delete, is the text the sender believes
+	// occupies that range. The server verifies it before applying; see
+	// editor.capnp. Carried on the op rather than alongside it so it survives
+	// being rebased, which is the only point at which checking it is meaningful.
+	ExpectText string
 }
 
 // Buffer holds the text of a single file using a hybrid rope + gap buffer.

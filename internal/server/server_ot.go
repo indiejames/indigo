@@ -157,6 +157,80 @@ func resetOutgoing(entry *bufferEntry) {
 	entry.sinceByClient = nil
 }
 
+// verifyExpectedText checks that a batch carrying expectations still means what
+// its sender meant, comparing what it asked for against what rebasing left.
+// Callers must hold s.mu.
+//
+// The thing this guards is narrower than it first appears, and worth stating
+// precisely. Rebasing already protects *placement*: an op sent with the
+// baseVersion its coordinates were read at lands on the text it described, even
+// if the document moved underneath. What rebasing cannot protect is *intent*. If
+// another client already deleted that text, the op correctly transforms to
+// nothing; if they edited part of it, the op correctly splits around their
+// change. Both are right as transforms and both leave the caller's "replace this
+// exact text" silently unfulfilled — the reply says success and the edit did not
+// happen, or happened to half of it.
+//
+// So each expectation must survive rebasing as exactly one delete still covering
+// exactly that text. Anything else is reported rather than applied:
+//
+//   - no surviving delete: someone else removed the text already;
+//   - more than one: someone else edited inside it, splitting the delete;
+//   - different text at the range: the range survived but its contents did not.
+//
+// Checked after rebasing and before applying. After, because the original
+// coordinates describe a document the server may have moved past. Before,
+// because there is no rollback: a check interleaved with the applies could
+// refuse a batch it had already half-written.
+func verifyExpectedText(buf *document.Buffer, input, rebased []document.Op) error {
+	for _, want := range input {
+		if want.Type != document.OpDelete || want.ExpectText == "" {
+			continue
+		}
+		var survivors []document.Op
+		for _, op := range rebased {
+			if op.Type == document.OpDelete && op.ExpectText == want.ExpectText {
+				survivors = append(survivors, op)
+			}
+		}
+		switch {
+		case len(survivors) == 0:
+			return fmt.Errorf("text %q is no longer present: another client removed it "+
+				"since it was read", truncateForError(want.ExpectText))
+		case len(survivors) > 1:
+			return fmt.Errorf("text %q was edited by another client since it was read, "+
+				"so this edit would apply to only part of it", truncateForError(want.ExpectText))
+		}
+		op := survivors[0]
+		actual, err := extractRange(buf, op.FromLine, op.FromCol, op.ToLine, op.ToCol)
+		if err != nil {
+			return fmt.Errorf("cannot verify expected text at %d:%d-%d:%d: %w",
+				op.FromLine, op.FromCol, op.ToLine, op.ToCol, err)
+		}
+		if actual != op.ExpectText {
+			// Both texts are reported, truncated: the caller's recovery is to
+			// re-read and recompute, and knowing what is actually there tells it
+			// whether that is worth doing or whether its premise is stale.
+			return fmt.Errorf("text at %d:%d-%d:%d has changed since it was read: expected %q, found %q",
+				op.FromLine, op.FromCol, op.ToLine, op.ToCol,
+				truncateForError(op.ExpectText), truncateForError(actual))
+		}
+	}
+	return nil
+}
+
+// truncateForError shortens text for an error message. These strings are buffer
+// content and can be arbitrarily long; an error line is not the place for a
+// whole paste.
+func truncateForError(s string) string {
+	const max = 60
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
 // applyServerOriginated applies ops that did not arrive through a client's
 // ApplyOp — a plugin edit, a cross-file move, a workspace edit — and queues them
 // for delivery. It returns the buffer's resulting version. Callers must hold

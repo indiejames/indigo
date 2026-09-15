@@ -601,6 +601,23 @@ struct EditOp {
   toLine   @8 :UInt32;
   toCol    @9 :UInt32;
 
+  # expectText, when non-empty on a delete, is the text the caller believes
+  # occupies that range. The server checks it after rebasing and immediately
+  # before applying, and refuses the whole batch if it does not match.
+  #
+  # This guards a failure the transform cannot: coordinates are rebased
+  # correctly, but a caller that computed them from content it read earlier may
+  # be describing text that has since become something else. An agent tool
+  # reading a file, thinking, and then writing back offsets derived from that
+  # read is the case — the gap there is however long the thinking took, not a
+  # scheduling window. Rebased coordinates land in the right *place* and replace
+  # the wrong *thing*.
+  #
+  # Verified against the buffer as it stands before the batch, so it describes
+  # the batch's starting state. For the delete+insert pair a replace compiles
+  # to, that is exactly the intended meaning.
+  expectText @10 :Text;
+
   enum OpType {
     noop   @0;
     insert @1;

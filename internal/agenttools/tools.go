@@ -616,6 +616,13 @@ func execApplyEdits(ctx context.Context, rpc *client.RPC, ap Approver, workDir s
 			ToLine:   endLine,
 			ToCol:    endCol,
 			Version:  version,
+			// The server re-checks this after rebasing, immediately before
+			// applying. Finding old_text in `content` above is not enough on its
+			// own: that content was read before this tool call did any of its
+			// work, and a window or another agent editing in the meantime can
+			// leave the rebased coordinates pointing at something else. Without
+			// this, such an edit succeeds and replaces the wrong text.
+			ExpectText: in.OldText,
 		},
 		{
 			Type:       document.OpInsert,
@@ -626,6 +633,12 @@ func execApplyEdits(ctx context.Context, rpc *client.RPC, ap Approver, workDir s
 	}, generation, version); err != nil {
 		if weOpened {
 			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
+		}
+		if strings.Contains(err.Error(), "has changed since it was read") {
+			// Worth distinguishing from a transport failure: this one is
+			// recoverable, and says how.
+			return fmt.Sprintf("edit not applied — %s changed while this edit was being prepared: %v\n"+
+				"Re-read the file and recompute old_text before retrying.", in.Path, err), true
 		}
 		return fmt.Sprintf("edit ops failed: %v", err), true
 	}

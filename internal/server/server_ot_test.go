@@ -75,6 +75,9 @@ func sendOpGen(t *testing.T, cl proto.EditorService, clientID, generation, baseV
 			po.SetFromCol(uint32(op.FromCol))
 			po.SetToLine(uint32(op.ToLine))
 			po.SetToCol(uint32(op.ToCol))
+			if op.ExpectText != "" {
+				return po.SetExpectText(op.ExpectText)
+			}
 		}
 		return nil
 	})

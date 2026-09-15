@@ -71,6 +71,9 @@ func encodeOp(protoOp proto.EditOp, op document.Op) error {
 		protoOp.SetFromCol(uint32(op.FromCol))
 		protoOp.SetToLine(uint32(op.ToLine))
 		protoOp.SetToCol(uint32(op.ToCol))
+		if op.ExpectText != "" {
+			return protoOp.SetExpectText(op.ExpectText)
+		}
 	default:
 		protoOp.SetType(proto.EditOp_OpType_noop)
 	}

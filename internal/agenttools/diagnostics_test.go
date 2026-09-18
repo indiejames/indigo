@@ -3,6 +3,7 @@ package agenttools
 import (
 	"context"
 	"encoding/json"
+	"github.com/indiejames/indigo/internal/syncevent"
 	"strings"
 	"testing"
 	"time"
@@ -134,7 +135,7 @@ func TestBuffersWithLaggingClients(t *testing.T) {
 func TestDiagnosticToolsAreRegisteredAndDispatched(t *testing.T) {
 	t.Setenv("INDIGO_LOG_DIR", t.TempDir())
 
-	for _, name := range []string{"get_logs", "get_sync_state", "check_buffer_consistency", "report_bundle"} {
+	for _, name := range []string{"get_logs", "get_sync_events", "get_sync_state", "check_buffer_consistency", "report_bundle"} {
 		var def *ToolDef
 		for i, td := range AllTools() {
 			if td.Name == name {
@@ -151,11 +152,16 @@ func TestDiagnosticToolsAreRegisteredAndDispatched(t *testing.T) {
 		}
 	}
 
-	// get_logs needs no server, so it can be driven all the way through the
-	// dispatcher — proving the name is actually wired, not just defined.
+	// get_logs and get_sync_events need no server, so they can be driven all
+	// the way through the dispatcher — proving the name is actually wired, not
+	// just defined.
 	out, isErr := ExecTool(context.Background(), nil, nil, t.TempDir(), "get_logs", json.RawMessage(`{}`))
 	if isErr {
 		t.Errorf("ExecTool(get_logs) returned an error result: %s", out)
+	}
+	out, isErr = ExecTool(context.Background(), nil, nil, t.TempDir(), "get_sync_events", json.RawMessage(`{}`))
+	if isErr {
+		t.Errorf("ExecTool(get_sync_events) returned an error result: %s", out)
 	}
 
 	if out, isErr := ExecTool(context.Background(), nil, nil, t.TempDir(), "get_logs", json.RawMessage(`{bad`)); !isErr {
@@ -273,5 +279,37 @@ func TestExecCheckConsistencyRejectsHugeSettle(t *testing.T) {
 	out, isErr := execCheckConsistency(context.Background(), nil, "", checkConsistencyInput{SettleMs: maxSettleMs + 1})
 	if !isErr || !strings.Contains(out, "too large") {
 		t.Errorf("got (%q, %v), want an error about settle_ms being too large", out, isErr)
+	}
+}
+
+// TestGetSyncEventsRejectsAnUnknownKind covers the worst answer a diagnostic
+// can give: an unknown kind matched nothing, and an empty result is reported as
+// "no sync events — buffers and clients stayed in step". A mistyped filter
+// reported health that was never checked.
+func TestGetSyncEventsRejectsAnUnknownKind(t *testing.T) {
+	t.Setenv("INDIGO_LOG_DIR", t.TempDir())
+
+	out, isErr := execGetSyncEvents(getSyncEventsInput{Kind: "resync"})
+	if !isErr {
+		t.Fatalf("an unknown kind was accepted and answered with: %s", out)
+	}
+	if !strings.Contains(out, "resync_started") {
+		t.Errorf("error %q does not list the kinds the caller could have used", out)
+	}
+}
+
+// TestGetSyncEventsAcceptsEveryDeclaredKind is the other half: the validator
+// must not reject a kind the recorder can produce.
+func TestGetSyncEventsAcceptsEveryDeclaredKind(t *testing.T) {
+	t.Setenv("INDIGO_LOG_DIR", t.TempDir())
+
+	for _, k := range syncevent.Kinds() {
+		if _, isErr := execGetSyncEvents(getSyncEventsInput{Kind: string(k)}); isErr {
+			t.Errorf("kind %q is declared but the tool rejects it", k)
+		}
+	}
+	// And no filter at all stays valid.
+	if _, isErr := execGetSyncEvents(getSyncEventsInput{}); isErr {
+		t.Error("an empty kind must mean 'any', not an error")
 	}
 }

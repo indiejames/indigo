@@ -843,6 +843,10 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.handleUndoJump(msg)
 		return a, nil
 
+	case client.RedoMsg:
+		a.handleRedoJump(msg)
+		return a, nil
+
 	// ---- plugin-driven UI ----
 	case client.ShowPluginPopupMsg:
 		a.pluginPopup = &appPluginPopup{

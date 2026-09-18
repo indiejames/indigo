@@ -75,7 +75,12 @@ func (a *App) applyEditRecord(msg client.EditRecordMsg) {
 	if msg.FilePath == "" {
 		return
 	}
-	a.shiftJumpEntries(msg.FilePath, msg.AtLine, msg.LineDelta, msg.UndoDepth)
+	// Each shift at its own boundary, in order. One message is still one user
+	// action, so exactly one jump destination is recorded below however many
+	// shifts came with it.
+	for _, s := range msg.Shifts {
+		a.shiftJumpEntries(msg.FilePath, s.AtLine, s.Delta, msg.UndoDepth)
+	}
 	a.recordEdit(msg.FilePath, msg.Line, msg.Col, msg.UndoDepth)
 }
 
@@ -140,7 +145,38 @@ func (a *App) recordEdit(filePath string, line, col, undoDepth int) {
 	}
 }
 
-// handleUndoJump processes a single undo in a single pass over the jump list:
+// handleRedoJump adjusts the jump list for a redo.
+//
+// Only the line arithmetic, and it is the *forward* kind: a redo re-applies the
+// edits, so entries move exactly as they did when those edits were first made,
+// and an entry inside a redone delete is re-suspended. That is
+// shiftJumpEntries, not handleUndoJump's Rule 3.
+//
+// Nothing is dropped or reactivated here. Undo's two depth rules have no
+// meaning in this direction — a redo restores edits rather than removing them,
+// so no entry's creating edit disappears, and nothing a redo re-applies can
+// un-suspend an entry.
+//
+// **Entries that undo dropped do not come back.** Rule 1 deletes them from the
+// list outright, so by the time a redo arrives the information is gone. That is
+// a pre-existing limitation of storing the jump list this way rather than
+// something this function could fix: restoring them would mean keeping dropped
+// entries around with their depth, which is a larger change to the data
+// structure than this is. Worth knowing when a jump-back after undo-then-redo
+// has fewer places to go than expected.
+func (a *App) handleRedoJump(msg client.RedoMsg) {
+	// msg.NewDepth is the depth after the redo, which is the depth the original
+	// edit had — so an entry re-suspended here carries the same
+	// deactivatedDepth as the first time, and a later undo reactivates it.
+	for _, s := range msg.Shifts {
+		a.shiftJumpEntries(msg.FilePath, s.AtLine, s.Delta, msg.NewDepth)
+	}
+	// Same reasoning as handleUndoJump: the cursor is now at the redone
+	// position, not at any known jump entry, so navigation starts fresh.
+	a.jumpIdx = -1
+}
+
+// handleUndoJump processes a single undo over the jump list, in two passes:
 //
 //  1. Active entries created by the undone edit (undoDepth > newDepth) are
 //     dropped — those edits no longer exist.
@@ -155,10 +191,16 @@ func (a *App) recordEdit(filePath string, line, col, undoDepth int) {
 //     entries need this too so their positions stay valid when reactivated by a
 //     future undo.
 func (a *App) handleUndoJump(msg client.UndoMsg) {
-	atLine := msg.AtLine
-	delta := msg.LineDelta
-	deletedTo := atLine - delta // only meaningful when delta < 0
-
+	// Rules 1 and 2 are depth-based bookkeeping about the undo as a whole —
+	// which edits no longer exist, which suspended entries come back — so they
+	// run once, however many ops the undo restored. Only Rule 3's line
+	// arithmetic is per op, and it runs in the second pass below.
+	//
+	// reactivated carries what used to be a `continue`: Rule 2's entries keep
+	// their stored position, which is already correct, so pass 2 must leave
+	// them alone. In a single pass that was one keyword; split in two it has to
+	// be remembered.
+	reactivated := make(map[int]bool)
 	n := 0
 	for _, e := range a.jumpList {
 		if e.filePath == msg.FilePath {
@@ -167,38 +209,65 @@ func (a *App) handleUndoJump(msg client.UndoMsg) {
 				continue
 			}
 			// Rule 2: reactivate inactive entries suspended by the undone edit.
-			// Skip line adjustment — the stored position is already correct.
 			if !e.active && e.deactivatedDepth > msg.NewDepth {
 				e.active = true
 				e.deactivatedDepth = 0
-				a.jumpList[n] = e
-				n++
-				continue
-			}
-			// Rule 3: adjust line numbers for everything else.
-			if delta < 0 {
-				// Undo of a forward insert: the inserted lines are being removed.
-				if e.line >= deletedTo {
-					e.line += delta
-				}
-				// Entries in [atLine, deletedTo) are inserted-content entries;
-				// they were already dropped by Rule 1 (undoDepth > newDepth).
-				// Inactive entries from prior deletes that happen to sit in this
-				// range keep their position — their deactivatedDepth is older and
-				// will be handled by a future undo.
-			} else {
-				// Undo of a forward delete: the deleted lines are being restored.
-				// Use >= so entries that landed exactly at atLine (shifted from
-				// deletedTo by the original delete) are correctly restored.
-				if e.line >= atLine {
-					e.line += delta
-				}
+				reactivated[n] = true
 			}
 		}
 		a.jumpList[n] = e
 		n++
 	}
 	a.jumpList = a.jumpList[:n]
+
+	// Rule 3: adjust line numbers, each shift at its own boundary and in the
+	// order the ops were applied. Summing them first would move an entry
+	// sitting between two of them by the wrong amount, and by nothing at all
+	// when they cancel.
+	for _, s := range msg.Shifts {
+		deletedTo := s.AtLine - s.Delta // only meaningful when Delta < 0
+		for i := range a.jumpList {
+			e := &a.jumpList[i]
+			if e.filePath != msg.FilePath {
+				continue
+			}
+			// A reactivated entry skips exactly one shift: the one restoring
+			// the lines it sits inside. Its position was frozen when that
+			// delete suspended it, so that shift is already accounted for —
+			// but every *other* op in the same undo group still moves it, and
+			// skipping those too leaves it short by their combined delta.
+			//
+			// The identification is exact rather than heuristic. shiftJumpEntries
+			// suspends an entry only when its line falls in the forward delete's
+			// [atLine, deletedTo), and the undo of that delete is the positive
+			// shift with the same AtLine and Delta == deletedTo-atLine — so the
+			// restoring shift is the one whose restored range contains the
+			// frozen line. Consumed once, so a later shift over the same range
+			// is applied normally.
+			if reactivated[i] && s.Delta > 0 && e.line >= s.AtLine && e.line < s.AtLine+s.Delta {
+				delete(reactivated, i)
+				continue
+			}
+			if s.Delta < 0 {
+				// Undo of a forward insert: the inserted lines are being removed.
+				if e.line >= deletedTo {
+					e.line += s.Delta
+				}
+				// Entries in [AtLine, deletedTo) are inserted-content entries;
+				// they were already dropped by Rule 1 (undoDepth > newDepth).
+				// Inactive entries from prior deletes that happen to sit in this
+				// range keep their position — their deactivatedDepth is older and
+				// will be handled by a future undo.
+			} else {
+				// Undo of a forward delete: the deleted lines are being restored.
+				// Use >= so entries that landed exactly at AtLine (shifted from
+				// deletedTo by the original delete) are correctly restored.
+				if e.line >= s.AtLine {
+					e.line += s.Delta
+				}
+			}
+		}
+	}
 	// Reset navigation state. After an undo the cursor is at the undo-restored
 	// position, not at any known jump entry. Leaving jumpIdx set (possibly
 	// clamped by earlier pruning) causes doJumpBack to think we're already at

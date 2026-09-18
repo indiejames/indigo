@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/syncevent"
 )
 
 // sendQueue serialises this client's outbound edits per buffer.
@@ -153,6 +154,9 @@ func (q *sendQueue) retire(epoch uint64) bool {
 func (m Model) drainCmd(epoch uint64) tea.Cmd {
 	q := m.sendQ
 	rpc := m.rpc
+	// queuedSend carries no path — the server is addressed by buffer id — so it
+	// is captured here, or a path-filtered query cannot find send failures.
+	path := m.filePath
 	return func() tea.Msg {
 		for {
 			s, ok := q.next(epoch)
@@ -173,6 +177,13 @@ func (m Model) drainCmd(epoch uint64) tea.Cmd {
 				if !q.retire(epoch) {
 					return nil
 				}
+				// Recorded only once the failure is one we are acting on. The
+				// clientLog line above keeps the detail either way; what the
+				// event stream must not show is a send_failed *after* the
+				// resync_started that already explains it, which reads as a new
+				// problem rather than a consequence of the old one.
+				syncevent.Recordf("client", syncevent.SendFailed, s.bufID, path,
+					"gen=%d base=%d op=%s: %v", s.generation, s.baseVersion, describeOp(s.op), err)
 				return applyOpFailedMsg{bufID: s.bufID, err: err}
 			}
 		}

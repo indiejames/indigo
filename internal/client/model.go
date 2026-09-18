@@ -13,6 +13,7 @@ import (
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/highlight"
+	"github.com/indiejames/indigo/internal/syncevent"
 	"github.com/indiejames/indigo/internal/theme"
 )
 
@@ -250,15 +251,6 @@ type workspaceDiagSummaryMsg struct {
 // both checked on arrival: hover describes one position, so a result landing
 // after the cursor moved documents something the user is no longer pointing at —
 // the same defect fixItemsMsg carried, reported from real use.
-// lineShift is one edit's effect on line numbering: everything at or after
-// atLine moves by delta. A sequence of these is kept rather than a single
-// summed shift because they are not commutative with the positions they move —
-// see the updatesMsg handler.
-type lineShift struct {
-	atLine int
-	delta  int
-}
-
 type hoverMsg struct {
 	result ClientHoverResult
 	bufID  uint32
@@ -472,9 +464,24 @@ type JumpForwardMsg struct{}
 type EditRecordMsg struct {
 	FilePath  string
 	Line, Col int // new jump entry position
-	AtLine    int // adjustment boundary
-	LineDelta int // net lines added (>0) or removed (<0)
+	// Shifts are the edit's line-count changes, in application order.
+	//
+	// A slice rather than one summed (AtLine, LineDelta), because an action
+	// can be several ops and they do not compose into one shift: a jump entry
+	// sitting *between* two ops' edit points is moved by one and not the
+	// other. Summing is wrong in general and silently wrong when the deltas
+	// cancel, which shifts nothing at all. One message still means one user
+	// action, so exactly one jump destination is recorded no matter how many
+	// shifts it carries.
+	Shifts    []LineShift
 	UndoDepth int // undo stack depth at which this entry was created
+}
+
+// LineShift is one edit's effect on line numbering: everything at or after
+// AtLine moves by Delta.
+type LineShift struct {
+	AtLine int
+	Delta  int
 }
 
 // RemoteEditMsg tells the App that another client's edit changed this buffer's
@@ -496,13 +503,42 @@ type RemoteEditMsg struct {
 // UndoMsg signals the App that an undo was performed in the given buffer.
 // NewDepth is len(undoStack) after the undo; all jump entries with
 // undoDepth > NewDepth are removed.
-// AtLine and LineDelta describe the net line-count change caused by the undo
-// operation itself (so existing jump entries can be re-adjusted).
 type UndoMsg struct {
-	FilePath  string
-	NewDepth  int
-	AtLine    int
-	LineDelta int
+	FilePath string
+	NewDepth int
+	// Shifts are the line-count changes the undone ops made, in the order they
+	// were applied — which is the reverse of the undo entry's own order, since
+	// an entry is undone last-op-first.
+	//
+	// Plural for the same reason EditRecordMsg's is: one undo entry can hold
+	// many ops at different places (an LSP code action, a search-and-replace
+	// commit), and a jump entry between two of them is moved by one and not the
+	// other. The depth-based bookkeeping in handleUndoJump still happens once —
+	// this is one user action, however many ops it restores.
+	Shifts []LineShift
+}
+
+// RedoMsg signals the App that a redo was performed in the given buffer.
+//
+// Deliberately not an UndoMsg with the sign flipped. Undo's jump-list rules are
+// written for the undo stack getting *shorter* — drop the entries whose
+// creating edit no longer exists, restore the ones a now-undone delete had
+// suspended — and neither has a meaning going the other way: a redo restores
+// edits, so it removes nothing, and the entries undo dropped are already gone
+// from the list and cannot come back (see handleRedoJump).
+//
+// What redo does have is a forward edit's line arithmetic, which is
+// shiftJumpEntries' and not Rule 3's, applied per op. NewDepth is the undo
+// depth *after* the redo, so an entry this redo re-suspends carries the same
+// deactivatedDepth the original edit gave it and a later undo reactivates it
+// exactly as before.
+//
+// Like UndoMsg it records no new jump destination: redo is navigation through
+// edit history, not a place the user edited from.
+type RedoMsg struct {
+	FilePath string
+	NewDepth int
+	Shifts   []LineShift
 }
 
 // GrepMsg signals the App to open the workspace search picker.
@@ -1361,6 +1397,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// branch below does — treating it as a mismatch instead would
 			// send us round the resync loop a second time for a swap that
 			// has already been handled.
+			syncevent.Recordf("client", syncevent.StaleResponseDropped, m.bufID, m.filePath,
+				"poll response generation %d is older than ours %d", msg.generation, m.generation)
 			return m, nil
 		}
 		if m.generationKnown && msg.generation != m.generation {
@@ -1368,6 +1406,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// last known generation (format-on-save, SaveAs, DiscardRecovery,
 			// explicit Format) — msg.ops describe changes to that different
 			// object and can't be safely applied against our current one.
+			// Recorded because the status message above is the only other sign
+			// and it is overwritten within seconds. This is the single most
+			// common "why did my window just reload?" and nothing durable said
+			// so before.
+			syncevent.Recordf("client", syncevent.GenerationMismatch, m.bufID, m.filePath,
+				"poll: server generation %d, ours %d", msg.generation, m.generation)
 			m = m.pushStatus("Buffer changed on the server, resyncing...")
 			return m, m.resyncFromServer("")
 		}
@@ -1383,7 +1427,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var inverses []document.Op
 		applied := 0
 		groupClosed := false
-		var lineShifts []lineShift
+		var lineShifts []LineShift
+		// Counted, not recorded per op: two polls outstanding at once means the
+		// whole response is duplicated, and one line per op would bury the log
+		// in exactly the situation worth noticing.
+		duplicates := 0
 		for _, op := range msg.ops {
 			// Skip ops we have already applied. Polls are issued every
 			// 120ms with a 2s timeout and no in-flight guard, so two can
@@ -1393,6 +1441,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Without this check the second response applies that edit a
 			// second time, duplicating an insert or deleting live text.
 			if op.Version != 0 && op.Version <= m.version {
+				duplicates++
 				continue
 			}
 			// Rebase past anything still in flight from this client before
@@ -1451,7 +1500,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// lower down — collapse to a delta of zero and shift nothing,
 				// leaving everything between them a line out.
 				if al, d := opLineDelta(r); d != 0 {
-					lineShifts = append(lineShifts, lineShift{atLine: al, delta: d})
+					lineShifts = append(lineShifts, LineShift{AtLine: al, Delta: d})
 				}
 				m.buf.Apply(r)
 				applied++
@@ -1465,6 +1514,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// buffer had when it was built, which can be behind what a response
 		// handled since has already moved us to. Taking it verbatim would
 		// rewind our polling watermark and re-request ops we just applied.
+		if duplicates > 0 {
+			syncevent.Recordf("client", syncevent.DuplicateOpsSkipped, m.bufID, m.filePath,
+				"%d op(s) already applied, from overlapping polls", duplicates)
+		}
 		m.version = max(m.version, msg.version)
 		// Reconcile the dirty marker: if another client saved this buffer, our
 		// content now matches disk exactly when its hash equals savedHash. The
@@ -1495,8 +1548,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.filePath != "" {
 			for _, s := range lineShifts {
 				rec := RemoteEditMsg{
-					FilePath: m.filePath, AtLine: max(s.atLine, 0),
-					LineDelta: s.delta, UndoDepth: len(m.undoStack),
+					FilePath: m.filePath, AtLine: max(s.AtLine, 0),
+					LineDelta: s.Delta, UndoDepth: len(m.undoStack),
 				}
 				remoteEditCmds = append(remoteEditCmds, func() tea.Msg { return rec })
 			}
@@ -1507,7 +1560,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// no longer match.
 		m.refreshSearchMatches()
 		for _, s := range lineShifts {
-			m = m.shiftLSPOverlayLines(max(s.atLine, 0), s.delta)
+			m = m.shiftLSPOverlayLines(max(s.AtLine, 0), s.Delta)
 		}
 		m, refreshCmd := m.scheduleLSPOverlayRefresh()
 		return m, tea.Batch(append([]tea.Cmd{m.reparseHighlight(), refreshCmd}, remoteEditCmds...)...)

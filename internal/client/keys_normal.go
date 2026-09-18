@@ -188,12 +188,21 @@ func executeUndo(m Model) (tea.Model, tea.Cmd) {
 	// Snapshot current (post-edit) state so redo can restore it.
 	redoEntry := undoEntry{before: m.cursorSnap()}
 	var cmds []tea.Cmd
+	// Collected here, in the loop that applies them, rather than in a second
+	// pass over entry.ops. The second pass ran *forward* while this one runs
+	// backward, which did not matter while the result was a minimum and a sum
+	// but is the whole of it for an ordered list: these shifts describe a
+	// sequence of applications and must be in the order they happened.
+	var shifts []LineShift
 	for i := len(entry.ops) - 1; i >= 0; i-- {
 		inv := entry.ops[i]
 		inv.ClientID = m.rpc.ClientID()
 		reInv := inverseOp(m, inv) // compute re-inverse before applying
 		al, d := opLineDelta(inv)
 		m = m.shiftLSPOverlayLines(al, d)
+		if d != 0 {
+			shifts = append(shifts, LineShift{AtLine: max(al, 0), Delta: d})
+		}
 		m.buf.Apply(inv)
 		var sendCmd tea.Cmd
 		m, sendCmd = m.sendToServer(inv)
@@ -211,22 +220,10 @@ func executeUndo(m Model) (tea.Model, tea.Cmd) {
 	}
 	fp := m.filePath
 	newDepth := len(m.undoStack)
-	// Compute the net line delta produced by the inverse ops that were
-	// just applied — this lets the App reverse any line-shift it made
-	// when those edits were originally recorded.
-	atLine, lineDelta := -1, 0
-	for _, inv := range entry.ops {
-		al, d := opLineDelta(inv)
-		if atLine < 0 || al < atLine {
-			atLine = al
-		}
-		lineDelta += d
-	}
-	if atLine < 0 {
-		atLine = 0
-	}
+	// The shifts were collected in the apply loop above; they let the App
+	// reverse the line adjustments it made when these edits were recorded.
 	undoCmd := func() tea.Msg {
-		return UndoMsg{FilePath: fp, NewDepth: newDepth, AtLine: atLine, LineDelta: lineDelta}
+		return UndoMsg{FilePath: fp, NewDepth: newDepth, Shifts: shifts}
 	}
 	var refreshCmd tea.Cmd
 	m, refreshCmd = m.scheduleLSPOverlayRefresh()
@@ -243,12 +240,17 @@ func executeRedo(m Model) (tea.Model, tea.Cmd) {
 	// Snapshot current (pre-edit) state so undo can restore it.
 	newUndoEntry := undoEntry{before: m.cursorSnap()}
 	var cmds []tea.Cmd
+	// Collected where they are applied, for the same reason executeUndo does.
+	var shifts []LineShift
 	for i := len(entry.ops) - 1; i >= 0; i-- {
 		op := entry.ops[i]
 		op.ClientID = m.rpc.ClientID()
 		inv := inverseOp(m, op) // compute inverse before applying
 		al, d := opLineDelta(op)
 		m = m.shiftLSPOverlayLines(al, d)
+		if d != 0 {
+			shifts = append(shifts, LineShift{AtLine: max(al, 0), Delta: d})
+		}
 		m.buf.Apply(op)
 		var sendCmd tea.Cmd
 		m, sendCmd = m.sendToServer(op)
@@ -264,10 +266,18 @@ func executeRedo(m Model) (tea.Model, tea.Cmd) {
 	if len(m.undoStack) == m.savedUndoDepth {
 		m.buf.SetClean()
 	}
+	// Tell the App, which this function did not do at all: a redo that changed
+	// line counts left every jump entry below it pointing at the wrong line,
+	// and left entries the redone delete should re-suspend still active.
+	fp := m.filePath
+	newDepth := len(m.undoStack)
+	redoCmd := func() tea.Msg {
+		return RedoMsg{FilePath: fp, NewDepth: newDepth, Shifts: shifts}
+	}
 	var refreshCmd tea.Cmd
 	m, refreshCmd = m.scheduleLSPOverlayRefresh()
 	cmds = append(cmds, refreshCmd)
-	return m, tea.Sequence(append(cmds, m.reparseHighlight())...)
+	return m, tea.Sequence(append(cmds, m.reparseHighlight(), redoCmd)...)
 }
 
 func executeExtendNextWordStart(m Model) (tea.Model, tea.Cmd) {

@@ -31,6 +31,13 @@ install: build-release
 test:
 	go test -tags lang_all ./...
 
+# The fault-injection hooks (internal/faultinject) are compiled out unless this
+# tag is set, so a release binary cannot be made to corrupt a buffer. That also
+# means `make test` does not exercise them or the failure paths they reach —
+# run this as well when touching the sync path.
+test-faults:
+	go test -tags "lang_all indigo_debug" ./...
+
 vet:
 	go vet -tags lang_all ./...
 

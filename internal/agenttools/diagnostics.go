@@ -6,11 +6,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/debuglog"
+	"github.com/indiejames/indigo/internal/syncevent"
 )
 
 // ─── get_logs ─────────────────────────────────────────────────────────────────
@@ -401,4 +404,125 @@ func stillSettling(prev, cur client.BufferConsistency, c client.ClientBufferRepo
 		return p.Version != c.Version || !bytes.Equal(p.ContentSha256, c.ContentSha256)
 	}
 	return true // not present in the first sample; no baseline to compare
+}
+
+// ---- get_sync_events ----
+
+type getSyncEventsInput struct {
+	Since string `json:"since"`
+	Kind  string `json:"kind"`
+	Path  string `json:"path"`
+	BufID uint32 `json:"buf_id"`
+	Max   int    `json:"max"`
+}
+
+// execGetSyncEvents reports the sync events recorded by every process.
+//
+// Deliberately reads the shared log rather than asking the server for an
+// in-memory ring: client, server and app all append to one file, so their
+// events are already one ordered stream, and they survive the process that
+// wrote them. A window that has since been closed — or a server that exited
+// overnight — is exactly the case a report arrives about. See internal/syncevent.
+func execGetSyncEvents(in getSyncEventsInput) (string, bool) {
+	since := defaultLogSince
+	if in.Since != "" {
+		d, err := time.ParseDuration(in.Since)
+		if err != nil {
+			return fmt.Sprintf("bad since %q: %v (use a duration like 15m, 2h)", in.Since, err), true
+		}
+		if d <= 0 {
+			return fmt.Sprintf("bad since %q: must be positive", in.Since), true
+		}
+		since = d
+	}
+	maxEvents := in.Max
+	if maxEvents <= 0 {
+		maxEvents = defaultLogLines
+	}
+	if maxEvents > maxLogLines {
+		maxEvents = maxLogLines
+	}
+
+	// Validated rather than passed through. An unknown kind matches nothing,
+	// and the empty result reads as "no sync events — buffers and clients
+	// stayed in step": a typo would report health. Reporting health that was
+	// never checked is the one answer a diagnostic must never give.
+	if in.Kind != "" && !syncevent.ValidKind(syncevent.Kind(in.Kind)) {
+		known := make([]string, 0, len(syncevent.Kinds()))
+		for _, k := range syncevent.Kinds() {
+			known = append(known, string(k))
+		}
+		return fmt.Sprintf("unknown kind %q: use one of %s",
+			in.Kind, strings.Join(known, ", ")), true
+	}
+
+	events, err := syncevent.Read(syncevent.ReadOptions{
+		Since: time.Now().Add(-since),
+		Kind:  syncevent.Kind(in.Kind),
+		BufID: in.BufID,
+		Path:  in.Path,
+		Max:   maxEvents,
+	})
+	if err != nil {
+		return fmt.Sprintf("cannot read logs from %s: %v", debuglog.Dir(), err), true
+	}
+	if len(events) == 0 {
+		// Said positively: no events in this window is the healthy answer, and
+		// a caller checking whether something went wrong should not have to
+		// guess whether an empty result means "nothing happened" or "nothing
+		// was recorded".
+		return fmt.Sprintf("no sync events in the last %s%s — "+
+			"buffers and clients stayed in step, or nothing was open",
+			since, filterSuffix(in)), false
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d sync event(s) in the last %s%s\n\n", len(events), since, filterSuffix(in))
+
+	counts := syncevent.CountByKind(events)
+	kinds := make([]string, 0, len(counts))
+	for k := range counts {
+		kinds = append(kinds, string(k))
+	}
+	sort.Strings(kinds)
+	b.WriteString("by kind:\n")
+	for _, k := range kinds {
+		fmt.Fprintf(&b, "  %-24s %d\n", k, counts[syncevent.Kind(k)])
+	}
+
+	b.WriteString("\nevents (oldest first):\n")
+	for _, e := range events {
+		ts := e.Time.Format("15:04:05.000")
+		if !e.TimeExact {
+			// Marked rather than hidden: an inherited timestamp is close enough
+			// to be useful and wrong enough to mislead if it looks exact.
+			ts = "~" + ts
+		}
+		fmt.Fprintf(&b, "  %s [%s] %s buf=%d", ts, e.Component, e.Kind, e.BufID)
+		if e.Path != "" {
+			fmt.Fprintf(&b, " %s", filepath.Base(e.Path))
+		}
+		if e.Detail != "" {
+			fmt.Fprintf(&b, " — %s", e.Detail)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String(), false
+}
+
+func filterSuffix(in getSyncEventsInput) string {
+	var parts []string
+	if in.Kind != "" {
+		parts = append(parts, "kind="+in.Kind)
+	}
+	if in.BufID != 0 {
+		parts = append(parts, fmt.Sprintf("buf=%d", in.BufID))
+	}
+	if in.Path != "" {
+		parts = append(parts, "path~"+in.Path)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }

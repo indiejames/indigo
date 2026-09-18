@@ -177,7 +177,13 @@ func describeOp(op document.Op) string {
 // buffer via SaveAs since it last synced.
 func (m Model) resyncFromServer(failureCause string) tea.Cmd {
 	bufID := m.bufID
-	syncevent.Record("client", syncevent.ResyncStarted, bufID, m.filePath, failureCause)
+	// Captured here rather than taken from the RPC result: GetBufferSnapshot
+	// returns an empty path on failure, so the failure event — the one most
+	// worth finding — was the one a path-filtered query could not see. This is
+	// the client's remembered path, which may be stale if another client
+	// renamed the buffer, but a possibly-stale path beats none.
+	knownPath := m.filePath
+	syncevent.Record("client", syncevent.ResyncStarted, bufID, knownPath, failureCause)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), resyncTimeout)
 		defer cancel()
@@ -188,7 +194,7 @@ func (m Model) resyncFromServer(failureCause string) tea.Cmd {
 			// this is the point where knowing whether the server was slow, gone,
 			// or had dropped the buffer decides what to do about it.
 			clientLog("resync FAILED buf=%d: %v", bufID, err)
-			syncevent.Recordf("client", syncevent.ResyncFailed, bufID, path, "%v", err)
+			syncevent.Recordf("client", syncevent.ResyncFailed, bufID, knownPath, "%v", err)
 		} else {
 			clientLog("resync ok buf=%d version=%d generation=%d path=%s", bufID, version, generation, path)
 			syncevent.Recordf("client", syncevent.ResyncOK, bufID, path,

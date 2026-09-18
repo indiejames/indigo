@@ -443,6 +443,19 @@ func execGetSyncEvents(in getSyncEventsInput) (string, bool) {
 		maxEvents = maxLogLines
 	}
 
+	// Validated rather than passed through. An unknown kind matches nothing,
+	// and the empty result reads as "no sync events — buffers and clients
+	// stayed in step": a typo would report health. Reporting health that was
+	// never checked is the one answer a diagnostic must never give.
+	if in.Kind != "" && !syncevent.ValidKind(syncevent.Kind(in.Kind)) {
+		known := make([]string, 0, len(syncevent.Kinds()))
+		for _, k := range syncevent.Kinds() {
+			known = append(known, string(k))
+		}
+		return fmt.Sprintf("unknown kind %q: use one of %s",
+			in.Kind, strings.Join(known, ", ")), true
+	}
+
 	events, err := syncevent.Read(syncevent.ReadOptions{
 		Since: time.Now().Add(-since),
 		Kind:  syncevent.Kind(in.Kind),

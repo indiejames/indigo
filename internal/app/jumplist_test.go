@@ -654,3 +654,81 @@ func TestRedoMsgIsRoutedToTheHandler(t *testing.T) {
 			"handleRedoJump, not drop it into the active buffer", got)
 	}
 }
+
+// TestUndoOfAGroupThatBothSuspendsAndShifts is the case a reactivated entry
+// skipping *every* shift gets wrong.
+//
+// One applyBatch — an LSP code action, a search-and-replace commit — produces
+// one undo entry holding several ops. If one of them is the delete that
+// suspended a jump entry and another changes line counts elsewhere, then
+// undoing the group must skip only the shift that restores the suspended
+// entry's own lines. Skipping the rest leaves it short by their combined delta.
+//
+// Forward: insert a line at 2 moves the entry 10 -> 11, then a delete of 9..12
+// suspends it, frozen at 11. Undoing restores [9,12) — which the entry's stored
+// position already accounts for — and removes the inserted line, which it does
+// not. Correct answer is 10.
+func TestUndoOfAGroupThatBothSuspendsAndShifts(t *testing.T) {
+	a := newJumpApp()
+	rec(a, "/tmp/a.go", 10, 1)
+
+	a.applyEditRecord(client.EditRecordMsg{
+		FilePath:  "/tmp/a.go",
+		Line:      0,
+		UndoDepth: 2,
+		Shifts: []client.LineShift{
+			{AtLine: 2, Delta: 1},  // pushes the entry to 11
+			{AtLine: 9, Delta: -3}, // covers 11: suspends it there
+		},
+	})
+	if activeAt(a, "/tmp/a.go", 11) {
+		t.Fatal("test setup: the entry should be suspended at line 11")
+	}
+
+	// Undo applies the group's inverses in reverse order.
+	a.handleUndoJump(client.UndoMsg{
+		FilePath: "/tmp/a.go",
+		NewDepth: 1,
+		Shifts: []client.LineShift{
+			{AtLine: 9, Delta: 3},  // restores the range it sits in: skip this one
+			{AtLine: 2, Delta: -1}, // removes the inserted line: must still apply
+		},
+	})
+
+	if !activeAt(a, "/tmp/a.go", 10) {
+		t.Errorf("jumpList = %+v, want the reactivated entry active at line 10 — a "+
+			"reactivated entry skips only the shift that restores it, not every "+
+			"shift in the group", a.jumpList)
+	}
+}
+
+// TestReactivatedEntrySkipsOnlyOneRestoringShift guards the "consumed once"
+// half: two restoring shifts over the same lines must not both be skipped.
+func TestReactivatedEntrySkipsOnlyOneRestoringShift(t *testing.T) {
+	a := newJumpApp()
+	rec(a, "/tmp/a.go", 10, 1)
+
+	a.applyEditRecord(client.EditRecordMsg{
+		FilePath:  "/tmp/a.go",
+		Line:      0,
+		UndoDepth: 2,
+		Shifts:    []client.LineShift{{AtLine: 9, Delta: -3}},
+	})
+	if activeAt(a, "/tmp/a.go", 10) {
+		t.Fatal("test setup: the entry should be suspended at line 10")
+	}
+
+	a.handleUndoJump(client.UndoMsg{
+		FilePath: "/tmp/a.go",
+		NewDepth: 1,
+		Shifts: []client.LineShift{
+			{AtLine: 9, Delta: 3}, // the restoring shift: skipped
+			{AtLine: 9, Delta: 2}, // a second insert there: must apply
+		},
+	})
+
+	if !activeAt(a, "/tmp/a.go", 12) {
+		t.Errorf("jumpList = %+v, want the entry at 12 (10, skip the restore, then +2)",
+			a.jumpList)
+	}
+}

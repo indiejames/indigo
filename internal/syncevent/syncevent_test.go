@@ -181,3 +181,51 @@ func TestSplitFieldsKeepsQuotedSpaces(t *testing.T) {
 		t.Error("a quoted path swallowed the next field")
 	}
 }
+
+// TestKindsCoversEveryDeclaredKind guards Kinds() against the constants
+// drifting away from it. A kind missing from Kinds() is rejected by the tool's
+// validator as unknown while still being recorded — a filter that reports "no
+// events" for something that is happening.
+//
+// Its limit, stated because the list below looks like it proves more than it
+// does: Go offers no way to enumerate a package's constants at runtime, so this
+// compares one hand-maintained list against another. It catches the two
+// drifting apart, which is the realistic mistake — adding a constant and
+// wiring it into a call site while forgetting Kinds(). It cannot catch a
+// constant added to neither list.
+func TestKindsCoversEveryDeclaredKind(t *testing.T) {
+	declared := []Kind{
+		ApplyOpRejected, GenerationMismatch, StaleBase,
+		ResyncStarted, ResyncOK, ResyncFailed,
+		DuplicateOpsSkipped, StaleResponseDropped, SendFailed,
+		ExternalWriteNotified, BufferReloaded,
+	}
+	if len(declared) != len(Kinds()) {
+		t.Fatalf("Kinds() has %d entries, %d constants are declared — they have drifted",
+			len(Kinds()), len(declared))
+	}
+	for _, k := range declared {
+		if !ValidKind(k) {
+			t.Errorf("%q is a declared kind but ValidKind rejects it", k)
+		}
+		if k == "" {
+			t.Error("a declared kind is empty")
+		}
+	}
+	// And the values are distinct, so two kinds cannot collide in a count.
+	seen := map[Kind]bool{}
+	for _, k := range Kinds() {
+		if seen[k] {
+			t.Errorf("%q appears twice in Kinds()", k)
+		}
+		seen[k] = true
+	}
+}
+
+func TestValidKindRejectsUnknown(t *testing.T) {
+	for _, k := range []Kind{"", "resync", "RESYNC_OK", "not_a_kind"} {
+		if ValidKind(k) {
+			t.Errorf("ValidKind(%q) = true, want false", k)
+		}
+	}
+}

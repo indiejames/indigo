@@ -228,7 +228,24 @@ func (a *App) handleUndoJump(msg client.UndoMsg) {
 		deletedTo := s.AtLine - s.Delta // only meaningful when Delta < 0
 		for i := range a.jumpList {
 			e := &a.jumpList[i]
-			if reactivated[i] || e.filePath != msg.FilePath {
+			if e.filePath != msg.FilePath {
+				continue
+			}
+			// A reactivated entry skips exactly one shift: the one restoring
+			// the lines it sits inside. Its position was frozen when that
+			// delete suspended it, so that shift is already accounted for —
+			// but every *other* op in the same undo group still moves it, and
+			// skipping those too leaves it short by their combined delta.
+			//
+			// The identification is exact rather than heuristic. shiftJumpEntries
+			// suspends an entry only when its line falls in the forward delete's
+			// [atLine, deletedTo), and the undo of that delete is the positive
+			// shift with the same AtLine and Delta == deletedTo-atLine — so the
+			// restoring shift is the one whose restored range contains the
+			// frozen line. Consumed once, so a later shift over the same range
+			// is applied normally.
+			if reactivated[i] && s.Delta > 0 && e.line >= s.AtLine && e.line < s.AtLine+s.Delta {
+				delete(reactivated, i)
 				continue
 			}
 			if s.Delta < 0 {

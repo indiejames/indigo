@@ -79,6 +79,32 @@ const (
 	BufferReloaded Kind = "buffer_reloaded"
 )
 
+// Kinds returns every kind, in a stable order, for validating a caller's filter
+// and for telling them what they could have asked for.
+//
+// Lives here rather than in the tool so adding a kind above cannot leave a
+// validator behind that rejects it — the failure would be a filter that reports
+// "no events" for something that is happening, which is the worst answer a
+// diagnostic can give.
+func Kinds() []Kind {
+	return []Kind{
+		ApplyOpRejected, GenerationMismatch, StaleBase,
+		ResyncStarted, ResyncOK, ResyncFailed,
+		DuplicateOpsSkipped, StaleResponseDropped, SendFailed,
+		ExternalWriteNotified, BufferReloaded,
+	}
+}
+
+// ValidKind reports whether k is one of Kinds().
+func ValidKind(k Kind) bool {
+	for _, known := range Kinds() {
+		if k == known {
+			return true
+		}
+	}
+	return false
+}
+
 // Event is one recorded occurrence.
 type Event struct {
 	Time      time.Time

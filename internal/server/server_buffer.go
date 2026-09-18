@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/faultinject"
 	proto "github.com/indiejames/indigo/internal/proto"
+	"github.com/indiejames/indigo/internal/syncevent"
 )
 
 // atomicWriteFile writes data to path via a temp file in the same directory
@@ -392,6 +394,24 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 
+	// An injected drop must be *recoverable*, which takes more than returning
+	// no ops. Reporting ver with an empty list would have the client adopt a
+	// version covering ops it never received, and since the watermark only
+	// moves forward those ops would never be sent again — permanent loss, not a
+	// lost response. So the response also reports the version the caller
+	// already had, and progress is not recorded: the queue keeps the ops (their
+	// version is still above `since`) and the next poll delivers them. From the
+	// client this is indistinguishable from a poll that ran a moment earlier.
+	//
+	// Returning an error instead would exercise the RPC-failure path, which is
+	// a different fault and already reachable by stopping the server.
+	droppedPoll := faultinject.ShouldDropPoll()
+	if droppedPoll {
+		serverLog("GetUpdates: dropping %d op(s) for buffer %d (fault injection)", len(pending), bufID)
+		pending = nil
+		ver = since
+	}
+
 	res, err := call.AllocResults()
 	if err != nil {
 		return err
@@ -407,6 +427,12 @@ func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_g
 	}
 
 	if len(pending) == 0 {
+		if droppedPoll {
+			// Deliberately no recordClientProgress: a dropped response must not
+			// advance what the server believes this client has seen, or
+			// TrimHistory could reclaim the very ops the retry needs.
+			return nil
+		}
 		// recordClientProgress only after the response is fully built. It
 		// advances this client's watermark to ver, which is what lets
 		// TrimHistory reclaim buffer history — so recording it before the
@@ -570,7 +596,23 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 		s.mu.Unlock()
 		serverLog("ApplyOp REJECTED: unknown buffer %d (client %d) — the buffer was closed or "+
 			"the server restarted while a client still held it", bufID, clientID)
+		syncevent.Recordf("server", syncevent.ApplyOpRejected, bufID, "",
+			"unknown buffer (client %d)", clientID)
 		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	// Compiled out entirely unless -tags indigo_debug; see internal/faultinject.
+	// Placed before the real generation check so an injected bump is
+	// indistinguishable from a genuine wholesale swap — the client must not be
+	// able to tell, or the path being exercised is not the real one.
+	if faultinject.ShouldBumpGeneration() {
+		entry.generation++
+	}
+	if faultinject.ShouldFailApplyOp() {
+		path := entry.buf.Path()
+		s.mu.Unlock()
+		serverLog("ApplyOp REJECTED: buffer %d (%q) fault injection", bufID, path)
+		syncevent.Record("server", syncevent.ApplyOpRejected, bufID, path, "fault injection")
+		return fmt.Errorf("buffer %d: injected failure", bufID)
 	}
 	if entry.generation != clientGeneration {
 		gen, path := entry.generation, entry.buf.Path()
@@ -585,6 +627,8 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 		// let a caller write whatever it liked as a separate log line.
 		serverLog("ApplyOp REJECTED: buffer %d (%q) generation mismatch: client has %d, server has %d",
 			bufID, path, clientGeneration, gen)
+		syncevent.Recordf("server", syncevent.GenerationMismatch, bufID, path,
+			"applyOp from client %d: client has %d, server has %d", clientID, clientGeneration, gen)
 		return fmt.Errorf("buffer %d generation mismatch: client has %d, server has %d", bufID, clientGeneration, gen)
 	}
 	buf := entry.buf
@@ -595,6 +639,8 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 
 	if rebaseErr != nil {
 		serverLog("ApplyOp REJECTED: buffer %d (%q) %v", bufID, path, rebaseErr)
+		syncevent.Recordf("server", syncevent.StaleBase, bufID, path,
+			"applyOp from client %d: %v", clientID, rebaseErr)
 		return fmt.Errorf("buffer %d: %w", bufID, rebaseErr)
 	}
 
@@ -704,13 +750,27 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 		// a client replaying a batch) gets a string it may not surface, and this
 		// is the only place that knows it happened.
 		serverLog("ApplyOps REJECTED: unknown buffer %d (client %d)", bufID, clientID)
+		syncevent.Recordf("server", syncevent.ApplyOpRejected, bufID, "",
+			"applyOps: unknown buffer (client %d)", clientID)
 		return fmt.Errorf("unknown buffer %d", bufID)
+	}
+	if faultinject.ShouldBumpGeneration() {
+		entry.generation++
+	}
+	if faultinject.ShouldFailApplyOp() {
+		path := entry.buf.Path()
+		s.mu.Unlock()
+		serverLog("ApplyOps REJECTED: buffer %d (%q) fault injection", bufID, path)
+		syncevent.Record("server", syncevent.ApplyOpRejected, bufID, path, "fault injection")
+		return fmt.Errorf("buffer %d: injected failure", bufID)
 	}
 	if entry.generation != clientGeneration {
 		gen, path := entry.generation, entry.buf.Path()
 		s.mu.Unlock()
 		serverLog("ApplyOps REJECTED: buffer %d (%q) generation mismatch: client has %d, server has %d",
 			bufID, path, clientGeneration, gen)
+		syncevent.Recordf("server", syncevent.GenerationMismatch, bufID, path,
+			"applyOps from client %d: client has %d, server has %d", clientID, clientGeneration, gen)
 		return fmt.Errorf("buffer %d generation mismatch: client has %d, server has %d", bufID, clientGeneration, gen)
 	}
 	buf := entry.buf
@@ -721,6 +781,8 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 
 	if rebaseErr != nil {
 		serverLog("ApplyOps REJECTED: buffer %d (%q) %v", bufID, path, rebaseErr)
+		syncevent.Recordf("server", syncevent.StaleBase, bufID, path,
+			"applyOps from client %d: %v", clientID, rebaseErr)
 		return fmt.Errorf("buffer %d: %w", bufID, rebaseErr)
 	}
 

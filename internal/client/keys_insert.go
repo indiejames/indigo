@@ -214,8 +214,27 @@ func executeInsertEsc(m Model) (tea.Model, tea.Cmd) {
 	if len(m.currentGroup) > 0 {
 		m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: m.groupBefore})
 		fp := m.filePath
-		atLine := minAffectedLine(m.currentGroup)
-		lineDelta := m.buf.LineCount() - m.insertLineCount
+		// Per op, in the order they were typed, rather than one shift from the
+		// session's net line count. Two things were wrong with the net figure.
+		//
+		// It collapsed: a jump entry between two of the session's edit points
+		// is moved by one and not the other, and a session that adds a line in
+		// one place and removes one in another summed to zero and shifted
+		// nothing. And it was measured against m.insertLineCount, captured when
+		// insert mode was entered and never reset — but a remote op arriving
+		// mid-session closes this group (see the updatesMsg handler), so the
+		// difference also counted *another client's* line changes as part of
+		// this session. Deriving it from the group's own ops cannot.
+		//
+		// currentGroup holds the inverses, so each delta negates: a forward
+		// insert at line L of N newlines is stored as a delete of L..L+N, whose
+		// opLineDelta is (L, -N).
+		shifts := make([]LineShift, 0, len(m.currentGroup))
+		for _, inv := range m.currentGroup {
+			if al, d := opLineDelta(inv); d != 0 {
+				shifts = append(shifts, LineShift{AtLine: max(al, 0), Delta: -d})
+			}
+		}
 		startLine := m.groupBefore.cursor.Line
 		startCol := m.groupBefore.cursor.Col
 		depth := len(m.undoStack)
@@ -224,8 +243,7 @@ func executeInsertEsc(m Model) (tea.Model, tea.Cmd) {
 				FilePath:  fp,
 				Line:      startLine,
 				Col:       startCol,
-				AtLine:    atLine,
-				LineDelta: lineDelta,
+				Shifts:    shifts,
 				UndoDepth: depth,
 			}
 		}

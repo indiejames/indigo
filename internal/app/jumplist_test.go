@@ -28,18 +28,16 @@ func recDelta(a *App, file string, line, depth, atLine, delta int) {
 		FilePath:  file,
 		Line:      line,
 		UndoDepth: depth,
-		AtLine:    atLine,
-		LineDelta: delta,
+		Shifts:    []client.LineShift{{AtLine: atLine, Delta: delta}},
 	})
 }
 
 // undoOp simulates an undo, providing the reverse line shift the undo caused.
 func undoOp(a *App, file string, newDepth, atLine, delta int) {
 	a.handleUndoJump(client.UndoMsg{
-		FilePath:  file,
-		NewDepth:  newDepth,
-		AtLine:    atLine,
-		LineDelta: delta,
+		FilePath: file,
+		NewDepth: newDepth,
+		Shifts:   []client.LineShift{{AtLine: atLine, Delta: delta}},
 	})
 }
 
@@ -411,5 +409,248 @@ func TestJumpListMultipleFiles(t *testing.T) {
 	}
 	if bLine != 20 {
 		t.Errorf("b.go entry should not shift; want 20, got %d", bLine)
+	}
+}
+
+// TestApplyEditRecordAppliesEveryShift is the App half of the collapsed-shift
+// fix. The client now sends the ordered shifts rather than one summed
+// (AtLine, LineDelta), and each has to be applied at its own boundary.
+//
+// The entry under test sits *between* two edit points whose deltas cancel: a
+// summed shift moves it by zero, when it should move down one.
+func TestApplyEditRecordAppliesEveryShift(t *testing.T) {
+	a := newJumpApp()
+	rec(a, "/tmp/a.go", 4, 1) // an entry at line 4
+
+	a.applyEditRecord(client.EditRecordMsg{
+		FilePath:  "/tmp/a.go",
+		Line:      0,
+		UndoDepth: 2,
+		Shifts: []client.LineShift{
+			{AtLine: 1, Delta: 1},  // above it: pushes it down
+			{AtLine: 7, Delta: -1}, // below it: must not touch it
+		},
+	})
+
+	if got := a.jumpList[0].line; got != 5 {
+		t.Errorf("entry line = %d, want 5 — the shift above it must apply even though "+
+			"the two shifts sum to zero", got)
+	}
+}
+
+// TestApplyEditRecordRecordsOneDestinationPerMessage guards the other half:
+// however many shifts a message carries, it is one user action and adds one
+// jump entry.
+func TestApplyEditRecordRecordsOneDestinationPerMessage(t *testing.T) {
+	a := newJumpApp()
+	before := len(a.jumpList)
+
+	a.applyEditRecord(client.EditRecordMsg{
+		FilePath:  "/tmp/a.go",
+		Line:      9,
+		UndoDepth: 1,
+		Shifts: []client.LineShift{
+			{AtLine: 1, Delta: 1},
+			{AtLine: 7, Delta: -1},
+			{AtLine: 9, Delta: 3},
+		},
+	})
+
+	if got := len(a.jumpList) - before; got != 1 {
+		t.Errorf("added %d jump entries, want 1 — three shifts are still one edit", got)
+	}
+}
+
+// TestHandleUndoJumpAppliesEveryShift is the App half of the UndoMsg fix. The
+// entry sits between two shifts whose deltas cancel, so a summed version moves
+// it by nothing when it should move down one.
+func TestHandleUndoJumpAppliesEveryShift(t *testing.T) {
+	a := newJumpApp()
+	rec(a, "/tmp/a.go", 4, 1) // an entry at line 4
+
+	a.handleUndoJump(client.UndoMsg{
+		FilePath: "/tmp/a.go",
+		NewDepth: 1, // keeps the entry: its undoDepth is not greater
+		Shifts: []client.LineShift{
+			{AtLine: 7, Delta: -1}, // below it: must not touch it
+			{AtLine: 1, Delta: 1},  // above it: pushes it down
+		},
+	})
+
+	if got := a.jumpList[0].line; got != 5 {
+		t.Errorf("entry line = %d, want 5 — each shift must apply at its own "+
+			"boundary even though the two sum to zero", got)
+	}
+}
+
+// TestHandleUndoJumpReactivatedEntriesKeepTheirLine guards the subtlety the
+// two-pass split introduced. Rule 2 restores an entry suspended by the edit
+// being undone, and its stored position is already correct — so Rule 3 must
+// skip it. That used to be a `continue` inside one loop; with the line
+// arithmetic moved to a second pass it has to be carried across, and getting it
+// wrong would shift exactly the entries that must not move.
+func TestHandleUndoJumpReactivatedEntriesKeepTheirLine(t *testing.T) {
+	a := newJumpApp()
+	rec(a, "/tmp/a.go", 10, 1)
+
+	// A delete at depth 2 suspends that entry.
+	a.applyEditRecord(client.EditRecordMsg{
+		FilePath:  "/tmp/a.go",
+		Line:      0,
+		UndoDepth: 2,
+		Shifts:    []client.LineShift{{AtLine: 9, Delta: -3}},
+	})
+	var suspended *jumpEntry
+	for i := range a.jumpList {
+		if a.jumpList[i].line == 10 && !a.jumpList[i].active {
+			suspended = &a.jumpList[i]
+		}
+	}
+	if suspended == nil {
+		t.Fatal("test setup: expected the entry at line 10 to be suspended")
+	}
+
+	// Undoing that delete restores the lines and reactivates the entry.
+	a.handleUndoJump(client.UndoMsg{
+		FilePath: "/tmp/a.go",
+		NewDepth: 1,
+		Shifts:   []client.LineShift{{AtLine: 9, Delta: 3}},
+	})
+
+	var found bool
+	for _, e := range a.jumpList {
+		if e.filePath == "/tmp/a.go" && e.active && e.line == 10 {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("jumpList = %+v, want the reactivated entry still at line 10 — its "+
+			"stored position was already correct and must not be shifted again",
+			a.jumpList)
+	}
+}
+
+// redoOp simulates a redo and the forward line shift it re-applies.
+func redoOp(a *App, file string, newDepth, atLine, delta int) {
+	a.handleRedoJump(client.RedoMsg{
+		FilePath: file,
+		NewDepth: newDepth,
+		Shifts:   []client.LineShift{{AtLine: atLine, Delta: delta}},
+	})
+}
+
+// TestRedoRestoresJumpLinesAfterUndo is the round trip, and the property a user
+// would actually notice: edit, undo, redo, and a jump entry is back where the
+// edit put it. Before this, redo told the App nothing, so the entry kept the
+// line the *undo* had moved it to and every later jump landed wrong.
+func TestRedoRestoresJumpLinesAfterUndo(t *testing.T) {
+	a := newJumpApp()
+	rec(a, "/tmp/a.go", 10, 1) // an entry at line 10
+
+	// A forward edit inserting one line above it: the entry moves to 11.
+	a.applyEditRecord(client.EditRecordMsg{
+		FilePath:  "/tmp/a.go",
+		Line:      0,
+		UndoDepth: 2,
+		Shifts:    []client.LineShift{{AtLine: 2, Delta: 1}},
+	})
+	if got := lineOf(a, "/tmp/a.go", 1); got != 11 {
+		t.Fatalf("test setup: entry line = %d, want 11 after the insert", got)
+	}
+
+	undoOp(a, "/tmp/a.go", 1, 2, -1)
+	if got := lineOf(a, "/tmp/a.go", 1); got != 10 {
+		t.Fatalf("after undo: entry line = %d, want 10", got)
+	}
+
+	redoOp(a, "/tmp/a.go", 2, 2, 1)
+	if got := lineOf(a, "/tmp/a.go", 1); got != 11 {
+		t.Errorf("after redo: entry line = %d, want 11 — the redo re-applies the "+
+			"insert, so the entry must move back down with it", got)
+	}
+}
+
+// lineOf returns the line of the entry with the given undoDepth, or -1.
+func lineOf(a *App, file string, undoDepth int) int {
+	for _, e := range a.jumpList {
+		if e.filePath == file && e.undoDepth == undoDepth {
+			return e.line
+		}
+	}
+	return -1
+}
+
+// TestRedoReSuspendsEntriesADeleteHadRemoved checks the depth symmetry, which is
+// the part most easily got wrong: NewDepth must be the depth *after* the redo,
+// so a re-suspended entry carries the same deactivatedDepth the original delete
+// gave it and a later undo reactivates it exactly as the first one did.
+func TestRedoReSuspendsEntriesADeleteHadRemoved(t *testing.T) {
+	a := newJumpApp()
+	rec(a, "/tmp/a.go", 10, 1)
+
+	// A delete covering lines 9..12 at depth 2 suspends the entry at 10.
+	a.applyEditRecord(client.EditRecordMsg{
+		FilePath:  "/tmp/a.go",
+		Line:      0,
+		UndoDepth: 2,
+		Shifts:    []client.LineShift{{AtLine: 9, Delta: -3}},
+	})
+	if active := activeAt(a, "/tmp/a.go", 10); active {
+		t.Fatal("test setup: the entry inside the deleted range should be suspended")
+	}
+
+	// Undo restores the lines and reactivates it.
+	undoOp(a, "/tmp/a.go", 1, 9, 3)
+	if !activeAt(a, "/tmp/a.go", 10) {
+		t.Fatal("after undo: the entry should be active again at line 10")
+	}
+
+	// Redo re-applies the delete: it must be suspended again.
+	redoOp(a, "/tmp/a.go", 2, 9, -3)
+	if activeAt(a, "/tmp/a.go", 10) {
+		t.Error("after redo: the entry is still active, but the delete that " +
+			"suspended it has been re-applied")
+	}
+
+	// And undoing once more must reactivate it, which only works if the redo
+	// recorded the same deactivatedDepth the original delete did.
+	undoOp(a, "/tmp/a.go", 1, 9, 3)
+	if !activeAt(a, "/tmp/a.go", 10) {
+		t.Error("after undo following a redo: the entry should be active again — " +
+			"the redo must re-suspend at the depth the original edit used")
+	}
+}
+
+// activeAt reports whether an active entry sits at the given line.
+func activeAt(a *App, file string, line int) bool {
+	for _, e := range a.jumpList {
+		if e.filePath == file && e.line == line && e.active {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRedoMsgIsRoutedToTheHandler covers the wiring, not the arithmetic.
+//
+// The tests above call handleRedoJump directly, so they pass just as happily if
+// Update never dispatches a RedoMsg to it — which is precisely the state this
+// work started from, since executeRedo sent nothing and nothing received it.
+// A jump list that silently stops being adjusted raises no error; it just puts
+// a later jump in the wrong place.
+func TestRedoMsgIsRoutedToTheHandler(t *testing.T) {
+	a := App{jumpIdx: -1, buffers: []client.Model{newReloadTestModel(1, "/tmp/a.go")}}
+	a.jumpList = []jumpEntry{{filePath: "/tmp/a.go", line: 10, undoDepth: 1, active: true}}
+
+	updated, _ := a.Update(client.RedoMsg{
+		FilePath: "/tmp/a.go",
+		NewDepth: 2,
+		Shifts:   []client.LineShift{{AtLine: 2, Delta: 1}},
+	})
+	a2 := updated.(App)
+
+	if got := a2.jumpList[0].line; got != 11 {
+		t.Errorf("entry line = %d, want 11 — Update must route RedoMsg to "+
+			"handleRedoJump, not drop it into the active buffer", got)
 	}
 }

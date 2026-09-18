@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/syncevent"
 )
 
 // sendQueue serialises this client's outbound edits per buffer.
@@ -165,6 +166,8 @@ func (m Model) drainCmd(epoch uint64) tea.Cmd {
 			if err != nil {
 				clientLog("ApplyOp FAILED buf=%d gen=%d base=%d op=%s: %v",
 					s.bufID, s.generation, s.baseVersion, describeOp(s.op), err)
+				syncevent.Recordf("client", syncevent.SendFailed, s.bufID, "",
+					"gen=%d base=%d op=%s: %v", s.generation, s.baseVersion, describeOp(s.op), err)
 				// A failure from a superseded epoch is dropped rather than
 				// reported. Its op described content the client has already
 				// discarded, and the resync that discarded it is either done or

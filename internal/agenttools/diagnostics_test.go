@@ -134,7 +134,7 @@ func TestBuffersWithLaggingClients(t *testing.T) {
 func TestDiagnosticToolsAreRegisteredAndDispatched(t *testing.T) {
 	t.Setenv("INDIGO_LOG_DIR", t.TempDir())
 
-	for _, name := range []string{"get_logs", "get_sync_state", "check_buffer_consistency", "report_bundle"} {
+	for _, name := range []string{"get_logs", "get_sync_events", "get_sync_state", "check_buffer_consistency", "report_bundle"} {
 		var def *ToolDef
 		for i, td := range AllTools() {
 			if td.Name == name {
@@ -151,11 +151,16 @@ func TestDiagnosticToolsAreRegisteredAndDispatched(t *testing.T) {
 		}
 	}
 
-	// get_logs needs no server, so it can be driven all the way through the
-	// dispatcher — proving the name is actually wired, not just defined.
+	// get_logs and get_sync_events need no server, so they can be driven all
+	// the way through the dispatcher — proving the name is actually wired, not
+	// just defined.
 	out, isErr := ExecTool(context.Background(), nil, nil, t.TempDir(), "get_logs", json.RawMessage(`{}`))
 	if isErr {
 		t.Errorf("ExecTool(get_logs) returned an error result: %s", out)
+	}
+	out, isErr = ExecTool(context.Background(), nil, nil, t.TempDir(), "get_sync_events", json.RawMessage(`{}`))
+	if isErr {
+		t.Errorf("ExecTool(get_sync_events) returned an error result: %s", out)
 	}
 
 	if out, isErr := ExecTool(context.Background(), nil, nil, t.TempDir(), "get_logs", json.RawMessage(`{bad`)); !isErr {

@@ -1,14 +1,18 @@
 package document
 
+import "math/bits"
+
 const leafMaxRunes = 128
 
 // ropeNode is a node in an immutable rope tree.
 // Leaves have data != nil; internal nodes have left and right children.
-// runeLen and newlines are cached for the entire subtree.
+// runeLen, newlines, depth and leaves are cached for the entire subtree.
 type ropeNode struct {
 	left, right *ropeNode
 	runeLen     int
 	newlines    int
+	depth       int    // 1 for a leaf; 1 + max(children) for an internal node
+	leaves      int    // leaf count of this subtree
 	data        []rune // non-nil only for leaves
 }
 
@@ -19,7 +23,7 @@ func newLeaf(data []rune) *ropeNode {
 			nl++
 		}
 	}
-	return &ropeNode{runeLen: len(data), newlines: nl, data: data}
+	return &ropeNode{runeLen: len(data), newlines: nl, depth: 1, leaves: 1, data: data}
 }
 
 func newInternal(left, right *ropeNode) *ropeNode {
@@ -28,7 +32,115 @@ func newInternal(left, right *ropeNode) *ropeNode {
 		right:    right,
 		runeLen:  left.runeLen + right.runeLen,
 		newlines: left.newlines + right.newlines,
+		depth:    1 + max(left.depth, right.depth),
+		leaves:   left.leaves + right.leaves,
 	}
+}
+
+// idealDepth is the depth of a perfectly balanced tree over n leaves.
+func idealDepth(n int) int {
+	if n <= 1 {
+		return 1
+	}
+	return bits.Len(uint(n-1)) + 1
+}
+
+// ropeNeedsRebalance reports whether r has drifted far enough from balanced to
+// be worth rebuilding.
+//
+// The allowance is generous — twice the ideal depth plus two — because
+// rebuilding is O(leaves) and the point is to bound the worst case, not to keep
+// the tree pretty. Every concat can add one level at the root, so this permits
+// roughly idealDepth concats between rebuilds and the rebuild cost amortizes
+// over them.
+func ropeNeedsRebalance(r *ropeNode) bool {
+	return r != nil && r.data == nil && r.depth > 2*idealDepth(r.leaves)+2
+}
+
+// ropeRebalance rebuilds r as a balanced tree over its leaves.
+//
+// Without this the tree degenerates into a list. ropeConcat hangs a new node off
+// the root, and an edit is split-then-concat, so each edit at a fresh location
+// adds a level: 2000 scattered edits produced depth 2007 where balanced is 12.
+// Every traversal here is O(depth) — newlinesBefore and offsetOfNthNewline run
+// on the render path — so a long editing session degraded steadily, and nothing
+// ever recovered because nothing ever rebuilt.
+//
+// Leaves are reused rather than copied: they are immutable, so only the
+// internal nodes are rebuilt. The exception is coalescing, which is worth the
+// copy — the same fragmentation that deepens the tree also shatters it into
+// tiny leaves (2064 leaves averaging 3 runes each in that measurement), and
+// leaving those in place would mean rebalancing again almost immediately.
+func ropeRebalance(r *ropeNode) *ropeNode {
+	if r == nil {
+		return nil
+	}
+	leaves := make([]*ropeNode, 0, r.leaves)
+	collectLeaves(r, &leaves)
+	return buildBalanced(coalesceLeaves(leaves))
+}
+
+func collectLeaves(r *ropeNode, out *[]*ropeNode) {
+	if r == nil {
+		return
+	}
+	if r.data != nil {
+		*out = append(*out, r)
+		return
+	}
+	collectLeaves(r.left, out)
+	collectLeaves(r.right, out)
+}
+
+// coalesceLeaves merges adjacent undersized leaves up to leafMaxRunes,
+// preserving order and therefore content.
+//
+// Accumulating into one pending slice rather than merging pairwise matters:
+// merging k tiny leaves a pair at a time recopies the prefix every time, which
+// is quadratic in k, and k reaches leafMaxRunes in exactly the fragmented case
+// this exists to clean up. A leaf already at or over the limit is passed
+// through by pointer, so a large well-formed rope is rebalanced without copying
+// any text at all.
+func coalesceLeaves(leaves []*ropeNode) []*ropeNode {
+	out := make([]*ropeNode, 0, len(leaves))
+	var pending []rune
+	flush := func() {
+		if len(pending) > 0 {
+			out = append(out, newLeaf(pending))
+			pending = nil
+		}
+	}
+	for _, lf := range leaves {
+		if lf.runeLen == 0 {
+			continue
+		}
+		if lf.runeLen >= leafMaxRunes {
+			flush()
+			out = append(out, lf)
+			continue
+		}
+		if len(pending)+lf.runeLen > leafMaxRunes {
+			flush()
+		}
+		pending = append(pending, lf.data...)
+	}
+	flush()
+	return out
+}
+
+// buildBalanced builds a balanced tree over leaves, which must be in document
+// order. It calls newInternal directly rather than ropeConcat: the result is
+// balanced by construction, so re-checking it at every join would be wasted
+// work, and ropeConcat's leaf merging would undo coalesceLeaves' arrangement.
+func buildBalanced(leaves []*ropeNode) *ropeNode {
+	switch len(leaves) {
+	case 0:
+		return nil
+	case 1:
+		return leaves[0]
+	}
+	mid := len(leaves) / 2
+	return newInternal(buildBalanced(leaves[:mid]), buildBalanced(leaves[mid:]))
 }
 
 // ropeFromRunes builds a balanced rope from a rune slice. Returns nil for empty input.
@@ -59,7 +171,13 @@ func ropeConcat(a, b *ropeNode) *ropeNode {
 		copy(merged[a.runeLen:], b.data)
 		return newLeaf(merged)
 	}
-	return newInternal(a, b)
+	n := newInternal(a, b)
+	// The one place a tree grows a level, so the one place that has to notice
+	// it has grown too many.
+	if ropeNeedsRebalance(n) {
+		return ropeRebalance(n)
+	}
+	return n
 }
 
 // ropeSplit splits the rope at flat rune offset i, returning (left[0..i), right[i..]).

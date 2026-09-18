@@ -192,6 +192,22 @@ func AllTools() []ToolDef {
 			},
 		},
 		{
+			Name: "get_sync_events",
+			Description: "List buffer-synchronization events — rejected edits, generation mismatches, resyncs, stale or duplicated poll responses, external writes — from every process, in one timeline. " +
+				"This is the \"what went wrong between the windows\" view: get_logs shows prose, this shows the same moments filtered and counted by kind, which is what you want when asserting on behaviour or when a user reports a window that stopped updating. " +
+				"Reports a count per kind first, then the events themselves.",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]SchemaProp{
+					"since":  {Type: "string", Description: "How far back to look, as a duration like \"15m\" or \"2h\". Default 30m."},
+					"kind":   {Type: "string", Description: "Keep only one kind, e.g. \"generation_mismatch\", \"resync_started\", \"apply_op_rejected\", \"stale_base\". Omit for all."},
+					"path":   {Type: "string", Description: "Keep only events whose file path contains this substring. Omit for all files."},
+					"buf_id": {Type: "integer", Description: "Keep only events for this buffer id. Omit for all buffers."},
+					"max":    {Type: "integer", Description: "Newest N events to return. Default 200, capped at 2000."},
+				},
+			},
+		},
+		{
 			Name: "get_sync_state",
 			Description: "Report how the server and its connected editor windows currently stand on each open buffer: version, generation, dirty flag, content hash, retained ops, and every attached client's acknowledged version. " +
 				"Use it to diagnose buffers that look stale, out of sync between two windows, or that didn't pick up an external change. Reports content as a hash only, never as text.",
@@ -310,6 +326,12 @@ func ExecTool(ctx context.Context, rpc *client.RPC, ap Approver, workDir, name s
 			return fmt.Sprintf("bad input: %v", err), true
 		}
 		return execGetLogs(in)
+	case "get_sync_events":
+		var in getSyncEventsInput
+		if err := json.Unmarshal(rawInput, &in); err != nil {
+			return fmt.Sprintf("bad input: %v", err), true
+		}
+		return execGetSyncEvents(in)
 	case "get_sync_state":
 		var in getSyncStateInput
 		if err := json.Unmarshal(rawInput, &in); err != nil {

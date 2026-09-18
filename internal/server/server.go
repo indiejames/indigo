@@ -24,6 +24,7 @@ import (
 	"github.com/indiejames/indigo/internal/lsp"
 	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
+	"github.com/indiejames/indigo/internal/syncevent"
 )
 
 // serverRPCLogger implements rpc.Logger, routing capnproto internal messages to the log file.
@@ -342,6 +343,8 @@ func (s *editorService) handleExternalWrite(path string) {
 	s.mu.Unlock()
 
 	serverLog("handleExternalWrite: notifying %d clients for bufID=%d dirty=%v", len(callbacks), bufID, dirty)
+	syncevent.Recordf("server", syncevent.ExternalWriteNotified, bufID, path,
+		"notifying %d client(s), buffer dirty=%v", len(callbacks), dirty)
 	// Fan out concurrently, each client with its own timeout — the same shape
 	// PluginDecorationsChanged uses, and for a sharper reason here. This runs
 	// on watchLoop's single goroutine, so the previous serial

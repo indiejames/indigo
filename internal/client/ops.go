@@ -10,6 +10,7 @@ import (
 
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/highlight"
+	"github.com/indiejames/indigo/internal/syncevent"
 )
 
 // ReportActiveContextCmd returns a Cmd that tells the server this client's
@@ -176,6 +177,7 @@ func describeOp(op document.Op) string {
 // buffer via SaveAs since it last synced.
 func (m Model) resyncFromServer(failureCause string) tea.Cmd {
 	bufID := m.bufID
+	syncevent.Record("client", syncevent.ResyncStarted, bufID, m.filePath, failureCause)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), resyncTimeout)
 		defer cancel()
@@ -186,8 +188,11 @@ func (m Model) resyncFromServer(failureCause string) tea.Cmd {
 			// this is the point where knowing whether the server was slow, gone,
 			// or had dropped the buffer decides what to do about it.
 			clientLog("resync FAILED buf=%d: %v", bufID, err)
+			syncevent.Recordf("client", syncevent.ResyncFailed, bufID, path, "%v", err)
 		} else {
 			clientLog("resync ok buf=%d version=%d generation=%d path=%s", bufID, version, generation, path)
+			syncevent.Recordf("client", syncevent.ResyncOK, bufID, path,
+				"version=%d generation=%d", version, generation)
 		}
 		return bufferResyncMsg{bufID: bufID, content: content, version: version, generation: generation, path: path, err: err, failureCause: failureCause}
 	}
@@ -204,26 +209,6 @@ func opLineDelta(op document.Op) (atLine, delta int) {
 		return op.FromLine, -(op.ToLine - op.FromLine)
 	}
 	return 0, 0
-}
-
-// minAffectedLine returns the smallest line number referenced by any op in the
-// slice (which holds inverse ops from an insert session). Inverse ops reference
-// the same line numbers as the corresponding forward ops.
-func minAffectedLine(ops []document.Op) int {
-	min := -1
-	for _, op := range ops {
-		l := op.InsertLine
-		if op.Type == document.OpDelete {
-			l = op.FromLine
-		}
-		if min < 0 || l < min {
-			min = l
-		}
-	}
-	if min < 0 {
-		return 0
-	}
-	return min
 }
 
 // applyOp records the inverse of op for undo, then applies op locally and
@@ -245,7 +230,13 @@ func applyOp(m Model, op document.Op) (Model, tea.Cmd) {
 		fp, line, col := m.filePath, m.cursor.Line, m.cursor.Col
 		depth := len(m.undoStack)
 		recordCmd = func() tea.Msg {
-			return EditRecordMsg{FilePath: fp, Line: line, Col: col, AtLine: atLine, LineDelta: delta, UndoDepth: depth}
+			// One op, so one shift — and a zero delta still records the jump
+			// destination, which is the other half of this message.
+			return EditRecordMsg{
+				FilePath: fp, Line: line, Col: col,
+				Shifts:    []LineShift{{AtLine: max(atLine, 0), Delta: delta}},
+				UndoDepth: depth,
+			}
 		}
 	}
 	m.redoStack = nil // any new edit invalidates the redo history
@@ -365,29 +356,39 @@ func applyBatch(m Model, ops []document.Op) (Model, tea.Cmd) {
 	before := m.cursorSnap()
 	inverses := make([]document.Op, len(ops))
 	sendCmds := make([]tea.Cmd, 0, len(ops))
-	atLine, delta := -1, 0
+	// Recorded per op, in application order, rather than collapsed into a
+	// minimum line and a summed delta.
+	//
+	// Collapsing is wrong here for the same reason it was wrong in multicursor,
+	// in undo/redo, and in the remote-op handler: anything held *between* two
+	// ops' edit points is moved by one of them and not the other, which one
+	// combined shift cannot express. Two ops whose deltas cancel — an LSP code
+	// action adding a line up here and removing one down there — summed to zero
+	// and shifted nothing at all. applyLspEdits and the search-and-replace
+	// commit both produce exactly that shape.
+	var shifts []LineShift
 	for i, op := range ops {
 		inverses[i] = inverseOp(m, op) // must be before Apply
 		var sendCmd tea.Cmd
 		m, sendCmd = m.sendOp(op)
 		sendCmds = append(sendCmds, sendCmd)
-		al, d := opLineDelta(op)
-		if atLine < 0 || al < atLine {
-			atLine = al
+		if al, d := opLineDelta(op); d != 0 {
+			shifts = append(shifts, LineShift{AtLine: max(al, 0), Delta: d})
 		}
-		delta += d
-	}
-	if atLine < 0 {
-		atLine = 0
 	}
 	m.undoStack = append(m.undoStack, undoEntry{ops: inverses, before: before})
 	m.redoStack = nil
 	fp, line, col := m.filePath, m.cursor.Line, m.cursor.Col
 	depth := len(m.undoStack)
 	recordCmd := func() tea.Msg {
-		return EditRecordMsg{FilePath: fp, Line: line, Col: col, AtLine: atLine, LineDelta: delta, UndoDepth: depth}
+		return EditRecordMsg{FilePath: fp, Line: line, Col: col, Shifts: shifts, UndoDepth: depth}
 	}
-	m = m.shiftLSPOverlayLines(atLine, delta)
+	// sendOp applied each op to the buffer in order above, so each op's
+	// coordinates are against the buffer as it stood when that op landed —
+	// which is exactly what shifting sequentially in the same order needs.
+	for _, s := range shifts {
+		m = m.shiftLSPOverlayLines(s.AtLine, s.Delta)
+	}
 	m, refreshCmd := m.scheduleLSPOverlayRefresh()
 	extraCmds := []tea.Cmd{refreshCmd}
 	// sendOp already applied every op to the local buffer above, in order,

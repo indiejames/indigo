@@ -34,9 +34,16 @@ LANGS ?= lang_go lang_python lang_typescript lang_rust
 build-custom:
 	go build -tags "$(LANGS)" -o $(OUT) $(CMD)
 
-install: build-release
+install: build-release build-container-server
 	mv $(OUT) $(GOBIN)/$(BINARY)
 	$(GOBIN)/$(BINARY) --warm
+	# The container-side servers go to ~/.indigo, which is one of the places
+	# container.LocateServerBinary looks. Without this an installed indigo can
+	# only find them when it happens to sit beside a dist/ directory, which is
+	# true in a checkout and false everywhere else — found by running the
+	# feature from an installed binary for the first time.
+	mkdir -p $(HOME)/.indigo
+	cp dist/indigo-server-linux-arm64 dist/indigo-server-linux-amd64 $(HOME)/.indigo/
 
 test:
 	go test -tags lang_all ./...

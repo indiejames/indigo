@@ -22,6 +22,13 @@ func fakeCLI(t *testing.T, stdout, stderr string, exitCode int) CLI {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// A stand-in runtime, so these tests exercise output parsing rather than
+	// the runtime check that now runs before it. The fake CLI never spawns it.
+	stubRuntime := filepath.Join(dir, "docker")
+	if err := os.WriteFile(stubRuntime, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("INDIGO_DOCKER", stubRuntime)
 	return CLI{Command: path}
 }
 
@@ -188,4 +195,131 @@ func TestExecArgsPassTheRemoteUser(t *testing.T) {
 	if contains(execArgs("c1", "", []string{"x"}), "-u") {
 		t.Error("an empty user still produced a -u flag")
 	}
+}
+
+// TestUpParsesRealCLIOutput uses output captured verbatim from devcontainer CLI
+// 0.89.0, rather than a fixture written from the documentation.
+//
+// It pins two things the invented fixtures only assumed: the result is a single
+// line on *stdout* while progress and stack traces go to stderr, and a failure
+// still produces a result object rather than only an exit code. Both were
+// confirmed by running the real CLI; neither is stated anywhere in its docs.
+func TestUpParsesRealCLIOutput(t *testing.T) {
+	// Verbatim, from `devcontainer up --workspace-folder .` in a directory with
+	// no devcontainer.json. stderr carried a Node stack trace, which this
+	// deliberately reproduces because it is exactly what must not be mistaken
+	// for the result.
+	realStdout := `{"outcome":"error","message":"Dev container config (/private/tmp/dcprobe/.devcontainer/devcontainer.json) not found.","description":"Dev container config (/private/tmp/dcprobe/.devcontainer/devcontainer.json) not found."}`
+	realStderr := strings.Join([]string{
+		"[2026-09-21T20:56:57.599Z] @devcontainers/cli 0.89.0. Node.js v20.20.2. darwin 25.6.0 arm64.",
+		"    at kW (/Users/x/.devcontainers/cli/0.89.0/package/dist/spec-node/devContainersSpecCLI.js:488:3976)",
+		"    at async hI (/Users/x/.devcontainers/cli/0.89.0/package/dist/spec-node/devContainersSpecCLI.js:488:5808)",
+	}, "\n")
+
+	cli := fakeCLI(t, realStdout, realStderr, 1)
+	_, err := cli.Up(context.Background(), "/w")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "devcontainer.json") {
+		t.Errorf("error = %q, want the CLI's own diagnosis", err)
+	}
+	// The Node stack trace must not leak into the message as if it were the
+	// explanation.
+	if strings.Contains(err.Error(), "devContainersSpecCLI.js") {
+		t.Errorf("error = %q, want the CLI's message rather than its stack trace", err)
+	}
+}
+
+// TestCLIIsFoundOutsideThePath is a regression test for something a live check
+// found: the official install script puts the CLI in ~/.devcontainers/bin and
+// does not add it to PATH, so exec.LookPath alone reported "not installed" for
+// a CLI that was installed and working.
+func TestCLIIsFoundOutsideThePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// An empty PATH, so only the install-location search can succeed.
+	t.Setenv("PATH", t.TempDir())
+
+	var cli CLI
+	if cli.Available() {
+		t.Fatal("reported available before anything was installed")
+	}
+
+	installed := filepath.Join(home, ".devcontainers", "bin", "devcontainer")
+	if err := os.MkdirAll(filepath.Dir(installed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installed, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if !cli.Available() {
+		t.Error("did not find the CLI at the official install location")
+	}
+	if got := cli.bin(); got != installed {
+		t.Errorf("bin() = %q, want %q", got, installed)
+	}
+}
+
+// TestExplicitCommandWinsOverDiscovery keeps the test seam honest: a caller that
+// names a command must get that one, not whatever discovery turns up.
+func TestExplicitCommandWinsOverDiscovery(t *testing.T) {
+	cli := CLI{Command: "/somewhere/else/devcontainer"}
+	if got := cli.bin(); got != "/somewhere/else/devcontainer" {
+		t.Errorf("bin() = %q, want the explicit command", got)
+	}
+}
+
+// TestUpSaysWhatIsMissingWhenThereIsNoRuntime is the message a live run showed
+// was needed: without a container engine the CLI reports "spawn docker ENOENT",
+// which is Node for "not installed" and reads like an internal fault. Confirmed
+// against a real 0.89.0 before this check existed.
+func TestUpSaysWhatIsMissingWhenThereIsNoRuntime(t *testing.T) {
+	cli := fakeCLI(t, `{"outcome":"success","containerId":"abc"}`, "", 0)
+	noRuntime(t)
+
+	_, err := cli.Up(context.Background(), "/w")
+	if err == nil {
+		t.Fatal("expected an error with no runtime available")
+	}
+	if !strings.Contains(err.Error(), "container runtime") {
+		t.Errorf("error = %q, want it to name what is missing", err)
+	}
+	if strings.Contains(err.Error(), "ENOENT") {
+		t.Errorf("error = %q, want indigo's diagnosis rather than the CLI's", err)
+	}
+}
+
+// TestRuntimeOverrideIsHonoured: discovery cannot cover every installer, and
+// without an override a miss leaves the feature unusable with no way out.
+func TestRuntimeOverrideIsHonoured(t *testing.T) {
+	noRuntime(t)
+	t.Setenv("INDIGO_DOCKER", "/my/own/docker")
+
+	path, offPath, err := RuntimePath()
+	if err != nil {
+		t.Fatalf("RuntimePath: %v", err)
+	}
+	if path != "/my/own/docker" || !offPath {
+		t.Errorf("RuntimePath = (%q, %v), want the override, flagged as off-PATH", path, offPath)
+	}
+	// Docker.bin must use it too, or --container mode fails opaquely against an
+	// off-PATH install.
+	if got := (Docker{}).bin(); got != "/my/own/docker" {
+		t.Errorf("Docker.bin() = %q, want the override", got)
+	}
+}
+
+// noRuntime makes discovery find nothing, whatever is installed on the machine
+// running the test. PATH keeps /bin and /usr/bin so shell fixtures still work;
+// no container runtime installs itself there.
+func noRuntime(t *testing.T) {
+	t.Helper()
+	t.Setenv("INDIGO_DOCKER", "")
+	t.Setenv("PATH", "/bin:/usr/bin")
+	t.Setenv("HOME", t.TempDir())
+	prev := runtimeCandidates
+	runtimeCandidates = func() []string { return nil }
+	t.Cleanup(func() { runtimeCandidates = prev })
 }

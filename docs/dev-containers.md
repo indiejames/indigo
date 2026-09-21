@@ -28,7 +28,13 @@ Install the CLI first:
 curl -fsSL https://raw.githubusercontent.com/devcontainers/cli/main/scripts/install.sh | sh
 ```
 
-It bundles its own Node runtime, so there is nothing else to install.
+It bundles its own Node runtime. Note the script installs to `~/.devcontainers/bin`
+and does **not** add that to your `PATH`; indigo looks there anyway, so there is
+nothing further to do.
+
+You also need a container engine — Docker, OrbStack, Colima or Podman. indigo
+looks for one on `PATH` and in the usual install locations, and `INDIGO_DOCKER`
+points it at one it cannot find.
 
 **This is opt-in.** A repository that ships a `devcontainer.json` is not consent
 to build and start a container every time you open a file in it, so indigo never
@@ -55,9 +61,11 @@ by:
 make build-container-server
 ```
 
-It is found next to the `indigo` executable, in `dist/`, in `~/.indigo/`, or
-wherever `INDIGO_CONTAINER_SERVER` points. It is copied once per container and
-reused, and it needs no changes to your image.
+`make install` puts both architectures in `~/.indigo/`. indigo also looks next
+to its own executable, in `dist/`, and wherever `INDIGO_CONTAINER_SERVER`
+points. The binary is copied into a container once and reused, and it needs no
+changes to your image — it is statically linked, so glibc and musl images both
+work (tested on Alpine).
 
 If your image already ships one, say so in `devcontainer.json` and indigo will
 use it instead of copying anything:
@@ -112,6 +120,10 @@ named-volume workspaces are a common workaround.
 **"the devcontainer CLI is not installed"** — install it with the script above,
 or use `--container` against a container you start yourself.
 
+**"no container runtime found"** — install Docker, OrbStack, Colima or Podman.
+If one is installed somewhere indigo does not look, set `INDIGO_DOCKER` to its
+full path.
+
 **"no indigo-server-linux-… found"** — run `make build-container-server`.
 
 **"… is outside the workspace …"** — the file is not mounted into the container.
@@ -124,6 +136,11 @@ from, so it runs as the image's default user.
 **Everything is slow the first time** — `devcontainer up` may be pulling an
 image, building it, and running lifecycle hooks. Later starts reuse the
 container.
+
+**`docker-credential-desktop: executable file not found`** — Docker's credential
+helpers live beside the `docker` binary and are found through `PATH`. indigo
+adds that directory for the processes it spawns, so this should not reach you;
+if it does, add Docker's `bin` directory to your `PATH`.
 
 Diagnostics go to the same shared log as everything else; see
 `docs/agent-integration.md` for `get_logs`, and note that a wedged connection is

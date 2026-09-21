@@ -34,9 +34,14 @@ func errorsAs(err error, target any) bool { return errors.As(err, target) }
 // indigo's diagnostics.
 func stderrSink() io.Writer { return os.Stderr }
 
+// bin resolves the runtime, looking beyond PATH for the same reason CLI.bin
+// does — an installer that never touched PATH is the common case on macOS.
 func (d Docker) bin() string {
 	if d.Command != "" {
 		return d.Command
+	}
+	if p, _, err := RuntimePath(); err == nil {
+		return p
 	}
 	return "docker"
 }
@@ -48,14 +53,21 @@ func (d Docker) bin() string {
 // must never change and would be invisible if it did — a TTY translates \n to
 // \r\n and silently corrupts the capnp stream rather than failing.
 //
-// -i is required (the server reads its stdin), and "--" stops the CLI from
-// interpreting a leading dash in the command as its own flag.
+// -i is required: the server reads its stdin, and that is half the wire.
+//
+// There is deliberately **no "--" separator**. Most CLIs take one; `docker exec`
+// does not — it treats "--" as the command to run and fails with
+// `exec: "--": executable file not found in $PATH`. An earlier version had one,
+// and the unit test asserting its presence encoded the same wrong assumption,
+// so both passed until this was run against a real container. Nothing is lost:
+// docker stops parsing flags at the container name, and the command here is
+// always an absolute path, so there is no leading dash to protect against.
 func execArgs(id, user string, argv []string) []string {
 	out := []string{"exec", "-i"}
 	if user != "" {
 		out = append(out, "-u", user)
 	}
-	out = append(out, id, "--")
+	out = append(out, id)
 	return append(out, argv...)
 }
 
@@ -86,6 +98,7 @@ func (d Docker) Arch(ctx context.Context, id string) (string, error) {
 // container indigo can run a server in has some /bin/sh.
 func (d Docker) FileExists(ctx context.Context, id, path string) (bool, error) {
 	cmd := exec.CommandContext(ctx, d.bin(), execArgs(id, d.User, []string{"/bin/sh", "-c", "[ -x " + shellQuote(path) + " ]"})...)
+	cmd.Env = d.env()
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errorsAs(err, &exitErr) {
@@ -115,6 +128,7 @@ func (d Docker) CopyIn(ctx context.Context, id, localPath, remotePath string) er
 // in the same move.
 func (d Docker) Exec(ctx context.Context, id string, argv []string) (io.ReadWriteCloser, error) {
 	cmd := exec.CommandContext(ctx, d.bin(), execArgs(id, d.User, argv)...)
+	cmd.Env = d.env()
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -136,8 +150,19 @@ func (d Docker) Exec(ctx context.Context, id string, argv []string) (io.ReadWrit
 	return &procStream{cmd: cmd, in: stdin, out: stdout}, nil
 }
 
+// env gives a spawned docker its own directory on PATH, so it can find the
+// credential helpers that sit beside it. See container.childEnv.
+func (d Docker) env() []string {
+	path, offPath, err := RuntimePath()
+	if err != nil {
+		return os.Environ()
+	}
+	return childEnv(path, offPath)
+}
+
 func (d Docker) output(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, d.bin(), args...)
+	cmd.Env = d.env()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

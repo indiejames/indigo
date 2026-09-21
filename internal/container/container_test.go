@@ -192,16 +192,20 @@ func TestExecArgsNeverAllocateATTY(t *testing.T) {
 	if !contains(args, "-i") {
 		t.Errorf("args = %v, want -i", args)
 	}
-	// "--" keeps a command starting with a dash from being read as a flag.
-	sep := indexOf(args, "--")
-	if sep < 0 {
-		t.Fatalf("args = %v, want a -- separator", args)
+	// No "--" separator: docker exec treats one as the command to run and
+	// fails with `exec: "--": executable file not found`. Verified against a
+	// real docker 29.8.0 — an earlier version had one here, and the assertion
+	// that it was present encoded the same wrong assumption, so both passed
+	// until the feature was run for the first time.
+	if contains(args, "--") {
+		t.Fatalf("args = %v, want no -- separator; docker exec would try to run it", args)
 	}
-	if indexOf(args, "c1") > sep {
-		t.Errorf("args = %v, want the container id before --", args)
+	idIdx := indexOf(args, "c1")
+	if idIdx < 0 {
+		t.Fatalf("args = %v, want the container id", args)
 	}
-	if strings.Join(args[sep+1:], " ") != "/tmp/.indigo-server-arm64 /workspaces/proj" {
-		t.Errorf("command after -- = %v, want the server and its workspace", args[sep+1:])
+	if strings.Join(args[idIdx+1:], " ") != "/tmp/.indigo-server-arm64 /workspaces/proj" {
+		t.Errorf("command after the container id = %v, want the server and its workspace", args[idIdx+1:])
 	}
 }
 

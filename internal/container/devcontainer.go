@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -38,16 +40,49 @@ type CLI struct {
 	Command string
 }
 
+// bin resolves the CLI, looking beyond PATH.
+//
+// The official install script puts it in ~/.devcontainers/bin and does *not*
+// add that to PATH — verified against a real 0.89.0 install, where the CLI was
+// present and working and `exec.LookPath` still could not find it. Relying on
+// PATH alone means telling someone to install a thing they have already
+// installed, which is the most annoying possible error message.
 func (c CLI) bin() string {
 	if c.Command != "" {
 		return c.Command
 	}
+	if p, err := exec.LookPath("devcontainer"); err == nil {
+		return p
+	}
+	for _, p := range defaultCLIPaths() {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p
+		}
+	}
 	return "devcontainer"
+}
+
+// defaultCLIPaths are the install locations to check when PATH does not have
+// it. The first is where the official install script puts it.
+func defaultCLIPaths() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return []string{
+		filepath.Join(home, ".devcontainers", "bin", "devcontainer"),
+		filepath.Join(home, ".local", "bin", "devcontainer"),
+	}
 }
 
 // Available reports whether the CLI can be found.
 func (c CLI) Available() bool {
-	_, err := exec.LookPath(c.bin())
+	bin := c.bin()
+	if filepath.IsAbs(bin) {
+		info, err := os.Stat(bin)
+		return err == nil && !info.IsDir()
+	}
+	_, err := exec.LookPath(bin)
 	return err == nil
 }
 
@@ -80,8 +115,24 @@ func (c CLI) Up(ctx context.Context, workspaceFolder string) (UpResult, error) {
 	if !c.Available() {
 		return UpResult{}, ErrCLIMissing
 	}
+	// Checked before the CLI is invoked, not after. Without a runtime the CLI
+	// fails with "spawn docker ENOENT", which is Node for "not installed" and
+	// reads like an internal fault — verified against a real 0.89.0. Saying
+	// what is actually missing is worth one LookPath.
+	args := []string{"up", "--workspace-folder", workspaceFolder}
+	runtimePath, offPath, err := RuntimePath()
+	if err != nil {
+		return UpResult{}, err
+	}
+	if offPath {
+		// The CLI spawns the runtime itself and inherits our PATH, so one we
+		// found off-PATH has to be handed over explicitly.
+		args = append(args, "--docker-path", runtimePath)
+	}
+
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, c.bin(), "up", "--workspace-folder", workspaceFolder)
+	cmd := exec.CommandContext(ctx, c.bin(), args...)
+	cmd.Env = childEnv(runtimePath, offPath)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
@@ -138,18 +189,43 @@ func (c CLI) ReadConfiguration(ctx context.Context, workspaceFolder string) (Con
 		return Configuration{}, ErrCLIMissing
 	}
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, c.bin(), "read-configuration", "--workspace-folder", workspaceFolder)
+	// --include-merged-configuration so customizations contributed by a
+	// *feature* are merged in, not only those written directly in
+	// devcontainer.json. It adds a key rather than changing the existing one,
+	// and the parsing below accepts either shape.
+	cfgArgs := []string{"read-configuration", "--workspace-folder", workspaceFolder,
+		"--include-merged-configuration"}
+	if runtimePath, offPath, err := RuntimePath(); err == nil && offPath {
+		// read-configuration shells out to `docker ps` to find an existing
+		// container, so it needs the runtime too — confirmed by watching it
+		// fail with exactly that call.
+		cfgArgs = append(cfgArgs, "--docker-path", runtimePath)
+	}
+	cmd := exec.CommandContext(ctx, c.bin(), cfgArgs...)
+	if runtimePath, offPath, err := RuntimePath(); err == nil {
+		cmd.Env = childEnv(runtimePath, offPath)
+	}
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return Configuration{}, fmt.Errorf("devcontainer read-configuration: %w: %s", err, tail(stderr.String()))
 	}
-	// The CLI wraps the resolved file in a "configuration" key; older versions
-	// print it bare. Both are accepted rather than pinning a version, since a
-	// missing customizations block is indistinguishable from an absent one and
-	// costs nothing to be lenient about.
+	// Three shapes are accepted: the merged configuration, the resolved file
+	// under a "configuration" key, and — for older versions — the file bare.
+	// Leniency rather than pinning a version, because the whole block is
+	// optional and an unreadable one is indistinguishable from an absent one.
+	//
+	// Untested against a real CLI: read-configuration shells out to `docker ps`
+	// and so needs a runtime, which the machine this was written on does not
+	// have. The `up` half above *is* verified against a real 0.89.0.
 	type wrapper struct {
+		Merged        Configuration `json:"mergedConfiguration"`
 		Configuration Configuration `json:"configuration"`
+	}
+	if w, ok := lastJSONObject[wrapper](stdout.Bytes(), func(w wrapper) bool {
+		return w.Merged.Customizations.Indigo != IndigoCustomizations{}
+	}); ok {
+		return w.Merged, nil
 	}
 	if w, ok := lastJSONObject[wrapper](stdout.Bytes(), func(w wrapper) bool {
 		return w.Configuration.Customizations.Indigo != IndigoCustomizations{}

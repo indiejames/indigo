@@ -196,6 +196,15 @@ func connect(workDir string) (*client.RPC, error) {
 
 	// workDir is already the container's name for the workspace — see
 	// resolveWorkspace, which is where the translation happens.
+	// Checked here as well as in CLI.Up, because --container never goes near
+	// the devcontainer CLI. Without it the failure surfaces as a raw
+	// "exec: docker: executable file not found in $PATH" wrapped in two layers
+	// of context about architecture probing, which says nothing about what to
+	// do — seen on a real run before this check existed.
+	if _, _, rtErr := container.RuntimePath(); rtErr != nil {
+		return nil, rtErr
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), attachTimeout)
 	defer cancel()
 	stream, err := container.Attach(ctx, container.Docker{User: remoteUser}, containerName, workDir,

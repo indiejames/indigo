@@ -121,6 +121,15 @@ func main() {
 		fatalf("server did not start: %v", err)
 	}
 
+	// Armed before Dial, not after. Dial's handshake calls carry no deadline
+	// at all, and the OpenFile below is the first thing a window does — so a
+	// server that never answers either of them is a window that never appears,
+	// which is a hang like any other and was the one the detector could not
+	// see. Arming this early costs nothing: no loop has registered a heartbeat
+	// yet, so until the Bubble Tea program starts there is only call tracking.
+	hangdetect.Start()
+	defer hangdetect.Stop()
+
 	rpc, err := client.Dial(sockPath)
 	if err != nil {
 		fatalf("connect to server: %v", err)
@@ -141,12 +150,6 @@ func main() {
 		a = app.New(rpc, bufID, content, version, absTarget, cfg, fromRecovery, workDir, startLine, generation)
 	}
 
-	// See runServer. Started here rather than inside app so that the update
-	// loop's heartbeat is only armed for a program that is actually running
-	// one — a test driving App.Update directly must not look like a window
-	// that stopped beating the moment the test ended.
-	hangdetect.Start()
-	defer hangdetect.Stop()
 	p := tea.NewProgram(a, tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
 	finalModel, err := p.Run()
@@ -299,6 +302,10 @@ func openUntitled(startLine int) {
 		fatalf("server did not start: %v", err)
 	}
 
+	// Before Dial — see the matching comment in the main startup path.
+	hangdetect.Start()
+	defer hangdetect.Stop()
+
 	rpc, err := client.Dial(sockPath)
 	if err != nil {
 		fatalf("connect to server: %v", err)
@@ -313,8 +320,6 @@ func openUntitled(startLine int) {
 	}
 
 	a := app.New(rpc, bufID, content, version, "", cfg, false, workDir, startLine, generation)
-	hangdetect.Start()
-	defer hangdetect.Stop()
 	p := tea.NewProgram(a, tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
 	finalModel, err := p.Run()

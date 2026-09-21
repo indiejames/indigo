@@ -250,12 +250,15 @@ func (d *Detector) Beat(tag, what string, threshold time.Duration) {
 		l = &trackedLoop{tag: tag, threshold: threshold}
 		d.loops[tag] = l
 	}
+	// Read before overwriting: the beat that ends a stall names whatever the
+	// loop moved on to, and the end line has to name what it was stuck on, or
+	// it cannot be paired with the start line it closes.
+	blamed := l.what
 	l.what = what
 	l.last = now
 	l.threshold = threshold
 	recovered := l.reported
 	stalled := now.Sub(l.stallStart)
-	blamed := l.what
 	if recovered {
 		l.reported = false
 		l.stallStart = time.Time{}

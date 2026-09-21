@@ -65,24 +65,59 @@ func TestUpdateBeatsTheHangDetector(t *testing.T) {
 	}
 }
 
-// TestUpdateBeatsBeforeDoingTheWork pins the ordering that makes a report
-// usable: the beat has to name the message that is about to be handled, not
-// the one that was handled last. Beating afterwards would name the previous
-// message on every stall — always the wrong one.
+// TestUpdateBeatsBeforeDoingTheWork pins the ordering, which is the whole
+// point of the heartbeat: a beat taken *after* the work has already been done
+// records a message that by definition did not hang, and a message that does
+// hang is never beaten for at all — so the detector would be silent in exactly
+// the case it exists for.
+//
+// Observing it needs a vantage point inside the handler. App is a value
+// receiver, so the fields it assigns are invisible from out here — but
+// a.buffers is a slice, and the bufferReloadedMsg handler writes through its
+// backing array, which the caller shares. So the beat reads that slot and
+// records what it saw; if the handler had already run, it would see the
+// replacement.
+//
+// An earlier version of this test asserted only that a beat happened and that
+// the message was processed, which passes with the beat on either side of the
+// work. Verified by moving the call in Update, which now fails here.
 func TestUpdateBeatsBeforeDoingTheWork(t *testing.T) {
+	a := newBeatTestApp() // buffers[0] is bufID 1 at /tmp/a.go
+
 	var seen []string
+	var atBeat string
 	old := beat
-	beat = func(_, what string, _ time.Duration) { seen = append(seen, what) }
+	beat = func(_, what string, _ time.Duration) {
+		seen = append(seen, what)
+		atBeat = a.buffers[0].FilePath()
+	}
 	t.Cleanup(func() { beat = old })
 
-	a := newBeatTestApp()
+	replacement := client.New(&client.RPC{}, 1, "", 0, "/tmp/replaced.go", "/tmp", nil, false, 0)
+	a.Update(bufferReloadedMsg{idx: 0, oldBufID: 1, model: replacement})
+
+	// The observation point is real: the handler did write through the slot
+	// the beat was reading. Without this the assertion below would hold just
+	// as well if nothing had happened at all.
+	if got := a.buffers[0].FilePath(); got != "/tmp/replaced.go" {
+		t.Fatalf("buffers[0] = %q; the handler never wrote, so this test proves nothing", got)
+	}
+	if atBeat != "/tmp/a.go" {
+		t.Errorf("at beat time buffers[0] was %q, want the pre-handler %q — the beat "+
+			"is being taken after the work rather than before it", atBeat, "/tmp/a.go")
+	}
+	if len(seen) != 1 || !strings.Contains(seen[0], "bufferReloadedMsg") {
+		t.Errorf("beats = %v, want one naming bufferReloadedMsg", seen)
+	}
+
+	// And the same holds for a message handled on a different branch.
+	seen, atBeat = nil, ""
 	updated, _ := a.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	a2 := updated.(App)
-	if a2.width != 100 {
-		t.Fatalf("the message was not actually processed (width = %d)", a2.width)
+	if a2 := updated.(App); a2.width != 100 {
+		t.Fatalf("the window-size message was not processed (width = %d)", a2.width)
 	}
 	if len(seen) != 1 || !strings.Contains(seen[0], "WindowSizeMsg") {
-		t.Fatalf("beats = %v, want one naming WindowSizeMsg", seen)
+		t.Errorf("beats = %v, want one naming WindowSizeMsg", seen)
 	}
 }
 

@@ -68,13 +68,19 @@ func TestLoopStallIsReportedOnceThenRecovered(t *testing.T) {
 		t.Fatalf("got %d lines, want exactly 1 — a stall must not be re-reported every scan: %v", n, *lines)
 	}
 
-	// The loop comes back. Recovery is reported by Beat, at the moment it
-	// happened, and carries how long the stall lasted.
+	// The loop comes back, and the beat that revives it names a *different*
+	// message — which is the normal case, since the loop moves on the instant
+	// it is unblocked. The end line must still name the message that stalled
+	// it, or it cannot be correlated with the start line it closes.
 	*now = now.Add(5 * time.Second)
-	d.Beat("app", "app.tickMsg", LoopThreshold)
+	d.Beat("app", "app.tickMsg2", LoopThreshold)
 	end := findLine(*lines, "kind=loop_stalled", "phase=end")
 	if end == "" {
 		t.Fatalf("no end line after the loop resumed: %v", *lines)
+	}
+	if !strings.Contains(end, `what="app.tickMsg"`) {
+		t.Errorf("end line names the message that resumed the loop rather than "+
+			"the one that stalled it: %s", end)
 	}
 	// The whole quiet period, measured from the last beat to this one — not
 	// from when the monitor first noticed, which is a scan interval later and

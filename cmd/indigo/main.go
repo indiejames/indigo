@@ -16,6 +16,7 @@ import (
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/debuglog"
+	"github.com/indiejames/indigo/internal/hangdetect"
 	"github.com/indiejames/indigo/internal/highlight"
 	"github.com/indiejames/indigo/internal/server"
 	"github.com/indiejames/indigo/internal/theme"
@@ -119,6 +120,15 @@ func main() {
 	if err := waitForServer(sockPath, 3*time.Second); err != nil {
 		fatalf("server did not start: %v", err)
 	}
+
+	// Armed before Dial, not after. Dial's handshake calls carry no deadline
+	// at all, and the OpenFile below is the first thing a window does — so a
+	// server that never answers either of them is a window that never appears,
+	// which is a hang like any other and was the one the detector could not
+	// see. Arming this early costs nothing: no loop has registered a heartbeat
+	// yet, so until the Bubble Tea program starts there is only call tracking.
+	hangdetect.Start()
+	defer hangdetect.Stop()
 
 	rpc, err := client.Dial(sockPath)
 	if err != nil {
@@ -292,6 +302,10 @@ func openUntitled(startLine int) {
 		fatalf("server did not start: %v", err)
 	}
 
+	// Before Dial — see the matching comment in the main startup path.
+	hangdetect.Start()
+	defer hangdetect.Stop()
+
 	rpc, err := client.Dial(sockPath)
 	if err != nil {
 		fatalf("connect to server: %v", err)
@@ -401,6 +415,11 @@ func init() {
 }
 
 func runServer(dir string) {
+	// Armed for the whole life of the server process, the same way debuglog is
+	// always on: the failure it watches for leaves no other trace, and there is
+	// no moment at which someone would have known to turn it on first.
+	hangdetect.Start()
+	defer hangdetect.Stop()
 	srv, err := server.New(dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "server: %v\n", err)

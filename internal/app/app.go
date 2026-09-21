@@ -14,6 +14,7 @@ import (
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/debuglog"
+	"github.com/indiejames/indigo/internal/hangdetect"
 )
 
 func appLog(format string, args ...any) {
@@ -291,6 +292,19 @@ func withMousePos(msg tea.Msg, mouse tea.Mouse) tea.Msg {
 // and any of them forgetting to record "this buffer was just used" would show
 // up only as the wrong tab quietly disappearing off a crowded tab bar.
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Heartbeat for the hang detector, stamped with the message about to be
+	// processed. Bubble Tea's loop is single-threaded and self-sustaining — a
+	// tickMsg every 120ms reschedules itself — so beats stop only because an
+	// Update did not return, and the message named here is the one that did
+	// not return. That is the whole diagnosis whenever the cause is
+	// synchronous work on this thread, which is the easiest kind to introduce
+	// here and the hardest to spot afterwards: everything below runs before
+	// the next frame is drawn.
+	//
+	// Inert until hangdetect.Start, which only cmd/indigo calls, so tests and
+	// embedders pay one atomic load.
+	beat(UILoopTag, msgName(msg), hangdetect.LoopThreshold)
+
 	next, cmd := a.update(msg)
 	updated, ok := next.(App)
 	if !ok {

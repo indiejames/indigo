@@ -15,6 +15,7 @@ import (
 
 	"github.com/indiejames/indigo/internal/debuglog"
 	proto "github.com/indiejames/indigo/internal/proto"
+	"github.com/indiejames/indigo/internal/rpcwatch"
 )
 
 // rpcLogger implements rpc.Logger, routing capnproto internal messages to our log file.
@@ -179,7 +180,18 @@ func Dial(socketPath string) (*RPC, error) {
 		BootstrapClient: capnp.Client(cbCap).AddRef(),
 		Logger:          &rpcLogger{},
 	})
-	svc := proto.EditorService(conn.Bootstrap(context.Background()))
+	// Every outgoing call goes through rpcwatch, which records it as in flight
+	// for as long as it is outstanding. Two things come of that: the handshake
+	// calls below carry no deadline, so a server that never answers them would
+	// otherwise leave a window that simply never opens with nothing written
+	// down; and when this window's update loop freezes, the report carries
+	// what this connection was waiting on at that moment, which is what
+	// separates "stuck doing local work" from "stuck waiting on the server".
+	//
+	// Safe to wrap because this capability is only ever called from this
+	// process and never handed back to the server — a wrapper has its own
+	// identity, so a peer receiving one would export it afresh.
+	svc := proto.EditorService(rpcwatch.WrapOutgoing("client", conn.Bootstrap(context.Background())))
 
 	// Register with server, passing our callback capability.
 	fut, rel := svc.Connect(context.Background(), func(p proto.EditorService_connect_Params) error {

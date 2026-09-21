@@ -20,10 +20,12 @@ import (
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/format"
+	"github.com/indiejames/indigo/internal/hangdetect"
 	"github.com/indiejames/indigo/internal/lint"
 	"github.com/indiejames/indigo/internal/lsp"
 	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
+	"github.com/indiejames/indigo/internal/rpcwatch"
 	"github.com/indiejames/indigo/internal/syncevent"
 )
 
@@ -788,6 +790,46 @@ func (s *Server) flushDirtyBuffers(maxBytes int64) {
 	}
 }
 
+// bootstrapOptions builds the RPC options one connection is served with.
+//
+// Split out of serve() so the wrapping below has somewhere to be asserted on:
+// a capability that is not wrapped behaves identically in every other respect,
+// so nothing else in the suite would notice it going missing.
+//
+// Incoming calls are timed from arrival to return, not from when their handler
+// starts. capnp serialises this connection's calls until a handler releases
+// the queue with call.Go(), so one that blocks without releasing it stalls
+// every later call on the connection too — and that queueing delay is exactly
+// the latency the client experiences. A report from here also carries this
+// process's goroutines, which is the half of the picture a client stuck
+// waiting on this server cannot obtain for itself.
+func bootstrapOptions(svc *connSvc) *rpc.Options {
+	registerMethodNamesOnce.Do(func() {
+		// An incoming call carries only numeric ids — the schema's names live
+		// in the generated server's method table, which is consulted after the
+		// capability hook has already seen the call. Without this a report
+		// reads "@0xd281f133906f9f01.@2", which names the stall in the one
+		// vocabulary nobody debugging it is fluent in.
+		rpcwatch.RegisterMethodNames(proto.EditorService_Methods(nil, svc))
+	})
+	return &rpc.Options{
+		BootstrapClient: rpcwatch.WrapIncoming("server",
+			capnp.Client(proto.EditorService_ServerToClient(svc)),
+			serverCallBudget),
+		Logger: &serverRPCLogger{},
+	}
+}
+
+// serverCallBudget is a var so a test can shorten it, the same reason
+// format.externalFormatTimeout is one: the real value is the right one to ship
+// and the wrong one to make every test run wait for.
+var serverCallBudget = hangdetect.ServerCallBudget
+
+// registerMethodNamesOnce guards a table that is the same for every
+// connection. Building it per connection would work and would also allocate
+// the whole method list on every window that opens.
+var registerMethodNamesOnce sync.Once
+
 func (s *Server) serve() {
 	for {
 		conn, err := s.listener.Accept()
@@ -821,11 +863,7 @@ func (s *Server) serve() {
 			}()
 			transport := rpc.NewStreamTransport(c)
 			svc := &connSvc{editorService: s.svc, connID: connID}
-			opts := &rpc.Options{
-				BootstrapClient: capnp.Client(proto.EditorService_ServerToClient(svc)),
-				Logger:          &serverRPCLogger{},
-			}
-			conn := rpc.NewConn(transport, opts)
+			conn := rpc.NewConn(transport, bootstrapOptions(svc))
 			defer conn.Close() //nolint:errcheck
 			select {
 			case <-conn.Done():

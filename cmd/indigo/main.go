@@ -16,6 +16,7 @@ import (
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/debuglog"
+	"github.com/indiejames/indigo/internal/hangdetect"
 	"github.com/indiejames/indigo/internal/highlight"
 	"github.com/indiejames/indigo/internal/server"
 	"github.com/indiejames/indigo/internal/theme"
@@ -140,6 +141,12 @@ func main() {
 		a = app.New(rpc, bufID, content, version, absTarget, cfg, fromRecovery, workDir, startLine, generation)
 	}
 
+	// See runServer. Started here rather than inside app so that the update
+	// loop's heartbeat is only armed for a program that is actually running
+	// one — a test driving App.Update directly must not look like a window
+	// that stopped beating the moment the test ended.
+	hangdetect.Start()
+	defer hangdetect.Stop()
 	p := tea.NewProgram(a, tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
 	finalModel, err := p.Run()
@@ -306,6 +313,8 @@ func openUntitled(startLine int) {
 	}
 
 	a := app.New(rpc, bufID, content, version, "", cfg, false, workDir, startLine, generation)
+	hangdetect.Start()
+	defer hangdetect.Stop()
 	p := tea.NewProgram(a, tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
 	finalModel, err := p.Run()
@@ -401,6 +410,11 @@ func init() {
 }
 
 func runServer(dir string) {
+	// Armed for the whole life of the server process, the same way debuglog is
+	// always on: the failure it watches for leaves no other trace, and there is
+	// no moment at which someone would have known to turn it on first.
+	hangdetect.Start()
+	defer hangdetect.Stop()
 	srv, err := server.New(dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "server: %v\n", err)

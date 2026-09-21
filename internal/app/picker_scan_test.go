@@ -20,12 +20,17 @@ import (
 // project-scoped root) this could hang the editor indefinitely with no
 // feedback and no way to interrupt it.
 //
-// The scan must now happen in the tea.Cmd Update returns, not in Update
-// itself: right after OpenPickerMsg, the picker must already be open but
-// its global file list (picker.all) must still be empty/loading — proving
-// Update returned without doing the walk — and only invoking the returned
-// command (which is what Bubble Tea does in its own goroutine) actually
-// performs it.
+// The scan must happen in the tea.Cmd Update returns, not in Update itself:
+// right after OpenPickerMsg, the picker must already be open but its global
+// file list (picker.all) must still be empty/loading, proving Update returned
+// without doing the walk.
+//
+// The walk now runs on the server (see internal/workspacefs), which makes this
+// guard stronger rather than weaker — the work Update must not do is a round
+// trip as well as a walk. What this test no longer does is invoke the returned
+// command: that needs a live server, and that half is covered by the RPC tests
+// in internal/client. The deferral is what this test is named for and is what
+// the reported bug was.
 func TestOpenPickerDoesNotScanSynchronously(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a"), 0o644); err != nil {
@@ -52,25 +57,18 @@ func TestOpenPickerDoesNotScanSynchronously(t *testing.T) {
 	if len(a2.picker.all) != 0 {
 		t.Errorf("picker.all = %v, want empty immediately after OpenPickerMsg (populated by the returned command instead)", a2.picker.all)
 	}
+	if !a2.picker.loadingDir {
+		t.Error("loadingDir = false immediately after OpenPickerMsg, want true (listing deferred too)")
+	}
+	if len(a2.picker.entries) != 0 {
+		t.Errorf("picker.entries = %v, want empty immediately after OpenPickerMsg", a2.picker.entries)
+	}
 	if cmd == nil {
 		t.Fatal("expected a non-nil scan command")
 	}
 
-	msg := cmd()
-	pfm, ok := msg.(pickerFilesMsg)
-	if !ok {
-		t.Fatalf("cmd() = %T, want pickerFilesMsg", msg)
-	}
-	found := false
-	for _, f := range pfm.files {
-		if f == "a.go" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("scanned files = %v, want to include a.go", pfm.files)
-	}
-
+	// Applying a result still clears the loading state.
+	pfm := pickerFilesMsg{seq: a2.picker.seq, files: []string{"a.go"}}
 	updated, _ = a2.Update(pfm)
 	a3 := updated.(App)
 	if a3.picker.loadingAll {
@@ -89,7 +87,8 @@ func TestOpenPickerDoesNotScanSynchronously(t *testing.T) {
 // nothing — collectFiles was running synchronously inside Update, so the
 // picker never got a chance to render until the (potentially very slow)
 // walk finished. ctrl+p must open the picker and return a scan command
-// immediately, without walking the filesystem itself.
+// immediately, without touching the filesystem itself — which it now could not
+// do anyway, since the workspace may be on the far side of a container.
 func TestNoBufferOpenCtrlPStartsScanWithoutBlocking(t *testing.T) {
 	dir := t.TempDir()
 
@@ -112,9 +111,6 @@ func TestNoBufferOpenCtrlPStartsScanWithoutBlocking(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("expected a non-nil scan command")
-	}
-	if _, ok := cmd().(pickerFilesMsg); !ok {
-		t.Errorf("cmd() did not produce a pickerFilesMsg")
 	}
 }
 
@@ -154,11 +150,12 @@ func TestPickerFilesMsgRefreshesActiveSearch(t *testing.T) {
 	a := App{width: 80, height: 24, cfg: &config.Config{}, workDir: dir}
 
 	a.picker = a.newDirectoryPicker()
-	cmd := a.startPickerFileScan(dir)
-	a.picker.setQuery("main") // user starts searching while still loading
+	_ = a.startPickerFileScan(dir) // stamps the picker's seq
+	a.picker.setQuery("main")      // user starts searching while still loading
 
-	msg := cmd().(pickerFilesMsg)
-	msg.files = []string{"cmd/indigo/main.go", "other.go"}
+	// The scan's result, as the server would have answered it. Built here
+	// rather than by running the command, which now needs a live server.
+	msg := pickerFilesMsg{seq: a.picker.seq, files: []string{"cmd/indigo/main.go", "other.go"}}
 
 	updated, _ := a.Update(msg)
 	a2 := updated.(App)
@@ -168,32 +165,9 @@ func TestPickerFilesMsgRefreshesActiveSearch(t *testing.T) {
 	}
 }
 
-// TestPickerFileScanDoesNotRaceWithIgnoredDirsReload is a regression test
-// (found in review) for a data race introduced by deferring collectFiles
-// into a background command: collectFiles used to read the shared
-// package-level ignoredDirs variable directly, but it now runs
-// concurrently with the rest of Update on its own goroutine — including a
-// config hot-reload's addIgnoredDirs, which reassigns ignoredDirs to a
-// brand-new map. Run with -race; confirmed to flag a real race (both on
-// the ignoredDirs variable itself and, more seriously, on the new map's
-// internal state during construction) before startPickerFileScan started
-// snapshotting ignoredDirs on the caller's goroutine and passing it into
-// collectFiles as a parameter.
-func TestPickerFileScanDoesNotRaceWithIgnoredDirsReload(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	a := App{width: 80, height: 24, cfg: &config.Config{}, workDir: dir}
-	a.picker = a.newDirectoryPicker()
-	cmd := a.startPickerFileScan(dir)
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		cmd() // runs collectFiles, same as Bubble Tea would on its own goroutine
-	}()
-
-	addIgnoredDirs([]string{"some-dir"}) // concurrent config-reload-style reassignment
-	<-done
-}
+// The scan/ignore-set data race this file used to guard on the client moved
+// with the code that had it: CollectFiles now runs on the server, so the
+// concurrent pair is workspacefs.SetIgnoredDirs against workspacefs's own
+// readers. TestIgnoredDirsConcurrentAccess in internal/workspacefs is that
+// test, moved rather than dropped — the guard is still there, it is just no
+// longer reachable from here, because nothing on this side walks the tree.

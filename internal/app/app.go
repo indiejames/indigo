@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -105,14 +107,16 @@ type App struct {
 	// screen is already torn down by then, so there's no in-TUI message to show.
 	serverGone bool
 
-	picker         *filePicker          // non-nil when file picker is open
-	pickerFilesSeq int                  // bumped on every new picker file scan; see pickerFilesMsg
-	grep           *grepPicker          // non-nil when workspace search picker is open
-	grepSeq        int                  // bumped on every new grep request; see grepResultsMsg
-	diagBrowser    *diagBrowser         // non-nil when the workspace diagnostic browser is open
-	diagSeq        int                  // bumped on every new diagnostic-browser request; see diagBrowserResultsMsg
-	bufPicker      *bufPicker           // non-nil when buffer picker popup is open
-	searchReplace  *searchReplaceDialog // non-nil when the global search & replace dialog is open
+	picker          *filePicker          // non-nil when file picker is open
+	pickerFilesSeq  int                  // bumped on every new picker file scan; see pickerFilesMsg
+	pickerDirSeq    int                  // bumped on every picker directory listing; see pickerDirMsg
+	pickerRecentSeq int                  // bumped on every recent-files filter; see recentFilesMsg
+	grep            *grepPicker          // non-nil when workspace search picker is open
+	grepSeq         int                  // bumped on every new grep request; see grepResultsMsg
+	diagBrowser     *diagBrowser         // non-nil when the workspace diagnostic browser is open
+	diagSeq         int                  // bumped on every new diagnostic-browser request; see diagBrowserResultsMsg
+	bufPicker       *bufPicker           // non-nil when buffer picker popup is open
+	searchReplace   *searchReplaceDialog // non-nil when the global search & replace dialog is open
 
 	symbolPicker    *symbolPickerState    // non-nil when workspace symbol picker is open
 	docSymbolPicker *docSymbolPickerState // non-nil when document symbol picker is open
@@ -208,8 +212,7 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 	if startLine > 0 {
 		m = m.AtLine(startLine)
 	}
-	addIgnoredDirs(cfg.PickerIgnoreDirs)
-	recordRecentFile(workDir, absPath)
+	recordRecentFile(workDir, recentRootOr(workDir), absPath)
 	cfgPath, cfgMod := configPathAndMtime()
 	a := &App{
 		rpc:            rpc,
@@ -235,7 +238,14 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 // recent-files list recorded from a previous session.
 func (a App) newDirectoryPicker() *filePicker {
 	fp := newFilePicker(a.workDir, "", a.width, a.height, a.cfg.FuzzySearch)
-	if recents := loadRecentFiles(a.workDir); len(recents) > 0 {
+	fp.beginDirLoad()
+	// Shown unfiltered, then narrowed when the server answers (see
+	// App.filterRecentFiles). Waiting for that round trip before deciding
+	// whether to open in recent-files mode would mean the picker either
+	// stalls or opens in the wrong mode and switches under the user; showing
+	// the list immediately and dropping any dead entries a moment later is the
+	// lesser of those, and the list is capped at 30 entries.
+	if recents := recentRels(recentRootOr(a.workDir)); len(recents) > 0 {
 		fp.recentFiles = recents
 		fp.recentMode = true
 	}
@@ -246,7 +256,6 @@ func (a App) newDirectoryPicker() *filePicker {
 // (used when indigo is started with a directory argument).
 func NewWithPicker(rpc *client.RPC, cfg *config.Config, workDir string) *App {
 	cfgPath, cfgMod := configPathAndMtime()
-	addIgnoredDirs(cfg.PickerIgnoreDirs)
 	return &App{
 		rpc:            rpc,
 		cfg:            cfg,
@@ -378,7 +387,6 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.configModTime = msg.newMod
 		if msg.cfg != nil {
 			a.cfg = msg.cfg
-			addIgnoredDirs(msg.cfg.PickerIgnoreDirs)
 			for i, m := range a.buffers {
 				a.buffers[i] = m.WithConfig(msg.cfg)
 			}
@@ -392,7 +400,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var pickerScanCmd tea.Cmd
 		if len(a.buffers) == 0 && a.picker == nil {
 			a.picker = a.newDirectoryPicker()
-			pickerScanCmd = a.startPickerFileScan(a.workDir)
+			pickerScanCmd = tea.Batch(a.loadPickerDir(), a.startPickerFileScan(a.workDir), a.filterRecentFiles())
 		}
 		if a.picker != nil {
 			a.picker.width = msg.Width
@@ -459,7 +467,8 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ---- picker open ----
 	case client.OpenPickerMsg:
 		a.picker = newFilePicker(a.workDir, a.activeFileDir(), a.width, a.height, a.cfg.FuzzySearch)
-		return a, a.startPickerFileScan(a.workDir)
+		a.picker.beginDirLoad()
+		return a, tea.Batch(a.loadPickerDir(), a.startPickerFileScan(a.workDir), a.filterRecentFiles())
 
 	// ---- new file prompt open ----
 	case client.OpenNewFileMsg:
@@ -500,14 +509,65 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			searching: true,
 			seq:       seq,
 		}
-		workDir := a.workDir
 		pattern := msg.Pattern
 		include := msg.Include
 		exclude := msg.Exclude
+		rpc := a.rpc
 		return a, func() tea.Msg {
-			results, err := searchWorkspace(workDir, pattern, include, exclude)
-			return grepResultsMsg{seq: seq, results: results, err: err}
+			ctx, cancel := context.WithTimeout(context.Background(), grepTimeout)
+			defer cancel()
+			results, searchErr, err := rpc.GrepWorkspace(ctx, pattern, include, exclude, false, false, false)
+			if err != nil {
+				return grepResultsMsg{seq: seq, err: err}
+			}
+			if searchErr != "" {
+				// A pattern the user is still typing, not a broken connection.
+				return grepResultsMsg{seq: seq, err: errors.New(searchErr)}
+			}
+			return grepResultsMsg{seq: seq, results: results}
 		}
+
+	case newFileParentMsg:
+		switch {
+		case msg.err != nil:
+			// A permission denial or an I/O fault — not something to offer to
+			// fix by creating a directory.
+			a.status = fmt.Sprintf("E: cannot access parent directory: %v", msg.err)
+		case !msg.exists:
+			// Ask before creating it, rather than opening a buffer that will
+			// fail on its first save.
+			p := msg.path
+			a.newFileMkdirConfirm = &p
+		case !msg.isDir:
+			a.status = fmt.Sprintf("E: parent path is not a directory: %s", filepath.Dir(msg.path))
+		default:
+			return a, a.doOpenFile(msg.path)
+		}
+		return a, nil
+
+	case newFileDirCreatedMsg:
+		if msg.err != nil {
+			a.status = fmt.Sprintf("E: could not create directory: %v", msg.err)
+			return a, nil
+		}
+		return a, a.doOpenFile(msg.path)
+
+	case recentFilesMsg:
+		if a.picker != nil && msg.seq == a.picker.recentSeq {
+			a.picker.recentFiles = msg.files
+			if len(msg.files) == 0 && a.picker.recentMode {
+				// Everything recorded has since gone or become ignored; the
+				// browser is more useful than an empty list.
+				a.picker.recentMode = false
+			}
+		}
+		return a, nil
+
+	case pickerDirMsg:
+		if a.picker != nil && msg.seq == a.picker.dirSeq {
+			a.picker.setDirEntries(msg.entries)
+		}
+		return a, nil
 
 	case pickerFilesMsg:
 		if a.picker != nil && msg.seq == a.picker.seq {
@@ -573,7 +633,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ---- search & replace dialog ----
 	case client.OpenSearchReplaceMsg:
-		a.searchReplace = newSearchReplaceDialog(a.workDir, a.width, a.height)
+		a.searchReplace = newSearchReplaceDialog(a.rpc, a.workDir, a.width, a.height)
 		return a, nil
 
 	case sraResultsMsg:
@@ -695,7 +755,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ---- file opened ----
 	case bufferOpenedMsg:
 		m := msg.model
-		recordRecentFile(a.workDir, m.FilePath())
+		recordRecentFile(a.workDir, recentRootOr(a.workDir), m.FilePath())
 		if msg.line >= 0 {
 			if msg.col >= 0 && msg.matchLen > 0 {
 				m = m.AtMatch(msg.line, msg.col, msg.matchLen, a.bufHeight())

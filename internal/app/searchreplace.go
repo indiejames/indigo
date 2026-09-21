@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/workspacefs"
 )
 
 // sraFocus identifies which control in the search/replace dialog has focus.
@@ -35,11 +37,26 @@ const (
 	sraFocusResults
 )
 
+// workspaceSearcher is the part of *client.RPC the search dialog uses.
+type workspaceSearcher interface {
+	GrepWorkspace(ctx context.Context, pattern, include, exclude string,
+		caseSensitive, isRegex, explicit bool) ([]workspacefs.Result, string, error)
+}
+
 // searchReplaceDialog is the 's'-triggered global search & replace popup.
 type searchReplaceDialog struct {
 	workDir string
-	width   int
-	height  int
+	// searcher is how this dialog reaches the workspace. The dialog used to
+	// walk it directly, which stops being correct the moment the files are on
+	// the other side of a container boundary — see internal/workspacefs.
+	//
+	// An interface rather than *client.RPC because that is all this needs, and
+	// because the include/exclude filters are worth being able to assert on:
+	// the pattern arriving while a filter is silently dropped is a wiring bug
+	// that looks exactly like "no matches".
+	searcher workspaceSearcher
+	width    int
+	height   int
 
 	searchInput   textinput.Model
 	replaceInput  textinput.Model
@@ -68,7 +85,7 @@ type searchReplaceDialog struct {
 	applyMsg      string
 }
 
-func newSearchReplaceDialog(workDir string, w, h int) *searchReplaceDialog {
+func newSearchReplaceDialog(searcher workspaceSearcher, workDir string, w, h int) *searchReplaceDialog {
 	si := textinput.New()
 	si.Placeholder = "Search"
 	si.Prompt = ""
@@ -90,6 +107,7 @@ func newSearchReplaceDialog(workDir string, w, h int) *searchReplaceDialog {
 
 	d := &searchReplaceDialog{
 		workDir:      workDir,
+		searcher:     searcher,
 		width:        w,
 		height:       h,
 		searchInput:  si,
@@ -267,14 +285,22 @@ func (a App) startSearchReplaceSearch(d *searchReplaceDialog) tea.Cmd {
 	d.errMsg = ""
 	d.results = nil
 	d.cursor = 0
-	workDir := d.workDir
+	searcher := d.searcher
 	caseSensitive := d.caseSensitive
 	useRegex := d.useRegex
 	include := d.includeInput.Value()
 	exclude := d.excludeInput.Value()
 	searchCmd := func() tea.Msg {
-		results, err := searchWorkspaceExplicit(workDir, pattern, include, exclude, caseSensitive, useRegex)
-		return sraResultsMsg{results: results, err: err}
+		ctx, cancel := context.WithTimeout(context.Background(), grepTimeout)
+		defer cancel()
+		results, searchErr, err := searcher.GrepWorkspace(ctx, pattern, include, exclude, caseSensitive, useRegex, true)
+		if err != nil {
+			return sraResultsMsg{err: err}
+		}
+		if searchErr != "" {
+			return sraResultsMsg{err: errors.New(searchErr)}
+		}
+		return sraResultsMsg{results: results}
 	}
 	return tea.Batch(searchCmd, d.spinner.Tick)
 }

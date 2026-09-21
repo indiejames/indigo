@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"path/filepath"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -412,5 +413,44 @@ func (a App) doDisconnectAndQuit() tea.Cmd {
 		defer cancel()
 		rpc.Disconnect(ctx) //nolint:errcheck
 		return appQuitMsg{}
+	}
+}
+
+// newFileParentMsg answers "can a new file be created at this path?" — the
+// question the New File prompt used to answer with a local os.Stat, before the
+// workspace moved to the other side of an RPC.
+type newFileParentMsg struct {
+	path   string // the file the user asked for, not its parent
+	exists bool
+	isDir  bool
+	err    error
+}
+
+// newFileDirCreatedMsg reports the outcome of creating a missing parent.
+type newFileDirCreatedMsg struct {
+	path string
+	err  error
+}
+
+// checkNewFileParent stats the parent of path on the server.
+func (a App) checkNewFileParent(path string) tea.Cmd {
+	rpc := a.rpc
+	parent := filepath.Dir(path)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		exists, isDir, err := rpc.StatPath(ctx, parent)
+		return newFileParentMsg{path: path, exists: exists, isDir: isDir, err: err}
+	}
+}
+
+// createNewFileParent creates path's parent directory on the server.
+func (a App) createNewFileParent(path string) tea.Cmd {
+	rpc := a.rpc
+	parent := filepath.Dir(path)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return newFileDirCreatedMsg{path: path, err: rpc.CreateDir(ctx, parent)}
 	}
 }

@@ -58,7 +58,7 @@ func main() {
 
 	// Parse optional +N line argument (e.g. indigo +42 foo.go).
 	startLine := 0
-	args := os.Args[1:]
+	args := parseContainerFlags(os.Args[1:])
 	if len(args) >= 2 && strings.HasPrefix(args[0], "+") {
 		if n, err := strconv.Atoi(args[0][1:]); err == nil && n > 0 {
 			startLine = n - 1 // convert to 0-based
@@ -102,7 +102,7 @@ func main() {
 	}
 	loadAndApplyTheme(cfg)
 
-	// Determine workspace root.
+	// Determine workspace root, as this machine names it.
 	var workDir string
 	if info.IsDir() {
 		workDir = absTarget
@@ -112,27 +112,23 @@ func main() {
 			workDir = filepath.Dir(absTarget)
 		}
 	}
+	// Attached to a container, everything past this point is in the
+	// container's names for things. See resolveWorkspace.
+	workDir, absTarget = resolveWorkspace(workDir, absTarget)
 
-	sockPath := server.SocketPath(workDir)
-	if !server.IsRunning(sockPath) {
-		startServer(workDir)
-	}
-	if err := waitForServer(sockPath, 3*time.Second); err != nil {
-		fatalf("server did not start: %v", err)
-	}
-
-	// Armed before Dial, not after. Dial's handshake calls carry no deadline
-	// at all, and the OpenFile below is the first thing a window does — so a
-	// server that never answers either of them is a window that never appears,
-	// which is a hang like any other and was the one the detector could not
-	// see. Arming this early costs nothing: no loop has registered a heartbeat
-	// yet, so until the Bubble Tea program starts there is only call tracking.
+	// Armed before connecting, not after. The handshake calls carry no
+	// deadline at all, and the OpenFile below is the first thing a window
+	// does — so a server that never answers either of them is a window that
+	// never appears, which is a hang like any other and was the one the
+	// detector could not see. Arming this early costs nothing: no loop has
+	// registered a heartbeat yet, so until the Bubble Tea program starts there
+	// is only call tracking.
 	hangdetect.Start()
 	defer hangdetect.Stop()
 
-	rpc, err := client.Dial(sockPath)
+	rpc, err := connect(workDir)
 	if err != nil {
-		fatalf("connect to server: %v", err)
+		fatalf("%v", err)
 	}
 	warnIfServerStale(rpc)
 
@@ -287,6 +283,7 @@ func openUntitled(startLine int) {
 	if root := gitRoot(workDir); root != "" {
 		workDir = root
 	}
+	workDir, _ = resolveWorkspace(workDir, "")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -294,21 +291,13 @@ func openUntitled(startLine int) {
 	}
 	loadAndApplyTheme(cfg)
 
-	sockPath := server.SocketPath(workDir)
-	if !server.IsRunning(sockPath) {
-		startServer(workDir)
-	}
-	if err := waitForServer(sockPath, 3*time.Second); err != nil {
-		fatalf("server did not start: %v", err)
-	}
-
-	// Before Dial — see the matching comment in the main startup path.
+	// Before connecting — see the matching comment in the main startup path.
 	hangdetect.Start()
 	defer hangdetect.Stop()
 
-	rpc, err := client.Dial(sockPath)
+	rpc, err := connect(workDir)
 	if err != nil {
-		fatalf("connect to server: %v", err)
+		fatalf("%v", err)
 	}
 	warnIfServerStale(rpc)
 
@@ -381,6 +370,17 @@ func init() {
 		runServer(os.Args[2])
 		os.Exit(0)
 	}
+
+	// --server-stdio is --server for a server that was handed its client
+	// rather than listening for one: it serves a single capnp connection over
+	// stdin/stdout and exits when that stream closes. This is what the host
+	// runs inside a dev container, over the container runtime's exec stdio.
+	//
+	// Nothing may write to stdout in this mode — it is the wire.
+	if len(os.Args) == 3 && os.Args[1] == "--server-stdio" {
+		runServerStdio(os.Args[2])
+		os.Exit(0)
+	}
 	// MCP server mode: speak the Model Context Protocol over stdio, exposing
 	// indigo's buffers and language servers to an agent. Registered once with
 	//
@@ -412,6 +412,27 @@ func init() {
 		agenttools.RunHTTP(addr)
 		os.Exit(0)
 	}
+}
+
+// stdioStream presents this process's stdin and stdout as one bidirectional
+// stream. Closing it closes stdin only: stdout is how the last bytes of a
+// capnp teardown reach the peer, and closing both here would race that.
+type stdioStream struct{}
+
+func (stdioStream) Read(p []byte) (int, error)  { return os.Stdin.Read(p) }
+func (stdioStream) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
+func (stdioStream) Close() error                { return os.Stdin.Close() }
+
+func runServerStdio(dir string) {
+	hangdetect.Start()
+	defer hangdetect.Stop()
+	srv, err := server.ServeStream(dir, stdioStream{})
+	if err != nil {
+		// stderr, never stdout: stdout is the capnp wire.
+		fmt.Fprintf(os.Stderr, "server: %v\n", err)
+		os.Exit(1)
+	}
+	srv.Wait()
 }
 
 func runServer(dir string) {

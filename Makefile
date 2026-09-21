@@ -15,6 +15,16 @@ build-release:
 build-minimal:
 	go build -o $(OUT) $(CMD)
 
+# The editor server on its own, statically linked for Linux, to be copied into
+# a dev container (see cmd/indigo-server). CGO_ENABLED=0 is what makes it
+# static and portable across glibc and musl bases; it works only because the
+# server has no tree-sitter dependency, which cmd/indigo does and cannot shed.
+build-container-server:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" \
+		-o dist/indigo-server-linux-arm64 ./cmd/indigo-server
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" \
+		-o dist/indigo-server-linux-amd64 ./cmd/indigo-server
+
 # Exclude the two largest grammars (Nim ~68 MB, Swift ~18 MB of C source).
 build-no-heavy:
 	go build -tags "lang_all lang_not_nim lang_not_swift" -ldflags="-s -w" -o $(OUT) $(CMD)

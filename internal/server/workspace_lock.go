@@ -13,9 +13,15 @@ import (
 // the socket it wanted is being served, just not by this process.
 var ErrAlreadyRunning = errors.New("a server is already running for this workspace")
 
+// errLockTimeout means the workspace lock stayed held for lockWaitTimeout with
+// nothing answering on the socket. Distinct from ErrAlreadyRunning so it is
+// reported as a failure; starting again once the holder exits will succeed.
+var errLockTimeout = errors.New("timed out waiting for the workspace lock")
+
 // lockWaitTimeout bounds how long New waits for a lock whose holder has stopped
-// answering on the socket — a server partway through shutting down.
-const lockWaitTimeout = 2 * time.Second
+// answering on the socket — a server partway through shutting down. A var so
+// tests can shorten it.
+var lockWaitTimeout = 2 * time.Second
 
 // acquireWorkspaceLock takes an exclusive flock next to the socket, held for
 // the life of the server.
@@ -55,9 +61,17 @@ func acquireWorkspaceLock(sockPath string) (*os.File, error) {
 			f.Close() //nolint:errcheck
 			return nil, fmt.Errorf("lock %s: %w", lockPath, err)
 		}
-		if IsRunning(sockPath) || time.Now().After(deadline) {
+		if IsRunning(sockPath) {
 			f.Close() //nolint:errcheck
 			return nil, ErrAlreadyRunning
+		}
+		if time.Now().After(deadline) {
+			// Held, but nobody is serving: a predecessor wedged in shutdown.
+			// Not ErrAlreadyRunning, which callers treat as success and exit
+			// quietly on — that would hide a server that is not working.
+			f.Close() //nolint:errcheck
+			return nil, fmt.Errorf("%w (%s held for %v by a server that is not answering)",
+				errLockTimeout, lockPath, lockWaitTimeout)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

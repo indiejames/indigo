@@ -77,9 +77,10 @@ func (r *RPC) ListWorkspaceFiles(ctx context.Context) ([]string, error) {
 // smart-case and backslash-prefix conventions the pattern itself carries —
 // the same two entry points the engine has always had.
 //
-// A pattern error (a malformed regex — a user typo) comes back as an ordinary
-// error value from a successful call, not as an RPC failure, so it cannot be
-// mistaken for the connection being in trouble.
+// A pattern error (a malformed regex — a user typo) comes back as the second
+// return value, a non-empty search-error string from a successful call, while
+// the error return is reserved for RPC failures — so a typo cannot be mistaken
+// for the connection being in trouble.
 func (r *RPC) GrepWorkspace(ctx context.Context, pattern, include, exclude string, caseSensitive, isRegex, explicit bool) ([]workspacefs.Result, string, error) {
 	fut, rel := r.svc.GrepWorkspace(ctx, func(p proto.EditorService_grepWorkspace_Params) error {
 		if err := p.SetPattern(pattern); err != nil {

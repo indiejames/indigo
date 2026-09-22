@@ -34,6 +34,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -73,6 +74,10 @@ func runDaemon(dir string) {
 	defer hangdetect.Stop()
 
 	srv, err := server.New(dir)
+	if errors.Is(err, server.ErrAlreadyRunning) {
+		// Another bridge's daemon won the startup race; our bridge dials it.
+		return
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "indigo-server: %v\n", err)
 		os.Exit(1)

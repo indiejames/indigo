@@ -318,8 +318,17 @@ func (a App) jumpToEntry(e jumpEntry) (tea.Model, tea.Cmd) {
 	return a, a.doOpenFileAtPos(e.filePath, e.line, e.col)
 }
 
-// doOpenFileAtPos opens absPath in a new buffer positioned at (line, col).
+// doOpenFileAtPos opens absPath positioned at (line, col), switching to its
+// existing tab when it is already open — the same check doOpenFileAt and
+// doOpenFileAtMatch make. Without it, picking a reference or symbol in the
+// current file opened a second tab onto the same server buffer.
 func (a App) doOpenFileAtPos(absPath string, line, col int) tea.Cmd {
+	for i, m := range a.buffers {
+		if m.FilePath() == absPath {
+			idx := i
+			return func() tea.Msg { return switchBufferMsg{idx: idx, line: line, col: col} }
+		}
+	}
 	rpc := a.rpc
 	cfg := a.cfg
 	return func() tea.Msg {

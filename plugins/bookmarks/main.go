@@ -119,16 +119,7 @@ func (b *Bookmarks) onAltM(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
 		return sdk.KeyResponse{Handled: true}
 	}
 
-	b.mu.Lock()
-	idx := b.findBookmark(filePath, ctx.CursorLine)
-	b.mu.Unlock()
-
-	if idx >= 0 {
-		// Already bookmarked — remove it.
-		b.mu.Lock()
-		b.bookmarks = append(b.bookmarks[:idx], b.bookmarks[idx+1:]...)
-		b.enqueuePersist(b.bookmarks)
-		b.mu.Unlock()
+	if b.removeBookmarkAt(filePath, ctx.CursorLine) {
 		return sdk.KeyResponse{Handled: true}
 	}
 
@@ -258,6 +249,23 @@ func (b *Bookmarks) getDecorations(bufID uint32, _ uint64, _ sdk.Range) []sdk.De
 // after releasing the lock.
 func snapshotBookmarks(bmarks []bookmark) []bookmark {
 	return append([]bookmark(nil), bmarks...)
+}
+
+// removeBookmarkAt removes the active bookmark at (filePath, line), if any, and
+// reports whether it did. The lookup and the removal share one critical
+// section: onAltM used to find the index, unlock, then lock again and remove by
+// that index, so a concurrent onEditEvent shift or another removal in between
+// could make it delete a different bookmark or slice out of range.
+func (b *Bookmarks) removeBookmarkAt(filePath string, line uint32) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	idx := b.findBookmark(filePath, line)
+	if idx < 0 {
+		return false
+	}
+	b.bookmarks = append(b.bookmarks[:idx], b.bookmarks[idx+1:]...)
+	b.enqueuePersist(b.bookmarks)
+	return true
 }
 
 // findBookmark returns the index of an active bookmark at (filePath, line), or -1.

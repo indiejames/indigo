@@ -765,6 +765,20 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ---- file opened ----
 	case bufferOpenedMsg:
 		m := msg.model
+		// The server hands an already-open file back under the same bufID, so
+		// an open that raced another open of the same file (or came from a path
+		// that skipped the already-open check) would otherwise add a second tab
+		// onto one server buffer. Two Models sharing a bufID is broken rather
+		// than merely redundant: RoutableMsg dispatch delivers every bufID-tagged
+		// result — highlighting, polls, send failures — to the first match only,
+		// so the second tab never highlights or syncs, and closing either tab
+		// releases the buffer the other is still showing.
+		for i := range a.buffers {
+			if a.buffers[i].BufID() == m.BufID() {
+				idx := i
+				return a, func() tea.Msg { return switchBufferMsg{idx: idx, line: msg.line, col: msg.col, matchLen: msg.matchLen} }
+			}
+		}
 		recordRecentFile(a.workDir, recentRootOr(a.workDir), m.FilePath())
 		if msg.line >= 0 {
 			if msg.col >= 0 && msg.matchLen > 0 {

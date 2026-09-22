@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -150,6 +151,9 @@ func main() {
 	rpc.SetPushSender(p.Send)
 	finalModel, err := p.Run()
 	if err != nil {
+		// fatalf exits, so without this a dev container indigo started would
+		// be left running whenever the editor itself failed.
+		shutdownContainer()
 		fatalf("run: %v", err)
 	}
 	shutdownContainer()
@@ -314,6 +318,9 @@ func openUntitled(startLine int) {
 	rpc.SetPushSender(p.Send)
 	finalModel, err := p.Run()
 	if err != nil {
+		// fatalf exits, so without this a dev container indigo started would
+		// be left running whenever the editor itself failed.
+		shutdownContainer()
 		fatalf("run: %v", err)
 	}
 	shutdownContainer()
@@ -444,6 +451,11 @@ func runServer(dir string) {
 	hangdetect.Start()
 	defer hangdetect.Stop()
 	srv, err := server.New(dir)
+	if errors.Is(err, server.ErrAlreadyRunning) {
+		// Lost a startup race to another window's server, which is serving
+		// the socket this process was started to provide. Nothing to do.
+		return
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "server: %v\n", err)
 		os.Exit(1)

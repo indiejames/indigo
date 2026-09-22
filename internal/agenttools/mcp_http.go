@@ -56,7 +56,7 @@ func RunHTTP(addr string) {
 	if addr == "" {
 		addr = defaultMCPHTTPAddr
 	}
-	srv := &mcpServer{callTool: workspaceToolCaller()}
+	srv := &mcpServer{callTool: workspaceToolCaller(nil)}
 	token := os.Getenv(mcpHTTPTokenEnv)
 
 	ln, err := net.Listen("tcp", addr)

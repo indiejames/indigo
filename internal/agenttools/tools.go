@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/rpcclient"
 )
 
 // AllTools returns every tool definition.
@@ -282,7 +282,7 @@ type gotoFileInput struct {
 
 // ExecTool runs one tool by name against a live indigo server. It returns
 // the text result and whether that result is an error.
-func ExecTool(ctx context.Context, rpc *client.RPC, ap Approver, workDir, name string, rawInput json.RawMessage) (string, bool) {
+func ExecTool(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDir, name string, rawInput json.RawMessage) (string, bool) {
 	switch name {
 	case "read_file":
 		var in readFileInput
@@ -393,7 +393,7 @@ func ExecTool(ctx context.Context, rpc *client.RPC, ap Approver, workDir, name s
 
 // ─── read_file ────────────────────────────────────────────────────────────────
 
-func execReadFile(ctx context.Context, rpc *client.RPC, workDir string, in readFileInput) (string, bool) {
+func execReadFile(ctx context.Context, rpc *rpcclient.RPC, workDir string, in readFileInput) (string, bool) {
 	abs := absPath(workDir, in.Path)
 	content, fromDisk, err := readWholeFile(ctx, rpc, abs)
 	if err != nil {
@@ -419,7 +419,7 @@ const diskFallbackNote = "NOTE: read from disk, not the editor buffer — the in
 
 // readWholeFile returns a file's content, reporting whether it had to come
 // from disk because the server was unreachable.
-func readWholeFile(ctx context.Context, rpc *client.RPC, abs string) (content string, fromDisk bool, err error) {
+func readWholeFile(ctx context.Context, rpc *rpcclient.RPC, abs string) (content string, fromDisk bool, err error) {
 	bufID, content, _, _, _, err := rpc.OpenFile(ctx, abs)
 	if err != nil {
 		data, ferr := os.ReadFile(abs)
@@ -592,7 +592,7 @@ func requestEditApproval(ap Approver, req EditRequest) bool {
 
 // ─── apply_edits ──────────────────────────────────────────────────────────────
 
-func execApplyEdits(ctx context.Context, rpc *client.RPC, ap Approver, workDir string, in applyEditsInput) (string, bool) {
+func execApplyEdits(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDir string, in applyEditsInput) (string, bool) {
 	abs := absPath(workDir, in.Path)
 
 	if !requestEditApproval(ap, EditRequest{
@@ -703,7 +703,7 @@ func insertLineOp(content, text string, line int) document.Op {
 	}
 }
 
-func execInsertAtLine(ctx context.Context, rpc *client.RPC, ap Approver, workDir string, in insertAtLineInput) (string, bool) {
+func execInsertAtLine(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDir string, in insertAtLineInput) (string, bool) {
 	abs := absPath(workDir, in.Path)
 
 	if !requestEditApproval(ap, EditRequest{
@@ -763,7 +763,7 @@ func gotoFileWireLine(oneBased int) uint32 {
 // optionally a 1-based line), so the user sees the location directly rather
 // than just reading a path in the chat transcript. No approval popup: this
 // only moves the cursor, it never changes file content.
-func execGotoFile(ctx context.Context, rpc *client.RPC, workDir string, in gotoFileInput) (string, bool) {
+func execGotoFile(ctx context.Context, rpc *rpcclient.RPC, workDir string, in gotoFileInput) (string, bool) {
 	abs := absPath(workDir, in.Path)
 	if _, err := os.Stat(abs); err != nil {
 		return fmt.Sprintf("cannot find %s: %v", in.Path, err), true
@@ -784,7 +784,7 @@ func execGotoFile(ctx context.Context, rpc *client.RPC, workDir string, in gotoF
 // buffer is open in an editor it may hold the user's own unsaved changes, so
 // the save must be approved; when only the agent has it open, every unsaved
 // byte was already approved edit by edit and the save is silent.
-func execSaveFile(ctx context.Context, rpc *client.RPC, ap Approver, workDir, path string) (string, bool) {
+func execSaveFile(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDir, path string) (string, bool) {
 	abs := absPath(workDir, path)
 	bufID, _, _, _, _, err := rpc.OpenFile(ctx, abs)
 	if err != nil {
@@ -868,7 +868,7 @@ func offsetToLineCol(s string, byteOffset int) (line, col int) {
 // of being told it succeeded, so it can react rather than building on a file
 // it wrongly believes it changed. It returns the mismatch as a message, never
 // an error, since the buffer edit itself did succeed.
-func verifySaved(ctx context.Context, rpc *client.RPC, bufID uint32, abs string) string {
+func verifySaved(ctx context.Context, rpc *rpcclient.RPC, bufID uint32, abs string) string {
 	want, _, _, _, err := rpc.GetBufferSnapshot(ctx, bufID)
 	return verifySavedAgainst(want, err, abs)
 }
@@ -919,7 +919,7 @@ type listSymbolsInput struct {
 // releases it again if we were the one who opened it. Leaving buffers open
 // behind a query would keep the server's history alive and, worse, make the
 // *next* tool call think a second client has the file open.
-func openForRead(ctx context.Context, rpc *client.RPC, workDir, path string) (bufID uint32, content string, done func(), err error) {
+func openForRead(ctx context.Context, rpc *rpcclient.RPC, workDir, path string) (bufID uint32, content string, done func(), err error) {
 	abs := absPath(workDir, path)
 	bufID, content, _, _, _, err = rpc.OpenFile(ctx, abs)
 	if err != nil {
@@ -998,7 +998,7 @@ const (
 // have LspReady to interpret an empty list with.
 // hasErrorOrWarning reports whether any diagnostic is severity error (1) or
 // warning (2), as opposed to info/hint from a linter or spell-checker.
-func hasErrorOrWarning(diags []client.ClientDiag) bool {
+func hasErrorOrWarning(diags []rpcclient.ClientDiag) bool {
 	for _, d := range diags {
 		if d.Severity == 1 || d.Severity == 2 {
 			return true
@@ -1007,7 +1007,7 @@ func hasErrorOrWarning(diags []client.ClientDiag) bool {
 	return false
 }
 
-func waitForDiagnostics(ctx context.Context, rpc *client.RPC, bufID uint32) (client.DiagnosticsResult, error) {
+func waitForDiagnostics(ctx context.Context, rpc *rpcclient.RPC, bufID uint32) (rpcclient.DiagnosticsResult, error) {
 	deadline := time.Now().Add(diagnosticsWait)
 	for {
 		res, err := rpc.GetDiagnostics(ctx, bufID)
@@ -1030,7 +1030,7 @@ func waitForDiagnostics(ctx context.Context, rpc *client.RPC, bufID uint32) (cli
 	}
 }
 
-func execGetDiagnostics(ctx context.Context, rpc *client.RPC, workDir, path string) (string, bool) {
+func execGetDiagnostics(ctx context.Context, rpc *rpcclient.RPC, workDir, path string) (string, bool) {
 	bufID, _, done, err := openForRead(ctx, rpc, workDir, path)
 	if err != nil {
 		return err.Error(), true
@@ -1068,9 +1068,9 @@ func execGetDiagnostics(ctx context.Context, rpc *client.RPC, workDir, path stri
 	return b.String(), false
 }
 
-func execFindDefinition(ctx context.Context, rpc *client.RPC, workDir string, in symbolPosInput) (string, bool) {
+func execFindDefinition(ctx context.Context, rpc *rpcclient.RPC, workDir string, in symbolPosInput) (string, bool) {
 	var note string
-	var resolved *client.ClientSymbol
+	var resolved *rpcclient.ClientSymbol
 	if in.Symbol != "" && in.Line == "" {
 		// Same entry point find_references has: a caller who knows only a name
 		// must not have to locate it first. Requiring a path here is what left
@@ -1118,7 +1118,7 @@ func execFindDefinition(ctx context.Context, rpc *client.RPC, workDir string, in
 // ambiguityNote reports the other symbols sharing a name when a bare-name
 // lookup had to choose between them. Silently picking one is exactly the case
 // where a wrong answer looks right, so the choice is always stated.
-func ambiguityNote(symbol string, chosen client.ClientSymbol, others []client.ClientSymbol) string {
+func ambiguityNote(symbol string, chosen rpcclient.ClientSymbol, others []rpcclient.ClientSymbol) string {
 	if len(others) == 0 {
 		return ""
 	}
@@ -1132,7 +1132,7 @@ func ambiguityNote(symbol string, chosen client.ClientSymbol, others []client.Cl
 	return b.String()
 }
 
-func execFindReferences(ctx context.Context, rpc *client.RPC, workDir string, in symbolPosInput) (string, bool) {
+func execFindReferences(ctx context.Context, rpc *rpcclient.RPC, workDir string, in symbolPosInput) (string, bool) {
 	var note string
 	if in.Symbol != "" && in.Line == "" {
 		// Resolve the name to a position first, so a caller who knows only
@@ -1199,7 +1199,7 @@ const previewFileBudget = 20
 //
 // Previews are read through the buffer rather than off disk so they show
 // unsaved edits, consistent with every other tool here.
-func fillPreviews(ctx context.Context, rpc *client.RPC, refs []client.ClientReference) {
+func fillPreviews(ctx context.Context, rpc *rpcclient.RPC, refs []rpcclient.ClientReference) {
 	byFile := map[string][]int{}
 	for i, r := range refs {
 		if strings.TrimSpace(r.Preview) != "" {
@@ -1230,7 +1230,7 @@ func fillPreviews(ctx context.Context, rpc *client.RPC, refs []client.ClientRefe
 	}
 }
 
-func execListSymbols(ctx context.Context, rpc *client.RPC, workDir string, in listSymbolsInput) (string, bool) {
+func execListSymbols(ctx context.Context, rpc *rpcclient.RPC, workDir string, in listSymbolsInput) (string, bool) {
 	// A path is required even for a workspace-wide query, and not as an
 	// arbitrary restriction: LSP's workspace/symbol is answered by one
 	// language server, so something has to say which. Any file in the target
@@ -1263,7 +1263,7 @@ func execListSymbols(ctx context.Context, rpc *client.RPC, workDir string, in li
 	}
 	defer done()
 
-	var syms []client.ClientSymbol
+	var syms []rpcclient.ClientSymbol
 	if in.Query != "" {
 		syms, err = rpc.WorkspaceSymbols(ctx, bufID, in.Query)
 	} else {
@@ -1307,7 +1307,7 @@ type workspaceDiagnosticsInput struct {
 // the compile error the caller is actually asking about.
 const workspaceRescanWait = 15 * time.Second
 
-func execGetWorkspaceDiagnostics(ctx context.Context, rpc *client.RPC, workDir string, in workspaceDiagnosticsInput) (string, bool) {
+func execGetWorkspaceDiagnostics(ctx context.Context, rpc *rpcclient.RPC, workDir string, in workspaceDiagnosticsInput) (string, bool) {
 	rescan := strings.EqualFold(strings.TrimSpace(in.Rescan), "true")
 
 	if rescan {
@@ -1344,7 +1344,7 @@ func execGetWorkspaceDiagnostics(ctx context.Context, rpc *client.RPC, workDir s
 }
 
 // renderWorkspaceDiagnostics formats a workspace diagnostics result.
-func renderWorkspaceDiagnostics(res client.WorkspaceDiagnosticsResult, workDir string, rescan bool) string {
+func renderWorkspaceDiagnostics(res rpcclient.WorkspaceDiagnosticsResult, workDir string, rescan bool) string {
 	if len(res.Items) == 0 {
 		if !rescan {
 			// Never let this read as "the project is fine": without a rescan
@@ -1365,7 +1365,7 @@ func renderWorkspaceDiagnostics(res client.WorkspaceDiagnosticsResult, workDir s
 	// prose files, which both buries the compile errors and hits the server's
 	// result cap. The suppressed count is still reported so nothing looks
 	// hidden.
-	var items []client.ClientWorkspaceDiag
+	var items []rpcclient.ClientWorkspaceDiag
 	suppressed := 0
 	for _, d := range res.Items {
 		if d.Severity == 1 || d.Severity == 2 {
@@ -1381,7 +1381,7 @@ func renderWorkspaceDiagnostics(res client.WorkspaceDiagnosticsResult, workDir s
 	}
 
 	// Group by file so the output reads like a build log rather than a flat list.
-	byFile := map[string][]client.ClientWorkspaceDiag{}
+	byFile := map[string][]rpcclient.ClientWorkspaceDiag{}
 	var order []string
 	for _, d := range items {
 		if _, seen := byFile[d.Path]; !seen {
@@ -1420,7 +1420,7 @@ func renderWorkspaceDiagnostics(res client.WorkspaceDiagnosticsResult, workDir s
 // workspaceHasErrorOrWarning is workspaceHasErrorOrWarning's counterpart for
 // the workspace diagnostic type, which carries a path the per-file one does
 // not.
-func workspaceHasErrorOrWarning(items []client.ClientWorkspaceDiag) bool {
+func workspaceHasErrorOrWarning(items []rpcclient.ClientWorkspaceDiag) bool {
 	for _, d := range items {
 		if d.Severity == 1 || d.Severity == 2 {
 			return true
@@ -1565,7 +1565,7 @@ const symbolResolveWait = 20 * time.Second
 // workspace search also returns, and reports when several things share the
 // name so the caller can disambiguate with an explicit path rather than
 // silently getting the wrong one.
-func resolveSymbol(ctx context.Context, rpc *client.RPC, workDir, symbol, hintPath string) (sym client.ClientSymbol, others []client.ClientSymbol, err error) {
+func resolveSymbol(ctx context.Context, rpc *rpcclient.RPC, workDir, symbol, hintPath string) (sym rpcclient.ClientSymbol, others []rpcclient.ClientSymbol, err error) {
 	candidates := []string{hintPath}
 	if hintPath == "" {
 		candidates = representativeFiles(workDir)
@@ -1580,7 +1580,7 @@ func resolveSymbol(ctx context.Context, rpc *client.RPC, workDir, symbol, hintPa
 	// the symbol.
 	per := symbolResolveWait / time.Duration(len(candidates))
 
-	var syms []client.ClientSymbol
+	var syms []rpcclient.ClientSymbol
 	for _, cand := range candidates {
 		bufID, _, done, err := openForRead(ctx, rpc, workDir, cand)
 		if err != nil {
@@ -1617,7 +1617,7 @@ func resolveSymbol(ctx context.Context, rpc *client.RPC, workDir, symbol, hintPa
 		}
 	}
 
-	var exact []client.ClientSymbol
+	var exact []rpcclient.ClientSymbol
 	for _, s := range syms {
 		if s.Name == symbol {
 			exact = append(exact, s)

@@ -63,6 +63,13 @@ behaviour comes from.
 
 ## Running the agent in a container
 
+**If indigo itself is attached to the container** (`--devcontainer` or
+`--container`), the server already runs inside it — use
+`/tmp/.indigo-server --mcp` from the container instead of anything below. See
+"An agent inside the container" in [dev-containers.md](dev-containers.md). The
+rest of this section is for an agent in a container while indigo's server runs
+on the host.
+
 The setup above has Claude Code *spawn* `indigo --mcp`, which ties the agent to
 the same machine, filesystem and uid as the editor. An agent in a container has
 none of those. Reaching the editor's Unix socket from one means aligning three

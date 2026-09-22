@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/debuglog"
+	"github.com/indiejames/indigo/internal/rpcclient"
 )
 
 func TestExecGetLogsFiltersAndReportsTruncation(t *testing.T) {
@@ -73,11 +73,11 @@ func TestExecGetLogsExcludesOlderThanSince(t *testing.T) {
 }
 
 func TestFormatSyncStateFlagsLaggingClient(t *testing.T) {
-	states := []client.BufferSyncState{{
+	states := []rpcclient.BufferSyncState{{
 		BufID: 1, Path: "/tmp/a.go", Version: 10, Generation: 2,
 		Dirty: true, ContentSha256: []byte{0xde, 0xad, 0xbe, 0xef}, ContentBytes: 42,
 		LineCount: 3, HistoryLen: 10,
-		Clients: []client.ClientSyncState{
+		Clients: []rpcclient.ClientSyncState{
 			{ClientID: 1, AckedVersion: 10, ConnID: 11},
 			{ClientID: 2, AckedVersion: 4, ConnID: 22},
 		},
@@ -99,7 +99,7 @@ func TestFormatSyncStateFlagsLaggingClient(t *testing.T) {
 // what gets pasted into bug reports, so buffer text must never reach it.
 func TestFormatSyncStateNeverIncludesContent(t *testing.T) {
 	const secret = "SUPER_SECRET_TOKEN"
-	states := []client.BufferSyncState{{
+	states := []rpcclient.BufferSyncState{{
 		BufID: 1, Path: "/tmp/a.go", Version: 1,
 		ContentSha256: []byte{0x01, 0x02}, ContentBytes: uint64(len(secret)),
 	}}
@@ -109,17 +109,17 @@ func TestFormatSyncStateNeverIncludesContent(t *testing.T) {
 }
 
 func TestFormatSyncStateFlagsOrphanedBuffer(t *testing.T) {
-	states := []client.BufferSyncState{{BufID: 4, Path: "/tmp/a.go", Version: 2}}
+	states := []rpcclient.BufferSyncState{{BufID: 4, Path: "/tmp/a.go", Version: 2}}
 	if out := formatSyncState(states); !strings.Contains(out, "orphaned") {
 		t.Errorf("a buffer with no clients should be called out:\n%s", out)
 	}
 }
 
 func TestBuffersWithLaggingClients(t *testing.T) {
-	states := []client.BufferSyncState{
-		{Version: 5, Clients: []client.ClientSyncState{{AckedVersion: 5}}},
-		{Version: 5, Clients: []client.ClientSyncState{{AckedVersion: 5}, {AckedVersion: 1}}},
-		{Version: 5, Clients: []client.ClientSyncState{{AckedVersion: 0}, {AckedVersion: 0}}},
+	states := []rpcclient.BufferSyncState{
+		{Version: 5, Clients: []rpcclient.ClientSyncState{{AckedVersion: 5}}},
+		{Version: 5, Clients: []rpcclient.ClientSyncState{{AckedVersion: 5}, {AckedVersion: 1}}},
+		{Version: 5, Clients: []rpcclient.ClientSyncState{{AckedVersion: 0}, {AckedVersion: 0}}},
 	}
 	// The second and third buffers lag; the count is per buffer, not per client.
 	if got := buffersWithLaggingClients(states); got != 2 {
@@ -169,8 +169,8 @@ func TestDiagnosticToolsAreRegisteredAndDispatched(t *testing.T) {
 	}
 }
 
-func consistencySample(serverVer uint64, serverSum []byte, clients ...client.ClientBufferReport) []client.BufferConsistency {
-	return []client.BufferConsistency{{
+func consistencySample(serverVer uint64, serverSum []byte, clients ...rpcclient.ClientBufferReport) []rpcclient.BufferConsistency {
+	return []rpcclient.BufferConsistency{{
 		BufID: 1, Path: "/tmp/a.go", ServerVersion: serverVer,
 		ServerGeneration: 2, ServerSha256: serverSum, Clients: clients,
 	}}
@@ -186,7 +186,7 @@ var (
 // disagree, so nothing was in flight and the two really do hold different
 // content.
 func TestConsistencyReportsPersistentMismatchAsDiverged(t *testing.T) {
-	c := client.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: sumOther}
+	c := rpcclient.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: sumOther}
 	out := formatConsistency(
 		consistencySample(5, sumServer, c),
 		consistencySample(5, sumServer, c),
@@ -206,11 +206,11 @@ func TestConsistencyReportsPersistentMismatchAsDiverged(t *testing.T) {
 // content at any instant.
 func TestConsistencyDoesNotReportMidEditAsDiverged(t *testing.T) {
 	first := consistencySample(5, sumServer,
-		client.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: sumOther})
+		rpcclient.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: sumOther})
 	// Same mismatch, but the client's own content changed between samples — it
 	// is being typed in, not stuck.
 	second := consistencySample(5, sumServer,
-		client.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: []byte{0xee, 0xff}})
+		rpcclient.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: []byte{0xee, 0xff}})
 
 	out := formatConsistency(first, second, 300*time.Millisecond)
 	if strings.Contains(out, "DIVERGED") {
@@ -224,7 +224,7 @@ func TestConsistencyDoesNotReportMidEditAsDiverged(t *testing.T) {
 // TestConsistencyServerStillApplyingIsInconclusive covers the other in-flight
 // direction: the server's own version moved between samples.
 func TestConsistencyServerStillApplyingIsInconclusive(t *testing.T) {
-	c := client.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: sumOther}
+	c := rpcclient.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: sumOther}
 	out := formatConsistency(consistencySample(5, sumServer, c), consistencySample(6, sumServer, c), 300*time.Millisecond)
 	if strings.Contains(out, "DIVERGED") {
 		t.Errorf("the server was still applying ops; that is not divergence:\n%s", out)
@@ -235,7 +235,7 @@ func TestConsistencyServerStillApplyingIsInconclusive(t *testing.T) {
 // self-correcting case: the buffer was swapped wholesale and this client hasn't
 // polled yet, so it is about to resync on its own.
 func TestConsistencyStaleGenerationIsNotDivergence(t *testing.T) {
-	c := client.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 1, ContentSha256: sumOther}
+	c := rpcclient.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 1, ContentSha256: sumOther}
 	out := formatConsistency(consistencySample(5, sumServer, c), consistencySample(5, sumServer, c), 300*time.Millisecond)
 	if strings.Contains(out, "DIVERGED") {
 		t.Errorf("a stale generation means a resync is pending, not divergence:\n%s", out)
@@ -246,7 +246,7 @@ func TestConsistencyStaleGenerationIsNotDivergence(t *testing.T) {
 }
 
 func TestConsistencyMatchingClientIsOK(t *testing.T) {
-	c := client.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: sumServer}
+	c := rpcclient.ClientBufferReport{ClientID: 1, Answered: true, Known: true, Version: 5, Generation: 2, ContentSha256: sumServer}
 	out := formatConsistency(consistencySample(5, sumServer, c), consistencySample(5, sumServer, c), 300*time.Millisecond)
 	if !strings.Contains(out, "OK") || !strings.Contains(out, "No divergence found") {
 		t.Errorf("a matching client should read as OK:\n%s", out)
@@ -256,8 +256,8 @@ func TestConsistencyMatchingClientIsOK(t *testing.T) {
 // TestConsistencyDistinguishesNoAnswerFromNotHolding guards the distinction a
 // diagnosis depends on: a wedged window and a closed tab are different findings.
 func TestConsistencyDistinguishesNoAnswerFromNotHolding(t *testing.T) {
-	wedged := client.ClientBufferReport{ClientID: 1, Answered: false}
-	closed := client.ClientBufferReport{ClientID: 2, Answered: true, Known: false}
+	wedged := rpcclient.ClientBufferReport{ClientID: 1, Answered: false}
+	closed := rpcclient.ClientBufferReport{ClientID: 2, Answered: true, Known: false}
 	out := formatConsistency(
 		consistencySample(5, sumServer, wedged, closed),
 		consistencySample(5, sumServer, wedged, closed),

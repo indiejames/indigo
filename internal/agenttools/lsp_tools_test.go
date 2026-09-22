@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/indiejames/indigo/internal/client"
+	"github.com/indiejames/indigo/internal/rpcclient"
 )
 
 // TestResolvePos covers the 1-based-in / 0-based-out conversion and the
@@ -61,17 +61,17 @@ func TestResolvePos(t *testing.T) {
 // while a compiler error takes seconds, so the poll stopped with a list of
 // spelling hints and the type error never appeared in the result.
 func TestHasErrorOrWarning(t *testing.T) {
-	hints := []client.ClientDiag{
+	hints := []rpcclient.ClientDiag{
 		{Severity: 3, Message: "info"},
 		{Severity: 4, Message: "hint"},
 	}
 	if hasErrorOrWarning(hints) {
 		t.Error("info/hint diagnostics should not stop the poll — a compiler error may still be coming")
 	}
-	if !hasErrorOrWarning(append(hints, client.ClientDiag{Severity: 1, Message: "boom"})) {
+	if !hasErrorOrWarning(append(hints, rpcclient.ClientDiag{Severity: 1, Message: "boom"})) {
 		t.Error("an error must stop the poll immediately")
 	}
-	if !hasErrorOrWarning([]client.ClientDiag{{Severity: 2, Message: "warn"}}) {
+	if !hasErrorOrWarning([]rpcclient.ClientDiag{{Severity: 2, Message: "warn"}}) {
 		t.Error("a warning must stop the poll immediately")
 	}
 	if hasErrorOrWarning(nil) {

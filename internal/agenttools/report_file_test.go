@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/indiejames/indigo/internal/client"
+	"github.com/indiejames/indigo/internal/rpcclient"
 )
 
 // TestReportBundleCreatesADistinctFile covers the bundle being written with
@@ -26,7 +26,7 @@ func TestReportBundleCreatesADistinctFile(t *testing.T) {
 
 	// A zero RPC: GetSyncState fails and the bundle records it as unavailable,
 	// which is enough — this is about the file, not the contents.
-	rpc := &client.RPC{}
+	rpc := &rpcclient.RPC{}
 
 	first, isErr := execReportBundle(context.Background(), rpc, dir, reportBundleInput{})
 	if isErr {

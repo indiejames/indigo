@@ -280,13 +280,21 @@ func shutdownContainer() {
 	defer cancel()
 
 	rt := container.Docker{User: remoteUser}
-	others, err := container.OtherWindowsAttached(ctx, rt, containerName, containerDir, clientToken)
+	// pathMap.ContainerRoot, not containerDir: that is the cleaned path the
+	// server was actually started on and therefore what the bridges carry. The
+	// raw value can differ by a trailing slash or a "." segment, and a probe
+	// that matches nothing reads as "nobody else is here".
+	others, err := container.OtherWindowsAttached(ctx, rt, containerName, pathMap.ContainerRoot, clientToken)
 	if err != nil {
 		// Cannot tell — leave it alone. A container left running is a
 		// nuisance; one stopped out from under another window is data loss.
 		return
 	}
-	if others > 0 {
+	// Anything but a clean zero is a reason not to act. A negative count means
+	// this window's own bridges outnumbered the total, which cannot happen if
+	// the two probes agreed — so the picture is inconsistent and the same
+	// asymmetry applies: leave it running.
+	if others != 0 {
 		return
 	}
 
@@ -347,9 +355,15 @@ func stagePluginsForContainer() (*container.StagedPlugins, error) {
 	return staged, nil
 }
 
-// pluginsHostDir is where this machine keeps installed plugins, matching the
-// server's own resolution so the two cannot drift.
+// pluginsHostDir is where this machine keeps installed plugins, matching
+// plugin.pluginsConfigDir's resolution so the two cannot drift.
 func pluginsHostDir() (string, error) {
+	// Same first check the server makes. Without it, someone who points
+	// INDIGO_PLUGINS_DIR at their plugins gets them for a local session and
+	// silently none in a container, because staging looked somewhere else.
+	if d := os.Getenv("INDIGO_PLUGINS_DIR"); d != "" {
+		return d, nil
+	}
 	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
 		return filepath.Join(d, "indigo", "plugins"), nil
 	}

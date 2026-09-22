@@ -171,3 +171,39 @@ func TestPickerFilesMsgRefreshesActiveSearch(t *testing.T) {
 // readers. TestIgnoredDirsConcurrentAccess in internal/workspacefs is that
 // test, moved rather than dropped — the guard is still there, it is just no
 // longer reachable from here, because nothing on this side walks the tree.
+
+// TestCtrlPWithNoBuffersRequestsAListing is a regression test: this branch
+// returned only the fuzzy-search scan, never the directory listing, so the
+// picker opened with loadingDir set and nothing on the way to clear it. The
+// browser stayed empty for ever — and this is the path taken from the "No
+// buffer open. Press ctrl+p to open a file." screen, so it is the first thing
+// someone sees.
+func TestCtrlPWithNoBuffersRequestsAListing(t *testing.T) {
+	a := App{
+		width:          80,
+		height:         24,
+		cfg:            &config.Config{},
+		workDir:        t.TempDir(),
+		fileChangedIdx: -1,
+	}
+
+	before := a.pickerDirSeq
+	updated, cmd := a.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	a2 := updated.(App)
+
+	if a2.picker == nil {
+		t.Fatal("ctrl+p did not open the picker")
+	}
+	if cmd == nil {
+		t.Fatal("no command returned")
+	}
+	// loadPickerDir bumps the sequence as it stamps the picker, so this says
+	// the listing was actually requested rather than merely intended.
+	if a2.pickerDirSeq == before {
+		t.Error("no directory listing was requested; the browser would stay empty")
+	}
+	if a2.picker.dirSeq != a2.pickerDirSeq {
+		t.Errorf("picker dirSeq = %d, want the request it is waiting on (%d)",
+			a2.picker.dirSeq, a2.pickerDirSeq)
+	}
+}

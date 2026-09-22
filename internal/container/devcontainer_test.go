@@ -382,3 +382,50 @@ func noRuntime(t *testing.T) {
 	runtimeCandidates = func() []string { return nil }
 	t.Cleanup(func() { lookPath, runtimeCandidates = prevLook, prevCandidates })
 }
+
+// TestReadConfigurationKeepsShutdownActionAndCompose is a regression test for a
+// user-visible bug: an earlier version built a fresh Configuration holding only
+// the indigo customizations, so `"shutdownAction": "none"` was discarded and
+// indigo stopped a container the project had explicitly asked it to leave
+// running. dockerComposeFile went the same way, which would have meant stopping
+// one service container of a compose project as if that were the whole thing.
+func TestReadConfigurationKeepsShutdownActionAndCompose(t *testing.T) {
+	out := `{"configuration":{"shutdownAction":"none","dockerComposeFile":"docker-compose.yml",` +
+		`"customizations":{"indigo":{"serverPath":"/usr/local/bin/indigo-server"}}},` +
+		`"mergedConfiguration":{"customizations":{"indigo":[{"serverPath":"/usr/local/bin/indigo-server"}]}}}`
+	cli := fakeCLI(t, out, "", 0)
+
+	cfg, err := cli.ReadConfiguration(context.Background(), "/w")
+	if err != nil {
+		t.Fatalf("ReadConfiguration: %v", err)
+	}
+	if cfg.ShutdownAction != "none" {
+		t.Errorf("ShutdownAction = %q, want none", cfg.ShutdownAction)
+	}
+	if cfg.ShouldStopOnExit() {
+		t.Error("ShouldStopOnExit is true despite shutdownAction none")
+	}
+	if !cfg.IsCompose() {
+		t.Error("IsCompose is false despite dockerComposeFile being set")
+	}
+	if got := cfg.Customizations.Indigo.ServerPath; got != "/usr/local/bin/indigo-server" {
+		t.Errorf("serverPath = %q, want it kept alongside the rest", got)
+	}
+}
+
+// TestReadConfigurationReadsAFileWithNoIndigoBlock: the match cannot be
+// conditioned on the indigo customizations, or a project that only sets
+// shutdownAction is read as if it said nothing.
+func TestReadConfigurationReadsAFileWithNoIndigoBlock(t *testing.T) {
+	out := `{"configuration":{"shutdownAction":"none","customizations":{"vscode":{}}},` +
+		`"mergedConfiguration":{"customizations":{"vscode":[{}]}}}`
+	cli := fakeCLI(t, out, "", 0)
+
+	cfg, err := cli.ReadConfiguration(context.Background(), "/w")
+	if err != nil {
+		t.Fatalf("ReadConfiguration: %v", err)
+	}
+	if cfg.ShutdownAction != "none" {
+		t.Errorf("ShutdownAction = %q, want none", cfg.ShutdownAction)
+	}
+}

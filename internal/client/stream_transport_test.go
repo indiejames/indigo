@@ -32,12 +32,13 @@ func TestStreamTransportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ServeStream: %v", err)
 	}
-	t.Cleanup(srv.Wait)
-
 	r, err := DialStream(hostSide)
 	if err != nil {
 		t.Fatalf("DialStream: %v", err)
 	}
+	// See workspacefs_rpc_test.go: registered after the client exists, so a
+	// failed dial cannot leave Wait blocking for ever.
+	t.Cleanup(srv.Wait)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()

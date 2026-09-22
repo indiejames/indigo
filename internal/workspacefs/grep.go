@@ -343,8 +343,14 @@ var candidateFileListCache struct {
 	mu      sync.Mutex
 	workDir string
 	builtAt time.Time
-	paths   []string
-	rels    []string
+	// gen is the ignore-set generation the list was built under. The cached
+	// files are the ones that passed *that* ignore set, so reusing them after
+	// it changes serves results the user has just asked not to see — for up to
+	// a full TTL. Reachable in ordinary use now that the client pushes the set
+	// at startup and on every config reload.
+	gen   uint64
+	paths []string
+	rels  []string
 }
 
 // cachedCandidateFiles returns the enumerated candidate file list for
@@ -359,8 +365,10 @@ var candidateFileListCache struct {
 // a cache that's only ever used to speed up interactive, human-paced
 // repeated searches in the same session.
 func cachedCandidateFiles(workDir string) (paths, rels []string, err error) {
+	gen := ignoredDirsGeneration()
 	candidateFileListCache.mu.Lock()
-	if candidateFileListCache.workDir == workDir && time.Since(candidateFileListCache.builtAt) < fileListCacheTTL {
+	if candidateFileListCache.workDir == workDir && candidateFileListCache.gen == gen &&
+		time.Since(candidateFileListCache.builtAt) < fileListCacheTTL {
 		paths, rels = candidateFileListCache.paths, candidateFileListCache.rels
 		candidateFileListCache.mu.Unlock()
 		return paths, rels, nil
@@ -373,10 +381,17 @@ func cachedCandidateFiles(workDir string) (paths, rels []string, err error) {
 	}
 
 	candidateFileListCache.mu.Lock()
-	candidateFileListCache.workDir = workDir
-	candidateFileListCache.builtAt = time.Now()
-	candidateFileListCache.paths = paths
-	candidateFileListCache.rels = rels
+	// Discard a walk that raced a change to the ignore set: it enumerated under
+	// the old one, so caching it would reintroduce exactly the staleness the
+	// generation exists to prevent. The results are still returned to this
+	// caller, who asked before the change.
+	if ignoredDirsGeneration() == gen {
+		candidateFileListCache.workDir = workDir
+		candidateFileListCache.builtAt = time.Now()
+		candidateFileListCache.gen = gen
+		candidateFileListCache.paths = paths
+		candidateFileListCache.rels = rels
+	}
 	candidateFileListCache.mu.Unlock()
 
 	return paths, rels, nil
@@ -555,9 +570,13 @@ func matchGlob(glob, relPath string) bool {
 	relPath = filepath.ToSlash(relPath)
 	glob = filepath.ToSlash(glob)
 
-	// Directory prefix: "src/" matches anything under src/.
+	// Directory prefix: "src/" matches src itself and anything under it.
+	//
+	// The bare-name check is an equality test, not a prefix one: prefixing
+	// against the trimmed name made "vendor/" match "vendor2/main.go", which is
+	// a different directory entirely.
 	if strings.HasSuffix(glob, "/") {
-		return strings.HasPrefix(relPath, glob) || strings.HasPrefix(relPath, strings.TrimSuffix(glob, "/"))
+		return strings.HasPrefix(relPath, glob) || relPath == strings.TrimSuffix(glob, "/")
 	}
 	// No path separator in glob: match against basename.
 	if !strings.Contains(glob, "/") {

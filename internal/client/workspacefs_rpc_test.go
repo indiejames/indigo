@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,12 +22,15 @@ func dialWorkspaceServer(t *testing.T, workDir string) *RPC {
 	if err != nil {
 		t.Skipf("cannot start a server here: %v", err)
 	}
-	t.Cleanup(srv.Wait)
-
 	r, err := Dial(server.SocketPath(workDir))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
+	// Registered only once there is a client, and before the disconnect below
+	// so cleanups run disconnect-then-wait. Registering it earlier hangs the
+	// *failure* path: a server that never had a client never shuts down, so
+	// Wait blocks for ever and a failed Dial becomes a stuck test run.
+	t.Cleanup(srv.Wait)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -307,4 +311,63 @@ func containsPath(paths []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestListDirResolvesRelativeToTheWorkspace is a regression test: the client
+// sends the picker's workspace-relative directory, and an earlier server passed
+// it to the filesystem unchanged — resolving it against the server process's
+// own working directory. It appeared to work only because the server happens to
+// be launched with the workspace as its cwd, which nothing guarantees.
+func TestListDirResolvesRelativeToTheWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"top.txt":           "t",
+		"sub/inner.txt":     "i",
+		"sub/deep/leaf.txt": "l",
+	})
+	r := dialWorkspaceServer(t, dir)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	entries, err := r.ListDir(ctx, "sub")
+	if err != nil {
+		t.Fatalf("ListDir(sub): %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name)
+	}
+	if strings.Join(names, ",") != "deep,inner.txt" {
+		t.Errorf("entries = %v, want the contents of <workspace>/sub", names)
+	}
+
+	if entries, err = r.ListDir(ctx, filepath.Join("sub", "deep")); err != nil {
+		t.Fatalf("ListDir(sub/deep): %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name != "leaf.txt" {
+		t.Errorf("entries = %+v, want leaf.txt", entries)
+	}
+}
+
+// TestListDirRefusesToLeaveTheWorkspace: the server is reachable over a socket
+// by anything running as this user, and answering "list /etc" because someone
+// sent "../../etc" is not a thing a workspace server should do.
+func TestListDirRefusesToLeaveTheWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{"a.txt": "a"})
+	r := dialWorkspaceServer(t, dir)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for _, bad := range []string{"..", filepath.Join("..", ".."), "/etc"} {
+		if _, err := r.ListDir(ctx, bad); err == nil {
+			t.Errorf("ListDir(%q) was allowed", bad)
+		}
+	}
+	// A path that merely *looks* like it escapes but does not must still work.
+	if _, err := r.ListDir(ctx, filepath.Join("sub", "..")); err != nil {
+		t.Errorf("ListDir of a path that stays inside was refused: %v", err)
+	}
 }

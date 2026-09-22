@@ -31,9 +31,18 @@ var builtInIgnoredDirs = []string{
 // paths), so the unsafe spelling is removed entirely rather than left
 // available for the next reader to trip over.
 var (
-	ignoredDirsMu sync.RWMutex
-	ignoredDirs   = newIgnoredDirsSet(nil)
+	ignoredDirsMu  sync.RWMutex
+	ignoredDirs    = newIgnoredDirsSet(nil)
+	ignoredDirsGen uint64
 )
+
+// ignoredDirsGeneration counts changes to the set, so anything caching results
+// derived from it can tell that it has moved on. See candidateFileListCache.
+func ignoredDirsGeneration() uint64 {
+	ignoredDirsMu.RLock()
+	defer ignoredDirsMu.RUnlock()
+	return ignoredDirsGen
+}
 
 // IgnoredDirs returns the current ignore set for reading. The
 // returned map must be treated as read-only: SetIgnoredDirs always installs
@@ -68,6 +77,7 @@ func SetIgnoredDirs(names []string) {
 	set := newIgnoredDirsSet(names)
 	ignoredDirsMu.Lock()
 	ignoredDirs = set
+	ignoredDirsGen++
 	ignoredDirsMu.Unlock()
 }
 

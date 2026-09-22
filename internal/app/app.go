@@ -1106,7 +1106,10 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch km.String() {
 			case "ctrl+p":
 				a.picker = a.newDirectoryPicker()
-				return a, a.startPickerFileScan(a.workDir)
+				// Same trio as every other picker-opening path. Without the
+				// listing this branch showed an empty browser for ever, since
+				// newDirectoryPicker only marks the load as pending.
+				return a, tea.Batch(a.loadPickerDir(), a.startPickerFileScan(a.workDir), a.filterRecentFiles())
 			case "ctrl+c", "q":
 				return a, a.doDisconnectAndQuit()
 			}

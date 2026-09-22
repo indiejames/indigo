@@ -277,10 +277,20 @@ func (c CLI) ReadConfiguration(ctx context.Context, workspaceFolder string) (Con
 	}
 	// Verified against devcontainer CLI 0.89.0 — see readConfigOutput for the
 	// shape, which is not what it looks like.
+	//
+	// The whole resolved configuration is kept, not just the indigo block. An
+	// earlier version built a fresh Configuration holding only the
+	// customizations, which silently discarded shutdownAction and
+	// dockerComposeFile — so `"shutdownAction": "none"` was ignored and indigo
+	// stopped a container the project had explicitly asked it to leave running.
+	// The match likewise cannot be conditioned on the indigo block alone: a
+	// file that sets only shutdownAction has to be read too.
 	if o, ok := lastJSONObject[readConfigOutput](stdout.Bytes(), func(o readConfigOutput) bool {
-		return o.indigoCustomizations() != IndigoCustomizations{}
+		return o.indigoCustomizations() != IndigoCustomizations{} ||
+			o.Configuration.ShutdownAction != "" ||
+			o.Configuration.IsCompose()
 	}); ok {
-		var cfg Configuration
+		cfg := o.Configuration
 		cfg.Customizations.Indigo = o.indigoCustomizations()
 		return cfg, nil
 	}

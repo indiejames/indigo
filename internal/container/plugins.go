@@ -121,7 +121,14 @@ func StagePlugins(hostDir, goos, goarch string) (*StagedPlugins, error) {
 			os.RemoveAll(stageDir) //nolint:errcheck
 			return nil, err
 		}
-		if err := copyFile(binary, filepath.Join(dst, rel), 0o755); err != nil {
+		// rel comes from the manifest and may name a path, not just a file, so
+		// its parent has to exist before the copy.
+		stagedBinary := filepath.Join(dst, rel)
+		if err := os.MkdirAll(filepath.Dir(stagedBinary), 0o755); err != nil {
+			os.RemoveAll(stageDir) //nolint:errcheck
+			return nil, err
+		}
+		if err := copyFile(binary, stagedBinary, 0o755); err != nil {
 			os.RemoveAll(stageDir) //nolint:errcheck
 			return nil, err
 		}

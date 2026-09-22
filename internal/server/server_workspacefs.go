@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
+	"strings"
 
 	proto "github.com/indiejames/indigo/internal/proto"
 	"github.com/indiejames/indigo/internal/workspacefs"
@@ -35,12 +38,13 @@ import (
 // this process's. Browse mode has always hidden them; doing it client-side
 // would mean the client deciding what to hide in a tree it cannot see.
 func (s *editorService) ListDir(_ context.Context, call proto.EditorService_listDir) error {
-	path, err := call.Args().Path()
+	rel, err := call.Args().Path()
 	if err != nil {
 		return err
 	}
-	if path == "" {
-		path = s.workspaceDir
+	path, err := s.resolveWorkspaceRel(rel)
+	if err != nil {
+		return err
 	}
 	call.Go()
 
@@ -73,6 +77,34 @@ func (s *editorService) ListDir(_ context.Context, call proto.EditorService_list
 		item.SetIsDir(e.IsDir)
 	}
 	return nil
+}
+
+// resolveWorkspaceRel turns a workspace-relative path from a client into an
+// absolute one inside the workspace.
+//
+// The client sends paths relative to the workspace (the picker's currentDir),
+// and an earlier version passed them to the filesystem unchanged — which
+// resolves them against *this process's* working directory. That happened to
+// work only because the server is started with the workspace as its cwd, which
+// is a coincidence of how it is launched and not a property anything guarantees.
+//
+// It also refuses to leave the workspace. A client is not an attacker here, but
+// the server is reachable over a socket by anything running as this user, and
+// answering "list /etc" because someone sent "../../etc" is not a thing a
+// workspace server should do.
+func (s *editorService) resolveWorkspaceRel(rel string) (string, error) {
+	if rel == "" {
+		return s.workspaceDir, nil
+	}
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("path %q must be relative to the workspace", rel)
+	}
+	abs := filepath.Clean(filepath.Join(s.workspaceDir, rel))
+	root := filepath.Clean(s.workspaceDir)
+	if abs != root && !strings.HasPrefix(abs, root+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q is outside the workspace", rel)
+	}
+	return abs, nil
 }
 
 // ListWorkspaceFiles enumerates every file under the workspace root as

@@ -910,7 +910,11 @@ func (s *Server) serveConn(c io.ReadWriteCloser) {
 		newCount := s.connCount.Add(-1)
 		serverLog("serve: connection closed, connCount now %d, hasHadClient=%v", newCount, s.hasHadClient.Load())
 		c.Close() //nolint:errcheck
-		if newCount == 0 && s.hasHadClient.Load() {
+		// With a listener, waiting for a real client is right: another may yet
+		// connect. With none (ServeStream) this connection was the only one
+		// there will ever be, so a peer that hangs up before completing the
+		// handshake would otherwise leave the process running for ever.
+		if newCount == 0 && (s.hasHadClient.Load() || s.listener == nil) {
 			s.triggerShutdown()
 		}
 	}()

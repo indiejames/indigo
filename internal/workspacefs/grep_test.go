@@ -396,3 +396,69 @@ func TestGrepFileSkipsOnlyTheOversizedLine(t *testing.T) {
 		t.Errorf("matched lines = %v, want [0 2] (line 1 oversized and skipped)", lines)
 	}
 }
+
+// TestMatchGlobDirectoryDoesNotMatchASibling is a regression test: "vendor/"
+// was matching "vendor2/main.go", because the bare-name check was a prefix
+// comparison rather than an equality one. An exclude filter would then quietly
+// hide a directory the user never named.
+func TestMatchGlobDirectoryDoesNotMatchASibling(t *testing.T) {
+	for _, tc := range []struct {
+		glob, path string
+		want       bool
+	}{
+		{"vendor/", "vendor/x.go", true},
+		{"vendor/", "vendor/deep/x.go", true},
+		{"vendor/", "vendor", true}, // the directory itself
+		{"vendor/", "vendor2/x.go", false},
+		{"vendor/", "vendored/x.go", false},
+		{"src/", "src/a/b.go", true},
+		{"src/", "srcs/a.go", false},
+	} {
+		if got := matchGlob(tc.glob, tc.path); got != tc.want {
+			t.Errorf("matchGlob(%q, %q) = %v, want %v", tc.glob, tc.path, got, tc.want)
+		}
+	}
+}
+
+// TestCandidateCacheIsInvalidatedByTheIgnoreSet: the cached list is the files
+// that passed a *particular* ignore set, so serving it after the set changes
+// returns results the user has just asked not to see. Reachable in ordinary use
+// now that the client pushes the set at startup and on every config reload.
+func TestCandidateCacheIsInvalidatedByTheIgnoreSet(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"keep.go":      "package a",
+		"build/gen.go": "package b",
+	})
+	t.Cleanup(func() { SetIgnoredDirs(nil) })
+	SetIgnoredDirs(nil)
+
+	_, rels, err := cachedCandidateFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasRel(rels, filepath.Join("build", "gen.go")) {
+		t.Fatalf("rels = %v, want build/gen.go before it is ignored", rels)
+	}
+
+	// Within the cache TTL, so only the generation can cause a re-walk.
+	SetIgnoredDirs([]string{"build"})
+	_, rels, err = cachedCandidateFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasRel(rels, filepath.Join("build", "gen.go")) {
+		t.Errorf("rels = %v, want build/ gone after the ignore set changed", rels)
+	}
+	if !hasRel(rels, "keep.go") {
+		t.Errorf("rels = %v, want the rest still listed", rels)
+	}
+}
+
+func hasRel(rels []string, want string) bool {
+	for _, r := range rels {
+		if r == want {
+			return true
+		}
+	}
+	return false
+}

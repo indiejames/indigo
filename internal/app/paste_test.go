@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/indiejames/indigo/internal/client"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/config"
@@ -45,7 +47,7 @@ func TestPasteReachesModals(t *testing.T) {
 	})
 
 	t.Run("search & replace", func(t *testing.T) {
-		d := newSearchReplaceDialog("/tmp", 80, 24)
+		d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 80, 24)
 		d.setFocus(sraFocusSearch)
 		a := App{width: 80, height: 24, cfg: cfg, fileChangedIdx: -1, searchReplace: d}
 		got, _ := a.Update(tea.PasteMsg{Content: "needle"})

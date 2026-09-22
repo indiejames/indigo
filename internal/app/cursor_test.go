@@ -72,7 +72,7 @@ func TestAppHidesCursorUnderDialogs(t *testing.T) {
 		name string
 		mut  func(a *App)
 	}{
-		{"search & replace", func(a *App) { a.searchReplace = newSearchReplaceDialog("/tmp", 80, 24) }},
+		{"search & replace", func(a *App) { a.searchReplace = newSearchReplaceDialog(&client.RPC{}, "/tmp", 80, 24) }},
 		{"buffer picker", func(a *App) { a.bufPicker = &bufPicker{} }},
 		{"file-changed prompt", func(a *App) { a.fileChangedIdx = 0 }},
 	}

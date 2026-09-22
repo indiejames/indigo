@@ -1,78 +1,18 @@
 package app
 
 import (
-	"io/fs"
-	"os"
+	"context"
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
+	"time"
+
+	"github.com/indiejames/indigo/internal/client"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/sahilm/fuzzy"
 )
-
-// builtInIgnoredDirs are never shown in the file browser.
-var builtInIgnoredDirs = []string{
-	".git", "vendor", "node_modules",
-	".svn", ".hg", "__pycache__", ".cache",
-}
-
-// ignoredDirs is the effective set of directories to hide, seeded from
-// builtInIgnoredDirs so it's always non-empty even if addIgnoredDirs is
-// never called, and rebuilt on each configuration load to fold in
-// Config.PickerIgnoreDirs.
-//
-// Guarded by ignoredDirsMu and reachable only through ignoredDirsSnapshot /
-// addIgnoredDirs, never read directly: addIgnoredDirs runs on the main
-// goroutine on every config hot-reload (polled every 2s by watchConfig),
-// while readers run on background goroutines — the file picker's scan
-// (startPickerFileScan) and both workspace-grep backends. Reading the bare
-// variable from those goroutines is a genuine, race-detector-confirmed data
-// race, and one that's bitten twice now (the picker path, then both grep
-// paths), so the unsafe spelling is removed entirely rather than left
-// available for the next reader to trip over.
-var (
-	ignoredDirsMu sync.RWMutex
-	ignoredDirs   = newIgnoredDirsSet(nil)
-)
-
-// ignoredDirsSnapshot returns the current ignore set for reading. The
-// returned map must be treated as read-only: addIgnoredDirs always installs
-// a whole new map rather than mutating the existing one, so a snapshot taken
-// here stays valid (and unchanging) for as long as the caller holds it, with
-// no further synchronization needed.
-func ignoredDirsSnapshot() map[string]bool {
-	ignoredDirsMu.RLock()
-	defer ignoredDirsMu.RUnlock()
-	return ignoredDirs
-}
-
-// newIgnoredDirsSet builds an ignore set from builtInIgnoredDirs plus extra.
-func newIgnoredDirsSet(extra []string) map[string]bool {
-	set := make(map[string]bool, len(builtInIgnoredDirs)+len(extra))
-	for _, name := range builtInIgnoredDirs {
-		set[name] = true
-	}
-	for _, name := range extra {
-		if name != "" {
-			set[name] = true
-		}
-	}
-	return set
-}
-
-// addIgnoredDirs rebuilds the ignoredDirs set from built-in defaults plus
-// additional directory names (from Config.PickerIgnoreDirs) to hide from the
-// file picker, recent files, and workspace grep. Removed entries no longer
-// persist across configuration reloads.
-func addIgnoredDirs(names []string) {
-	set := newIgnoredDirsSet(names)
-	ignoredDirsMu.Lock()
-	ignoredDirs = set
-	ignoredDirsMu.Unlock()
-}
 
 // pickerEntry is one row in the directory browser.
 type pickerEntry struct {
@@ -109,14 +49,29 @@ type filePicker struct {
 	// a very long time on a large/slow directory tree (a real report: a
 	// home directory with no project-scoped root), and doing it synchronously
 	// inside Update blocked the whole UI — including the keypress meant to
-	// open a different picker or cancel. Browse mode (buildEntries, a single
-	// non-recursive os.ReadDir) is unaffected and works immediately either
-	// way; only the global fuzzy-search list depends on this. loadingAll is
+	// open a different picker or cancel. Browse mode is a single readdir and
+	// stays comparatively cheap, but it is a round trip now too and so has its
+	// own loadingDir/dirSeq pair. loadingAll is
 	// true until the scan for seq completes; seq guards against a stale scan
 	// (from a picker that's since closed, or been reopened for a different
 	// directory) overwriting a newer one's results — see pickerFilesMsg.
 	seq        int
 	loadingAll bool
+
+	// loadingDir is browse mode's equivalent of loadingAll: the directory
+	// listing is now a round trip to the server, because the server is the
+	// process that can see the directory. dirSeq identifies which request the
+	// picker is waiting on, so a slower listing for a directory the user has
+	// already navigated out of cannot overwrite the one they are looking at —
+	// the same hazard pickerFilesMsg's seq guards, now reachable by holding
+	// down Backspace.
+	loadingDir bool
+	dirSeq     int
+
+	// recentSeq identifies the recent-files filter request this picker is
+	// waiting on, for the same reason dirSeq exists: the picker can be closed
+	// and reopened while one is in flight.
+	recentSeq int
 }
 
 // showingRecent reports whether the recent-files list is currently displayed.
@@ -138,26 +93,137 @@ type pickerFilesMsg struct {
 	files []string
 }
 
-// startPickerFileScan bumps the picker-scan generation counter, stamps it
-// onto a.picker (which must already be set), and returns a command that
-// walks workDir for the global fuzzy-search file list in the background
-// (see filePicker.all's doc comment for why this can't run synchronously).
-// Call this right after newFilePicker/newDirectoryPicker.
+// startPickerFileScan asks the server to enumerate the workspace for the
+// picker's fuzzy-search list.
 //
-// ignoredDirs is snapshotted here, on the caller's goroutine, rather than
-// read from inside the returned command: the command runs concurrently
-// with the rest of Update, including a config hot-reload's addIgnoredDirs,
-// so collectFiles reading the shared package-level variable directly would
-// race with that reassignment (see collectFiles' doc comment).
+// The walk runs where the files are. That used to be here, which was correct
+// only for as long as the client and the workspace shared a machine — see
+// internal/workspacefs.
+//
+// seq still guards the result, for the same reason it always did: a slower
+// older scan must not overwrite a newer one's list. A round trip only makes
+// that more likely, not less.
 func (a *App) startPickerFileScan(workDir string) tea.Cmd {
 	a.pickerFilesSeq++
 	seq := a.pickerFilesSeq
 	a.picker.seq = seq
-	ignored := ignoredDirsSnapshot()
+	rpc := a.rpc
 	return func() tea.Msg {
-		return pickerFilesMsg{seq: seq, files: collectFiles(workDir, ignored)}
+		ctx, cancel := context.WithTimeout(context.Background(), workspaceScanTimeout)
+		defer cancel()
+		files, err := rpc.ListWorkspaceFiles(ctx)
+		if err != nil {
+			// A failed scan leaves the fuzzy list empty rather than stale;
+			// browse mode still works, which is the useful half.
+			appLog("picker file scan failed: %v", err)
+			return pickerFilesMsg{seq: seq}
+		}
+		return pickerFilesMsg{seq: seq, files: files}
 	}
 }
+
+// pushIgnoredDirs sends config.toml's picker_ignore_dirs to the server.
+//
+// Fire-and-forget: the set only affects what a later listing hides, so a failed
+// push costs one stale listing and is not worth interrupting anything for. The
+// next config tick or picker open sends it again.
+func (a App) pushIgnoredDirs() tea.Cmd {
+	if a.rpc == nil || a.cfg == nil {
+		return nil
+	}
+	rpc := a.rpc
+	dirs := append([]string(nil), a.cfg.PickerIgnoreDirs...)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := rpc.SetIgnoredDirs(ctx, dirs); err != nil {
+			appLog("pushing picker_ignore_dirs failed: %v", err)
+		}
+		return nil
+	}
+}
+
+// loadPickerDir asks the server for the listing of the picker's current
+// directory. Pair it with any state change that moves the picker — see
+// filePicker.beginDirLoad.
+func (a *App) loadPickerDir() tea.Cmd {
+	if a.picker == nil {
+		return nil
+	}
+	a.pickerDirSeq++
+	seq := a.pickerDirSeq
+	a.picker.dirSeq = seq
+	rpc := a.rpc
+	// Sent as a workspace-relative path, and resolved against the workspace
+	// root by the server: "" means the root, and the client does not have to
+	// know what that root is called on the far side of a container boundary.
+	dir := a.picker.currentDir
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), listDirTimeout)
+		defer cancel()
+		entries, err := rpc.ListDir(ctx, dir)
+		if err != nil {
+			appLog("picker list dir %q failed: %v", dir, err)
+			return pickerDirMsg{seq: seq}
+		}
+		return pickerDirMsg{seq: seq, entries: entries}
+	}
+}
+
+// filterRecentFiles asks the server which of the recorded recent files are
+// still worth showing — still present, not ignored, not gitignored. Every part
+// of that question is about the workspace, so it is asked where the workspace
+// is.
+func (a *App) filterRecentFiles() tea.Cmd {
+	if a.picker == nil || len(a.picker.recentFiles) == 0 {
+		return nil
+	}
+	a.pickerRecentSeq++
+	seq := a.pickerRecentSeq
+	a.picker.recentSeq = seq
+	rpc := a.rpc
+	rels := append([]string(nil), a.picker.recentFiles...)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), listDirTimeout)
+		defer cancel()
+		kept, err := rpc.FilterWorkspaceFiles(ctx, rels)
+		if err != nil {
+			// Leave the unfiltered list alone rather than blanking it: a stale
+			// entry the user can see is better than a list that vanished.
+			appLog("recent-files filter failed: %v", err)
+			return recentFilesMsg{seq: seq, files: rels}
+		}
+		return recentFilesMsg{seq: seq, files: kept}
+	}
+}
+
+// recentFilesMsg carries the filtered recent-files list back to the picker.
+type recentFilesMsg struct {
+	seq   int
+	files []string
+}
+
+// pickerDirMsg carries one directory listing back to the picker. seq is checked
+// against the picker's current dirSeq on arrival: hold Backspace and several
+// listings are in flight at once, and the one that arrives last is not
+// necessarily the one for the directory now on screen.
+type pickerDirMsg struct {
+	seq     int
+	entries []client.DirEntry
+}
+
+const (
+	// listDirTimeout bounds one readdir. Generous for a local disk and still
+	// short enough that a wedged mount does not leave the picker blank with no
+	// explanation.
+	listDirTimeout = 10 * time.Second
+	// workspaceScanTimeout bounds a whole-tree walk, which on a large
+	// repository over a slow container mount is a different order of cost.
+	workspaceScanTimeout = 60 * time.Second
+	// grepTimeout bounds a workspace search. Same order as the scan: ripgrep
+	// over a large tree is the slowest thing the editor asks the server for.
+	grepTimeout = 60 * time.Second
+)
 
 // startDir is the workspace-relative directory to browse into initially;
 // "" opens at the project root. The global (fuzzy-search) file list isn't
@@ -172,50 +238,41 @@ func newFilePicker(workDir, startDir string, w, h int, fuzzySearch bool) *filePi
 		fuzzySearch: fuzzySearch,
 		loadingAll:  true,
 	}
-	fp.entries = fp.buildEntries()
+	// The first listing arrives asynchronously; callers pair this with
+	// App.loadPickerDir, exactly as they already pair it with
+	// App.startPickerFileScan for the fuzzy list.
 	return fp
+}
+
+// beginDirLoad marks the picker as waiting for a listing of currentDir. The
+// caller pairs this with App.loadPickerDir, which issues the request; splitting
+// them keeps the RPC out of a method that has no way to reach the server.
+func (fp *filePicker) beginDirLoad() {
+	fp.entries = nil
+	fp.loadingDir = true
 }
 
 // browseMode reports whether the picker is showing the directory browser
 // (query is empty) rather than the global search list.
 func (fp *filePicker) browseMode() bool { return fp.query == "" }
 
-// buildEntries reads currentDir and returns a sorted entry list:
-// ".." (when not at root), then directories, then files.
-func (fp *filePicker) buildEntries() []pickerEntry {
-	absDir := fp.workDir
-	if fp.currentDir != "" {
-		absDir = filepath.Join(fp.workDir, fp.currentDir)
-	}
-
-	des, err := os.ReadDir(absDir)
-	if err != nil {
-		return nil
-	}
-
-	ignored := ignoredDirsSnapshot()
-	var dirs, files []pickerEntry
-	for _, de := range des {
-		if ignored[de.Name()] {
-			continue
-		}
-		if de.IsDir() {
-			dirs = append(dirs, pickerEntry{name: de.Name(), isDir: true})
-		} else {
-			files = append(files, pickerEntry{name: de.Name(), isDir: false})
-		}
-	}
-	// os.ReadDir returns entries sorted, but be explicit.
-	sort.Slice(dirs, func(i, j int) bool { return dirs[i].name < dirs[j].name })
-	sort.Slice(files, func(i, j int) bool { return files[i].name < files[j].name })
-
-	var result []pickerEntry
+// setDirEntries installs a directory listing the server produced, prepending
+// ".." when there is a parent to go back to.
+//
+// The ignore filter that used to happen here now happens on the server: the set
+// is config-driven and the config describing that filesystem is the server's.
+// What is left is presentation — the parent entry and the ordering the server
+// already applied.
+func (fp *filePicker) setDirEntries(entries []client.DirEntry) {
+	result := make([]pickerEntry, 0, len(entries)+1)
 	if fp.currentDir != "" {
 		result = append(result, pickerEntry{name: "..", isDir: true})
 	}
-	result = append(result, dirs...)
-	result = append(result, files...)
-	return result
+	for _, e := range entries {
+		result = append(result, pickerEntry{name: e.Name, isDir: e.IsDir})
+	}
+	fp.entries = result
+	fp.loadingDir = false
 }
 
 // navigateInto descends into the named subdirectory.
@@ -226,7 +283,7 @@ func (fp *filePicker) navigateInto(name string) {
 		fp.currentDir = filepath.Join(fp.currentDir, name)
 	}
 	fp.cursor = 0
-	fp.entries = fp.buildEntries()
+	fp.beginDirLoad()
 }
 
 // navigateUp ascends one directory level. No-op at the project root.
@@ -240,38 +297,7 @@ func (fp *filePicker) navigateUp() {
 	}
 	fp.currentDir = parent
 	fp.cursor = 0
-	fp.entries = fp.buildEntries()
-}
-
-// collectFiles walks root and returns all workspace-relative file paths.
-// ignored is a snapshot of the ignoredDirs set, taken by the caller before
-// starting this scan (see startPickerFileScan) rather than read from the
-// shared package-level variable here: collectFiles runs in its own
-// goroutine (the tea.Cmd startPickerFileScan returns), and ignoredDirs can
-// be concurrently reassigned by addIgnoredDirs on the main goroutine (e.g.
-// a config hot-reload) — a genuine, race-detector-confirmed data race
-// before this parameter was added. addIgnoredDirs always builds a whole
-// new map rather than mutating the existing one in place, so a snapshot
-// taken once, before the goroutine starts, is safe to read for the rest of
-// this scan with no further synchronization.
-func collectFiles(root string, ignored map[string]bool) []string {
-	var paths []string
-	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error { //nolint:errcheck
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			if ignored[d.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		rel, _ := filepath.Rel(root, path)
-		paths = append(paths, rel)
-		return nil
-	})
-	sort.Strings(paths)
-	return paths
+	fp.beginDirLoad()
 }
 
 func (fp *filePicker) setQuery(q string) {
@@ -280,7 +306,7 @@ func (fp *filePicker) setQuery(q string) {
 	if q == "" {
 		// Returning to browse mode — reset filtered and rebuild directory entries.
 		fp.filtered = fp.all
-		fp.entries = fp.buildEntries()
+		fp.beginDirLoad()
 		return
 	}
 	if fp.fuzzySearch {
@@ -461,7 +487,11 @@ func (fp *filePicker) View() string {
 	case fp.showingRecent():
 		sb.WriteString(pickerTitleStyle.Render(clamp("  Recent Files")))
 	case fp.browseMode():
-		sb.WriteString(pickerTitleStyle.Render(clamp("  " + fp.breadcrumb())))
+		title := "  " + fp.breadcrumb()
+		if fp.loadingDir {
+			title += "  [listing…]"
+		}
+		sb.WriteString(pickerTitleStyle.Render(clamp(title)))
 	default:
 		title := "  Open File"
 		if fp.loadingAll {

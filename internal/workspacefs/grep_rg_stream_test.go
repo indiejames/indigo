@@ -1,4 +1,4 @@
-package app
+package workspacefs
 
 import (
 	"bufio"
@@ -34,9 +34,9 @@ func useFakeRg(t *testing.T, path string) {
 // TestSearchWithRgKillsProcessEarlyOnceMaxResultsReached is a regression
 // test for a bug where searchWithRg used cmd.Output(), which blocks until
 // rg exits and buffers all of its stdout before any parsing starts — so the
-// maxGrepResults cap only trimmed what was read back afterward and never
+// MaxResults cap only trimmed what was read back afterward and never
 // actually stopped rg early. This stands in a fake "rg" that emits far more
-// than maxGrepResults matches instantly and then sleeps, so a correct
+// than MaxResults matches instantly and then sleeps, so a correct
 // implementation (which kills the process once it has enough matches)
 // returns almost immediately, while the old cmd.Output()-based
 // implementation would block for the full sleep duration.
@@ -50,7 +50,7 @@ func TestSearchWithRgKillsProcessEarlyOnceMaxResultsReached(t *testing.T) {
 
 	var sb strings.Builder
 	sb.WriteString("#!/bin/sh\n")
-	extra := maxGrepResults + 200
+	extra := MaxResults + 200
 	for i := 1; i <= extra; i++ {
 		fmt.Fprintf(&sb,
 			`echo '{"type":"match","data":{"path":{"text":"/tmp/fake.go"},"lines":{"text":"hello world"},"line_number":%d,"submatches":[{"start":0,"end":5}]}}'`+"\n",
@@ -75,8 +75,8 @@ func TestSearchWithRgKillsProcessEarlyOnceMaxResultsReached(t *testing.T) {
 	if err != nil {
 		t.Fatalf("searchWithRg: %v", err)
 	}
-	if len(results) != maxGrepResults {
-		t.Fatalf("got %d results, want %d", len(results), maxGrepResults)
+	if len(results) != MaxResults {
+		t.Fatalf("got %d results, want %d", len(results), MaxResults)
 	}
 	if elapsed > 6*time.Second {
 		t.Fatalf("searchWithRg took %v — process was not killed early (should return well before the fake rg's 12s sleep)", elapsed)
@@ -116,13 +116,13 @@ func TestSearchWithRgHandlesLongMatchLine(t *testing.T) {
 	}
 }
 
-// withMaxFileBytes temporarily overrides maxFileBytes for the duration of a
+// withMaxFileBytes temporarily overrides MaxFileBytes for the duration of a
 // test.
 func withMaxFileBytes(t *testing.T, n int) {
 	t.Helper()
-	orig := maxFileBytes
-	maxFileBytes = n
-	t.Cleanup(func() { maxFileBytes = orig })
+	orig := MaxFileBytes
+	MaxFileBytes = n
+	t.Cleanup(func() { MaxFileBytes = orig })
 }
 
 // TestSearchWithRgSkipsOversizedRecordWithoutLosingOtherMatches is a
@@ -131,7 +131,7 @@ func withMaxFileBytes(t *testing.T, n int) {
 // over-buffer-size line as a fatal error — killing rg and discarding every
 // match found so far, even ones already read before the oversized line.
 // The correct behavior, matching searchBuiltin's existing "skip files over
-// maxFileBytes" policy, is to skip just the oversized record and keep
+// MaxFileBytes" policy, is to skip just the oversized record and keep
 // going: matches before *and after* it must both still come back, with no
 // error.
 func TestSearchWithRgSkipsOversizedRecordWithoutLosingOtherMatches(t *testing.T) {

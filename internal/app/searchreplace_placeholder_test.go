@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/indiejames/indigo/internal/client"
+
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -23,7 +25,7 @@ import (
 // so it fails for the symptom the user actually saw regardless of how the
 // widths get applied.
 func TestSearchReplaceInputPlaceholdersRenderInFull(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 120, 40)
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 120, 40)
 	d.replaceOpen = true
 	d.filterOpen = true
 
@@ -45,7 +47,7 @@ func TestSearchReplaceInputPlaceholdersRenderInFull(t *testing.T) {
 // line. Sizing to innerW-1 is what keeps the box one row tall.
 func TestSearchReplaceInputsFitTheirBorder(t *testing.T) {
 	for _, termW := range []int{80, 120, 200, 40} {
-		d := newSearchReplaceDialog("/tmp", termW, 40)
+		d := newSearchReplaceDialog(&client.RPC{}, "/tmp", termW, 40)
 		innerW := dialogInnerW(termW)
 		if got := lipgloss.Width(d.searchInput.View()); got > innerW {
 			t.Errorf("termW=%d: search input renders %d columns, exceeding its box's inner width %d — "+
@@ -59,7 +61,7 @@ func TestSearchReplaceInputsFitTheirBorder(t *testing.T) {
 // re-sizing them would leave them at the old width (and, growing from a
 // narrow start, visibly clipped).
 func TestSearchReplaceResizeKeepsPlaceholders(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 40, 20)
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 40, 20)
 	before := d.searchInput.Width()
 
 	d.width = 200

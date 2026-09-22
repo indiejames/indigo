@@ -7,6 +7,12 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/indiejames/indigo/internal/client"
+	"github.com/indiejames/indigo/internal/config"
+
+	"github.com/indiejames/indigo/internal/workspacefs"
 )
 
 // withTempHome points os.UserHomeDir at a fresh temp dir for the duration of
@@ -41,11 +47,11 @@ func TestRecordRecentFileMostRecentFirstAndDeduped(t *testing.T) {
 		}
 	}
 
-	recordRecentFile(workDir, filepath.Join(workDir, "a.go"))
-	recordRecentFile(workDir, filepath.Join(workDir, "b.go"))
-	recordRecentFile(workDir, filepath.Join(workDir, "c.go"))
+	recordRecentFile(workDir, workDir, filepath.Join(workDir, "a.go"))
+	recordRecentFile(workDir, workDir, filepath.Join(workDir, "b.go"))
+	recordRecentFile(workDir, workDir, filepath.Join(workDir, "c.go"))
 	// Re-opening a.go should move it back to the front, not duplicate it.
-	recordRecentFile(workDir, filepath.Join(workDir, "a.go"))
+	recordRecentFile(workDir, workDir, filepath.Join(workDir, "a.go"))
 
 	got := loadRecentFiles(workDir)
 	want := []string{"a.go", "c.go", "b.go"}
@@ -65,7 +71,7 @@ func TestRecordRecentFileCapsLength(t *testing.T) {
 	for i := 0; i < maxRecentFiles+5; i++ {
 		name := filepath.Join(workDir, "f"+string(rune('a'+i%26))+".go")
 		os.WriteFile(name, nil, 0644) //nolint:errcheck
-		recordRecentFile(workDir, name)
+		recordRecentFile(workDir, workDir, name)
 	}
 	got := loadRecentFiles(workDir)
 	if len(got) > maxRecentFiles {
@@ -81,8 +87,8 @@ func TestLoadRecentFilesSkipsDeleted(t *testing.T) {
 	os.WriteFile(keepPath, nil, 0644)  //nolint:errcheck
 	os.WriteFile(goneePath, nil, 0644) //nolint:errcheck
 
-	recordRecentFile(workDir, goneePath)
-	recordRecentFile(workDir, keepPath)
+	recordRecentFile(workDir, workDir, goneePath)
+	recordRecentFile(workDir, workDir, keepPath)
 
 	if err := os.Remove(goneePath); err != nil {
 		t.Fatal(err)
@@ -98,8 +104,8 @@ func TestRecordRecentFileIgnoresOutsideWorkDirAndUntitled(t *testing.T) {
 	withTempHome(t)
 	workDir := t.TempDir()
 
-	recordRecentFile(workDir, "")
-	recordRecentFile(workDir, "/etc/hosts")
+	recordRecentFile(workDir, workDir, "")
+	recordRecentFile(workDir, workDir, "/etc/hosts")
 
 	if got := loadRecentFiles(workDir); len(got) != 0 {
 		t.Fatalf("loadRecentFiles = %v, want empty", got)
@@ -109,6 +115,11 @@ func TestRecordRecentFileIgnoresOutsideWorkDirAndUntitled(t *testing.T) {
 // TestRecordRecentFileExcludesGitInternalPath is a regression test: opening
 // a file like .git/COMMIT_EDITMSG (e.g. via the indigo-git plugin) must not
 // pollute the recent-files list, since it's not a project file.
+// Note the guarantee is about what the list *shows*, not about what is
+// recorded: recordRecentFile no longer filters on write, because answering
+// "is this ignored?" is a question about the workspace and asking it on every
+// buffer open would put a round trip on that path. The filter runs once, when
+// the list is displayed.
 func TestRecordRecentFileExcludesGitInternalPath(t *testing.T) {
 	withTempHome(t)
 	workDir := t.TempDir()
@@ -118,7 +129,7 @@ func TestRecordRecentFileExcludesGitInternalPath(t *testing.T) {
 	commitMsgPath := filepath.Join(workDir, ".git", "COMMIT_EDITMSG")
 	os.WriteFile(commitMsgPath, []byte("msg"), 0644) //nolint:errcheck
 
-	recordRecentFile(workDir, commitMsgPath)
+	recordRecentFile(workDir, workDir, commitMsgPath)
 
 	if got := loadRecentFiles(workDir); len(got) != 0 {
 		t.Fatalf("loadRecentFiles = %v, want empty (.git paths must be excluded)", got)
@@ -135,6 +146,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// As above: filtered when shown, not when recorded.
 func TestRecordRecentFileExcludesGitignoredPath(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
@@ -153,8 +165,8 @@ func TestRecordRecentFileExcludesGitignoredPath(t *testing.T) {
 	keptPath := filepath.Join(workDir, "main.go")
 	os.WriteFile(keptPath, nil, 0644) //nolint:errcheck
 
-	recordRecentFile(workDir, ignoredPath)
-	recordRecentFile(workDir, keptPath)
+	recordRecentFile(workDir, workDir, ignoredPath)
+	recordRecentFile(workDir, workDir, keptPath)
 
 	got := loadRecentFiles(workDir)
 	want := []string{"main.go"}
@@ -192,7 +204,7 @@ func TestRecordRecentFileConcurrentWritesDontLoseUpdates(t *testing.T) {
 		wg.Add(1)
 		go func(p string) {
 			defer wg.Done()
-			recordRecentFile(workDir, p)
+			recordRecentFile(workDir, workDir, p)
 		}(p)
 	}
 	wg.Wait()
@@ -226,7 +238,7 @@ func TestLoadRecentFilesSelfHealsNewlyGitignoredEntry(t *testing.T) {
 	genPath := filepath.Join(workDir, "generated.go")
 	os.WriteFile(genPath, nil, 0644) //nolint:errcheck
 
-	recordRecentFile(workDir, genPath)
+	recordRecentFile(workDir, workDir, genPath)
 	if got := loadRecentFiles(workDir); len(got) != 1 {
 		t.Fatalf("loadRecentFiles before gitignore = %v, want [generated.go]", got)
 	}
@@ -237,5 +249,105 @@ func TestLoadRecentFilesSelfHealsNewlyGitignoredEntry(t *testing.T) {
 
 	if got := loadRecentFiles(workDir); len(got) != 0 {
 		t.Fatalf("loadRecentFiles after gitignore = %v, want empty", got)
+	}
+}
+
+// loadRecentFiles is the composition the App now performs across an RPC: the
+// recorded list is read here, on the client, and filtered on the server, where
+// the workspace is (see recentRels and workspacefs.FilterExisting). Spelled out
+// once here so these tests keep asserting the user-visible guarantee — what
+// ends up in the list — rather than which side of the wire each half runs on.
+func loadRecentFiles(workDir string) []string {
+	return workspacefs.FilterExisting(workDir, recentRels(workDir))
+}
+
+// TestRecentFilesKeyedByHostRootButRelativeToWorkDir covers the container case,
+// where the workspace has two names.
+//
+// Entries must be stored relative to how *this process* sees the workspace, so
+// they mean the same thing from either side of the boundary; the list must be
+// keyed by where the workspace lives on the host, so that two projects which
+// both mount at /workspaces/api do not share one.
+func TestRecentFilesKeyedByHostRootButRelativeToWorkDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	hostRoot := filepath.Join(home, "projects", "api")
+	containerRoot := "/workspaces/api"
+	SetRecentRoot(hostRoot)
+	t.Cleanup(func() { SetRecentRoot("") })
+
+	// The client is working in container paths, as it does once attached.
+	recordRecentFile(containerRoot, hostRoot, containerRoot+"/cmd/main.go")
+
+	got := recentRels(hostRoot)
+	if len(got) != 1 || got[0] != filepath.Join("cmd", "main.go") {
+		t.Fatalf("recentRels(hostRoot) = %v, want [cmd/main.go]", got)
+	}
+
+	// A second project mounted at the same container path keeps its own list.
+	otherHostRoot := filepath.Join(home, "work", "api")
+	recordRecentFile(containerRoot, otherHostRoot, containerRoot+"/other.go")
+	if got := recentRels(otherHostRoot); len(got) != 1 || got[0] != "other.go" {
+		t.Errorf("second workspace's list = %v, want [other.go]", got)
+	}
+	if got := recentRels(hostRoot); len(got) != 1 || got[0] != filepath.Join("cmd", "main.go") {
+		t.Errorf("first workspace's list = %v, want it untouched; the two shared a key", got)
+	}
+}
+
+// TestRecentRootDefaultsToTheWorkspace: without a container there is one name
+// for the workspace and nothing to set.
+func TestRecentRootDefaultsToTheWorkspace(t *testing.T) {
+	SetRecentRoot("")
+	if got := recentRootOr("/some/where"); got != "/some/where" {
+		t.Errorf("recentRootOr = %q, want the workspace path", got)
+	}
+	SetRecentRoot("/host/root")
+	t.Cleanup(func() { SetRecentRoot("") })
+	if got := recentRootOr("/workspaces/x"); got != "/host/root" {
+		t.Errorf("recentRootOr = %q, want the host root", got)
+	}
+}
+
+// TestConfigReloadPushesTheIgnoreSet is a regression test for something moving
+// the file listing to the server quietly took away: picker_ignore_dirs used to
+// take effect within two seconds of editing config.toml, via the client's
+// config watcher. Once the ignore set lived on the server — which reads its
+// config exactly once, at startup — a change needed a server restart.
+//
+// The preference belongs to the user rather than to the filesystem, so the
+// client pushes it; this checks the reload path actually does.
+func TestConfigReloadPushesTheIgnoreSet(t *testing.T) {
+	a := App{
+		rpc:     &client.RPC{},
+		cfg:     &config.Config{PickerIgnoreDirs: []string{"build"}},
+		width:   80,
+		height:  24,
+		workDir: t.TempDir(),
+	}
+
+	newCfg := &config.Config{PickerIgnoreDirs: []string{"build", "target"}}
+	updated, cmd := a.Update(configTickMsg{newMod: time.Now(), cfg: newCfg})
+	a2 := updated.(App)
+
+	if len(a2.cfg.PickerIgnoreDirs) != 2 {
+		t.Fatalf("config not adopted: %v", a2.cfg.PickerIgnoreDirs)
+	}
+	if cmd == nil {
+		t.Fatal("no command returned; the new ignore set never reaches the server")
+	}
+	// pushIgnoredDirs snapshots the dirs at construction time rather than
+	// reading a.cfg later, so a further reload cannot change what this send
+	// carries.
+	if push := a2.pushIgnoredDirs(); push == nil {
+		t.Error("pushIgnoredDirs returned nothing with an rpc and a config present")
+	}
+}
+
+func TestPushIgnoredDirsIsInertWithoutAnRPC(t *testing.T) {
+	a := App{cfg: &config.Config{PickerIgnoreDirs: []string{"x"}}}
+	if cmd := a.pushIgnoredDirs(); cmd != nil {
+		t.Error("returned a command with no rpc to send it on")
 	}
 }

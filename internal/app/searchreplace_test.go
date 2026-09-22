@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
+	"github.com/indiejames/indigo/internal/workspacefs"
 )
 
 func TestOldTextOf(t *testing.T) {
@@ -77,7 +79,7 @@ func TestBoldPreserving(t *testing.T) {
 }
 
 func TestRenderResultLineBoldsMatch(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 100, 20)
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 20)
 	r := GrepResult{RelPath: "a.go", Line: 0, Col: 4, MatchLen: 5, LineText: "foo MATCH bar"}
 
 	// Non-selected, non-diff: the match is rendered via sraMatchStyle (bold),
@@ -100,7 +102,7 @@ func TestRenderResultLineBoldsMatch(t *testing.T) {
 }
 
 func TestRenderResultLineKeepsMatchVisibleWhenLineIsLong(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 60, 20) // dialogResultsW(60) = 48
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 60, 20) // dialogResultsW(60) = 48
 
 	pad := strings.Repeat("x", 200)
 	r := GrepResult{RelPath: "a.go", Line: 0, Col: len(pad), MatchLen: 6, LineText: pad + "NEEDLE" + strings.Repeat("y", 200)}
@@ -179,7 +181,7 @@ func TestSplitContextWideRunes(t *testing.T) {
 }
 
 func TestRenderResultLineWideRunesRespectWidth(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 60, 20)
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 60, 20)
 	r := GrepResult{
 		RelPath:  "a.go",
 		Line:     0,
@@ -201,7 +203,7 @@ func TestRenderResultLineWideRunesRespectWidth(t *testing.T) {
 }
 
 func TestSearchReplaceResizeRefreshesResultsView(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 300, 40)
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 300, 40)
 	d.results = []GrepResult{{RelPath: "a.go", Line: 0, Col: 0, MatchLen: 3, LineText: "foo bar baz"}}
 	d.refreshResultsView()
 	correctW := d.resultsMaxContentW
@@ -227,7 +229,7 @@ func TestSearchReplaceResizeRefreshesResultsView(t *testing.T) {
 }
 
 func TestSearchReplaceResultsWShrinksToFitContent(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 200, 40) // dialogInnerW=64, dialogResultsW=188
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 200, 40) // dialogInnerW=64, dialogResultsW=188
 
 	// No results yet: the box should sit at the input-dialog's minimum
 	// width, not the full terminal-width-based cap.
@@ -266,7 +268,7 @@ func TestSearchReplaceResultsWShrinksToFitContent(t *testing.T) {
 }
 
 func TestFocusOrderExpandsWithReplaceAndResults(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 100, 40)
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 40)
 
 	order := d.focusOrder()
 	want := []sraFocus{sraFocusSearch, sraFocusCase, sraFocusRegex, sraFocusFilterToggle, sraFocusToggle}
@@ -289,7 +291,7 @@ func TestFocusOrderExpandsWithReplaceAndResults(t *testing.T) {
 }
 
 func TestAdvanceFocusWrapsAndSkipsCollapsedControls(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 100, 40)
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 40)
 	// replaceOpen and results are both false/empty, so the order is just
 	// search, case, regex, toggle — advancing must never land on Replace/All/Results.
 	for i := 0; i < 8; i++ {
@@ -308,7 +310,7 @@ func TestAdvanceFocusWrapsAndSkipsCollapsedControls(t *testing.T) {
 }
 
 func TestSetFocusManagesTextInputFocus(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 100, 40)
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 40)
 
 	d.setFocus(sraFocusReplace)
 	if d.searchInput.Focused() {
@@ -328,7 +330,7 @@ func TestSetFocusManagesTextInputFocus(t *testing.T) {
 }
 
 func TestSraResultsAutoFocusesResultsList(t *testing.T) {
-	a := App{searchReplace: newSearchReplaceDialog("/tmp", 100, 40)}
+	a := App{searchReplace: newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 40)}
 
 	updated, _ := a.Update(sraResultsMsg{results: []GrepResult{
 		{RelPath: "a.go", Line: 0, Col: 0, MatchLen: 3, LineText: "foo bar"},
@@ -344,7 +346,7 @@ func TestSraResultsAutoFocusesResultsList(t *testing.T) {
 }
 
 func TestSraResultsNoAutoFocusWhenEmpty(t *testing.T) {
-	a := App{searchReplace: newSearchReplaceDialog("/tmp", 100, 40)}
+	a := App{searchReplace: newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 40)}
 
 	updated, _ := a.Update(sraResultsMsg{results: nil})
 	a2 := updated.(App)
@@ -361,7 +363,7 @@ func TestSraResultsNoAutoFocusWhenEmpty(t *testing.T) {
 // replace field has never been shown. Enter on a result should just open
 // the file, like a search, unless replace is toggled open.
 func TestSearchReplaceEnterOpensMatchWhenReplaceClosed(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 100, 40)
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 40)
 	d.results = []GrepResult{{RelPath: "a.go", Line: 0, Col: 0, MatchLen: 3, LineText: "foo bar"}}
 	d.setFocus(sraFocusResults)
 	d.cursor = 0
@@ -383,7 +385,7 @@ func TestSearchReplaceEnterOpensMatchWhenReplaceClosed(t *testing.T) {
 // the replace field open preserves the existing replace-on-Enter behavior
 // (the dialog itself closes later, once the async apply/open completes).
 func TestSearchReplaceEnterKeepsDialogOpenWhenReplaceOpen(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 100, 40)
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 40)
 	d.results = []GrepResult{{RelPath: "a.go", Line: 0, Col: 0, MatchLen: 3, LineText: "foo bar"}}
 	d.replaceOpen = true
 	d.setFocus(sraFocusResults)
@@ -402,7 +404,7 @@ func TestSearchReplaceEnterKeepsDialogOpenWhenReplaceOpen(t *testing.T) {
 }
 
 func TestOpenSearchReplaceMatchOutOfBounds(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 100, 40)
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 40)
 	a := App{searchReplace: d}
 	if cmd := a.openSearchReplaceMatch(d); cmd != nil {
 		t.Error("expected nil command when there are no results")
@@ -420,7 +422,7 @@ func newSraTestModel(absPath string) client.Model {
 // am.cmd so the already-applied edit still gets sent to the server.
 func TestSraSingleResultAppliedOutOfBoundsDoesNotPanic(t *testing.T) {
 	a := App{
-		searchReplace: newSearchReplaceDialog("/tmp", 100, 40),
+		searchReplace: newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 40),
 		buffers:       []client.Model{newSraTestModel("/tmp/a.go")},
 		active:        0,
 	}
@@ -449,7 +451,7 @@ func TestSraSingleResultAppliedOutOfBoundsDoesNotPanic(t *testing.T) {
 // Applying blindly would silently overwrite the wrong tab.
 func TestSraSingleResultAppliedStaleIndexReusedByAnotherBuffer(t *testing.T) {
 	a := App{
-		searchReplace: newSearchReplaceDialog("/tmp", 100, 40),
+		searchReplace: newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 40),
 		buffers:       []client.Model{newSraTestModel("/tmp/other.go")},
 		active:        0,
 	}
@@ -475,7 +477,7 @@ func TestSraSingleResultAppliedStaleIndexReusedByAnotherBuffer(t *testing.T) {
 // at the same buffer, so the model/active/cursor should update normally.
 func TestSraSingleResultAppliedValidIndex(t *testing.T) {
 	a := App{
-		searchReplace: newSearchReplaceDialog("/tmp", 100, 40),
+		searchReplace: newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 40),
 		buffers:       []client.Model{newSraTestModel("/tmp/a.go")},
 		active:        0,
 		cfg:           &config.Config{},
@@ -500,7 +502,7 @@ func TestSraSingleResultAppliedValidIndex(t *testing.T) {
 }
 
 func TestFocusOrderExpandsWithFilter(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 100, 40)
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 40)
 	d.filterOpen = true
 
 	order := d.focusOrder()
@@ -516,7 +518,7 @@ func TestFocusOrderExpandsWithFilter(t *testing.T) {
 }
 
 func TestSetFocusManagesIncludeExcludeInputFocus(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 100, 40)
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 40)
 
 	d.setFocus(sraFocusInclude)
 	if !d.includeInput.Focused() {
@@ -545,7 +547,7 @@ func TestSetFocusManagesIncludeExcludeInputFocus(t *testing.T) {
 // should open the section and, when closing it again, blur both inputs so a
 // stray keystroke can't land in a hidden field.
 func TestSpaceTogglesFilterOpen(t *testing.T) {
-	d := newSearchReplaceDialog("/tmp", 100, 40)
+	d := newSearchReplaceDialog(&client.RPC{}, "/tmp", 100, 40)
 	d.setFocus(sraFocusFilterToggle)
 	a := App{searchReplace: d}
 
@@ -565,15 +567,31 @@ func TestSpaceTogglesFilterOpen(t *testing.T) {
 	}
 }
 
+// fakeSearcher records what the dialog asked for and answers with whatever it
+// was primed with.
+type fakeSearcher struct {
+	pattern, include, exclude   string
+	caseSensitive, isRegex, exp bool
+	results                     []workspacefs.Result
+}
+
+func (f *fakeSearcher) GrepWorkspace(_ context.Context, pattern, include, exclude string,
+	caseSensitive, isRegex, explicit bool) ([]workspacefs.Result, string, error) {
+	f.pattern, f.include, f.exclude = pattern, include, exclude
+	f.caseSensitive, f.isRegex, f.exp = caseSensitive, isRegex, explicit
+	return f.results, "", nil
+}
+
 // TestStartSearchReplaceSearchUsesIncludeExclude confirms the include/exclude
-// input values actually reach searchWorkspaceExplicit, not just the pattern.
+// input values actually reach the search, not just the pattern.
+//
+// The search runs on the server now, so this asserts on the call rather than on
+// its results: a filter silently dropped on the way out produces "no matches",
+// which is indistinguishable from a filter that worked.
 func TestStartSearchReplaceSearchUsesIncludeExclude(t *testing.T) {
-	dir := writeTree(t, map[string]string{
-		"main.go":      "hello\n",
-		"main_test.go": "hello\n",
-		"readme.md":    "hello\n",
-	})
-	d := newSearchReplaceDialog(dir, 100, 40)
+	dir := t.TempDir()
+	fake := &fakeSearcher{results: []workspacefs.Result{{RelPath: "main.go"}}}
+	d := newSearchReplaceDialog(fake, dir, 100, 40)
 	d.searchInput.SetValue("hello")
 	d.includeInput.SetValue("*.go")
 	d.excludeInput.SetValue("*_test.go")
@@ -601,6 +619,20 @@ func TestStartSearchReplaceSearchUsesIncludeExclude(t *testing.T) {
 	}
 	if len(results) != 1 || results[0].RelPath != "main.go" {
 		t.Errorf("results = %+v, want only main.go", results)
+	}
+	if fake.pattern != "hello" {
+		t.Errorf("pattern reaching the search = %q, want %q", fake.pattern, "hello")
+	}
+	if fake.include != "*.go" {
+		t.Errorf("include reaching the search = %q, want %q", fake.include, "*.go")
+	}
+	if fake.exclude != "*_test.go" {
+		t.Errorf("exclude reaching the search = %q, want %q", fake.exclude, "*_test.go")
+	}
+	// The dialog owns its case/regex toggles, so it must ask for them to be
+	// honoured rather than letting the pattern's own conventions decide.
+	if !fake.exp {
+		t.Error("the dialog did not ask for its explicit case/regex settings to be used")
 	}
 }
 

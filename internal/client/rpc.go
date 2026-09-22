@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -170,6 +171,22 @@ func Dial(socketPath string) (*RPC, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", socketPath, err)
 	}
+	return DialStream(c)
+}
+
+// DialStream is Dial over an already-open stream, for a server this process did
+// not reach through a socket.
+//
+// That is how a dev container is attached: the server runs inside the
+// container and the connection arrives over the runtime's exec stdio, which is
+// a pipe pair and not a socket. capnp never cared — rpc.NewStreamTransport
+// takes an io.ReadWriteCloser — so everything below this point is identical for
+// both, and the two cannot drift apart because there is only one of them.
+//
+// The caller owns rwc until this returns successfully; after that the RPC owns
+// it and closing the connection closes the stream.
+func DialStream(rwc io.ReadWriteCloser) (*RPC, error) {
+	c := rwc
 
 	cb := &callbackServer{}
 	cbCap := proto.ClientCallback_ServerToClient(cb)

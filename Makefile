@@ -15,6 +15,16 @@ build-release:
 build-minimal:
 	go build -o $(OUT) $(CMD)
 
+# The editor server on its own, statically linked for Linux, to be copied into
+# a dev container (see cmd/indigo-server). CGO_ENABLED=0 is what makes it
+# static and portable across glibc and musl bases; it works only because the
+# server has no tree-sitter dependency, which cmd/indigo does and cannot shed.
+build-container-server:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" \
+		-o dist/indigo-server-linux-arm64 ./cmd/indigo-server
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" \
+		-o dist/indigo-server-linux-amd64 ./cmd/indigo-server
+
 # Exclude the two largest grammars (Nim ~68 MB, Swift ~18 MB of C source).
 build-no-heavy:
 	go build -tags "lang_all lang_not_nim lang_not_swift" -ldflags="-s -w" -o $(OUT) $(CMD)
@@ -24,9 +34,16 @@ LANGS ?= lang_go lang_python lang_typescript lang_rust
 build-custom:
 	go build -tags "$(LANGS)" -o $(OUT) $(CMD)
 
-install: build-release
+install: build-release build-container-server
 	mv $(OUT) $(GOBIN)/$(BINARY)
 	$(GOBIN)/$(BINARY) --warm
+	# The container-side servers go to ~/.indigo, which is one of the places
+	# container.LocateServerBinary looks. Without this an installed indigo can
+	# only find them when it happens to sit beside a dist/ directory, which is
+	# true in a checkout and false everywhere else — found by running the
+	# feature from an installed binary for the first time.
+	mkdir -p $(HOME)/.indigo
+	cp dist/indigo-server-linux-arm64 dist/indigo-server-linux-amd64 $(HOME)/.indigo/
 
 test:
 	go test -tags lang_all ./...
@@ -158,3 +175,28 @@ build-plugins: build-jumpy build-spell build-git build-bookmarks build-npm-versi
         build-bookmarks install-bookmarks uninstall-bookmarks \
         build-npm-versions install-npm-versions uninstall-npm-versions \
         build-plugins
+
+# Cross-build every bundled plugin for Linux and place the binaries alongside
+# the host ones in ~/.config/indigo/plugins.
+#
+# The plugin manifests already declare linux/arm64 and linux/amd64 — the format
+# has always been multi-platform — but `make install-<plugin>` only ever built
+# for the host, so those entries pointed at files nobody had produced. A dev
+# container's server is Linux, and selectBinary picks by the *server's*
+# platform, so without these a container session silently has no plugins.
+#
+# CGO_ENABLED=0 for the same reason as the container server: static binaries
+# run on any base image, glibc or musl.
+PLUGIN_NAMES := hello jumpy indigo-spell indigo-git bookmarks npm-versions
+
+build-plugins-linux:
+	@for name in $(PLUGIN_NAMES); do \
+		for arch in arm64 amd64; do \
+			out=$(HOME)/.config/indigo/plugins/$$name/$$name-linux-$$arch; \
+			mkdir -p $$(dirname $$out); \
+			echo "building $$name for linux/$$arch"; \
+			CGO_ENABLED=0 GOOS=linux GOARCH=$$arch \
+				go build -ldflags="-s -w" -o $$out ./$(PLUGINS_DIR)/$$name || exit 1; \
+		done; \
+		cp $(PLUGINS_DIR)/$$name/plugin.toml $(HOME)/.config/indigo/plugins/$$name/; \
+	done

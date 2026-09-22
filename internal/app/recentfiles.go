@@ -3,14 +3,34 @@ package app
 import (
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 )
+
+// hostRecentRoot is the workspace as the host names it, when that differs from
+// how this process names it — which happens only when attached to a container.
+//
+// Process-global because it is a property of the process: one indigo window
+// serves one workspace. The alternative is an eleventh positional parameter on
+// two constructors that are already long, to carry a value that never varies
+// within a run.
+var hostRecentRoot string
+
+// SetRecentRoot records where the workspace lives on the host, for keying the
+// recent-files list. Called once at startup; unset means the workspace is not
+// in a container and workDir already is the host path.
+func SetRecentRoot(hostRoot string) { hostRecentRoot = hostRoot }
+
+// recentRootOr returns the host root when one was set, and workDir otherwise.
+func recentRootOr(workDir string) string {
+	if hostRecentRoot != "" {
+		return hostRecentRoot
+	}
+	return workDir
+}
 
 // maxRecentFiles caps how many entries are kept per workspace.
 const maxRecentFiles = 30
@@ -95,79 +115,34 @@ func dropString(rels []string, s string) []string {
 	return out
 }
 
-// isInIgnoredDir reports whether rel has a path component the file picker
-// already treats as non-project noise (.git, vendor, node_modules, ...) —
-// same ignoredDirs set filepicker.go uses to hide them from Browse/search.
-func isInIgnoredDir(rel string) bool {
-	ignored := ignoredDirsSnapshot()
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
-		if ignored[part] {
-			return true
-		}
-	}
-	return false
-}
-
-// gitIgnoredSet returns the subset of rels (workspace-relative paths) that
-// git considers ignored in workDir, via a single `git check-ignore --stdin`
-// call — mirroring how workspace search already defers to git/ripgrep
-// rather than reimplementing gitignore parsing. Returns nil (nothing
-// filtered) if git isn't on PATH, workDir isn't a repo, or any other fatal
-// error occurs; a plain "no matches" is a normal, empty result.
-func gitIgnoredSet(workDir string, rels []string) map[string]bool {
-	if len(rels) == 0 {
-		return nil
-	}
-	cmd := exec.Command("git", "-C", workDir, "check-ignore", "--stdin")
-	cmd.Stdin = strings.NewReader(strings.Join(rels, "\n") + "\n")
-	out, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
-			return nil // git missing, not a repo, or another fatal error
-		}
-	}
-	ignored := make(map[string]bool, len(rels))
-	for _, line := range strings.Split(string(out), "\n") {
-		if line != "" {
-			ignored[line] = true
-		}
-	}
-	return ignored
-}
-
-// loadRecentFiles returns workDir's recent-files list, most-recently-opened
-// first, skipping any entry whose file no longer exists on disk, lives
-// under an ignored directory (.git, vendor, ...), or is gitignored.
-func loadRecentFiles(workDir string) []string {
-	p, err := recentFilesPath(workDir)
+// recentRels returns workDir's recorded recent-files list, most-recently-opened
+// first, exactly as it was written.
+//
+// No filtering happens here any more. Deciding whether an entry is still worth
+// showing means a stat, the ignore set and a `git check-ignore` — all of which
+// need the workspace, which the client may not be able to see. The list itself
+// is not workspace state and stays here: it lives in the user's home directory
+// and records what they have been editing, which is not something a container
+// should own.
+func recentRels(recentRoot string) []string {
+	p, err := recentFilesPath(recentRoot)
 	if err != nil {
 		return nil
 	}
-	var candidates []string
-	for _, rel := range readRecentList(p) {
-		if isInIgnoredDir(rel) {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(workDir, rel)); err != nil {
-			continue
-		}
-		candidates = append(candidates, rel)
-	}
-	ignored := gitIgnoredSet(workDir, candidates)
-	var out []string
-	for _, rel := range candidates {
-		if !ignored[rel] {
-			out = append(out, rel)
-		}
-	}
-	return out
+	return readRecentList(p)
 }
 
-// recordRecentFile moves absPath to the front of workDir's recent-files
+// recordRecentFile moves absPath to the front of the workspace's recent-files
 // list, persisting the result. absPath outside workDir, or "" (untitled
 // buffers), are ignored.
-func recordRecentFile(workDir, absPath string) {
+//
+// workDir is the workspace as *this process* names it, for computing the
+// relative path; recentRoot is where the workspace lives on the host, which is
+// what the list is keyed by. Attached to a container the two differ, and the
+// distinction is load-bearing: entries are stored relative so they mean the
+// same thing from either side, while the key stays on the host so that two
+// projects which both mount at /workspaces/api do not share one list.
+func recordRecentFile(workDir, recentRoot, absPath string) {
 	if absPath == "" {
 		return
 	}
@@ -175,13 +150,10 @@ func recordRecentFile(workDir, absPath string) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return
 	}
-	if isInIgnoredDir(rel) {
-		return
-	}
-	if ignored := gitIgnoredSet(workDir, []string{rel}); ignored[rel] {
-		return
-	}
-	p, err := recentFilesPath(workDir)
+	// Not filtered here. Whether this path is ignored is a question about the
+	// workspace, and answering it would mean a round trip on the path that runs
+	// every time a buffer opens. The filter runs once, when the list is shown.
+	p, err := recentFilesPath(recentRoot)
 	if err != nil {
 		return
 	}

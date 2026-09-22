@@ -306,11 +306,20 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
+		pluginLog("plugins: none installed (%s does not exist)", dir)
 		return nil
 	}
 	if err != nil {
+		// Logged, not only returned: the caller starts this in a goroutine and
+		// discards the error, so a directory that exists but cannot be read
+		// looked exactly like one with no plugins in it. That is how a
+		// permission problem stayed invisible through a whole round of
+		// debugging — the symptom was silence, and silence was also the
+		// success case.
+		pluginLog("plugins: cannot read %s: %v", dir, err)
 		return fmt.Errorf("read plugins dir: %w", err)
 	}
+	pluginLog("plugins: scanning %s (%d entries)", dir, len(entries))
 
 	var wg sync.WaitGroup
 	for _, entry := range entries {
@@ -1443,6 +1452,16 @@ func (m *Manager) DispatchBufferClose(ctx context.Context, bufID uint32, path st
 }
 
 func pluginsConfigDir() (string, error) {
+	// INDIGO_PLUGINS_DIR points the server at a plugin directory directly.
+	//
+	// It exists for the dev-container case, where the server runs inside the
+	// container and the user's plugins are on the host. The host stages the
+	// ones that have a binary for the container's platform and passes the
+	// directory here — guessing the remote user's home instead would be a
+	// guess, since a devcontainer's remoteUser may not have one.
+	if d := os.Getenv("INDIGO_PLUGINS_DIR"); d != "" {
+		return d, nil
+	}
 	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
 		return filepath.Join(d, "indigo", "plugins"), nil
 	}

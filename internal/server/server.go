@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ import (
 	proto "github.com/indiejames/indigo/internal/proto"
 	"github.com/indiejames/indigo/internal/rpcwatch"
 	"github.com/indiejames/indigo/internal/syncevent"
+	"github.com/indiejames/indigo/internal/workspacefs"
 )
 
 // serverRPCLogger implements rpc.Logger, routing capnproto internal messages to the log file.
@@ -181,11 +183,15 @@ type editorService struct {
 	clientMap map[uint64]*clientEntry
 	nextClt   uint64
 	recDir    string
-	lspMgr    *lsp.Manager
-	fmtMgr    *format.Manager
-	lintMgr   *lint.Manager
-	pluginMgr *plugin.Manager
-	cfg       *config.Config
+	// workspaceDir is the root the workspace-filesystem RPCs enumerate and
+	// search. The server is the process that can see it — which is the whole
+	// point once it runs inside a container and the client does not.
+	workspaceDir string
+	lspMgr       *lsp.Manager
+	fmtMgr       *format.Manager
+	lintMgr      *lint.Manager
+	pluginMgr    *plugin.Manager
+	cfg          *config.Config
 
 	watcher     *fsnotify.Watcher
 	watchMu     sync.Mutex
@@ -249,12 +255,17 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 		}
 	}
 	lspMgr := lsp.NewManager(workspaceDir, servers)
+	// The picker/grep ignore set is config-driven, and the config that matters
+	// is the one where the files are — which, once the server runs in a
+	// container, is this process's and not the client's.
+	workspacefs.SetIgnoredDirs(cfg.PickerIgnoreDirs)
 	watcher, _ := fsnotify.NewWatcher()
 	svc := &editorService{
 		staleWatch:           newStaleWatch(),
 		buffers:              make(map[uint32]*bufferEntry),
 		clientMap:            make(map[uint64]*clientEntry),
 		recDir:               recDir,
+		workspaceDir:         workspaceDir,
 		lspMgr:               lspMgr,
 		watcher:              watcher,
 		dirWatches:           make(map[string]int),
@@ -704,17 +715,50 @@ func New(dir string) (*Server, error) {
 		return nil, fmt.Errorf("listen %s: %w", sockPath, err)
 	}
 
-	recDir, err := setupRecoveryDir()
+	srv, err := build(dir, ln, sockPath)
 	if err != nil {
 		ln.Close()          //nolint:errcheck
 		os.Remove(sockPath) //nolint:errcheck
+		return nil, err
+	}
+	go srv.serve()
+	return srv, nil
+}
+
+// ServeStream builds a server for dir and serves exactly one client over rwc,
+// instead of listening on a socket.
+//
+// This is how the server runs inside a dev container: the host pipes a capnp
+// connection in over the container runtime's exec stdio, so there is no socket
+// to share, no port to publish, and nothing to align between the two
+// filesystems. capnp is happy with any stream — rpc.NewStreamTransport takes an
+// io.ReadWriteCloser, and a unix socket was only ever one of those.
+//
+// Everything else is the same server: same buffers, same LSP and plugin
+// managers, same recovery flush, same shutdown-when-the-last-client-leaves. The
+// difference is that with one connection and no listener, "the last client
+// leaves" and "this stream closed" are the same event.
+func ServeStream(dir string, rwc io.ReadWriteCloser) (*Server, error) {
+	srv, err := build(dir, nil, "")
+	if err != nil {
+		return nil, err
+	}
+	go srv.serveConn(rwc)
+	return srv, nil
+}
+
+// build assembles a server around an already-prepared listener, or around no
+// listener at all. ln and sockPath are nil/empty for a stream-served server;
+// Wait and the teardown paths guard on that rather than on a mode flag, so
+// there is one shutdown sequence and not two.
+func build(dir string, ln net.Listener, sockPath string) (*Server, error) {
+	recDir, err := setupRecoveryDir()
+	if err != nil {
 		return nil, fmt.Errorf("recovery dir: %w", err)
 	}
 
 	cfg, err := config.Load()
 	if err != nil {
-		ln.Close()          //nolint:errcheck
-		os.Remove(sockPath) //nolint:errcheck
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 
@@ -739,7 +783,6 @@ func New(dir string) (*Server, error) {
 
 	interval := time.Duration(cfg.RecoveryIntervalSecs) * time.Second
 	srv.startFlushLoop(interval, cfg.RecoveryMaxBytes)
-	go srv.serve()
 	return srv, nil
 }
 
@@ -840,45 +883,61 @@ func (s *Server) serve() {
 			}
 			return
 		}
-		s.connCount.Add(1)
-		connID := s.nextConnID.Add(1)
-		go func(c net.Conn, connID uint64) {
-			defer func() {
-				if r := recover(); r != nil {
-					buf := make([]byte, 64*1024)
-					n := runtime.Stack(buf, true)
-					serverLog("serve: PANIC: %v\n%s", r, buf[:n])
-				}
-				s.svc.statusBar.clearForConn(connID)
-				// Same reasoning as the status-bar cleanup above, for the
-				// registrations that outlive the connection far more
-				// damagingly — see dropConnection.
-				s.svc.dropConnection(connID)
-				newCount := s.connCount.Add(-1)
-				serverLog("serve: connection closed, connCount now %d, hasHadClient=%v", newCount, s.hasHadClient.Load())
-				c.Close() //nolint:errcheck
-				if newCount == 0 && s.hasHadClient.Load() {
-					s.triggerShutdown()
-				}
-			}()
-			transport := rpc.NewStreamTransport(c)
-			svc := &connSvc{editorService: s.svc, connID: connID}
-			conn := rpc.NewConn(transport, bootstrapOptions(svc))
-			defer conn.Close() //nolint:errcheck
-			select {
-			case <-conn.Done():
-				serverLog("serve: connection dropped by peer")
-			case <-s.done:
-				serverLog("serve: s.done fired")
-			}
-		}(conn, connID)
+		go s.serveConn(conn)
+	}
+}
+
+// serveConn runs one client connection to completion, then tears down
+// everything that connection registered.
+//
+// It takes an io.ReadWriteCloser rather than a net.Conn because a socket is
+// only one of the streams a client can arrive on — see ServeStream. Nothing in
+// here ever needed an address, a deadline or any other net.Conn method.
+func (s *Server) serveConn(c io.ReadWriteCloser) {
+	s.connCount.Add(1)
+	connID := s.nextConnID.Add(1)
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 64*1024)
+			n := runtime.Stack(buf, true)
+			serverLog("serve: PANIC: %v\n%s", r, buf[:n])
+		}
+		s.svc.statusBar.clearForConn(connID)
+		// Same reasoning as the status-bar cleanup above, for the
+		// registrations that outlive the connection far more
+		// damagingly — see dropConnection.
+		s.svc.dropConnection(connID)
+		newCount := s.connCount.Add(-1)
+		serverLog("serve: connection closed, connCount now %d, hasHadClient=%v", newCount, s.hasHadClient.Load())
+		c.Close() //nolint:errcheck
+		// With a listener, waiting for a real client is right: another may yet
+		// connect. With none (ServeStream) this connection was the only one
+		// there will ever be, so a peer that hangs up before completing the
+		// handshake would otherwise leave the process running for ever.
+		if newCount == 0 && (s.hasHadClient.Load() || s.listener == nil) {
+			s.triggerShutdown()
+		}
+	}()
+	transport := rpc.NewStreamTransport(c)
+	svc := &connSvc{editorService: s.svc, connID: connID}
+	conn := rpc.NewConn(transport, bootstrapOptions(svc))
+	defer conn.Close() //nolint:errcheck
+	select {
+	case <-conn.Done():
+		serverLog("serve: connection dropped by peer")
+	case <-s.done:
+		serverLog("serve: s.done fired")
 	}
 }
 
 // Wait blocks until the server should exit (all clients disconnected).
 func (s *Server) Wait() {
 	<-s.done
-	s.listener.Close() //nolint:errcheck
+	// Both are absent for a stream-served server (ServeStream), which has no
+	// socket to close or unlink.
+	if s.listener != nil {
+		s.listener.Close() //nolint:errcheck
+	}
 	s.deleteAllRecoveryFiles()
 	s.svc.lspMgr.Shutdown()
 	s.svc.pluginMgr.Shutdown()
@@ -886,7 +945,9 @@ func (s *Server) Wait() {
 	if s.svc.watcher != nil {
 		s.svc.watcher.Close() //nolint:errcheck
 	}
-	os.Remove(s.socketPath) //nolint:errcheck
+	if s.socketPath != "" {
+		os.Remove(s.socketPath) //nolint:errcheck
+	}
 }
 
 func (s *Server) deleteAllRecoveryFiles() {

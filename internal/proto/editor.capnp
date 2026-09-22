@@ -118,6 +118,66 @@ interface EditorService {
   # caller's job, by sampling twice and looking for a mismatch that persists
   # while neither side's version moved. bufferId 0 means every open buffer.
   checkBufferConsistency @56 (bufferId :UInt32) -> (buffers :List(BufferConsistency));
+
+  # ---- workspace filesystem ----
+  #
+  # The workspace's files are read by whoever is on the same machine as them,
+  # and once the server runs inside a dev container that is no longer the
+  # client. These three replace the client walking the tree and spawning
+  # ripgrep itself, which is correct only while the two share a filesystem.
+  #
+  # All three call.Go(): a tree walk and a ripgrep subprocess can take seconds
+  # on a large workspace, and a handler that does not release the queue stalls
+  # every other call on that connection (see bootstrapOptions).
+  #
+  # listDir is one readdir, for the picker's browse mode. Kept separate from
+  # listWorkspaceFiles because browsing a directory and indexing a whole tree
+  # have completely different costs, and the picker must open instantly.
+  listDir @57 (path :Text) -> (entries :List(DirEntry));
+  # listWorkspaceFiles enumerates every file under the workspace root, as
+  # workspace-relative paths, for the picker's fuzzy search.
+  listWorkspaceFiles @58 () -> (paths :List(Text));
+  # grepWorkspace searches the workspace. explicit selects the caller-supplied
+  # caseSensitive/isRegex rather than the smart-case and \-prefix conventions
+  # the pattern itself carries, matching the two entry points the engine has
+  # always had. A pattern error (bad regex) comes back in error rather than as
+  # an RPC failure: it is a normal thing for a user to type mid-keystroke.
+  grepWorkspace @59 (pattern :Text, include :Text, exclude :Text,
+                     caseSensitive :Bool, isRegex :Bool, explicit :Bool)
+                 -> (results :List(GrepMatch), error :Text);
+  # filterWorkspaceFiles keeps the workspace-relative paths that still exist,
+  # are not under an ignored directory, and are not gitignored — the filter the
+  # recent-files list applies before showing itself.
+  #
+  # One call rather than a stat and a git invocation per entry: the list is
+  # short and bounded, and a round trip per entry over a container boundary
+  # would be the whole cost.
+  filterWorkspaceFiles @60 (paths :List(Text)) -> (kept :List(Text));
+  # statPath answers the three questions the new-file prompt asks about a
+  # parent directory, which it must ask before opening a buffer that would
+  # otherwise fail on its first save.
+  #
+  # "Does not exist" is a normal answer and comes back as exists = false, not
+  # as an error; error carries anything else (a permission denial, an I/O
+  # fault), because the prompt reacts to those differently — it offers to
+  # create a missing directory and refuses to guess about the rest.
+  statPath @61 (path :Text) -> (exists :Bool, isDir :Bool, error :Text);
+  # createDir creates path and any missing parents, for the prompt's "create
+  # it?" answer. A failure comes back in error rather than as an RPC fault: a
+  # read-only mount or a permission denial is the user's situation, not the
+  # connection's.
+  createDir @62 (path :Text) -> (error :Text);
+  # setIgnoredDirs replaces the extra directory names hidden from the picker,
+  # recent files and workspace grep (config.toml's picker_ignore_dirs), on top
+  # of the built-in defaults.
+  #
+  # Pushed by the client rather than read from the server's own config, because
+  # this is a *preference about what the user wants to see*, not a property of
+  # the filesystem — so it should follow the user, and in a container the
+  # server's config is the image's, not theirs. It also restores hot-reload:
+  # the client already watches config.toml, and before listing moved to the
+  # server a change took effect within two seconds.
+  setIgnoredDirs @63 (dirs :List(Text)) -> ();
   # generation must match the buffer's current generation (see openFile's
   # doc comment) or the op is rejected — a client unaware of a wholesale
   # buffer swap must not have its (now-meaningless) coordinates applied to
@@ -623,4 +683,21 @@ struct EditOp {
     insert @1;
     delete @2;
   }
+}
+
+# DirEntry is one item in a directory listing (listDir).
+struct DirEntry {
+  name @0 :Text;
+  isDir @1 :Bool;
+}
+
+# GrepMatch is one workspace-search hit (grepWorkspace). Line is 0-based; col
+# and matchLen are rune offsets, not bytes, because that is what the client
+# renders and highlights with.
+struct GrepMatch {
+  relPath @0 :Text;
+  line @1 :UInt32;
+  col @2 :UInt32;
+  matchLen @3 :UInt32;
+  lineText @4 :Text;
 }

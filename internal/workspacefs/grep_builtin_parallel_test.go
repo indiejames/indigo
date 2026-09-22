@@ -1,4 +1,4 @@
-package app
+package workspacefs
 
 import (
 	"fmt"
@@ -42,7 +42,7 @@ func TestSearchBuiltinParallelFindsAllMatchesAcrossManyFiles(t *testing.T) {
 
 // TestSearchBuiltinParallelRespectsMaxResults is a regression test:
 // parallelizing the per-file scan must not let the total result count grow
-// past maxGrepResults even though multiple workers append concurrently —
+// past MaxResults even though multiple workers append concurrently —
 // the final concatenation step must still hard-cap the slice.
 func TestSearchBuiltinParallelRespectsMaxResults(t *testing.T) {
 	const numFiles = 40
@@ -60,8 +60,8 @@ func TestSearchBuiltinParallelRespectsMaxResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("searchBuiltin: %v", err)
 	}
-	if len(results) > maxGrepResults {
-		t.Fatalf("got %d results, want <= %d (maxGrepResults)", len(results), maxGrepResults)
+	if len(results) > MaxResults {
+		t.Fatalf("got %d results, want <= %d (MaxResults)", len(results), MaxResults)
 	}
 	if len(results) == 0 {
 		t.Fatal("expected some results")

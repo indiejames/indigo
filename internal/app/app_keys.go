@@ -2,10 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -32,11 +28,11 @@ func (a App) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			if e.name == ".." {
 				a.picker.navigateUp()
-				return a, nil
+				return a, a.loadPickerDir()
 			}
 			if e.isDir {
 				a.picker.navigateInto(e.name)
-				return a, nil
+				return a, a.loadPickerDir()
 			}
 			// File selected in browse mode.
 			if path := a.picker.selectedPath(); path != "" {
@@ -73,9 +69,15 @@ func (a App) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		q := []rune(a.picker.query)
 		if len(q) > 0 {
 			a.picker.setQuery(string(q[:len(q)-1]))
+			if a.picker.browseMode() {
+				// The query just emptied, so the picker is back in browse mode
+				// and needs the current directory's listing again.
+				return a, a.loadPickerDir()
+			}
 		} else {
 			// Query already empty: go up one directory level.
 			a.picker.navigateUp()
+			return a, a.loadPickerDir()
 		}
 
 	default:
@@ -195,22 +197,11 @@ func (a App) handleNewFileInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(a.workDir, path)
 		}
-		if info, err := os.Stat(filepath.Dir(path)); err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				// Parent directory doesn't exist — ask before creating it,
-				// rather than opening a buffer that will fail to save later.
-				a.newFileMkdirConfirm = &path
-				return a, nil
-			}
-			// Other error (permission denied, I/O error, etc.)
-			a.status = fmt.Sprintf("E: cannot access parent directory: %v", err)
-			return a, nil
-		} else if !info.IsDir() {
-			// Parent exists but is not a directory.
-			a.status = fmt.Sprintf("E: parent path is not a directory: %s", filepath.Dir(path))
-			return a, nil
-		}
-		return a, a.doOpenFile(path)
+		// The parent-directory check is a round trip now: the directory is in
+		// the workspace, and the workspace is the server's. Everything this
+		// decided synchronously before is decided in newFileParentMsg's
+		// handler instead.
+		return a, a.checkNewFileParent(path)
 	case "backspace":
 		if a.newFileInput != nil {
 			runes := []rune(a.newFileInput.text)
@@ -234,11 +225,7 @@ func (a App) handleNewFileMkdirConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y", "enter":
 		a.newFileMkdirConfirm = nil
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			a.status = fmt.Sprintf("E: could not create directory: %v", err)
-			return a, nil
-		}
-		return a, a.doOpenFile(path)
+		return a, a.createNewFileParent(path)
 	case "n", "N", "esc", "ctrl+c":
 		a.newFileMkdirConfirm = nil
 	}

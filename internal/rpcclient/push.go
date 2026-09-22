@@ -1,8 +1,7 @@
-package client
+package rpcclient
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"sync"
 	"time"
@@ -302,14 +301,11 @@ func (s *callbackServer) ReportBufferState(ctx context.Context, call proto.Clien
 	return res.SetContentSha256(rep.ContentSha256)
 }
 
-// BufferStateFor builds this model's answer to a consistency check.
-func (m Model) BufferStateFor() BufferStateReport {
-	sum := sha256.Sum256([]byte(m.buf.Content()))
-	return BufferStateReport{
-		Known:         true,
-		Version:       m.version,
-		Generation:    m.generation,
-		Dirty:         m.buf.Dirty(),
-		ContentSha256: sum[:],
-	}
+// OpenFileAtMsg signals the App to open a file at a specific 0-based line,
+// reusing an existing buffer if the file is already open.
+// Col is the 0-based column; -1 means no specific column (use start of line).
+type OpenFileAtMsg struct {
+	Path string
+	Line int
+	Col  int
 }

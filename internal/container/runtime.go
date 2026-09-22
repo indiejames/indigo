@@ -81,6 +81,28 @@ func ServerPath(goarch, contentHash string) string {
 	return "/tmp/.indigo-server-" + goarch + "-" + contentHash
 }
 
+// StableServerLink is a symlink Attach keeps pointing at the server binary it
+// last started, so something registered once — `claude mcp add ... --
+// /tmp/.indigo-server --mcp` — keeps working across indigo upgrades, which
+// move the content-addressed ServerPath. Two windows running different indigo
+// builds make it flip between them; either answers --mcp.
+const StableServerLink = "/tmp/.indigo-server"
+
+// linkStableServer points StableServerLink at remote. Run as the container
+// user, the same user that will follow it; paths travel in the environment to
+// keep quoting out of the script.
+func linkStableServer(ctx context.Context, rt Runtime, id, remote string) error {
+	env := []string{"INDIGO_SRV=" + remote, "INDIGO_LINK=" + StableServerLink}
+	return rt.Run(ctx, id, env, []string{"/bin/sh", "-c", stableLinkScript})
+}
+
+// stableLinkScript points the link at $INDIGO_SRV, replacing any existing one.
+// -n stops ln from following an existing link: if it ever pointed at a
+// directory, ln would otherwise create the new link inside it. Replacement is
+// an unlink followed by a symlink, so an agent spawning the server at that
+// exact instant can miss it; it only happens when a window attaches.
+const stableLinkScript = `ln -sfn -- "$INDIGO_SRV" "$INDIGO_LINK"`
+
 // hashFile returns a short content hash of the file at path.
 //
 // Short because it names a file a human may see in a process list, and eight
@@ -176,6 +198,15 @@ func Attach(ctx context.Context, rt Runtime, id, workspaceDir string, opts Attac
 		if err := rt.CopyIn(ctx, id, local, remote); err != nil {
 			return nil, fmt.Errorf("copy server into container: %w", err)
 		}
+	}
+
+	// Keep a fixed-name link to the server in use, for anything in the
+	// container that needs to run it by a path that survives upgrades — an
+	// agent's MCP registration (`indigo-server --mcp`) is the case it exists
+	// for, since ServerPath changes with every build. Not fatal: the editor
+	// itself never uses the link.
+	if err := linkStableServer(ctx, rt, id, remote); err != nil {
+		opts.warn(fmt.Sprintf("could not update %s: %v", StableServerLink, err))
 	}
 
 	if opts.PluginsDir != "" && opts.PluginsHash != "" {

@@ -6,6 +6,8 @@
 //	                                     it is not already running
 //	indigo-server --daemon <workspace>   the server itself, on a unix socket
 //	                                     inside the container
+//	indigo-server --mcp                  MCP over stdio for an agent running in
+//	                                     the container, against the same server
 //
 // # Why a bridge rather than serving stdio directly
 //
@@ -42,6 +44,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/indiejames/indigo/internal/agenttools"
 	"github.com/indiejames/indigo/internal/debuglog"
 	"github.com/indiejames/indigo/internal/hangdetect"
 	"github.com/indiejames/indigo/internal/server"
@@ -53,6 +56,22 @@ func main() {
 		runDaemon(args[1])
 		return
 	}
+	// --mcp is `indigo --mcp` for inside a dev container, where there is no
+	// `indigo` — only this binary. Register it from the container with
+	//
+	//	claude mcp add --scope user indigo -- /tmp/.indigo-server --mcp
+	//
+	// (/tmp/.indigo-server is the stable link Attach keeps pointing at the
+	// current build; see container.StableServerLink.) The workspace is found
+	// from the cwd exactly as `indigo --mcp` finds it, so an agent started in
+	// the workspace reaches the daemon the editor's bridge started. When none
+	// is running, it starts one the same way a bridge would — the --daemon
+	// mode below, not `indigo --server` — so a window attaching later joins it
+	// instead of starting a second server.
+	if len(args) == 1 && args[0] == "--mcp" {
+		agenttools.RunStandaloneWith(startDaemon)
+		return
+	}
 	// --client <token> marks this bridge in the container's process list so a
 	// window can tell its own from another's when deciding whether it is the
 	// last one out (see container.OtherWindowsAttached). Nothing reads it here;
@@ -61,7 +80,7 @@ func main() {
 		args = args[:1]
 	}
 	if len(args) != 1 {
-		fmt.Fprintf(os.Stderr, "usage: %s [--daemon] <workspace-dir> [--client <token>]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "usage: %s [--daemon] <workspace-dir> [--client <token>]\n       %s --mcp\n", os.Args[0], os.Args[0])
 		os.Exit(2)
 	}
 	runBridge(args[0])

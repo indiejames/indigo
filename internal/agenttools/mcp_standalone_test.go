@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/indiejames/indigo/internal/client"
+	"github.com/indiejames/indigo/internal/rpcclient"
 	"github.com/indiejames/indigo/internal/server"
 )
 
@@ -146,7 +146,7 @@ func TestMCPConnRedialsAfterServerExit(t *testing.T) {
 	// Holding a second client keeps the server up when the connection under
 	// test goes away — otherwise the last disconnect shuts it down and get()
 	// would need to spawn a replacement.
-	keepalive, err := client.Dial(sock)
+	keepalive, err := rpcclient.Dial(sock)
 	if err != nil {
 		t.Fatalf("keepalive dial: %v", err)
 	}

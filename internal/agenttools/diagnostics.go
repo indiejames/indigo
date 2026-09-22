@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/debuglog"
+	"github.com/indiejames/indigo/internal/rpcclient"
 	"github.com/indiejames/indigo/internal/syncevent"
 )
 
@@ -91,7 +91,7 @@ type getSyncStateInput struct {
 	Path string `json:"path"`
 }
 
-func execGetSyncState(ctx context.Context, rpc *client.RPC, workDir string, in getSyncStateInput) (string, bool) {
+func execGetSyncState(ctx context.Context, rpc *rpcclient.RPC, workDir string, in getSyncStateInput) (string, bool) {
 	states, err := rpc.GetSyncState(ctx, 0)
 	if err != nil {
 		return fmt.Sprintf("cannot read sync state: %v", err), true
@@ -117,7 +117,7 @@ func execGetSyncState(ctx context.Context, rpc *client.RPC, workDir string, in g
 
 // formatSyncState renders sync state as text, flagging the two conditions that
 // actually indicate a problem rather than leaving them to be spotted by eye.
-func formatSyncState(states []client.BufferSyncState) string {
+func formatSyncState(states []rpcclient.BufferSyncState) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d open buffer(s)\n", len(states))
 	for _, s := range states {
@@ -169,7 +169,7 @@ type reportBundleInput struct {
 // summary, rather than returning the whole thing. A bundle is long by design —
 // dumping it inline would bury the summary, and the point is to produce
 // something a person can attach to a report.
-func execReportBundle(ctx context.Context, rpc *client.RPC, workDir string, in reportBundleInput) (string, bool) {
+func execReportBundle(ctx context.Context, rpc *rpcclient.RPC, workDir string, in reportBundleInput) (string, bool) {
 	since := time.Hour
 	if in.Since != "" {
 		d, err := time.ParseDuration(in.Since)
@@ -247,7 +247,7 @@ func execReportBundle(ctx context.Context, rpc *client.RPC, workDir string, in r
 	return summary, false
 }
 
-func buffersWithLaggingClients(states []client.BufferSyncState) int {
+func buffersWithLaggingClients(states []rpcclient.BufferSyncState) int {
 	n := 0
 	for _, s := range states {
 		for _, c := range s.Clients {
@@ -282,7 +282,7 @@ const (
 // persists while neither side's version moves: nothing is in flight, both sides
 // have stopped changing, and they still disagree. That is divergence, and it is
 // otherwise invisible — no error, no version mismatch, no generation change.
-func execCheckConsistency(ctx context.Context, rpc *client.RPC, workDir string, in checkConsistencyInput) (string, bool) {
+func execCheckConsistency(ctx context.Context, rpc *rpcclient.RPC, workDir string, in checkConsistencyInput) (string, bool) {
 	settle := time.Duration(defaultSettleMs) * time.Millisecond
 	if in.SettleMs > 0 {
 		if in.SettleMs > maxSettleMs {
@@ -318,7 +318,7 @@ func execCheckConsistency(ctx context.Context, rpc *client.RPC, workDir string, 
 	return formatConsistency(first, second, settle), false
 }
 
-func filterByPath(in []client.BufferConsistency, path string) []client.BufferConsistency {
+func filterByPath(in []rpcclient.BufferConsistency, path string) []rpcclient.BufferConsistency {
 	out := in[:0:0]
 	for _, b := range in {
 		if b.Path == path {
@@ -328,8 +328,8 @@ func filterByPath(in []client.BufferConsistency, path string) []client.BufferCon
 	return out
 }
 
-func formatConsistency(first, second []client.BufferConsistency, settle time.Duration) string {
-	firstByBuf := map[uint32]client.BufferConsistency{}
+func formatConsistency(first, second []rpcclient.BufferConsistency, settle time.Duration) string {
+	firstByBuf := map[uint32]rpcclient.BufferConsistency{}
 	for _, b := range first {
 		firstByBuf[b.BufID] = b
 	}
@@ -391,7 +391,7 @@ func formatConsistency(first, second []client.BufferConsistency, settle time.Dur
 
 // stillSettling reports whether anything changed between the two samples for
 // this client, which makes a mismatch inconclusive rather than divergence.
-func stillSettling(prev, cur client.BufferConsistency, c client.ClientBufferReport) bool {
+func stillSettling(prev, cur rpcclient.BufferConsistency, c rpcclient.ClientBufferReport) bool {
 	if prev.ServerVersion != cur.ServerVersion {
 		return true // the server was still applying ops
 	}

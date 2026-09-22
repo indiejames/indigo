@@ -433,15 +433,6 @@ type formatResultMsg struct {
 
 type CloseBufferMsg struct{}
 
-// OpenFileAtMsg signals the App to open a file at a specific 0-based line,
-// reusing an existing buffer if the file is already open.
-// Col is the 0-based column; -1 means no specific column (use start of line).
-type OpenFileAtMsg struct {
-	Path string
-	Line int
-	Col  int
-}
-
 // OpenPickerMsg signals the App to open the file picker.
 type OpenPickerMsg struct{}
 

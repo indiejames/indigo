@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/indiejames/indigo/internal/binstamp"
-	"github.com/indiejames/indigo/internal/client"
+	"github.com/indiejames/indigo/internal/rpcclient"
 	"github.com/indiejames/indigo/internal/server"
 )
 
@@ -82,7 +82,24 @@ const mcpToolTimeout = 60 * time.Second
 // the last client disconnects, so an agent session can use the editor's
 // buffers and language servers without the user having indigo open.
 func RunStandalone() {
-	serveMCPStdio(&mcpServer{callTool: workspaceToolCaller()})
+	RunStandaloneWith(nil)
+}
+
+// ServerStarter starts a detached indigo server for workDir, returning once it
+// has been launched (not once it is listening — the caller waits for the
+// socket). nil means the default: `indigo --server <workDir>` from PATH.
+type ServerStarter func(workDir string) error
+
+// RunStandaloneWith is RunStandalone with a caller-supplied way to start a
+// server when none is running.
+//
+// It exists for indigo-server, the static binary indigo copies into a dev
+// container: there is no `indigo` on the container's PATH, so the default
+// starter would fail, and the right server to start is indigo-server's own
+// `--daemon` mode — the same process the editor's container bridge starts, so
+// an editor window attaching later joins it rather than starting a second.
+func RunStandaloneWith(start ServerStarter) {
+	serveMCPStdio(&mcpServer{callTool: workspaceToolCaller(start)})
 }
 
 // workspaceToolCaller builds the tool-execution function both transports use:
@@ -96,7 +113,7 @@ func RunStandalone() {
 //
 // Exits the process on a workspace that cannot host a server at all, so that
 // failure is visible at startup rather than once per tool call.
-func workspaceToolCaller() func(string, json.RawMessage) (string, bool) {
+func workspaceToolCaller(start ServerStarter) func(string, json.RawMessage) (string, bool) {
 	// Stamped before any startup work, not after: conn.get can start a server
 	// and wait several seconds for it, and a build landing inside that window
 	// would otherwise be adopted as the baseline and never reported.
@@ -108,7 +125,7 @@ func workspaceToolCaller() func(string, json.RawMessage) (string, bool) {
 	}
 	workDir := workspaceRoot(cwd)
 
-	conn := &mcpConn{workDir: workDir, sock: server.SocketPath(workDir)}
+	conn := &mcpConn{workDir: workDir, sock: server.SocketPath(workDir), start: start}
 	if _, err := conn.get(); err != nil {
 		mcpFatal("%v", err)
 	}
@@ -223,10 +240,13 @@ type mcpConn struct {
 	mu      sync.Mutex
 	workDir string
 	sock    string
-	rpc     *client.RPC
+	rpc     *rpcclient.RPC
+	// start launches a server when none answers on sock; nil means
+	// startIndigoServer. See ServerStarter.
+	start ServerStarter
 }
 
-func (c *mcpConn) get() (*client.RPC, error) {
+func (c *mcpConn) get() (*rpcclient.RPC, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -236,14 +256,18 @@ func (c *mcpConn) get() (*client.RPC, error) {
 	c.rpc = nil
 
 	if !server.IsRunning(c.sock) {
-		if err := startIndigoServer(c.workDir); err != nil {
+		start := c.start
+		if start == nil {
+			start = startIndigoServer
+		}
+		if err := start(c.workDir); err != nil {
 			return nil, fmt.Errorf("cannot start an indigo server for %s: %w", c.workDir, err)
 		}
 		if err := waitForIndigoServer(c.sock, 5*time.Second); err != nil {
 			return nil, fmt.Errorf("indigo server for %s did not come up: %w", c.workDir, err)
 		}
 	}
-	rpc, err := client.Dial(c.sock)
+	rpc, err := rpcclient.Dial(c.sock)
 	if err != nil {
 		return nil, fmt.Errorf("cannot connect to the indigo server for %s: %w", c.workDir, err)
 	}

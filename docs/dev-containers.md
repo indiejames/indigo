@@ -151,6 +151,42 @@ last.
 to a socket inside the container. That is why no ports are published and nothing
 needs configuring.
 
+## An agent inside the container
+
+If the container runs Claude Code (or another MCP client), point it at the
+server indigo already put there, so the agent and your editor share buffers
+and language servers:
+
+```sh
+# inside the container, as the same user indigo runs as (devcontainer.json's
+# remoteUser), once
+claude mcp add --scope user indigo -- /tmp/.indigo-server --mcp
+```
+
+Then start `claude` from inside the workspace. `/tmp/.indigo-server` is a link
+indigo updates on every attach to the server build currently in use, so the
+registration survives upgrades. It exists once an indigo window has attached to
+the container at least once.
+
+`--mcp` is the same MCP server as `indigo --mcp` (see
+[agent-integration.md](agent-integration.md)); it just lives in the static
+binary that is already in the container, so nothing has to be installed there.
+It finds the server the same way — the nearest `.git` above the working
+directory, the user id, and `TMPDIR` — so all three must match the editor's.
+With no editor window attached it starts the server itself, as the `--daemon`
+process a window would start, and a window attaching later joins it. A server
+started that way has no plugins until the last client leaves and a window
+starts it again.
+
+To check it is sharing the editor's server, make one tool call and run
+`ps -eo args | grep indigo` in the container: there should be exactly one
+`--daemon` process for the workspace.
+
+Do **not** use the host-side `indigo --mcp-http` recipe from agent-integration.md
+for this: with the server in the container, there is no server on the host for
+the workspace, so it would start a second one and the agent would edit a
+separate copy of every file.
+
 ## Paths
 
 Attached to a container, indigo shows you the container's paths: a file is

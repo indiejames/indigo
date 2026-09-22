@@ -3,6 +3,8 @@ package container
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/indiejames/indigo/internal/procutil"
 )
@@ -166,20 +169,108 @@ func (d Docker) env() []string {
 // CopyDirIn copies a directory in. No chmod afterwards: `docker cp` preserves
 // modes, and the staging directory already has the binaries executable and the
 // manifests not.
+//
+// Staged and published like CopyIn, for the same reason: Attach skips the copy
+// whenever the destination exists, so a half-copied plugin directory at the
+// real path would be trusted by every later attach. Here the destination is a
+// symlink to the staged copy — see publishDirScript.
 func (d Docker) CopyDirIn(ctx context.Context, id, localDir, remoteDir string) error {
-	_, err := d.output(ctx, copyArgs(id, localDir, remoteDir)...)
-	return err
+	tmp := partialPath(remoteDir)
+	if _, err := d.output(ctx, copyArgs(id, localDir, tmp)...); err != nil {
+		d.discardPartial(id, tmp)
+		return err
+	}
+	return d.publish(ctx, id, tmp, remoteDir, publishDirScript)
 }
 
+// CopyIn copies a file in and makes it executable.
+//
+// The copy lands at a temporary name and is published to the destination only
+// once it is complete and executable. Attach decides whether to copy at all by checking
+// that the destination exists and is executable, and `docker cp` creates the
+// file with its final mode *before* writing its contents — so copying straight
+// to the destination meant an interrupted copy (Ctrl-C, the attach timeout) left
+// a truncated binary that every later attach found, trusted and ran, and since
+// the path is content-addressed nothing would ever replace it. A second window
+// attaching mid-copy could likewise run the file while it was still being
+// written. Publishing is a hard link, which is atomic, so the destination is
+// either absent or complete.
 func (d Docker) CopyIn(ctx context.Context, id, localPath, remotePath string) error {
-	if _, err := d.output(ctx, copyArgs(id, localPath, remotePath)...); err != nil {
+	tmp := partialPath(remotePath)
+	if _, err := d.output(ctx, copyArgs(id, localPath, tmp)...); err != nil {
+		d.discardPartial(id, tmp)
 		return err
 	}
 	// docker cp preserves the source mode, but the source may have come from a
 	// build directory or an archive that did not; an unexecutable server is a
-	// confusing failure two steps later.
-	_, err := d.output(ctx, execArgs(id, "", nil, []string{"chmod", "+x", remotePath})...)
+	// confusing failure two steps later. Done on the temporary name, so what is
+	// published is already runnable.
+	if _, err := d.output(ctx, execArgs(id, "", nil, []string{"chmod", "+x", tmp})...); err != nil {
+		d.discardPartial(id, tmp)
+		return err
+	}
+	return d.publish(ctx, id, tmp, remotePath, publishFileScript)
+}
+
+// publish makes a completed copy visible at dst with script (publishFileScript
+// or publishDirScript). Run as root, like the copy and chmod before it:
+// `docker cp` writes as root regardless of d.User.
+func (d Docker) publish(ctx context.Context, id, tmp, dst, script string) error {
+	env := []string{"INDIGO_TMP=" + tmp, "INDIGO_DST=" + dst}
+	_, err := d.output(ctx, execArgs(id, "", env, []string{"/bin/sh", "-c", script})...)
+	if err != nil {
+		d.discardPartial(id, tmp)
+	}
 	return err
+}
+
+// discardPartial removes an abandoned temporary copy, best effort. Its own
+// short context, because the usual reason to be here is that the caller's has
+// expired. Anything it misses is a few megabytes in /tmp under a name nothing
+// will ever look for.
+func (d Docker) discardPartial(id, tmp string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	d.output(ctx, execArgs(id, "", []string{"INDIGO_TMP=" + tmp}, []string{"/bin/sh", "-c", `rm -rf -- "$INDIGO_TMP"`})...) //nolint:errcheck
+}
+
+// The publish scripts make $INDIGO_TMP visible at $INDIGO_DST without ever
+// replacing something already there. Two windows can copy the same
+// content-addressed thing at once; the first to publish wins and every later
+// one discards its copy and succeeds, since what it wanted is in place.
+//
+// Both use a primitive that fails atomically when the destination exists, not
+// a check followed by mv: `mv src existing-dir` moves src *inside* existing-dir
+// rather than failing, and a check-then-mv leaves a window in which two
+// publishers both see the path free. The leading [ -e ] is only a fast path.
+// Paths travel in the environment to keep quoting out of them.
+
+// publishFileScript hard-links the staged file into place — link(2) refuses an
+// existing destination — then drops the staging name.
+const publishFileScript = `if [ ! -e "$INDIGO_DST" ] && ! ln -- "$INDIGO_TMP" "$INDIGO_DST" 2>/dev/null && [ ! -e "$INDIGO_DST" ]; then ` +
+	`rm -f -- "$INDIGO_TMP"; exit 1; fi; rm -f -- "$INDIGO_TMP"`
+
+// publishDirScript publishes a directory as a relative symlink to the staged
+// copy, which stays where it is as the real storage. symlink(2) refuses an
+// existing destination, and -n makes ln treat an existing symlink to a
+// directory as the file it is instead of creating the link inside it — so a
+// losing publisher fails cleanly rather than nesting its copy in the winner's.
+// A symlink is followed by everything that reads the directory, including the
+// existence check in Attach and the plugin manager's scan.
+const publishDirScript = `if [ -e "$INDIGO_DST" ]; then rm -rf -- "$INDIGO_TMP"; exit 0; fi; ` +
+	`ln -sn -- "${INDIGO_TMP##*/}" "$INDIGO_DST" 2>/dev/null && exit 0; ` +
+	`rm -rf -- "$INDIGO_TMP"; [ -e "$INDIGO_DST" ]`
+
+// partialPath is the staging name a copy is written to before publish makes it
+// visible at dst. Beside dst, so a hard link stays on one filesystem and a
+// relative symlink resolves; random, so two windows copying at once do not
+// write into the same path.
+func partialPath(dst string) string {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%s.partial-%d", dst, time.Now().UnixNano())
+	}
+	return dst + ".partial-" + hex.EncodeToString(b[:])
 }
 
 // Exec starts argv in the container and returns its stdio as one stream.

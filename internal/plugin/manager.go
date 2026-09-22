@@ -251,8 +251,12 @@ func (p *registeredPlugin) release() {
 type Manager struct {
 	mu      sync.Mutex
 	plugins []*registeredPlugin
-	workDir string
-	bridge  ServerBridge
+	// shuttingDown is set under mu by Shutdown; startPlugin checks it under
+	// the same lock before publishing a plugin, so none is added after
+	// Shutdown's snapshot and left running.
+	shuttingDown bool
+	workDir      string
+	bridge       ServerBridge
 
 	// binStamps records, for each plugin that started successfully, the binary
 	// it was launched from and that file's identity at launch time — so the
@@ -418,14 +422,6 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 		menuItems:      manifest.MenuItems,
 	}
 
-	// Add reg to m.plugins before initialization so insert-hook registrations
-	// are visible to AllRegisteredInsertChars immediately. If initialization
-	// fails, we'll need to remove it.
-	m.mu.Lock()
-	m.plugins = append(m.plugins, reg)
-	pluginIndex := len(m.plugins) - 1
-	m.mu.Unlock()
-
 	apiServer := &editorApiServer{reg: reg, bridge: m.bridge}
 	api := pluginproto.EditorApi_ServerToClient(apiServer)
 	defer api.Release()
@@ -434,6 +430,24 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 		BootstrapClient: capnp.Client(api).AddRef(),
 	})
 	reg.rpcConn = rpcConn
+
+	// Add reg to m.plugins before initialization so insert-hook registrations
+	// are visible to AllRegisteredInsertChars immediately. If initialization
+	// fails, we'll need to remove it.
+	//
+	// Published only once rpcConn is set, and never after Shutdown has taken
+	// its snapshot: Shutdown reads p.rpcConn for every listed plugin, and a
+	// plugin appended after that snapshot would never be closed or killed.
+	m.mu.Lock()
+	if m.shuttingDown {
+		m.mu.Unlock()
+		rpcConn.Close() //nolint:errcheck
+		proc.Kill()     //nolint:errcheck
+		proc.Wait()     //nolint:errcheck
+		return fmt.Errorf("plugin %s: manager shut down during startup", name)
+	}
+	m.plugins = append(m.plugins, reg)
+	m.mu.Unlock()
 
 	plugin := pluginproto.Plugin(rpcConn.Bootstrap(ctx))
 	defer plugin.Release()
@@ -446,10 +460,13 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 	defer rel()
 
 	if _, err := fut.Struct(); err != nil {
-		// Remove the plugin from m.plugins since initialization failed.
-		m.mu.Lock()
-		m.plugins = append(m.plugins[:pluginIndex], m.plugins[pluginIndex+1:]...)
-		m.mu.Unlock()
+		// Remove the plugin from m.plugins since initialization failed —
+		// by identity, not by the index it was appended at. Plugins start
+		// concurrently, so another one failing first shifts every later
+		// index, and Shutdown can clear the slice outright while this
+		// Initialize is still waiting (it panicked with "slice bounds out of
+		// range" when a server was shut down during plugin startup).
+		m.removePlugin(reg)
 		rpcConn.Close() //nolint:errcheck
 		proc.Kill()     //nolint:errcheck
 		proc.Wait()     //nolint:errcheck
@@ -1189,6 +1206,7 @@ func (m *Manager) DispatchWorkspaceScan(ctx context.Context) {
 // Plugins are given a 2-second grace period, then SIGKILL.
 func (m *Manager) Shutdown() {
 	m.mu.Lock()
+	m.shuttingDown = true
 	plugins := m.plugins
 	m.plugins = nil
 	m.mu.Unlock()
@@ -1448,6 +1466,19 @@ func (m *Manager) DispatchBufferClose(ctx context.Context, bufID uint32, path st
 			defer rel()
 			fut.Struct() //nolint:errcheck
 		}(h)
+	}
+}
+
+// removePlugin drops reg from m.plugins if it is still there. A no-op when it
+// is not, which is the case once Shutdown has cleared the list.
+func (m *Manager) removePlugin(reg *registeredPlugin) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, p := range m.plugins {
+		if p == reg {
+			m.plugins = append(m.plugins[:i], m.plugins[i+1:]...)
+			return
+		}
 	}
 }
 

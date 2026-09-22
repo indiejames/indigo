@@ -675,7 +675,10 @@ func (s *editorService) DirtyBuffers() []string {
 
 // Server wraps the listener and the RPC service.
 type Server struct {
-	socketPath   string
+	socketPath string
+	// lockFile holds the workspace flock for a socket-served server (nil for
+	// ServeStream). See acquireWorkspaceLock.
+	lockFile     *os.File
 	listener     net.Listener
 	svc          *editorService
 	done         chan struct{}
@@ -708,10 +711,18 @@ func New(dir string) (*Server, error) {
 	}
 
 	sockPath := SocketPath(dir)
+	// The lock comes first: only its holder may touch the socket path, so the
+	// removal below can only ever clear a stale socket and never a live
+	// server's.
+	lock, err := acquireWorkspaceLock(sockPath)
+	if err != nil {
+		return nil, err
+	}
 	os.Remove(sockPath) //nolint:errcheck // clean up stale socket
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
+		lock.Close() //nolint:errcheck
 		return nil, fmt.Errorf("listen %s: %w", sockPath, err)
 	}
 
@@ -719,8 +730,10 @@ func New(dir string) (*Server, error) {
 	if err != nil {
 		ln.Close()          //nolint:errcheck
 		os.Remove(sockPath) //nolint:errcheck
+		lock.Close()        //nolint:errcheck
 		return nil, err
 	}
+	srv.lockFile = lock
 	go srv.serve()
 	return srv, nil
 }
@@ -938,15 +951,23 @@ func (s *Server) Wait() {
 	if s.listener != nil {
 		s.listener.Close() //nolint:errcheck
 	}
+	// Unlink the socket while the lock is still held, so this can only ever
+	// remove our own socket — never one a successor has since created. Then
+	// release the lock before the slow teardown below (language servers,
+	// plugins), so a window opened during it gets a fresh server rather than
+	// waiting on this one to finish exiting.
+	if s.socketPath != "" {
+		os.Remove(s.socketPath) //nolint:errcheck
+	}
 	s.deleteAllRecoveryFiles()
+	if s.lockFile != nil {
+		s.lockFile.Close() //nolint:errcheck
+	}
 	s.svc.lspMgr.Shutdown()
 	s.svc.pluginMgr.Shutdown()
 	s.svc.lintMgr.Shutdown()
 	if s.svc.watcher != nil {
 		s.svc.watcher.Close() //nolint:errcheck
-	}
-	if s.socketPath != "" {
-		os.Remove(s.socketPath) //nolint:errcheck
 	}
 }
 

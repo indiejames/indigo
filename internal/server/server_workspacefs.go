@@ -88,10 +88,12 @@ func (s *editorService) ListDir(_ context.Context, call proto.EditorService_list
 // work only because the server is started with the workspace as its cwd, which
 // is a coincidence of how it is launched and not a property anything guarantees.
 //
-// It also refuses to leave the workspace. A client is not an attacker here, but
-// the server is reachable over a socket by anything running as this user, and
-// answering "list /etc" because someone sent "../../etc" is not a thing a
-// workspace server should do.
+// It also refuses to leave the workspace, lexically: "../../etc" is refused,
+// though a symlink inside the workspace that points elsewhere is followed. This
+// confines the browse listing, not the server — StatPath and CreateDir take
+// absolute paths and are deliberately unconfined, because the New File prompt
+// accepts a path anywhere, just as OpenFile opens one. The server's access
+// boundary is the 0700 socket directory, not this check.
 func (s *editorService) resolveWorkspaceRel(rel string) (string, error) {
 	if rel == "" {
 		return s.workspaceDir, nil
@@ -132,10 +134,11 @@ func (s *editorService) ListWorkspaceFiles(_ context.Context, call proto.EditorS
 // GrepWorkspace searches the workspace.
 //
 // A pattern error comes back in the result's error field rather than as an RPC
-// failure. Search runs on every keystroke while someone types a regex, so a
-// half-typed one is an ordinary occurrence and not a fault of the call — and an
+// failure. A malformed regex is a user typo, not a fault of the call — and an
 // RPC error would reach the client through the failure path, which is where
-// genuine connection trouble lives.
+// genuine connection trouble lives. (Search runs when the user presses Enter,
+// not per keystroke, so a superseded search is not worth cancelling: there is
+// at most one per submission, and rg stops itself at MaxResults.)
 func (s *editorService) GrepWorkspace(_ context.Context, call proto.EditorService_grepWorkspace) error {
 	args := call.Args()
 	pattern, err := args.Pattern()

@@ -85,6 +85,38 @@ use it instead of copying anything:
 `customizations.vscode` is the same mechanism — so this is a supported way for a
 project to configure the editor rather than an extension of the format.
 
+## Stopping the container
+
+When the last indigo window closes, the container is stopped — the dev container
+specification's default (`shutdownAction`), and what VS Code does. To keep it
+running:
+
+```jsonc
+{ "shutdownAction": "none" }
+```
+
+`indigo --container` never stops anything: you started that container, so its
+lifetime is yours.
+
+With several windows open, only the last one out stops the container, and the
+others exit immediately — each window can see the others directly rather than
+waiting to find out.
+
+Compose-based dev containers are left running, with a note on exit. Stopping
+means bringing the whole project down, and stopping only indigo's own service
+container would look like it worked while leaving the rest up.
+
+## Multiple windows
+
+Open as many indigo windows onto one container as you like: they share a single
+server inside it, exactly as they do on your machine, so concurrent edits to the
+same file converge. The server starts with the first window and exits with the
+last.
+
+`docker exec` is the transport, not the server — each window's exec is a bridge
+to a socket inside the container. That is why no ports are published and nothing
+needs configuring.
+
 ## Paths
 
 Attached to a container, indigo shows you the container's paths: a file is
@@ -132,6 +164,10 @@ If the workspace is mounted somewhere unexpected, pass `--container-dir`.
 **Files are owned by root** — indigo runs the server as `devcontainer.json`'s
 `remoteUser`. With `--container` there is no `devcontainer.json` to read one
 from, so it runs as the image's default user.
+
+Note that on Docker Desktop for macOS a bind-mounted workspace synthesizes
+ownership: everything reports as `root` inside the container regardless of who
+wrote it, and `chown` has no effect. That is the mount, not indigo.
 
 **Everything is slow the first time** — `devcontainer up` may be pulling an
 image, building it, and running lifecycle hooks. Later starts reuse the

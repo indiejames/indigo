@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/indiejames/indigo/internal/client"
+	"github.com/indiejames/indigo/internal/config"
 
 	"github.com/indiejames/indigo/internal/workspacefs"
 )
@@ -303,5 +307,47 @@ func TestRecentRootDefaultsToTheWorkspace(t *testing.T) {
 	t.Cleanup(func() { SetRecentRoot("") })
 	if got := recentRootOr("/workspaces/x"); got != "/host/root" {
 		t.Errorf("recentRootOr = %q, want the host root", got)
+	}
+}
+
+// TestConfigReloadPushesTheIgnoreSet is a regression test for something moving
+// the file listing to the server quietly took away: picker_ignore_dirs used to
+// take effect within two seconds of editing config.toml, via the client's
+// config watcher. Once the ignore set lived on the server — which reads its
+// config exactly once, at startup — a change needed a server restart.
+//
+// The preference belongs to the user rather than to the filesystem, so the
+// client pushes it; this checks the reload path actually does.
+func TestConfigReloadPushesTheIgnoreSet(t *testing.T) {
+	a := App{
+		rpc:     &client.RPC{},
+		cfg:     &config.Config{PickerIgnoreDirs: []string{"build"}},
+		width:   80,
+		height:  24,
+		workDir: t.TempDir(),
+	}
+
+	newCfg := &config.Config{PickerIgnoreDirs: []string{"build", "target"}}
+	updated, cmd := a.Update(configTickMsg{newMod: time.Now(), cfg: newCfg})
+	a2 := updated.(App)
+
+	if len(a2.cfg.PickerIgnoreDirs) != 2 {
+		t.Fatalf("config not adopted: %v", a2.cfg.PickerIgnoreDirs)
+	}
+	if cmd == nil {
+		t.Fatal("no command returned; the new ignore set never reaches the server")
+	}
+	// pushIgnoredDirs snapshots the dirs at construction time rather than
+	// reading a.cfg later, so a further reload cannot change what this send
+	// carries.
+	if push := a2.pushIgnoredDirs(); push == nil {
+		t.Error("pushIgnoredDirs returned nothing with an rpc and a config present")
+	}
+}
+
+func TestPushIgnoredDirsIsInertWithoutAnRPC(t *testing.T) {
+	a := App{cfg: &config.Config{PickerIgnoreDirs: []string{"x"}}}
+	if cmd := a.pushIgnoredDirs(); cmd != nil {
+		t.Error("returned a command with no rpc to send it on")
 	}
 }

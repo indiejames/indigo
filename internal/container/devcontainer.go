@@ -160,9 +160,41 @@ func (c CLI) Up(ctx context.Context, workspaceFolder string) (UpResult, error) {
 // business, and modelling fields nothing here consumes would invite them to
 // drift out of date silently.
 type Configuration struct {
+	// ShutdownAction is devcontainer.json's shutdownAction: "none",
+	// "stopContainer" or "stopCompose".
+	//
+	// Empty when the file does not say — the CLI does not fill in a default,
+	// verified against 0.89.0 — so applying the spec's default is the tool's
+	// job. See ShouldStopOnExit.
+	ShutdownAction string `json:"shutdownAction"`
+
+	// DockerComposeFile is present when the dev container is compose-based, in
+	// which case "stopping the container" means bringing a project down and
+	// not stopping one container. Kept as raw JSON because the spec allows
+	// either a string or an array and nothing here needs to read it — only to
+	// know whether it is there.
+	DockerComposeFile json.RawMessage `json:"dockerComposeFile"`
+
 	Customizations struct {
 		Indigo IndigoCustomizations `json:"indigo"`
 	} `json:"customizations"`
+}
+
+// IsCompose reports whether the dev container is docker-compose based.
+func (c Configuration) IsCompose() bool {
+	t := strings.TrimSpace(string(c.DockerComposeFile))
+	return t != "" && t != "null" && t != `""` && t != "[]"
+}
+
+// ShouldStopOnExit reports whether the container should be stopped when the
+// last window closes.
+//
+// The specification's default is stopContainer (or stopCompose for compose), so
+// an absent value means *stop*. That is also what VS Code does, and it is the
+// behaviour that does not quietly accumulate running containers on a laptop.
+// Only "none" opts out.
+func (c Configuration) ShouldStopOnExit() bool {
+	return c.ShutdownAction != "none"
 }
 
 // IndigoCustomizations is `customizations.indigo` in devcontainer.json.
@@ -178,31 +210,64 @@ type IndigoCustomizations struct {
 	ServerPath string `json:"serverPath"`
 }
 
+// readConfigOutput is what `devcontainer read-configuration
+// --include-merged-configuration` prints.
+//
+// The two blocks carry the *same* customizations in **different shapes**, which
+// is the sort of thing only reading real output tells you:
+//
+//	"configuration":       {"customizations": {"indigo":  {"serverPath": "..."}}}
+//	"mergedConfiguration": {"customizations": {"indigo": [{"serverPath": "..."}]}}
+//
+// An object in one, an array in the other — because the merged view collects a
+// contribution per source (the file, plus each feature). Modelling both as an
+// object, as an earlier version did, makes the *whole line* fail to unmarshal,
+// so nothing is read at all and serverPath silently never works.
+type readConfigOutput struct {
+	Configuration Configuration `json:"configuration"`
+	Merged        struct {
+		Customizations struct {
+			Indigo []IndigoCustomizations `json:"indigo"`
+		} `json:"customizations"`
+	} `json:"mergedConfiguration"`
+}
+
+// indigoCustomizations picks the settings to use.
+//
+// What the project wrote in its own devcontainer.json wins; the merged view is
+// consulted only for what the file did not say, so a value contributed by a
+// feature is still found. Preferring the file is the less surprising direction:
+// it is the thing whose author can see it.
+func (o readConfigOutput) indigoCustomizations() IndigoCustomizations {
+	out := o.Configuration.Customizations.Indigo
+	for _, c := range o.Merged.Customizations.Indigo {
+		if out.ServerPath == "" {
+			out.ServerPath = c.ServerPath
+		}
+	}
+	return out
+}
+
 // ReadConfiguration returns the resolved configuration for workspaceFolder,
 // with variable substitution and feature merging already applied by the CLI.
 //
 // A configuration that cannot be read is not fatal to the caller: it only means
 // no indigo-specific customizations, and failing to start an editor over an
-// optional settings block would be the wrong trade.
+// optional settings block would be the wrong trade. It needs the container
+// runtime too — it shells out to `docker ps` to find an existing container.
 func (c CLI) ReadConfiguration(ctx context.Context, workspaceFolder string) (Configuration, error) {
 	if !c.Available() {
 		return Configuration{}, ErrCLIMissing
 	}
 	var stdout, stderr bytes.Buffer
-	// --include-merged-configuration so customizations contributed by a
-	// *feature* are merged in, not only those written directly in
-	// devcontainer.json. It adds a key rather than changing the existing one,
-	// and the parsing below accepts either shape.
 	cfgArgs := []string{"read-configuration", "--workspace-folder", workspaceFolder,
 		"--include-merged-configuration"}
-	if runtimePath, offPath, err := RuntimePath(); err == nil && offPath {
-		// read-configuration shells out to `docker ps` to find an existing
-		// container, so it needs the runtime too — confirmed by watching it
-		// fail with exactly that call.
-		cfgArgs = append(cfgArgs, "--docker-path", runtimePath)
-	}
 	cmd := exec.CommandContext(ctx, c.bin(), cfgArgs...)
 	if runtimePath, offPath, err := RuntimePath(); err == nil {
+		if offPath {
+			cfgArgs = append(cfgArgs, "--docker-path", runtimePath)
+			cmd = exec.CommandContext(ctx, c.bin(), cfgArgs...)
+		}
 		cmd.Env = childEnv(runtimePath, offPath)
 	}
 	cmd.Stdout = &stdout
@@ -210,28 +275,18 @@ func (c CLI) ReadConfiguration(ctx context.Context, workspaceFolder string) (Con
 	if err := cmd.Run(); err != nil {
 		return Configuration{}, fmt.Errorf("devcontainer read-configuration: %w: %s", err, tail(stderr.String()))
 	}
-	// Three shapes are accepted: the merged configuration, the resolved file
-	// under a "configuration" key, and — for older versions — the file bare.
-	// Leniency rather than pinning a version, because the whole block is
-	// optional and an unreadable one is indistinguishable from an absent one.
-	//
-	// Untested against a real CLI: read-configuration shells out to `docker ps`
-	// and so needs a runtime, which the machine this was written on does not
-	// have. The `up` half above *is* verified against a real 0.89.0.
-	type wrapper struct {
-		Merged        Configuration `json:"mergedConfiguration"`
-		Configuration Configuration `json:"configuration"`
-	}
-	if w, ok := lastJSONObject[wrapper](stdout.Bytes(), func(w wrapper) bool {
-		return w.Merged.Customizations.Indigo != IndigoCustomizations{}
+	// Verified against devcontainer CLI 0.89.0 — see readConfigOutput for the
+	// shape, which is not what it looks like.
+	if o, ok := lastJSONObject[readConfigOutput](stdout.Bytes(), func(o readConfigOutput) bool {
+		return o.indigoCustomizations() != IndigoCustomizations{}
 	}); ok {
-		return w.Merged, nil
+		var cfg Configuration
+		cfg.Customizations.Indigo = o.indigoCustomizations()
+		return cfg, nil
 	}
-	if w, ok := lastJSONObject[wrapper](stdout.Bytes(), func(w wrapper) bool {
-		return w.Configuration.Customizations.Indigo != IndigoCustomizations{}
-	}); ok {
-		return w.Configuration, nil
-	}
+	// Nothing for us in it, which is the normal case for a project that has
+	// never heard of indigo. Also covers an older CLI printing the resolved
+	// file bare, which parses into Configuration directly.
 	cfg, _ := lastJSONObject[Configuration](stdout.Bytes(), func(Configuration) bool { return true })
 	return cfg, nil
 }

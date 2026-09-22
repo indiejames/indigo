@@ -211,3 +211,24 @@ func (r *RPC) CreateDir(ctx context.Context, dir string) error {
 	}
 	return nil
 }
+
+// SetIgnoredDirs tells the server which extra directory names to hide from the
+// picker, recent files and workspace grep. See the schema for why the client
+// owns this rather than the server reading it from its own config.
+func (r *RPC) SetIgnoredDirs(ctx context.Context, dirs []string) error {
+	fut, rel := r.svc.SetIgnoredDirs(ctx, func(p proto.EditorService_setIgnoredDirs_Params) error {
+		list, err := p.NewDirs(int32(len(dirs)))
+		if err != nil {
+			return err
+		}
+		for i, d := range dirs {
+			if err := list.Set(i, d); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	defer rel()
+	_, err := fut.Struct()
+	return err
+}

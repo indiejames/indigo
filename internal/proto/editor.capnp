@@ -167,6 +167,17 @@ interface EditorService {
   # read-only mount or a permission denial is the user's situation, not the
   # connection's.
   createDir @62 (path :Text) -> (error :Text);
+  # setIgnoredDirs replaces the extra directory names hidden from the picker,
+  # recent files and workspace grep (config.toml's picker_ignore_dirs), on top
+  # of the built-in defaults.
+  #
+  # Pushed by the client rather than read from the server's own config, because
+  # this is a *preference about what the user wants to see*, not a property of
+  # the filesystem — so it should follow the user, and in a container the
+  # server's config is the image's, not theirs. It also restores hot-reload:
+  # the client already watches config.toml, and before listing moved to the
+  # server a change took effect within two seconds.
+  setIgnoredDirs @63 (dirs :List(Text)) -> ();
   # generation must match the buffer's current generation (see openFile's
   # doc comment) or the op is rejected — a client unaware of a wholesale
   # buffer swap must not have its (now-meaningless) coordinates applied to

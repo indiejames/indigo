@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +55,23 @@ func (l localRuntime) FileExists(_ context.Context, _, path string) (bool, error
 	return !info.IsDir(), nil
 }
 
+// ProcessCount is answered from this machine's process list, which is where
+// localRuntime's "container" actually is. Same anti-self-count technique as
+// Docker.ProcessCount, for the same reason.
+func (localRuntime) ProcessCount(ctx context.Context, _, contains, excluding string) (int, error) {
+	const script = `ps -eo args 2>/dev/null | awk '` +
+		`index($0, ENVIRON["INDIGO_MATCH"]) && ` +
+		`(ENVIRON["INDIGO_EXCLUDE"] == "" || !index($0, ENVIRON["INDIGO_EXCLUDE"])) { n++ } ` +
+		`END { print n+0 }'`
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
+	cmd.Env = append(os.Environ(), "INDIGO_MATCH="+contains, "INDIGO_EXCLUDE="+excluding)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(string(out)))
+}
+
 func (l localRuntime) CopyIn(_ context.Context, _, localPath, remotePath string) error {
 	data, err := os.ReadFile(localPath)
 	if err != nil {
@@ -66,13 +85,19 @@ func (l localRuntime) CopyIn(_ context.Context, _, localPath, remotePath string)
 }
 
 func (l localRuntime) Exec(ctx context.Context, _ string, argv []string) (io.ReadWriteCloser, error) {
-	cmd := exec.CommandContext(ctx, l.path(argv[0]), argv[1:]...)
+	// Detached from ctx exactly as Docker.Exec is: ctx bounds the start, the
+	// stream owns the process. A fake with different lifetime semantics from
+	// the real thing is how the cancel-kills-the-session bug survived.
+	procCtx, procCancel := context.WithCancel(context.WithoutCancel(ctx))
+	cmd := exec.CommandContext(procCtx, l.path(argv[0]), argv[1:]...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		procCancel()
 		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		procCancel()
 		return nil, err
 	}
 	cmd.Stderr = os.Stderr
@@ -81,9 +106,10 @@ func (l localRuntime) Exec(ctx context.Context, _ string, argv []string) (io.Rea
 	// holding the test binary's stdio.
 	procutil.SetPgid(cmd)
 	if err := cmd.Start(); err != nil {
+		procCancel()
 		return nil, err
 	}
-	return &procStream{cmd: cmd, in: stdin, out: stdout}, nil
+	return &procStream{cmd: cmd, in: stdin, out: stdout, cancel: procCancel}, nil
 }
 
 // buildServer compiles cmd/indigo-server for this machine, the way
@@ -125,8 +151,13 @@ func TestAttachServesARealClientOverASpawnedServer(t *testing.T) {
 		t.Fatalf("Attach: %v", err)
 	}
 
-	// The binary landed where Attach says it puts it.
-	if _, err := os.Stat(rt.path(ServerPath(runtime.GOARCH))); err != nil {
+	// The binary landed where Attach says it puts it, at a path derived from
+	// its content.
+	hash, err := hashFile(built)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(rt.path(ServerPath(runtime.GOARCH, hash))); err != nil {
 		t.Fatalf("Attach did not place the server: %v", err)
 	}
 
@@ -164,9 +195,13 @@ func TestAttachServesARealClientOverASpawnedServer(t *testing.T) {
 	}
 }
 
-// TestAttachSkipsTheCopyAgainstRealFiles is the fake's skip-the-copy assertion
-// against a real filesystem: the second window onto a container must not
-// rewrite the binary.
+// TestAttachSkipsTheCopyAgainstRealFiles is the skip-the-copy assertion against
+// a real filesystem: the second window onto a container must not rewrite the
+// binary.
+//
+// Asserted on the placed file's modification time, not on whether the local
+// binary was looked up — content-addressed placement reads it every time, since
+// its hash is what names the destination.
 func TestAttachSkipsTheCopyAgainstRealFiles(t *testing.T) {
 	t.Setenv("INDIGO_LOG_DIR", t.TempDir())
 	built := buildServer(t)
@@ -175,19 +210,36 @@ func TestAttachSkipsTheCopyAgainstRealFiles(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	locate := func(string) (string, error) { return built, nil }
 
-	first, err := Attach(ctx, rt, "ignored", workDir, AttachOptions{Locate: func(string) (string, error) { return built, nil }})
+	first, err := Attach(ctx, rt, "ignored", workDir, AttachOptions{Locate: locate})
 	if err != nil {
 		t.Fatalf("first Attach: %v", err)
 	}
 	first.Close() //nolint:errcheck
 
-	second, err := Attach(ctx, rt, "ignored", workDir, AttachOptions{Locate: func(string) (string, error) {
-		t.Error("looked for a local binary although one was already placed")
-		return built, nil
-	}})
+	hash, err := hashFile(built)
+	if err != nil {
+		t.Fatal(err)
+	}
+	placed := rt.path(ServerPath(runtime.GOARCH, hash))
+	before, err := os.Stat(placed)
+	if err != nil {
+		t.Fatalf("stat placed server: %v", err)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	second, err := Attach(ctx, rt, "ignored", workDir, AttachOptions{Locate: locate})
 	if err != nil {
 		t.Fatalf("second Attach: %v", err)
 	}
 	second.Close() //nolint:errcheck
+
+	after, err := os.Stat(placed)
+	if err != nil {
+		t.Fatalf("stat placed server: %v", err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Errorf("placed binary was rewritten (%v -> %v)", before.ModTime(), after.ModTime())
+	}
 }

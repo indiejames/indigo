@@ -227,3 +227,27 @@ func (s *editorService) CreateDir(_ context.Context, call proto.EditorService_cr
 	}
 	return nil
 }
+
+// SetIgnoredDirs replaces the configured extra ignore names.
+//
+// The client owns this setting: it is a preference about what the user wants to
+// see rather than a property of the filesystem, and in a container the server's
+// own config belongs to the image and not to them. Pushing it also restores the
+// hot-reload that moving the file listing to the server had quietly taken away
+// — the client watches config.toml already.
+func (s *editorService) SetIgnoredDirs(_ context.Context, call proto.EditorService_setIgnoredDirs) error {
+	list, err := call.Args().Dirs()
+	if err != nil {
+		return err
+	}
+	dirs := make([]string, list.Len())
+	for i := range dirs {
+		d, err := list.At(i)
+		if err != nil {
+			return err
+		}
+		dirs[i] = d
+	}
+	workspacefs.SetIgnoredDirs(dirs)
+	return nil
+}

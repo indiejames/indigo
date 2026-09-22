@@ -152,6 +152,7 @@ func main() {
 	if err != nil {
 		fatalf("run: %v", err)
 	}
+	shutdownContainer()
 	reportIfServerDisconnected(finalModel)
 }
 
@@ -315,6 +316,7 @@ func openUntitled(startLine int) {
 	if err != nil {
 		fatalf("run: %v", err)
 	}
+	shutdownContainer()
 	reportIfServerDisconnected(finalModel)
 }
 

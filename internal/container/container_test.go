@@ -20,16 +20,18 @@ import (
 // the Runtime interface is that this sequence is assertable on a machine with
 // no container engine, which is where this was written.
 type fakeRuntime struct {
-	arch       string
-	archErr    error
-	exists     bool
-	existsErr  error
-	copyErr    error
-	execErr    error
-	calls      []string
-	copiedFrom string
-	copiedTo   string
-	execArgv   []string
+	arch            string
+	archErr         error
+	exists          bool
+	existsErr       error
+	copyErr         error
+	execErr         error
+	calls           []string
+	copiedFrom      string
+	copiedTo        string
+	execArgv        []string
+	processCounts   map[string]int
+	processCountErr error
 }
 
 func (f *fakeRuntime) Arch(context.Context, string) (string, error) {
@@ -48,6 +50,14 @@ func (f *fakeRuntime) CopyIn(_ context.Context, _, localPath, remotePath string)
 	return f.copyErr
 }
 
+func (f *fakeRuntime) ProcessCount(_ context.Context, _, contains, excluding string) (int, error) {
+	f.calls = append(f.calls, "processCount:"+contains+"|"+excluding)
+	if f.processCounts != nil {
+		return f.processCounts[contains], f.processCountErr
+	}
+	return 0, f.processCountErr
+}
+
 func (f *fakeRuntime) Exec(_ context.Context, _ string, argv []string) (io.ReadWriteCloser, error) {
 	f.calls = append(f.calls, "exec")
 	f.execArgv = argv
@@ -63,31 +73,82 @@ func (nopStream) Read([]byte) (int, error)    { return 0, io.EOF }
 func (nopStream) Write(b []byte) (int, error) { return len(b), nil }
 func (nopStream) Close() error                { return nil }
 
-func locateFixed(path string) func(string) (string, error) {
-	return func(string) (string, error) { return path, nil }
+// locateReal writes a small file and points at it, so Attach can hash real
+// content — the placement path is derived from it.
+func locateReal(t *testing.T, content string) (locate func(string) (string, error), path, hash string) {
+	t.Helper()
+	path = filepath.Join(t.TempDir(), "indigo-server")
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h, err := hashFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return func(string) (string, error) { return path, nil }, path, h
 }
 
 func TestAttachCopiesThenStartsTheServer(t *testing.T) {
 	rt := &fakeRuntime{arch: "arm64", exists: false}
+	locate, local, hash := locateReal(t, "a server binary")
+	remote := ServerPath("arm64", hash)
 
-	stream, err := Attach(context.Background(), rt, "c1", "/workspaces/proj", AttachOptions{Locate: locateFixed("/local/indigo-server-linux-arm64")})
+	stream, err := Attach(context.Background(), rt, "c1", "/workspaces/proj", AttachOptions{Locate: locate})
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
 	defer stream.Close() //nolint:errcheck
 
-	want := []string{"arch", "exists:" + ServerPath("arm64"), "copy", "exec"}
+	want := []string{"arch", "exists:" + remote, "copy", "exec"}
 	if strings.Join(rt.calls, ",") != strings.Join(want, ",") {
 		t.Errorf("calls = %v, want %v", rt.calls, want)
 	}
-	if rt.copiedFrom != "/local/indigo-server-linux-arm64" || rt.copiedTo != ServerPath("arm64") {
-		t.Errorf("copied %s -> %s, want the arm64 binary to %s", rt.copiedFrom, rt.copiedTo, ServerPath("arm64"))
+	if rt.copiedFrom != local || rt.copiedTo != remote {
+		t.Errorf("copied %s -> %s, want %s -> %s", rt.copiedFrom, rt.copiedTo, local, remote)
 	}
 	// The server is started on the *container's* workspace path, which is the
 	// only path it can open anything with.
-	wantArgv := []string{ServerPath("arm64"), "/workspaces/proj"}
+	wantArgv := []string{remote, "/workspaces/proj"}
 	if strings.Join(rt.execArgv, " ") != strings.Join(wantArgv, " ") {
 		t.Errorf("exec argv = %v, want %v", rt.execArgv, wantArgv)
+	}
+}
+
+// TestAttachPlacesDifferentBuildsAtDifferentPaths is the regression for a
+// container outliving an indigo upgrade.
+//
+// The path used to carry only the architecture, so an upgraded client found the
+// *previous* server already in place, skipped the copy, and ran it. It surfaced
+// as `usage: /tmp/.indigo-server-arm64 <workspace-dir>` — a server from before a
+// flag existed, answering a client that passed it.
+func TestAttachPlacesDifferentBuildsAtDifferentPaths(t *testing.T) {
+	oldLocate, _, oldHash := locateReal(t, "build one")
+	newLocate, _, newHash := locateReal(t, "build two")
+	if oldHash == newHash {
+		t.Fatal("two different binaries hashed the same")
+	}
+
+	rt1 := &fakeRuntime{arch: "arm64", exists: false}
+	s1, err := Attach(context.Background(), rt1, "c1", "/w", AttachOptions{Locate: oldLocate})
+	if err != nil {
+		t.Fatalf("first Attach: %v", err)
+	}
+	s1.Close() //nolint:errcheck
+
+	// The upgraded client asks about a path the old build never occupied, so it
+	// copies rather than running what is there.
+	rt2 := &fakeRuntime{arch: "arm64", exists: false}
+	s2, err := Attach(context.Background(), rt2, "c1", "/w", AttachOptions{Locate: newLocate})
+	if err != nil {
+		t.Fatalf("second Attach: %v", err)
+	}
+	s2.Close() //nolint:errcheck
+
+	if rt1.execArgv[0] == rt2.execArgv[0] {
+		t.Errorf("both builds ran from %s; an upgrade would keep running the old server", rt1.execArgv[0])
+	}
+	if !strings.Contains(rt2.execArgv[0], newHash) {
+		t.Errorf("started %q, want the new build's path", rt2.execArgv[0])
 	}
 }
 
@@ -96,8 +157,9 @@ func TestAttachCopiesThenStartsTheServer(t *testing.T) {
 // open a file.
 func TestAttachSkipsTheCopyWhenTheServerIsAlreadyThere(t *testing.T) {
 	rt := &fakeRuntime{arch: "amd64", exists: true}
+	locate, _, hash := locateReal(t, "a server binary")
 
-	stream, err := Attach(context.Background(), rt, "c1", "/w", AttachOptions{Locate: locateFixed("/local/x")})
+	stream, err := Attach(context.Background(), rt, "c1", "/w", AttachOptions{Locate: locate})
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
@@ -108,30 +170,35 @@ func TestAttachSkipsTheCopyWhenTheServerIsAlreadyThere(t *testing.T) {
 			t.Fatalf("copied although the binary was already present: %v", rt.calls)
 		}
 	}
-	if rt.execArgv[0] != ServerPath("amd64") {
+	if rt.execArgv[0] != ServerPath("amd64", hash) {
 		t.Errorf("started %q, want the amd64 server", rt.execArgv[0])
 	}
 }
 
-// TestAttachDoesNotLocateABinaryItWillNotUse pins the ordering: asking where a
-// binary is has to come after learning it is needed, or a host with no built
-// server could not attach to a container that already has one.
-func TestAttachDoesNotLocateABinaryItWillNotUse(t *testing.T) {
+// TestAttachStillNeedsALocalBinaryWhenOneIsAlreadyPlaced records a deliberate
+// trade. An earlier version skipped locating when the container already had a
+// server, so a host with no built binary could still attach. Content-addressed
+// placement ends that: the local binary's hash is what names the path, so it
+// has to be read before the question can even be asked.
+//
+// Worth the loss. The alternative is what it replaced — an upgraded client
+// silently running the previous build — and `make install` places the binary
+// anyway.
+func TestAttachStillNeedsALocalBinaryWhenOneIsAlreadyPlaced(t *testing.T) {
 	rt := &fakeRuntime{arch: "arm64", exists: true}
-	called := false
-	locate := func(string) (string, error) {
-		called = true
-		return "", errors.New("should not be consulted")
+	locate := func(string) (string, error) { return "", errors.New("nothing built here") }
+
+	_, err := Attach(context.Background(), rt, "c1", "/w", AttachOptions{Locate: locate})
+	if err == nil {
+		t.Fatal("expected an error with no local binary to hash")
 	}
-	if _, err := Attach(context.Background(), rt, "c1", "/w", AttachOptions{Locate: locate}); err != nil {
-		t.Fatalf("Attach: %v", err)
-	}
-	if called {
-		t.Error("looked for a local binary although the container already had one")
+	if !strings.Contains(err.Error(), "nothing built here") {
+		t.Errorf("error = %q, want the locate failure surfaced", err)
 	}
 }
 
 func TestAttachSurfacesEachFailureWithContext(t *testing.T) {
+	locate, _, _ := locateReal(t, "a server binary")
 	for _, tc := range []struct {
 		name string
 		rt   *fakeRuntime
@@ -143,7 +210,7 @@ func TestAttachSurfacesEachFailureWithContext(t *testing.T) {
 		{"exec", &fakeRuntime{arch: "arm64", exists: true, execErr: errors.New("boom")}, "start server"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Attach(context.Background(), tc.rt, "c1", "/w", AttachOptions{Locate: locateFixed("/local/x")})
+			_, err := Attach(context.Background(), tc.rt, "c1", "/w", AttachOptions{Locate: locate})
 			if err == nil {
 				t.Fatal("expected an error")
 			}
@@ -157,9 +224,7 @@ func TestAttachSurfacesEachFailureWithContext(t *testing.T) {
 
 func TestAttachReportsAMissingLocalBinary(t *testing.T) {
 	rt := &fakeRuntime{arch: "arm64", exists: false}
-	locate := func(goarch string) (string, error) {
-		return LocateServerBinary(goarch)
-	}
+	locate := LocateServerBinary
 	t.Setenv("INDIGO_CONTAINER_SERVER", "")
 	t.Setenv("HOME", t.TempDir())
 
@@ -179,7 +244,7 @@ func TestAttachReportsAMissingLocalBinary(t *testing.T) {
 // connection, it quietly mangles any message containing that byte. Adding -t is
 // a one-character change with a symptom nobody would trace back here.
 func TestExecArgsNeverAllocateATTY(t *testing.T) {
-	args := execArgs("c1", "", []string{"/tmp/.indigo-server-arm64", "/workspaces/proj"})
+	args := execArgs("c1", "", nil, []string{"/tmp/.indigo-server-arm64", "/workspaces/proj"})
 	for _, a := range args {
 		if a == "-t" || a == "--tty" || a == "-it" || a == "-ti" {
 			t.Fatalf("execArgs allocated a TTY: %v", args)
@@ -234,13 +299,16 @@ func TestLocateServerBinaryPrefersAnExplicitOverride(t *testing.T) {
 	}
 }
 
-func TestServerPathIsArchitectureStamped(t *testing.T) {
-	if ServerPath("arm64") == ServerPath("amd64") {
-		t.Fatal("both architectures share a path; a container reused across hosts would run the wrong binary")
+func TestServerPathDistinguishesArchitectureAndBuild(t *testing.T) {
+	if ServerPath("arm64", "abc") == ServerPath("amd64", "abc") {
+		t.Error("both architectures share a path; a container reused across hosts would run the wrong binary")
+	}
+	if ServerPath("arm64", "abc") == ServerPath("arm64", "def") {
+		t.Error("two builds share a path; an upgrade would keep running the old server")
 	}
 	for _, a := range []string{"arm64", "amd64"} {
-		if !strings.HasPrefix(ServerPath(a), "/tmp/") {
-			t.Errorf("ServerPath(%q) = %q, want it under /tmp — a remoteUser may have no home", a, ServerPath(a))
+		if !strings.HasPrefix(ServerPath(a, "abc"), "/tmp/") {
+			t.Errorf("ServerPath(%q) = %q, want it under /tmp — a remoteUser may have no home", a, ServerPath(a, "abc"))
 		}
 	}
 }
@@ -354,4 +422,101 @@ func TestProcStreamCloseKillsTheWholeProcessTree(t *testing.T) {
 	}
 	syscall.Kill(pid, syscall.SIGKILL) //nolint:errcheck
 	t.Fatalf("grandchild %d outlived the kill; only the direct child was signalled", pid)
+}
+
+func TestShouldStopOnExitFollowsTheSpecDefault(t *testing.T) {
+	// Absent means stop: that is the specification's default for an image or
+	// Dockerfile, and it is what VS Code does. The CLI does not fill it in, so
+	// applying it is the tool's job.
+	if !(Configuration{}).ShouldStopOnExit() {
+		t.Error("an absent shutdownAction should mean stop")
+	}
+	if !(Configuration{ShutdownAction: "stopContainer"}).ShouldStopOnExit() {
+		t.Error("stopContainer should mean stop")
+	}
+	if !(Configuration{ShutdownAction: "stopCompose"}).ShouldStopOnExit() {
+		t.Error("stopCompose should mean stop")
+	}
+	if (Configuration{ShutdownAction: "none"}).ShouldStopOnExit() {
+		t.Error(`only "none" opts out`)
+	}
+}
+
+// TestServerRunningAsksAboutThisWorkspace: one container can host more than one
+// workspace's daemon, so the probe has to name the one being asked about.
+func TestServerRunningAsksAboutThisWorkspace(t *testing.T) {
+	rt := &fakeRuntime{processCounts: map[string]int{"--daemon /workspaces/proj": 1}}
+	running, err := ServerRunning(context.Background(), rt, "c1", "/workspaces/proj")
+	if err != nil || !running {
+		t.Fatalf("ServerRunning = (%v, %v), want (true, nil)", running, err)
+	}
+	if got := rt.calls[0]; got != "processCount:--daemon /workspaces/proj|" {
+		t.Errorf("probed %q, want it scoped to this workspace", got)
+	}
+}
+
+// TestOtherWindowsAttachedExcludesThisOne is what makes quitting instant: a
+// window has to be able to see past its own bridge, which may still be dying,
+// to whether anyone else is there. Without the exclusion the answer would be
+// ambiguous and the only way to resolve it would be to wait — which is exactly
+// the five-second pause this replaced.
+func TestOtherWindowsAttachedExcludesThisOne(t *testing.T) {
+	// Two bridges in the container, one of them ours.
+	rt := &fakeRuntime{processCounts: map[string]int{
+		"/workspaces/proj --client ": 2,
+		"--client mytoken":           1,
+	}}
+	others, err := OtherWindowsAttached(context.Background(), rt, "c1", "/workspaces/proj", "mytoken")
+	if err != nil {
+		t.Fatalf("OtherWindowsAttached: %v", err)
+	}
+	if others != 1 {
+		t.Errorf("others = %d, want 1", others)
+	}
+
+	// Only ours: nobody else, so the container can be stopped.
+	rt = &fakeRuntime{processCounts: map[string]int{
+		"/workspaces/proj --client ": 1,
+		"--client mytoken":           1,
+	}}
+	others, err = OtherWindowsAttached(context.Background(), rt, "c1", "/workspaces/proj", "mytoken")
+	if err != nil || others != 0 {
+		t.Errorf("others = (%d, %v), want (0, nil)", others, err)
+	}
+
+	// Ours already gone, another still there.
+	rt = &fakeRuntime{processCounts: map[string]int{
+		"/workspaces/proj --client ": 1,
+		"--client mytoken":           0,
+	}}
+	others, err = OtherWindowsAttached(context.Background(), rt, "c1", "/workspaces/proj", "mytoken")
+	if err != nil || others != 1 {
+		t.Errorf("others = (%d, %v), want (1, nil)", others, err)
+	}
+}
+
+// TestOtherWindowsAttachedRefusesWithoutAToken: without one a window cannot
+// tell its own bridge from anyone else's, and guessing here means either a
+// container left running or one stopped under a live window.
+func TestOtherWindowsAttachedRefusesWithoutAToken(t *testing.T) {
+	rt := &fakeRuntime{}
+	if _, err := OtherWindowsAttached(context.Background(), rt, "c1", "/w", ""); err == nil {
+		t.Error("expected an error with no client token")
+	}
+}
+
+// TestAttachMarksItsBridge pins the other half: the token has to reach the
+// process list, or nothing above can see it.
+func TestAttachMarksItsBridge(t *testing.T) {
+	rt := &fakeRuntime{arch: "arm64", exists: true}
+	locate, _, _ := locateReal(t, "a server binary")
+	stream, err := Attach(context.Background(), rt, "c1", "/w",
+		AttachOptions{ClientToken: "tok123", Locate: locate})
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	defer stream.Close() //nolint:errcheck
+	if got := strings.Join(rt.execArgv, " "); !strings.Contains(got, "--client tok123") {
+		t.Errorf("exec argv = %q, want it to carry the client token", got)
+	}
 }

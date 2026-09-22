@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"time"
@@ -33,6 +35,14 @@ var (
 	// projectServerPath comes from customizations.indigo.serverPath, for an
 	// image that already ships a server.
 	projectServerPath string
+	// stopOnExit is devcontainer.json's shutdownAction, resolved. See
+	// container.Configuration.ShouldStopOnExit.
+	stopOnExit bool
+	// composeProject is set when the dev container is compose-based, where
+	// stopping is a project-wide operation indigo does not attempt.
+	composeProject bool
+	// clientToken identifies this window's bridge process inside the container.
+	clientToken string
 )
 
 // pathMap translates between the workspace as this machine names it and as the
@@ -167,8 +177,14 @@ func bringUpDevcontainer(hostWorkDir string) {
 	// section would be the wrong trade.
 	cfgCtx, cfgCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cfgCancel()
+	// stopOnExit defaults to true when the configuration cannot be read at all:
+	// the specification's default is to stop, and a container left running
+	// because an *optional* settings read failed is the surprising direction.
+	stopOnExit = true
 	if cfg, err := cli.ReadConfiguration(cfgCtx, hostWorkDir); err == nil {
 		projectServerPath = cfg.Customizations.Indigo.ServerPath
+		stopOnExit = cfg.ShouldStopOnExit()
+		composeProject = cfg.IsCompose()
 	}
 }
 
@@ -207,10 +223,12 @@ func connect(workDir string) (*client.RPC, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), attachTimeout)
 	defer cancel()
+	clientToken = newClientToken()
 	stream, err := container.Attach(ctx, container.Docker{User: remoteUser}, containerName, workDir,
 		container.AttachOptions{
-			ServerPath: projectServerPath,
-			Locate:     container.LocateServerBinary,
+			ServerPath:  projectServerPath,
+			ClientToken: clientToken,
+			Locate:      container.LocateServerBinary,
 		})
 	if err != nil {
 		return nil, fmt.Errorf("attach to container %s: %w", containerName, err)
@@ -222,3 +240,67 @@ func connect(workDir string) (*client.RPC, error) {
 	}
 	return rpc, nil
 }
+
+// shutdownContainer stops a dev container indigo started, once nothing is using
+// it. Called after the editor's own program has exited.
+//
+// Three conditions, each of which matters:
+//
+//   - **indigo started it.** With --container the user started the container
+//     themselves and it is not ours to stop; the specification draws the same
+//     line, since shutdownAction describes what the *tool* brought up.
+//   - **shutdownAction does not say otherwise.** Absent means stop, which is
+//     the specification's default and what VS Code does.
+//   - **no other window is still attached.** The server daemon inside the
+//     container exits when its last client disconnects, so waiting for it to go
+//     is the same question asked in the only place that can answer it
+//     truthfully. Stopping while a second window is editing would be a far
+//     worse bug than leaving a container running.
+func shutdownContainer() {
+	if !useDevcontainer || containerName == "" || !stopOnExit {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), containerStopTimeout)
+	defer cancel()
+
+	rt := container.Docker{User: remoteUser}
+	others, err := container.OtherWindowsAttached(ctx, rt, containerName, containerDir, clientToken)
+	if err != nil {
+		// Cannot tell — leave it alone. A container left running is a
+		// nuisance; one stopped out from under another window is data loss.
+		return
+	}
+	if others > 0 {
+		return
+	}
+
+	if composeProject {
+		// shutdownAction's default for compose is stopCompose — bringing the
+		// whole project down — and stopping only our own service container
+		// would look like it worked while leaving the rest running. Saying so
+		// is better than doing part of it.
+		fmt.Fprintf(os.Stderr, "indigo: dev container is docker-compose based; "+
+			"leaving it running (stop it with `docker compose stop`)\n")
+		return
+	}
+	if err := rt.Stop(ctx, containerName); err != nil {
+		fmt.Fprintf(os.Stderr, "indigo: could not stop the dev container: %v\n", err)
+	}
+}
+
+// newClientToken returns a value unique to this window, for marking its bridge
+// process. Randomness is only needed to avoid collision between concurrent
+// windows, not to be unguessable — it appears in a process list either way.
+func newClientToken() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("pid%d", os.Getpid())
+	}
+	return hex.EncodeToString(b[:])
+}
+
+const (
+	// containerStopTimeout bounds the whole shutdown, which is a few execs and
+	// a container stop.
+	containerStopTimeout = 60 * time.Second
+)

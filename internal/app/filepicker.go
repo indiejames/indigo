@@ -122,6 +122,27 @@ func (a *App) startPickerFileScan(workDir string) tea.Cmd {
 	}
 }
 
+// pushIgnoredDirs sends config.toml's picker_ignore_dirs to the server.
+//
+// Fire-and-forget: the set only affects what a later listing hides, so a failed
+// push costs one stale listing and is not worth interrupting anything for. The
+// next config tick or picker open sends it again.
+func (a App) pushIgnoredDirs() tea.Cmd {
+	if a.rpc == nil || a.cfg == nil {
+		return nil
+	}
+	rpc := a.rpc
+	dirs := append([]string(nil), a.cfg.PickerIgnoreDirs...)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := rpc.SetIgnoredDirs(ctx, dirs); err != nil {
+			appLog("pushing picker_ignore_dirs failed: %v", err)
+		}
+		return nil
+	}
+}
+
 // loadPickerDir asks the server for the listing of the picker's current
 // directory. Pair it with any state change that moves the picker — see
 // filePicker.beginDirLoad.

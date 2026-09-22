@@ -268,7 +268,12 @@ func NewWithPicker(rpc *client.RPC, cfg *config.Config, workDir string) *App {
 }
 
 func (a App) Init() tea.Cmd {
-	cmds := []tea.Cmd{watchConfig(a.configPath, a.configModTime)}
+	// The ignore set is the client's to own (see the setIgnoredDirs schema
+	// comment), so it is sent once at startup as well as on every reload —
+	// otherwise the server would use its own config's value until the file
+	// happened to change, which in a container is the image's and not the
+	// user's.
+	cmds := []tea.Cmd{watchConfig(a.configPath, a.configModTime), a.pushIgnoredDirs()}
 	if len(a.buffers) > 0 {
 		cmds = append(cmds, a.buffers[0].Init())
 	}
@@ -385,13 +390,18 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, watchConfig(a.configPath, a.configModTime)
 		}
 		a.configModTime = msg.newMod
+		var pushCmd tea.Cmd
 		if msg.cfg != nil {
 			a.cfg = msg.cfg
 			for i, m := range a.buffers {
 				a.buffers[i] = m.WithConfig(msg.cfg)
 			}
+			// The ignore set lives on the server now, so a changed
+			// picker_ignore_dirs has to be sent there — without this it would
+			// take a server restart, where before it took two seconds.
+			pushCmd = a.pushIgnoredDirs()
 		}
-		return a, watchConfig(a.configPath, a.configModTime)
+		return a, tea.Batch(watchConfig(a.configPath, a.configModTime), pushCmd)
 
 	case tea.WindowSizeMsg:
 		a.width = msg.Width

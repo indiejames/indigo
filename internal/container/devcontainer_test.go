@@ -110,6 +110,60 @@ func TestUpRejectsSuccessWithoutAContainerID(t *testing.T) {
 	}
 }
 
+// realReadConfigOutput is captured verbatim from devcontainer CLI 0.89.0 with
+// --include-merged-configuration.
+//
+// The two blocks carry the same customizations in different shapes — an object
+// under "configuration", an array under "mergedConfiguration". An earlier
+// version modelled both as objects, which made the whole line fail to
+// unmarshal, so serverPath was silently never read. That passed against a
+// hand-written fixture, because the fixture had the shape the code expected.
+const realReadConfigOutput = `{"configuration": {"customizations": {"vscode": {"extensions": ["golang.go"]}, "indigo": {"serverPath": "/usr/local/bin/indigo-server"}}}, "mergedConfiguration": {"customizations": {"vscode": [{"extensions": ["golang.go"]}], "indigo": [{"serverPath": "/usr/local/bin/indigo-server"}]}}}`
+
+func TestReadConfigurationParsesRealCLIOutput(t *testing.T) {
+	cli := fakeCLI(t, realReadConfigOutput, "", 0)
+
+	cfg, err := cli.ReadConfiguration(context.Background(), "/w")
+	if err != nil {
+		t.Fatalf("ReadConfiguration: %v", err)
+	}
+	if got := cfg.Customizations.Indigo.ServerPath; got != "/usr/local/bin/indigo-server" {
+		t.Errorf("serverPath = %q, want the project's", got)
+	}
+}
+
+// TestMergedCustomizationsFillGapsInTheFile: a value contributed by a feature
+// appears only in the merged view, and must still be found.
+func TestMergedCustomizationsFillGapsInTheFile(t *testing.T) {
+	out := `{"configuration":{"customizations":{}},"mergedConfiguration":{"customizations":{"indigo":[{"serverPath":"/from/a/feature"}]}}}`
+	cli := fakeCLI(t, out, "", 0)
+
+	cfg, err := cli.ReadConfiguration(context.Background(), "/w")
+	if err != nil {
+		t.Fatalf("ReadConfiguration: %v", err)
+	}
+	if got := cfg.Customizations.Indigo.ServerPath; got != "/from/a/feature" {
+		t.Errorf("serverPath = %q, want the feature's contribution", got)
+	}
+}
+
+// TestTheFileWinsOverTheMergedView: what the project's own devcontainer.json
+// says beats a feature's contribution, because it is the one whose author can
+// see it.
+func TestTheFileWinsOverTheMergedView(t *testing.T) {
+	out := `{"configuration":{"customizations":{"indigo":{"serverPath":"/from/the/file"}}},` +
+		`"mergedConfiguration":{"customizations":{"indigo":[{"serverPath":"/from/a/feature"}]}}}`
+	cli := fakeCLI(t, out, "", 0)
+
+	cfg, err := cli.ReadConfiguration(context.Background(), "/w")
+	if err != nil {
+		t.Fatalf("ReadConfiguration: %v", err)
+	}
+	if got := cfg.Customizations.Indigo.ServerPath; got != "/from/the/file" {
+		t.Errorf("serverPath = %q, want the file's", got)
+	}
+}
+
 func TestReadConfigurationFindsIndigoCustomizations(t *testing.T) {
 	out := `{"configuration":{"image":"x","customizations":{"vscode":{"extensions":[]},"indigo":{"serverPath":"/usr/local/bin/indigo-server"}}}}`
 	cli := fakeCLI(t, out, "", 0)
@@ -177,7 +231,7 @@ func TestAttachHonoursAServerPathFromTheProject(t *testing.T) {
 }
 
 func TestExecArgsPassTheRemoteUser(t *testing.T) {
-	args := execArgs("c1", "vscode", []string{"/srv", "/w"})
+	args := execArgs("c1", "vscode", nil, []string{"/srv", "/w"})
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "-u vscode") {
 		t.Errorf("args = %v, want -u vscode; a server running as root writes files the developer cannot edit", args)
@@ -192,7 +246,7 @@ func TestExecArgsPassTheRemoteUser(t *testing.T) {
 		t.Errorf("args = %v, want -u before the container id", args)
 	}
 	// And no user means no flag at all, rather than an empty one.
-	if contains(execArgs("c1", "", []string{"x"}), "-u") {
+	if contains(execArgs("c1", "", nil, []string{"x"}), "-u") {
 		t.Error("an empty user still produced a -u flag")
 	}
 }

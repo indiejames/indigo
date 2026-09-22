@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/indiejames/indigo/internal/app"
 	"github.com/indiejames/indigo/internal/container"
@@ -158,5 +159,50 @@ func TestParseContainerFlagsReadsDevcontainer(t *testing.T) {
 	}
 	if containerName != "" {
 		t.Errorf("containerName = %q, want it left for the CLI to fill in", containerName)
+	}
+}
+
+// shutdownContainer's guards are what stop it doing damage, so they are what is
+// worth pinning: the positive path needs a live container and a terminal, but
+// each of these refusals is a case where stopping would break something.
+func TestShutdownContainerRefusesWhenItShould(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func()
+		why   string
+	}{
+		{
+			name:  "no container at all",
+			setup: func() {},
+			why:   "there is nothing to stop",
+		},
+		{
+			name:  "attached to a container the user started",
+			setup: func() { containerName = "someones-box"; useDevcontainer = false; stopOnExit = true },
+			why:   "--container means the user owns its lifetime, not indigo",
+		},
+		{
+			name:  "shutdownAction none",
+			setup: func() { containerName = "c1"; useDevcontainer = true; stopOnExit = false },
+			why:   "the project asked for the container to be left running",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetContainerFlags(t)
+			stopOnExit = false
+			t.Cleanup(func() { stopOnExit = false; composeProject = false })
+			tc.setup()
+
+			// A runtime that would fail loudly if it were reached: shutdownContainer
+			// must return before touching anything.
+			t.Setenv("INDIGO_DOCKER", "/nonexistent/docker")
+			done := make(chan struct{})
+			go func() { shutdownContainer(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatalf("shutdownContainer tried to do work when %s", tc.why)
+			}
+		})
 	}
 }

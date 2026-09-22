@@ -255,3 +255,56 @@ func TestCreateDirOverRPC(t *testing.T) {
 		t.Fatalf("directory was not created: %v", err)
 	}
 }
+
+// TestSetIgnoredDirsOverRPC checks the push actually changes what the server
+// hides, end to end — the handler and its effect, not just that the call
+// returns.
+func TestSetIgnoredDirsOverRPC(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"keep.txt":      "k",
+		"build/out.txt": "o",
+	})
+	r := dialWorkspaceServer(t, dir)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	// "build" is not a built-in ignore, so it starts visible.
+	before, err := r.ListWorkspaceFiles(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaceFiles: %v", err)
+	}
+	if !containsPath(before, filepath.Join("build", "out.txt")) {
+		t.Fatalf("paths = %v, want build/out.txt before it is ignored", before)
+	}
+
+	if err := r.SetIgnoredDirs(ctx, []string{"build"}); err != nil {
+		t.Fatalf("SetIgnoredDirs: %v", err)
+	}
+	t.Cleanup(func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		r.SetIgnoredDirs(c, nil) //nolint:errcheck // package-level state; other tests share it
+	})
+
+	after, err := r.ListWorkspaceFiles(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaceFiles: %v", err)
+	}
+	if containsPath(after, filepath.Join("build", "out.txt")) {
+		t.Errorf("paths = %v, want build/ hidden after the push", after)
+	}
+	if !containsPath(after, "keep.txt") {
+		t.Errorf("paths = %v, want the rest still listed", after)
+	}
+}
+
+func containsPath(paths []string, want string) bool {
+	for _, p := range paths {
+		if p == want {
+			return true
+		}
+	}
+	return false
+}

@@ -107,6 +107,12 @@ type AttachOptions struct {
 	// PluginsHash names the destination, so a changed plugin set lands
 	// somewhere new rather than being skipped as already present.
 	PluginsHash string
+	// Warn receives non-fatal problems worth telling the user about — a git
+	// fixup that did not apply, say. A library writing to os.Stderr itself is
+	// impolite and, in a test run, indistinguishable from a real failure: the
+	// earlier version printed "could not mark /w as a safe git directory"
+	// into CI output from a test that was deliberately inducing it.
+	Warn func(string)
 	// ClientToken marks this window's bridge process inside the container, so
 	// the windows can be told apart in a process list. Without it a window
 	// leaving cannot distinguish its own bridge from another window's — see
@@ -193,7 +199,7 @@ func Attach(ctx context.Context, rt Runtime, id, workspaceDir string, opts Attac
 	if err := ensureGitSafeDirectory(ctx, rt, id, workspaceDir); err != nil {
 		// Not fatal: the editor works without git decorations, and refusing to
 		// open over a failed `git config` would be the wrong trade.
-		fmt.Fprintf(os.Stderr, "indigo: could not mark %s as a safe git directory: %v\n", workspaceDir, err)
+		opts.warn(fmt.Sprintf("could not mark %s as a safe git directory: %v", workspaceDir, err))
 	}
 
 	argv := []string{remote, workspaceDir}
@@ -281,6 +287,14 @@ func OtherWindowsAttached(ctx context.Context, rt Runtime, id, workspaceDir, myT
 // bridgeMarker is what a bridge process's command line contains and a daemon's
 // does not — the workspace path immediately followed by the client flag.
 func bridgeMarker(workspaceDir string) string { return workspaceDir + " --client " }
+
+// warn reports a non-fatal problem, and does nothing when the caller did not
+// ask to hear about them.
+func (o AttachOptions) warn(msg string) {
+	if o.Warn != nil {
+		o.Warn(msg)
+	}
+}
 
 // ensureGitSafeDirectory lets git operate on the workspace inside the container.
 //

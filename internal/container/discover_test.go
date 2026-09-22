@@ -18,6 +18,8 @@ func TestFindRuntimePrefersPath(t *testing.T) {
 	prev := runtimeCandidates
 	runtimeCandidates = func() []string { return nil }
 	t.Cleanup(func() { runtimeCandidates = prev })
+	// The real lookPath, deliberately: this test is about PATH being consulted
+	// first, and dir is the only entry in it.
 
 	got, offPath, err := FindRuntime()
 	if err != nil {

@@ -229,6 +229,7 @@ func connect(workDir string) (*client.RPC, error) {
 		ServerPath:  projectServerPath,
 		ClientToken: clientToken,
 		Locate:      container.LocateServerBinary,
+		Warn:        func(msg string) { fmt.Fprintf(os.Stderr, "indigo: %s\n", msg) },
 	}
 
 	// Plugins run wherever the server runs, so the user's have to be carried

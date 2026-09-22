@@ -19,7 +19,7 @@ import (
 // found, which is what decides whether the devcontainer CLI needs telling.
 func FindRuntime() (path string, offPath bool, err error) {
 	for _, name := range []string{"docker", "podman"} {
-		if p, lookErr := exec.LookPath(name); lookErr == nil {
+		if p, lookErr := lookPath(name); lookErr == nil {
 			return p, false, nil
 		}
 	}
@@ -30,6 +30,15 @@ func FindRuntime() (path string, offPath bool, err error) {
 	}
 	return "", false, ErrNoRuntime
 }
+
+// lookPath is a seam, so a test can make discovery find nothing whatever the
+// machine running it has installed.
+//
+// Emptying PATH is not enough and was the actual CI failure: the tests trimmed
+// PATH to /bin:/usr/bin so shell fixtures would still work, which is empty of
+// container runtimes on macOS and is exactly where Ubuntu puts docker. The
+// tests passed locally and failed on every Linux runner.
+var lookPath = exec.LookPath
 
 // ErrNoRuntime says the thing the CLI's own message does not: that what is
 // missing is a container engine, and which ones would do.

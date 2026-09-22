@@ -3,6 +3,7 @@ package container
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -371,9 +372,13 @@ func TestRuntimeOverrideIsHonoured(t *testing.T) {
 func noRuntime(t *testing.T) {
 	t.Helper()
 	t.Setenv("INDIGO_DOCKER", "")
-	t.Setenv("PATH", "/bin:/usr/bin")
 	t.Setenv("HOME", t.TempDir())
-	prev := runtimeCandidates
+	// Both discovery routes are stubbed rather than steered through the
+	// environment. PATH cannot do this job: it has to keep /bin and /usr/bin
+	// for the shell fixtures, and /usr/bin is precisely where Linux installs
+	// docker — which is why this passed on macOS and failed on every CI run.
+	prevLook, prevCandidates := lookPath, runtimeCandidates
+	lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 	runtimeCandidates = func() []string { return nil }
-	t.Cleanup(func() { runtimeCandidates = prev })
+	t.Cleanup(func() { lookPath, runtimeCandidates = prevLook, prevCandidates })
 }

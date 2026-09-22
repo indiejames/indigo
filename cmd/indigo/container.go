@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/indiejames/indigo/internal/app"
@@ -224,12 +225,26 @@ func connect(workDir string) (*client.RPC, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), attachTimeout)
 	defer cancel()
 	clientToken = newClientToken()
-	stream, err := container.Attach(ctx, container.Docker{User: remoteUser}, containerName, workDir,
-		container.AttachOptions{
-			ServerPath:  projectServerPath,
-			ClientToken: clientToken,
-			Locate:      container.LocateServerBinary,
-		})
+	opts := container.AttachOptions{
+		ServerPath:  projectServerPath,
+		ClientToken: clientToken,
+		Locate:      container.LocateServerBinary,
+	}
+
+	// Plugins run wherever the server runs, so the user's have to be carried
+	// in. Failing to stage them is not worth refusing to open an editor over:
+	// a session without plugins still edits files.
+	if staged, err := stagePluginsForContainer(); err != nil {
+		fmt.Fprintf(os.Stderr, "indigo: could not prepare plugins for the container: %v\n", err)
+	} else if staged != nil {
+		defer os.RemoveAll(staged.Dir) //nolint:errcheck
+		opts.PluginsDir, opts.PluginsHash = staged.Dir, staged.Hash
+		if msg := staged.Describe(); msg != "" {
+			fmt.Fprintf(os.Stderr, "indigo: %s\n", msg)
+		}
+	}
+
+	stream, err := container.Attach(ctx, container.Docker{User: remoteUser}, containerName, workDir, opts)
 	if err != nil {
 		return nil, fmt.Errorf("attach to container %s: %w", containerName, err)
 	}
@@ -304,3 +319,42 @@ const (
 	// a container stop.
 	containerStopTimeout = 60 * time.Second
 )
+
+// stagePluginsForContainer prepares the user's plugins for the container's
+// platform. Returns nil when there is nothing to carry over.
+//
+// The container's architecture is asked of the container rather than assumed
+// from the host's: an arm64 Mac can perfectly well run an amd64 image.
+func stagePluginsForContainer() (*container.StagedPlugins, error) {
+	hostDir, err := pluginsHostDir()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	goarch, err := (container.Docker{User: remoteUser}).Arch(ctx, containerName)
+	if err != nil {
+		return nil, err
+	}
+	staged, err := container.StagePlugins(hostDir, "linux", goarch)
+	if err != nil {
+		return nil, err
+	}
+	if staged.Dir == "" {
+		return nil, nil
+	}
+	return staged, nil
+}
+
+// pluginsHostDir is where this machine keeps installed plugins, matching the
+// server's own resolution so the two cannot drift.
+func pluginsHostDir() (string, error) {
+	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
+		return filepath.Join(d, "indigo", "plugins"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "indigo", "plugins"), nil
+}

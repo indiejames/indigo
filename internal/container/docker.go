@@ -113,6 +113,12 @@ func (d Docker) FileExists(ctx context.Context, id, path string) (bool, error) {
 	return true, nil
 }
 
+// Run executes argv in the container and reports whether it succeeded.
+func (d Docker) Run(ctx context.Context, id string, env, argv []string) error {
+	_, err := d.output(ctx, execArgs(id, d.User, env, argv)...)
+	return err
+}
+
 // ProcessCount counts processes in the container whose command line contains
 // `contains` and, when `excluding` is non-empty, does not contain it.
 //
@@ -157,6 +163,14 @@ func (d Docker) env() []string {
 	return childEnv(path, offPath)
 }
 
+// CopyDirIn copies a directory in. No chmod afterwards: `docker cp` preserves
+// modes, and the staging directory already has the binaries executable and the
+// manifests not.
+func (d Docker) CopyDirIn(ctx context.Context, id, localDir, remoteDir string) error {
+	_, err := d.output(ctx, copyArgs(id, localDir, remoteDir)...)
+	return err
+}
+
 func (d Docker) CopyIn(ctx context.Context, id, localPath, remotePath string) error {
 	if _, err := d.output(ctx, copyArgs(id, localPath, remotePath)...); err != nil {
 		return err
@@ -189,8 +203,15 @@ func (d Docker) CopyIn(ctx context.Context, id, localPath, remotePath string) er
 // mixing it into the capnp bytes would corrupt the wire and lose the diagnostic
 // in the same move.
 func (d Docker) Exec(ctx context.Context, id string, argv []string) (io.ReadWriteCloser, error) {
+	return d.ExecEnv(ctx, id, nil, argv)
+}
+
+// ExecEnv is Exec with extra environment for the started process. The daemon
+// the bridge spawns inherits it, which is how INDIGO_PLUGINS_DIR reaches the
+// server without the bridge needing to know what it means.
+func (d Docker) ExecEnv(ctx context.Context, id string, env, argv []string) (io.ReadWriteCloser, error) {
 	procCtx, procCancel := context.WithCancel(context.WithoutCancel(ctx))
-	cmd := exec.CommandContext(procCtx, d.bin(), execArgs(id, d.User, nil, argv)...)
+	cmd := exec.CommandContext(procCtx, d.bin(), execArgs(id, d.User, env, argv)...)
 	cmd.Env = d.env()
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

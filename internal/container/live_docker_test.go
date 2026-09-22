@@ -22,6 +22,26 @@ import (
 // stream untouched, whether a CGO_ENABLED=0 binary really runs on a musl image,
 // and whether a server started this way can serve a full editing session.
 
+// buildContainerServer cross-builds the container-side server for goarch.
+//
+// Built here rather than read from dist/ because dist/ is produced by a make
+// target, and a source change that has not been through it leaves these tests
+// exercising a *previous* binary. That cost real debugging time once: a server
+// built before INDIGO_PLUGINS_DIR existed silently ignored it, and the symptom
+// — plugins simply not starting — looked exactly like the bug under
+// investigation. Go's build cache makes the rebuild cheap after the first.
+func buildContainerServer(t *testing.T, goarch string) string {
+	t.Helper()
+	out := filepath.Join(t.TempDir(), "indigo-server-linux-"+goarch)
+	cmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", out, "../../cmd/indigo-server")
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+goarch)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		t.Skipf("cannot cross-build the container server for %s: %v", goarch, err)
+	}
+	return out
+}
+
 // liveRuntime skips unless docker answers, and returns it.
 func liveRuntime(t *testing.T) Docker {
 	t.Helper()
@@ -84,10 +104,7 @@ func TestLiveAttachServesASessionOnAlpine(t *testing.T) {
 	}
 	t.Logf("container reports %s", goarch)
 
-	local := filepath.Join("..", "..", "dist", "indigo-server-linux-"+goarch)
-	if _, err := os.Stat(local); err != nil {
-		t.Skipf("no server binary for %s — run `make build-container-server`", goarch)
-	}
+	local := buildContainerServer(t, goarch)
 
 	stream, err := Attach(ctx, d, name, "/workspace", AttachOptions{
 		Locate: func(string) (string, error) { return local, nil },
@@ -147,10 +164,7 @@ func TestLiveBinaryIsReusedAcrossAttaches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Arch: %v", err)
 	}
-	local := filepath.Join("..", "..", "dist", "indigo-server-linux-"+goarch)
-	if _, err := os.Stat(local); err != nil {
-		t.Skipf("no server binary for %s", goarch)
-	}
+	local := buildContainerServer(t, goarch)
 	hash, err := hashFile(local)
 	if err != nil {
 		t.Fatal(err)
@@ -241,10 +255,7 @@ func TestLiveDevcontainerUpAndAttach(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Arch: %v", err)
 	}
-	local := filepath.Join("..", "..", "dist", "indigo-server-linux-"+goarch)
-	if _, err := os.Stat(local); err != nil {
-		t.Skipf("no server binary for %s — run `make build-container-server`", goarch)
-	}
+	local := buildContainerServer(t, goarch)
 
 	rt := Docker{Command: d.Command, User: res.RemoteUser}
 	stream, err := Attach(ctx, rt, res.ContainerID, res.RemoteWorkspaceFolder, AttachOptions{
@@ -365,10 +376,7 @@ func TestLiveAttachAsNonRootUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Arch: %v", err)
 	}
-	local := filepath.Join("..", "..", "dist", "indigo-server-linux-"+goarch)
-	if _, err := os.Stat(local); err != nil {
-		t.Skipf("no server binary for %s", goarch)
-	}
+	local := buildContainerServer(t, goarch)
 
 	// The whole point: attach as the non-root user.
 	rt := Docker{Command: d.Command, User: "dev"}
@@ -443,11 +451,7 @@ func TestExecSurvivesTheSetupContextBeingCancelled(t *testing.T) {
 		cancelSetup()
 		t.Fatalf("Arch: %v", err)
 	}
-	local := filepath.Join("..", "..", "dist", "indigo-server-linux-"+goarch)
-	if _, err := os.Stat(local); err != nil {
-		cancelSetup()
-		t.Skipf("no server binary for %s", goarch)
-	}
+	local := buildContainerServer(t, goarch)
 
 	stream, err := Attach(setupCtx, d, name, "/workspace", AttachOptions{
 		Locate: func(string) (string, error) { return local, nil },
@@ -514,10 +518,7 @@ func TestLiveTwoAttachesShareOneServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Arch: %v", err)
 	}
-	local := filepath.Join("..", "..", "dist", "indigo-server-linux-"+goarch)
-	if _, err := os.Stat(local); err != nil {
-		t.Skipf("no server binary for %s", goarch)
-	}
+	local := buildContainerServer(t, goarch)
 	opts := AttachOptions{Locate: func(string) (string, error) { return local, nil }}
 
 	first, err := Attach(ctx, d, name, "/workspace", opts)
@@ -600,10 +601,7 @@ func TestLiveDaemonExitsWhenTheLastWindowLeaves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Arch: %v", err)
 	}
-	local := filepath.Join("..", "..", "dist", "indigo-server-linux-"+goarch)
-	if _, err := os.Stat(local); err != nil {
-		t.Skipf("no server binary for %s", goarch)
-	}
+	local := buildContainerServer(t, goarch)
 	opts := AttachOptions{Locate: func(string) (string, error) { return local, nil }}
 
 	daemons := func() string {
@@ -675,10 +673,7 @@ func TestLiveServerRunningTracksTheDaemon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Arch: %v", err)
 	}
-	local := filepath.Join("..", "..", "dist", "indigo-server-linux-"+goarch)
-	if _, err := os.Stat(local); err != nil {
-		t.Skipf("no server binary for %s", goarch)
-	}
+	local := buildContainerServer(t, goarch)
 	opts := AttachOptions{Locate: func(string) (string, error) { return local, nil }}
 
 	// Nothing attached yet.
@@ -791,10 +786,7 @@ func TestLiveOtherWindowsAttachedIsInstantAndCorrect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Arch: %v", err)
 	}
-	local := filepath.Join("..", "..", "dist", "indigo-server-linux-"+goarch)
-	if _, err := os.Stat(local); err != nil {
-		t.Skipf("no server binary for %s", goarch)
-	}
+	local := buildContainerServer(t, goarch)
 	locate := func(string) (string, error) { return local, nil }
 
 	first, err := Attach(ctx, d, name, "/workspace", AttachOptions{Locate: locate, ClientToken: "tokenA"})
@@ -855,4 +847,175 @@ func TestLiveOtherWindowsAttachedIsInstantAndCorrect(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	first.Close() //nolint:errcheck
+}
+
+// TestLivePluginsReachTheContainer is the end of the plugin story: a plugin
+// installed on the host has to be running inside the container, because that is
+// where the server is.
+//
+// Asserted on the plugin *process*, not just on the files arriving. Copying a
+// binary in proves nothing — the whole failure this fixes was a container
+// session silently having no plugins, and a staged directory nobody loads looks
+// exactly the same from outside.
+//
+// Run as a **non-root user**, which is what a devcontainer's remoteUser
+// normally is. An earlier version ran as root and passed while plugins were in
+// fact unreachable for everyone else: the staged directory arrived 0700 and
+// only root could read it. Testing the easy case is how that survived.
+func TestLivePluginsReachTheContainer(t *testing.T) {
+	d := liveRuntime(t)
+	t.Setenv("INDIGO_LOG_DIR", t.TempDir())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	name := startLiveContainer(t, d, "alpine:latest", t.TempDir())
+	goarch, err := d.Arch(ctx, name)
+	if err != nil {
+		t.Fatalf("Arch: %v", err)
+	}
+	local := buildContainerServer(t, goarch)
+
+	// A non-root user to run the server as, as a devcontainer would.
+	if out, err := exec.CommandContext(ctx, d.bin(), "exec", name,
+		"adduser", "-D", "-u", "1000", "dev").CombinedOutput(); err != nil {
+		t.Skipf("cannot create a non-root user: %v: %s", err, out)
+	}
+	asDev := Docker{Command: d.Command, User: "dev"}
+
+	// A plugin built for the container, the way `make build-plugins-linux`
+	// produces them.
+	hostPlugins := t.TempDir()
+	pluginDir := filepath.Join(hostPlugins, "hello")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binName := "hello-linux-" + goarch
+	build := exec.CommandContext(ctx, "go", "build", "-o", filepath.Join(pluginDir, binName), "../../plugins/hello")
+	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+goarch)
+	build.Stderr = os.Stderr
+	if err := build.Run(); err != nil {
+		t.Skipf("cannot cross-build the hello plugin: %v", err)
+	}
+	manifest, err := os.ReadFile("../../plugins/hello/plugin.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.toml"), manifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	staged, err := StagePlugins(hostPlugins, "linux", goarch)
+	if err != nil {
+		t.Fatalf("StagePlugins: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(staged.Dir) }) //nolint:errcheck
+	if len(staged.Staged) != 1 {
+		t.Fatalf("staged %v, want the hello plugin (skipped: %v)", staged.Staged, staged.Skipped)
+	}
+
+	stream, err := Attach(ctx, asDev, name, "/workspace", AttachOptions{
+		Locate:      func(string) (string, error) { return local, nil },
+		PluginsDir:  staged.Dir,
+		PluginsHash: staged.Hash,
+		ClientToken: "plugintest",
+	})
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	defer stream.Close() //nolint:errcheck
+
+	r, err := client.DialStream(stream)
+	if err != nil {
+		t.Fatalf("DialStream: %v", err)
+	}
+	if _, _, _, _, _, err := r.OpenFile(ctx, "/workspace/x.txt"); err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+
+	// The server starts plugins asynchronously, so give it a moment.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		running, err := asDev.ProcessCount(ctx, name, binName, "")
+		if err != nil {
+			t.Fatalf("ProcessCount: %v", err)
+		}
+		if running > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			out, _ := exec.CommandContext(ctx, d.bin(), "exec", name,
+				"sh", "-c", "ls -la "+PluginsPath(staged.Hash)+"/hello 2>&1; tail -20 /tmp/indigo-plugins-*.log 2>&1").CombinedOutput()
+			t.Fatalf("the plugin never started in the container.\nstaged at %s:\n%s",
+				PluginsPath(staged.Hash), out)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// TestLiveGitWorksInsideTheContainer is the regression for git decorations
+// silently not appearing.
+//
+// The condition is created *inside* the container — a repository owned by root,
+// used by a non-root user — rather than by bind-mounting one from the host.
+// That is deliberate: a first version mounted a host temp directory and git did
+// not trip at all, because how ownership comes across depends on which host
+// filesystem the directory lives on. It reproduced on the user's real
+// repository and not in the test, which is the worst of both. Making the
+// mismatch directly means the precondition is guaranteed rather than hoped for.
+func TestLiveGitWorksInsideTheContainer(t *testing.T) {
+	d := liveRuntime(t)
+	t.Setenv("INDIGO_LOG_DIR", t.TempDir())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	name := startLiveContainer(t, d, "alpine:latest", t.TempDir())
+
+	// git, a non-root user, and a repository that user does not own.
+	setup := exec.CommandContext(ctx, d.bin(), "exec", name, "sh", "-c",
+		"apk add --no-cache git >/dev/null 2>&1 && adduser -D -u 1000 dev && "+
+			"mkdir -p /srv/repo && cd /srv/repo && git init -q && "+
+			"git -c user.email=t@e.com -c user.name=T commit -q --allow-empty -m initial && "+
+			"chmod -R a+rX /srv/repo")
+	if out, err := setup.CombinedOutput(); err != nil {
+		t.Skipf("cannot prepare the image: %v: %s", err, out)
+	}
+
+	gitStatus := func() (string, error) {
+		out, err := exec.CommandContext(ctx, d.bin(), "exec", "-u", "dev", "-w", "/srv/repo", name,
+			"git", "status", "--short").CombinedOutput()
+		return string(out), err
+	}
+
+	// The precondition, asserted rather than assumed: without the fixup git
+	// refuses, and every git-backed decoration with it.
+	out, err := gitStatus()
+	if err == nil {
+		t.Skipf("this git does not enforce the ownership check (%q); nothing to fix here", out)
+	}
+	if !strings.Contains(out, "dubious ownership") {
+		t.Fatalf("git failed for an unexpected reason: %s", out)
+	}
+
+	asDev := Docker{Command: d.Command, User: "dev"}
+	if err := ensureGitSafeDirectory(ctx, asDev, name, "/srv/repo"); err != nil {
+		t.Fatalf("ensureGitSafeDirectory: %v", err)
+	}
+
+	if out, err := gitStatus(); err != nil {
+		t.Fatalf("git still fails after the fixup: %v: %s", err, out)
+	}
+
+	// Applied twice must not accumulate duplicates: a long-lived container gets
+	// attached to many times.
+	if err := ensureGitSafeDirectory(ctx, asDev, name, "/srv/repo"); err != nil {
+		t.Fatalf("second ensureGitSafeDirectory: %v", err)
+	}
+	entries, err := exec.CommandContext(ctx, d.bin(), "exec", "-u", "dev", name,
+		"git", "config", "--global", "--get-all", "safe.directory").Output()
+	if err != nil {
+		t.Fatalf("read safe.directory: %v", err)
+	}
+	if got := strings.TrimSpace(string(entries)); got != "/srv/repo" {
+		t.Errorf("safe.directory = %q, want exactly one entry for the workspace", got)
+	}
 }

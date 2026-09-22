@@ -175,3 +175,28 @@ build-plugins: build-jumpy build-spell build-git build-bookmarks build-npm-versi
         build-bookmarks install-bookmarks uninstall-bookmarks \
         build-npm-versions install-npm-versions uninstall-npm-versions \
         build-plugins
+
+# Cross-build every bundled plugin for Linux and place the binaries alongside
+# the host ones in ~/.config/indigo/plugins.
+#
+# The plugin manifests already declare linux/arm64 and linux/amd64 — the format
+# has always been multi-platform — but `make install-<plugin>` only ever built
+# for the host, so those entries pointed at files nobody had produced. A dev
+# container's server is Linux, and selectBinary picks by the *server's*
+# platform, so without these a container session silently has no plugins.
+#
+# CGO_ENABLED=0 for the same reason as the container server: static binaries
+# run on any base image, glibc or musl.
+PLUGIN_NAMES := hello jumpy indigo-spell indigo-git bookmarks npm-versions
+
+build-plugins-linux:
+	@for name in $(PLUGIN_NAMES); do \
+		for arch in arm64 amd64; do \
+			out=$(HOME)/.config/indigo/plugins/$$name/$$name-linux-$$arch; \
+			mkdir -p $$(dirname $$out); \
+			echo "building $$name for linux/$$arch"; \
+			CGO_ENABLED=0 GOOS=linux GOARCH=$$arch \
+				go build -ldflags="-s -w" -o $$out ./$(PLUGINS_DIR)/$$name || exit 1; \
+		done; \
+		cp $(PLUGINS_DIR)/$$name/plugin.toml $(HOME)/.config/indigo/plugins/$$name/; \
+	done

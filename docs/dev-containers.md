@@ -85,6 +85,40 @@ use it instead of copying anything:
 `customizations.vscode` is the same mechanism — so this is a supported way for a
 project to configure the editor rather than an extension of the format.
 
+## Plugins
+
+Plugins run inside the container, because that is where the server is. indigo
+carries your installed plugins in automatically — but it can only carry a plugin
+that has a build for the container's platform, and `make install-<plugin>` only
+ever builds for your own.
+
+Build the Linux ones once:
+
+```sh
+make build-plugins-linux
+```
+
+That puts linux/arm64 and linux/amd64 binaries beside the host ones in
+`~/.config/indigo/plugins/`, which is what the plugin manifests have always
+declared. A plugin with no matching build is skipped, and indigo says which on
+startup rather than leaving you to notice.
+
+A third-party plugin needs the same: a `linux/<arch>` entry in its `plugin.toml`
+and the binary to go with it.
+
+Nothing goes in `devcontainer.json` — plugins are yours, not the project's, and
+indigo carries them across for you.
+
+### git-backed plugins
+
+indigo marks the workspace as a safe git directory inside the container. Without
+that, git refuses to touch a bind-mounted repository owned by a different uid
+(`detected dubious ownership`), every git command fails, and plugins that shell
+out to git show nothing and explain nothing. VS Code's extension does the same
+fixup; the `devcontainer` CLI does not.
+
+The exception is scoped to your workspace, never `*`.
+
 ## Stopping the container
 
 When the last indigo window closes, the container is stopped — the dev container

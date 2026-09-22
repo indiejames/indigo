@@ -72,6 +72,38 @@ func (localRuntime) ProcessCount(ctx context.Context, _, contains, excluding str
 	return strconv.Atoi(strings.TrimSpace(string(out)))
 }
 
+// Run executes a command on this machine, standing in for the container.
+//
+// Deliberately a no-op for the git fixup: localRuntime's "container" is the
+// developer's own machine, and writing to their real global git config would be
+// an unpleasant surprise from a test.
+func (localRuntime) Run(_ context.Context, _ string, _, argv []string) error {
+	return nil
+}
+
+// CopyDirIn copies a directory tree into the stand-in "container".
+func (l localRuntime) CopyDirIn(_ context.Context, _, localDir, remoteDir string) error {
+	target := l.path(remoteDir)
+	return filepath.WalkDir(localDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(localDir, path)
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(target, rel)
+		if d.IsDir() {
+			return os.MkdirAll(dst, 0o755)
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		return copyFile(path, dst, info.Mode().Perm())
+	})
+}
+
 func (l localRuntime) CopyIn(_ context.Context, _, localPath, remotePath string) error {
 	data, err := os.ReadFile(localPath)
 	if err != nil {
@@ -84,7 +116,11 @@ func (l localRuntime) CopyIn(_ context.Context, _, localPath, remotePath string)
 	return os.WriteFile(target, data, 0o755)
 }
 
-func (l localRuntime) Exec(ctx context.Context, _ string, argv []string) (io.ReadWriteCloser, error) {
+func (l localRuntime) Exec(ctx context.Context, id string, argv []string) (io.ReadWriteCloser, error) {
+	return l.ExecEnv(ctx, id, nil, argv)
+}
+
+func (l localRuntime) ExecEnv(ctx context.Context, _ string, env, argv []string) (io.ReadWriteCloser, error) {
 	// Detached from ctx exactly as Docker.Exec is: ctx bounds the start, the
 	// stream owns the process. A fake with different lifetime semantics from
 	// the real thing is how the cancel-kills-the-session bug survived.
@@ -100,6 +136,7 @@ func (l localRuntime) Exec(ctx context.Context, _ string, argv []string) (io.Rea
 		procCancel()
 		return nil, err
 	}
+	cmd.Env = append(os.Environ(), env...)
 	cmd.Stderr = os.Stderr
 	// Same process group treatment as Docker.Exec, so this stands in for it
 	// faithfully — a server killed without its plugin children would leave them

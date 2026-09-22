@@ -43,6 +43,12 @@ type Runtime interface {
 	// CopyIn copies localPath into the container at remotePath and makes it
 	// executable.
 	CopyIn(ctx context.Context, id, localPath, remotePath string) error
+	// CopyDirIn copies a local directory into the container at remoteDir,
+	// preserving file modes.
+	CopyDirIn(ctx context.Context, id, localDir, remoteDir string) error
+	// Run executes argv in the container and reports whether it succeeded,
+	// with env entries ("K=V") available to it.
+	Run(ctx context.Context, id string, env, argv []string) error
 	// ProcessCount counts processes in the container whose command line
 	// contains `contains` and does not contain `excluding` (ignored when
 	// empty).
@@ -50,6 +56,8 @@ type Runtime interface {
 	// Exec starts argv inside the container with no TTY, and returns its
 	// stdin/stdout as one stream. Closing the stream ends the process.
 	Exec(ctx context.Context, id string, argv []string) (io.ReadWriteCloser, error)
+	// ExecEnv is Exec with extra environment entries ("K=V") for the process.
+	ExecEnv(ctx context.Context, id string, env, argv []string) (io.ReadWriteCloser, error)
 }
 
 // ServerPath is where a server binary is placed inside the container.
@@ -93,6 +101,12 @@ func hashFile(path string) (string, error) {
 
 // AttachOptions carries the parts of an attach that vary.
 type AttachOptions struct {
+	// PluginsDir is a staged plugin directory on the host to carry into the
+	// container. Empty means no plugins.
+	PluginsDir string
+	// PluginsHash names the destination, so a changed plugin set lands
+	// somewhere new rather than being skipped as already present.
+	PluginsHash string
 	// ClientToken marks this window's bridge process inside the container, so
 	// the windows can be told apart in a process list. Without it a window
 	// leaving cannot distinguish its own bridge from another window's — see
@@ -143,6 +157,8 @@ func Attach(ctx context.Context, rt Runtime, id, workspaceDir string, opts Attac
 		remote = ServerPath(goarch, hash)
 	}
 
+	var env []string
+
 	present, err := rt.FileExists(ctx, id, remote)
 	if err != nil {
 		return nil, fmt.Errorf("check for %s in container: %w", remote, err)
@@ -156,11 +172,35 @@ func Attach(ctx context.Context, rt Runtime, id, workspaceDir string, opts Attac
 		}
 	}
 
+	if opts.PluginsDir != "" && opts.PluginsHash != "" {
+		remotePlugins := PluginsPath(opts.PluginsHash)
+		present, err := rt.FileExists(ctx, id, remotePlugins)
+		if err != nil {
+			return nil, fmt.Errorf("check for plugins in container: %w", err)
+		}
+		if !present {
+			if err := rt.CopyDirIn(ctx, id, opts.PluginsDir, remotePlugins); err != nil {
+				return nil, fmt.Errorf("copy plugins into container: %w", err)
+			}
+		}
+		// The server reads this; the bridge only has to pass it on, which it
+		// does by inheritance when it starts the daemon.
+		env = append(env, "INDIGO_PLUGINS_DIR="+remotePlugins)
+	}
+
+	// Done before the server starts, so the first thing a git-aware plugin does
+	// already works.
+	if err := ensureGitSafeDirectory(ctx, rt, id, workspaceDir); err != nil {
+		// Not fatal: the editor works without git decorations, and refusing to
+		// open over a failed `git config` would be the wrong trade.
+		fmt.Fprintf(os.Stderr, "indigo: could not mark %s as a safe git directory: %v\n", workspaceDir, err)
+	}
+
 	argv := []string{remote, workspaceDir}
 	if opts.ClientToken != "" {
 		argv = append(argv, "--client", opts.ClientToken)
 	}
-	stream, err := rt.Exec(ctx, id, argv)
+	stream, err := rt.ExecEnv(ctx, id, env, argv)
 	if err != nil {
 		return nil, fmt.Errorf("start server in container: %w", err)
 	}
@@ -241,3 +281,34 @@ func OtherWindowsAttached(ctx context.Context, rt Runtime, id, workspaceDir, myT
 // bridgeMarker is what a bridge process's command line contains and a daemon's
 // does not — the workspace path immediately followed by the client flag.
 func bridgeMarker(workspaceDir string) string { return workspaceDir + " --client " }
+
+// ensureGitSafeDirectory lets git operate on the workspace inside the container.
+//
+// A bind-mounted workspace does not carry its ownership across — on Docker
+// Desktop for macOS everything inside reports as root regardless of who wrote
+// it — so a container user of any other uid trips git's dubious-ownership
+// check:
+//
+//	fatal: detected dubious ownership in repository at '/workspaces/proj'
+//
+// Every git command then fails, which for a plugin that shells out to git means
+// no decorations and, since it swallows the error, no explanation either. That
+// is exactly how it presented.
+//
+// VS Code's Dev Containers extension does this same fixup; the devcontainer CLI
+// does not — checked, `devcontainer up` leaves safe.directory unset — so it
+// falls to whoever is driving the container, which here is indigo.
+//
+// The exception is scoped to this one workspace, never "*": the check exists to
+// stop a repository someone else controls running hooks as you, and the
+// workspace the user explicitly opened is precisely the case it is meant to
+// allow.
+func ensureGitSafeDirectory(ctx context.Context, rt Runtime, id, workspaceDir string) error {
+	// Added only when absent, so attaching repeatedly to a long-lived container
+	// does not accumulate duplicates. The path travels in the environment to
+	// keep quoting out of it.
+	const script = `git config --global --get-all safe.directory 2>/dev/null | ` +
+		`grep -qxF -- "$INDIGO_WS" || ` +
+		`git config --global --add safe.directory "$INDIGO_WS"`
+	return rt.Run(ctx, id, []string{"INDIGO_WS=" + workspaceDir}, []string{"/bin/sh", "-c", script})
+}

@@ -32,6 +32,11 @@ type fakeRuntime struct {
 	execArgv        []string
 	processCounts   map[string]int
 	processCountErr error
+	copiedDirTo     string
+	execEnv         []string
+	ranEnv          []string
+	ranArgv         []string
+	runErr          error
 }
 
 func (f *fakeRuntime) Arch(context.Context, string) (string, error) {
@@ -58,8 +63,26 @@ func (f *fakeRuntime) ProcessCount(_ context.Context, _, contains, excluding str
 	return 0, f.processCountErr
 }
 
-func (f *fakeRuntime) Exec(_ context.Context, _ string, argv []string) (io.ReadWriteCloser, error) {
+func (f *fakeRuntime) Run(_ context.Context, _ string, env, argv []string) error {
+	f.calls = append(f.calls, "run")
+	f.ranEnv = append(f.ranEnv, env...)
+	f.ranArgv = append(f.ranArgv, strings.Join(argv, " "))
+	return f.runErr
+}
+
+func (f *fakeRuntime) CopyDirIn(_ context.Context, _, localDir, remoteDir string) error {
+	f.calls = append(f.calls, "copyDir")
+	f.copiedDirTo = remoteDir
+	return f.copyErr
+}
+
+func (f *fakeRuntime) Exec(ctx context.Context, id string, argv []string) (io.ReadWriteCloser, error) {
+	return f.ExecEnv(ctx, id, nil, argv)
+}
+
+func (f *fakeRuntime) ExecEnv(_ context.Context, _ string, env, argv []string) (io.ReadWriteCloser, error) {
 	f.calls = append(f.calls, "exec")
+	f.execEnv = env
 	f.execArgv = argv
 	if f.execErr != nil {
 		return nil, f.execErr
@@ -99,7 +122,9 @@ func TestAttachCopiesThenStartsTheServer(t *testing.T) {
 	}
 	defer stream.Close() //nolint:errcheck
 
-	want := []string{"arch", "exists:" + remote, "copy", "exec"}
+	// "run" is the git safe.directory fixup, which has to land before the
+	// server starts — see TestAttachMarksTheWorkspaceSafeForGit.
+	want := []string{"arch", "exists:" + remote, "copy", "run", "exec"}
 	if strings.Join(rt.calls, ",") != strings.Join(want, ",") {
 		t.Errorf("calls = %v, want %v", rt.calls, want)
 	}
@@ -519,4 +544,55 @@ func TestAttachMarksItsBridge(t *testing.T) {
 	if got := strings.Join(rt.execArgv, " "); !strings.Contains(got, "--client tok123") {
 		t.Errorf("exec argv = %q, want it to carry the client token", got)
 	}
+}
+
+// TestAttachMarksTheWorkspaceSafeForGit is a regression test for git decorations
+// silently not appearing in a container.
+//
+// A bind-mounted workspace does not carry ownership across, so a container user
+// of a different uid trips git's dubious-ownership check and every git command
+// fails. A plugin that shells out to git then shows nothing and explains
+// nothing. VS Code's extension does this fixup; the devcontainer CLI does not.
+func TestAttachMarksTheWorkspaceSafeForGit(t *testing.T) {
+	rt := &fakeRuntime{arch: "arm64", exists: true}
+	locate, _, _ := locateReal(t, "a server binary")
+
+	stream, err := Attach(context.Background(), rt, "c1", "/workspaces/proj",
+		AttachOptions{Locate: locate})
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	defer stream.Close() //nolint:errcheck
+
+	joined := strings.Join(rt.ranArgv, " ")
+	if !strings.Contains(joined, "safe.directory") {
+		t.Fatalf("ran %v, want a safe.directory fixup", rt.ranArgv)
+	}
+	// Scoped to this workspace. "*" would disable a protection that exists to
+	// stop a repository someone else controls running hooks as you.
+	if strings.Contains(joined, "safe.directory *") || strings.Contains(joined, `"*"`) {
+		t.Errorf("ran %v, want the exception scoped to the workspace", rt.ranArgv)
+	}
+	if !contains(rt.ranEnv, "INDIGO_WS=/workspaces/proj") {
+		t.Errorf("env = %v, want the workspace path passed out of band", rt.ranEnv)
+	}
+	// Ordering: the fixup must land before the server starts, or the first
+	// thing a git plugin does still fails.
+	runAt, execAt := indexOf(rt.calls, "run"), indexOf(rt.calls, "exec")
+	if runAt < 0 || execAt < 0 || runAt > execAt {
+		t.Errorf("calls = %v, want the git fixup before the server starts", rt.calls)
+	}
+}
+
+// TestAttachSurvivesAFailedGitFixup: a container without git, or a read-only
+// home, must still give you an editor.
+func TestAttachSurvivesAFailedGitFixup(t *testing.T) {
+	rt := &fakeRuntime{arch: "arm64", exists: true, runErr: errors.New("git: not found")}
+	locate, _, _ := locateReal(t, "a server binary")
+
+	stream, err := Attach(context.Background(), rt, "c1", "/w", AttachOptions{Locate: locate})
+	if err != nil {
+		t.Fatalf("Attach failed over a git fixup it should only have warned about: %v", err)
+	}
+	stream.Close() //nolint:errcheck
 }

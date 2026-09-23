@@ -88,20 +88,31 @@ func ServerPath(goarch, contentHash string) string {
 // builds make it flip between them; either answers --mcp.
 const StableServerLink = "/tmp/.indigo-server"
 
-// linkStableServer points StableServerLink at remote. Run as the container
-// user, the same user that will follow it; paths travel in the environment to
-// keep quoting out of the script.
-func linkStableServer(ctx context.Context, rt Runtime, id, remote string) error {
-	env := []string{"INDIGO_SRV=" + remote, "INDIGO_LINK=" + StableServerLink}
+// StablePluginsLink is the same idea for the plugins Attach last carried in.
+//
+// A window's bridge hands its server INDIGO_PLUGINS_DIR, but a server started
+// with no window — by an agent's `indigo-server --mcp`, which connects as soon
+// as the agent launches — has no bridge to hand it anything, and so started
+// with no plugins; every window attaching afterwards joined that server and
+// had none either. indigo-server falls back to this link when the variable is
+// unset (see cmd/indigo-server), so the server gets the same plugins whichever
+// way it was started.
+const StablePluginsLink = "/tmp/.indigo-plugins"
+
+// linkStable points link at target. Run as the container user, the same user
+// that will follow it; paths travel in the environment to keep quoting out of
+// the script.
+func linkStable(ctx context.Context, rt Runtime, id, target, link string) error {
+	env := []string{"INDIGO_TARGET=" + target, "INDIGO_LINK=" + link}
 	return rt.Run(ctx, id, env, []string{"/bin/sh", "-c", stableLinkScript})
 }
 
-// stableLinkScript points the link at $INDIGO_SRV, replacing any existing one.
+// stableLinkScript points the link at $INDIGO_TARGET, replacing any existing one.
 // -n stops ln from following an existing link: if it ever pointed at a
 // directory, ln would otherwise create the new link inside it. Replacement is
 // an unlink followed by a symlink, so an agent spawning the server at that
 // exact instant can miss it; it only happens when a window attaches.
-const stableLinkScript = `ln -sfn -- "$INDIGO_SRV" "$INDIGO_LINK"`
+const stableLinkScript = `ln -sfn -- "$INDIGO_TARGET" "$INDIGO_LINK"`
 
 // hashFile returns a short content hash of the file at path.
 //
@@ -148,6 +159,12 @@ type AttachOptions struct {
 	// Locate finds a local binary to copy in, consulted only when the
 	// container does not already have one.
 	Locate func(goarch string) (string, error)
+	// Env is extra environment ("K=V") for the server — devcontainer.json's
+	// remoteEnv, resolved (see ResolveRemoteEnv). It is set on the bridge,
+	// and the daemon a bridge starts inherits it, as do the language servers,
+	// formatters and linters that daemon runs — which is the point: remoteEnv
+	// is how a project puts tools on PATH.
+	Env []string
 }
 
 // Attach makes a server available inside the container and starts it for
@@ -185,7 +202,7 @@ func Attach(ctx context.Context, rt Runtime, id, workspaceDir string, opts Attac
 		remote = ServerPath(goarch, hash)
 	}
 
-	var env []string
+	env := append([]string(nil), opts.Env...)
 
 	present, err := rt.FileExists(ctx, id, remote)
 	if err != nil {
@@ -205,7 +222,7 @@ func Attach(ctx context.Context, rt Runtime, id, workspaceDir string, opts Attac
 	// agent's MCP registration (`indigo-server --mcp`) is the case it exists
 	// for, since ServerPath changes with every build. Not fatal: the editor
 	// itself never uses the link.
-	if err := linkStableServer(ctx, rt, id, remote); err != nil {
+	if err := linkStable(ctx, rt, id, remote, StableServerLink); err != nil {
 		opts.warn(fmt.Sprintf("could not update %s: %v", StableServerLink, err))
 	}
 
@@ -223,6 +240,15 @@ func Attach(ctx context.Context, rt Runtime, id, workspaceDir string, opts Attac
 		// The server reads this; the bridge only has to pass it on, which it
 		// does by inheritance when it starts the daemon.
 		env = append(env, "INDIGO_PLUGINS_DIR="+remotePlugins)
+		if err := linkStable(ctx, rt, id, remotePlugins, StablePluginsLink); err != nil {
+			opts.warn(fmt.Sprintf("could not update %s: %v", StablePluginsLink, err))
+		}
+	} else if err := rt.Run(ctx, id, []string{"INDIGO_LINK=" + StablePluginsLink},
+		[]string{"/bin/sh", "-c", `rm -f -- "$INDIGO_LINK"`}); err != nil {
+		// No plugins to carry this time, so a link left from an earlier attach
+		// would give a server started without a window (an agent's --mcp)
+		// plugins that windows no longer get.
+		opts.warn(fmt.Sprintf("could not remove %s: %v", StablePluginsLink, err))
 	}
 
 	// Done before the server starts, so the first thing a git-aware plugin does

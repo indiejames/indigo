@@ -41,16 +41,20 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/indiejames/indigo/internal/agenttools"
+	"github.com/indiejames/indigo/internal/container"
 	"github.com/indiejames/indigo/internal/debuglog"
 	"github.com/indiejames/indigo/internal/hangdetect"
 	"github.com/indiejames/indigo/internal/server"
 )
 
 func main() {
+	applyRemoteEnvUnsets()
+	usePluginsLinkIfUnset(container.StablePluginsLink)
 	args := os.Args[1:]
 	if len(args) == 2 && args[0] == "--daemon" {
 		runDaemon(args[1])
@@ -84,6 +88,43 @@ func main() {
 		os.Exit(2)
 	}
 	runBridge(args[0])
+}
+
+// applyRemoteEnvUnsets removes the variables devcontainer.json's remoteEnv set
+// to null. The host cannot do it — `docker exec -e` sets variables but cannot
+// remove one the image defines — so it passes their names in
+// container.UnsetEnvVar and this process, the first one inside the container,
+// does it before starting anything. The daemon it starts, and everything the
+// daemon runs, inherit the result.
+func applyRemoteEnvUnsets() {
+	names := os.Getenv(container.UnsetEnvVar)
+	if names == "" {
+		return
+	}
+	for _, name := range strings.Split(names, ",") {
+		if name != "" {
+			os.Unsetenv(name) //nolint:errcheck
+		}
+	}
+	os.Unsetenv(container.UnsetEnvVar) //nolint:errcheck
+}
+
+// usePluginsLinkIfUnset points INDIGO_PLUGINS_DIR at link when nothing set it
+// and the link leads to a directory.
+//
+// A bridge started by a window always carries the variable; a server started by
+// an agent's --mcp did not, and so ran with no plugins — and since windows join
+// whatever server is already running, so did every window after it. Setting it
+// here, for every mode, means a daemon gets the plugins the last attach carried
+// in however it was started: --mcp passes its environment to the daemon it
+// starts. An explicit value always wins.
+func usePluginsLinkIfUnset(link string) {
+	if os.Getenv("INDIGO_PLUGINS_DIR") != "" {
+		return
+	}
+	if info, err := os.Stat(link); err == nil && info.IsDir() {
+		os.Setenv("INDIGO_PLUGINS_DIR", link) //nolint:errcheck
+	}
 }
 
 // runDaemon is the server proper: one per workspace, on a unix socket, exiting

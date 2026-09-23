@@ -42,3 +42,25 @@ func TestUsePluginsLinkIfUnset(t *testing.T) {
 		}
 	})
 }
+
+// remoteEnv's null entries arrive as names in INDIGO_UNSET_ENV, because the
+// host's `docker exec -e` cannot remove a variable the image defines. This
+// process must remove them — and the carrier — before starting the daemon, so
+// nothing it runs inherits the image's value.
+func TestApplyRemoteEnvUnsets(t *testing.T) {
+	t.Setenv("IMAGE_ONLY_A", "from the image")
+	t.Setenv("IMAGE_ONLY_B", "from the image")
+	t.Setenv("KEEP_ME", "kept")
+	t.Setenv("INDIGO_UNSET_ENV", "IMAGE_ONLY_A,IMAGE_ONLY_B")
+
+	applyRemoteEnvUnsets()
+
+	for _, name := range []string{"IMAGE_ONLY_A", "IMAGE_ONLY_B", "INDIGO_UNSET_ENV"} {
+		if v, ok := os.LookupEnv(name); ok {
+			t.Errorf("%s still set (%q)", name, v)
+		}
+	}
+	if os.Getenv("KEEP_ME") != "kept" {
+		t.Error("a variable not listed was removed")
+	}
+}

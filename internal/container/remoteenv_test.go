@@ -32,15 +32,21 @@ func TestResolveRemoteEnvForms(t *testing.T) {
 		"A_LOCAL":     strp("${localEnv:HOME_ON_HOST}/cache"),
 		"C_EMPTY":     strp("x${containerEnv:MISSING}y"),
 		"D_OTHER_VAR": strp("${containerWorkspaceFolder}/bin"),
-		"E_UNSET":     nil, // the spec's "unset": not expressible via -e, dropped
+		"E_UNSET":     nil, // the spec's "unset": carried to indigo-server by name
 		"F_PLAIN":     strp("literal"),
-	}, map[string]string{}, func(k string) (string, bool) { v, ok := local[k]; return v, ok })
+		"G_UNSET_TOO": nil,
+		"H_PRESENT":   strp("[${containerEnv:EMPTY:fallback}]"),
+	}, map[string]string{"EMPTY": ""}, func(k string) (string, bool) { v, ok := local[k]; return v, ok })
 	want := []string{
 		"A_LOCAL=/Users/me/cache",
 		"B_DEFAULT=fallback",
 		"C_EMPTY=xy",
 		"D_OTHER_VAR=${containerWorkspaceFolder}/bin",
 		"F_PLAIN=literal",
+		// Present but empty is kept empty, as the devcontainer CLI does; the
+		// default is only for an absent variable.
+		"H_PRESENT=[]",
+		UnsetEnvVar + "=E_UNSET,G_UNSET_TOO",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got\n %q\nwant\n %q", got, want)
@@ -119,5 +125,37 @@ func TestWithoutContainerEnvRefsKeepsPathIntact(t *testing.T) {
 	}), nil, nil)
 	if want := []string{"GOPATH=/go"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("got %q, want %q (PATH must be left to the image)", got, want)
+	}
+}
+
+// remoteEnv values can be secrets. They must reach docker through its
+// environment (`-e NAME`), never its argv (`-e NAME=value`), which any local
+// user can read with ps.
+func TestExecEnvKeepsValuesOffTheCommandLine(t *testing.T) {
+	d := Docker{Command: "docker", User: "vscode"}
+	env := []string{"API_TOKEN=s3cret", "EMPTY=", "PATH=/usr/bin:/extra"}
+	cmd := d.execEnvCommand(context.Background(), "c1", env, []string{"/srv", "/w"})
+
+	args := strings.Join(cmd.Args, " ")
+	if strings.Contains(args, "s3cret") || strings.Contains(args, "/extra") {
+		t.Errorf("a value is on the command line: %q", cmd.Args)
+	}
+	for _, name := range []string{"-e API_TOKEN", "-e EMPTY", "-e PATH"} {
+		if !strings.Contains(args, name) {
+			t.Errorf("command line %q is missing %q", args, name)
+		}
+	}
+	// The values are in docker's environment, after the inherited one so they
+	// win a duplicated name (PATH especially).
+	last := map[string]string{}
+	for _, kv := range cmd.Env {
+		k, v, _ := strings.Cut(kv, "=")
+		last[k] = v
+	}
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		if got, ok := last[k]; !ok || got != v {
+			t.Errorf("docker's environment has %s=%q (present=%v), want %q", k, got, ok, v)
+		}
 	}
 }

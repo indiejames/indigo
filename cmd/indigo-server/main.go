@@ -41,6 +41,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -52,6 +53,7 @@ import (
 )
 
 func main() {
+	applyRemoteEnvUnsets()
 	usePluginsLinkIfUnset(container.StablePluginsLink)
 	args := os.Args[1:]
 	if len(args) == 2 && args[0] == "--daemon" {
@@ -86,6 +88,25 @@ func main() {
 		os.Exit(2)
 	}
 	runBridge(args[0])
+}
+
+// applyRemoteEnvUnsets removes the variables devcontainer.json's remoteEnv set
+// to null. The host cannot do it — `docker exec -e` sets variables but cannot
+// remove one the image defines — so it passes their names in
+// container.UnsetEnvVar and this process, the first one inside the container,
+// does it before starting anything. The daemon it starts, and everything the
+// daemon runs, inherit the result.
+func applyRemoteEnvUnsets() {
+	names := os.Getenv(container.UnsetEnvVar)
+	if names == "" {
+		return
+	}
+	for _, name := range strings.Split(names, ",") {
+		if name != "" {
+			os.Unsetenv(name) //nolint:errcheck
+		}
+	}
+	os.Unsetenv(container.UnsetEnvVar) //nolint:errcheck
 }
 
 // usePluginsLinkIfUnset points INDIGO_PLUGINS_DIR at link when nothing set it

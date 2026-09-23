@@ -242,10 +242,11 @@ type readConfigOutput struct {
 		Customizations struct {
 			Indigo []IndigoCustomizations `json:"indigo"`
 		} `json:"customizations"`
-		// RemoteEnv is raw because its merged shape is not pinned down here:
-		// customizations taught that the merged view can turn an object into
-		// an array of per-source contributions, and guessing wrong would fail
-		// the whole line (see above). mergedRemoteEnv accepts either.
+		// RemoteEnv is one object in the merged view — the CLI builds it with
+		// Object.assign over every source (checked against 0.89.0's source) —
+		// unlike customizations above. Kept raw, and an array accepted too, so
+		// a different shape in another version degrades to "no remoteEnv"
+		// rather than failing the whole line.
 		RemoteEnv json.RawMessage `json:"remoteEnv"`
 	} `json:"mergedConfiguration"`
 }

@@ -302,8 +302,7 @@ func (d Docker) Exec(ctx context.Context, id string, argv []string) (io.ReadWrit
 // server without the bridge needing to know what it means.
 func (d Docker) ExecEnv(ctx context.Context, id string, env, argv []string) (io.ReadWriteCloser, error) {
 	procCtx, procCancel := context.WithCancel(context.WithoutCancel(ctx))
-	cmd := exec.CommandContext(procCtx, d.bin(), execArgs(id, d.User, env, argv)...)
-	cmd.Env = d.env()
+	cmd := d.execEnvCommand(procCtx, id, env, argv)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		procCancel()
@@ -326,6 +325,29 @@ func (d Docker) ExecEnv(ctx context.Context, id string, env, argv []string) (io.
 		return nil, err
 	}
 	return &procStream{cmd: cmd, in: stdin, out: stdout, cancel: procCancel}, nil
+}
+
+// execEnvCommand builds the `docker exec` for ExecEnv with env's values kept
+// off the command line.
+//
+// env is devcontainer.json's remoteEnv, which can hold secrets (tokens,
+// credentials). `-e NAME=value` would put each value in docker's argv, readable
+// by any local user through `ps` for as long as the session lasts. `-e NAME`
+// alone makes the docker CLI take the value from its own environment instead,
+// so the names go on the command line and the values into cmd.Env. Behaviour is
+// otherwise identical, empty values included: docker passes a variable that is
+// set but empty.
+func (d Docker) execEnvCommand(ctx context.Context, id string, env, argv []string) *exec.Cmd {
+	names := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		names = append(names, name)
+	}
+	cmd := exec.CommandContext(ctx, d.bin(), execArgs(id, d.User, names, argv)...)
+	// Appended after the base environment: os/exec keeps the last value for a
+	// duplicated name, so these win over anything this process inherited.
+	cmd.Env = append(d.env(), env...)
+	return cmd
 }
 
 func (d Docker) Stop(ctx context.Context, id string) error {

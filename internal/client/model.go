@@ -1840,6 +1840,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.bufID != m.bufID {
 			return m, nil // stale result from a previous buffer switch; discard
 		}
+		// A list that arrives after the user left Insert mode — Esc while the
+		// request was in flight — must not open the popup. Normal mode has no
+		// key that dismisses it, and it is drawn at the cursor, so it stayed
+		// open and followed the cursor around until the next Insert session.
+		if m.mode != ModeInsert {
+			return m, nil
+		}
 		// Recompute the prefix from the live buffer: the fetch was async and the
 		// cursor may have advanced (auto-trigger debounce), so filter against
 		// what's actually typed now, not what was typed when the fetch started.
@@ -1935,6 +1942,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case triggerCompletionMsg:
 		if msg.seq != m.completionSeq {
 			return m, nil // superseded by a later keystroke
+		}
+		if m.mode != ModeInsert {
+			return m, nil // debounce expired after Esc; see completionsMsg
 		}
 		return m, m.fetchCompletions()
 

@@ -1146,6 +1146,10 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 	return m
 }
 
+// Sized reports whether this Model has been given a window size. Until it has,
+// it renders only "loading…"; see App.ensureActiveSized.
+func (m Model) Sized() bool { return m.width > 0 }
+
 // Dirty reports whether the buffer has unsaved changes.
 func (m Model) Dirty() bool { return m.buf.Dirty() }
 

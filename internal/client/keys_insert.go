@@ -206,6 +206,10 @@ func executeTriggerCompletion(m Model) (tea.Model, tea.Cmd) {
 func executeInsertEsc(m Model) (tea.Model, tea.Cmd) {
 	m.mode = ModeNormal
 	m.sigHelp = nil
+	// The popup belongs to Insert mode, which has the only keys that dismiss
+	// it. handleInsert's own Esc closes an open one first, but leaving Insert
+	// mode must not carry popup state into Normal mode whatever the path.
+	m = m.clearedCompletion()
 	if m.cursor.Col > 0 {
 		m.cursor.Col--
 	}

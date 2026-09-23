@@ -78,6 +78,7 @@ func TestSignatureHelpIgnoredOnBufferOrCursorChange(t *testing.T) {
 // A different buffer is still plainly wrong.
 func TestCompletionsIgnoredOnBufferChangeButNotCursorMove(t *testing.T) {
 	m := staleTestModel()
+	m.mode = ModeInsert // completions only ever apply in Insert mode
 	m.cursor = document.Pos{Line: 2, Col: 5}
 	items := []ClientCompletion{{Label: "main"}}
 
@@ -144,5 +145,50 @@ func TestDocSymbolsPickerUsesTheRequestedBuffer(t *testing.T) {
 	}
 	if open.BufID != m.bufID {
 		t.Errorf("picker labelled with bufID %d, want %d", open.BufID, m.bufID)
+	}
+}
+
+// TestCompletionsAfterLeavingInsertModeAreDiscarded is the regression for a
+// popup left open in Normal mode, following the cursor around: pressing Esc
+// while a completion request was in flight (or before the auto-trigger's
+// debounce expired) let the response open the popup after Insert mode had
+// ended, and Normal mode has no key that closes it.
+func TestCompletionsAfterLeavingInsertModeAreDiscarded(t *testing.T) {
+	m := staleTestModel()
+	m.mode = ModeInsert
+	m.cursor = document.Pos{Line: 2, Col: 5}
+	seq := m.completionSeq
+
+	// Esc before the response arrives.
+	updated, _ := executeInsertEsc(m)
+	m = updated.(Model)
+	if m.mode != ModeNormal {
+		t.Fatalf("mode = %v after Esc, want Normal", m.mode)
+	}
+
+	// "function" matches whatever prefix the cursor is on after Esc ("func" or
+	// none), so only the mode check — not the filter — can keep it closed.
+	updated, _ = m.Update(completionsMsg{items: []ClientCompletion{{Label: "function"}}, bufID: m.bufID})
+	if updated.(Model).completionOn {
+		t.Error("a completion list that arrived after Esc opened the popup in Normal mode")
+	}
+
+	// The debounced trigger firing after Esc must not start a fetch at all.
+	if _, cmd := m.Update(triggerCompletionMsg{seq: seq}); cmd != nil {
+		t.Error("a debounced completion trigger fired after Esc and started a fetch")
+	}
+}
+
+// Leaving Insert mode must not carry an open popup into Normal mode.
+func TestInsertEscClearsCompletionPopup(t *testing.T) {
+	m := staleTestModel()
+	m.mode = ModeInsert
+	m.completionOn = true
+	m.completions = []ClientCompletion{{Label: "main"}}
+	m.completionsRaw = m.completions
+
+	updated, _ := executeInsertEsc(m)
+	if got := updated.(Model); got.completionOn || got.completions != nil || got.completionsRaw != nil {
+		t.Error("completion popup state survived leaving Insert mode")
 	}
 }

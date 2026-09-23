@@ -324,7 +324,31 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return next, cmd
 	}
-	return updated.stampActiveTab(), cmd
+	return updated.stampActiveTab().ensureActiveSized(), cmd
+}
+
+// ensureActiveSized gives the active buffer the window size if it has never had
+// one.
+//
+// A Model that has not seen a WindowSizeMsg renders only "loading…" while still
+// taking keys — so an invisible command menu can open a dialog nobody saw being
+// asked for. Every path that puts a freshly built Model into a.buffers is meant
+// to size it, and a background reload once did not; checking here, once per
+// message, keeps the next path that forgets from reproducing that. It costs a
+// field read when the buffer is already sized, which is always after the first
+// frame.
+//
+// The resize's command is dropped, as the reload handler drops it: it reports
+// the viewport, which the server keeps per client rather than per buffer, and a
+// tab switch has never re-reported it — sizing is the fix here, not a new
+// viewport report.
+func (a App) ensureActiveSized() App {
+	if a.width == 0 || a.active < 0 || a.active >= len(a.buffers) || a.buffers[a.active].Sized() {
+		return a
+	}
+	updated, _ := a.buffers[a.active].Update(tea.WindowSizeMsg{Width: a.width, Height: a.bufHeight()})
+	a.buffers[a.active] = updated.(client.Model)
+	return a
 }
 
 // stampActiveTab records the active buffer as the most recently used one.
@@ -913,12 +937,24 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.buffers[msg.idx] = msg.model
-		if msg.idx == a.active {
+		// Sized whether or not it is the active tab. msg.model is freshly
+		// built and has never seen a WindowSizeMsg, and a Model with no width
+		// renders only "loading…". This used to size only the active tab, but
+		// the usual reload is a background one — a file changed on disk
+		// under a tab with no unsaved changes — so switching to that tab
+		// showed "loading…" until an unrelated resize came along, while keys
+		// still reached the invisible buffer (a Space-menu command could open
+		// a dialog nobody saw being asked for).
+		//
+		// The resize's command — a viewport report — is dropped as before: the
+		// server keeps one viewport per client, and a background tab's must not
+		// replace the active tab's.
+		if a.width > 0 {
 			updated, _ := a.buffers[msg.idx].Update(
 				tea.WindowSizeMsg{Width: a.width, Height: a.bufHeight()})
 			a.buffers[msg.idx] = updated.(client.Model)
 		}
-		return a, msg.model.Init()
+		return a, a.buffers[msg.idx].Init()
 
 	// ---- edit jump list ----
 	case client.EditRecordMsg:

@@ -175,6 +175,19 @@ type Configuration struct {
 	// know whether it is there.
 	DockerComposeFile json.RawMessage `json:"dockerComposeFile"`
 
+	// RemoteEnv is devcontainer.json's remoteEnv: environment for the tools
+	// that run *in* the container on the editor's behalf, merged across the
+	// file and its features (see readConfigOutput.remoteEnv). A nil value is
+	// the spec's way of unsetting a variable. Values may still hold
+	// ${containerEnv:...} references; see ResolveRemoteEnv.
+	//
+	// indigo reads this because it starts its server with a plain `docker
+	// exec`, which gives it the image's ENV and nothing else — not what a login
+	// shell adds, and not remoteEnv, which only the devcontainer CLI's own
+	// exec applies. Without it a language server installed somewhere remoteEnv
+	// puts on PATH was invisible to the server.
+	RemoteEnv map[string]*string `json:"remoteEnv"`
+
 	Customizations struct {
 		Indigo IndigoCustomizations `json:"indigo"`
 	} `json:"customizations"`
@@ -229,7 +242,53 @@ type readConfigOutput struct {
 		Customizations struct {
 			Indigo []IndigoCustomizations `json:"indigo"`
 		} `json:"customizations"`
+		// RemoteEnv is raw because its merged shape is not pinned down here:
+		// customizations taught that the merged view can turn an object into
+		// an array of per-source contributions, and guessing wrong would fail
+		// the whole line (see above). mergedRemoteEnv accepts either.
+		RemoteEnv json.RawMessage `json:"remoteEnv"`
 	} `json:"mergedConfiguration"`
+}
+
+// remoteEnv merges the environment from both views: features' contributions
+// (in the merged view) first, then the project's own file on top, so what the
+// project wrote wins — the same precedence indigoCustomizations uses.
+func (o readConfigOutput) remoteEnv() map[string]*string {
+	out := mergedRemoteEnv(o.Merged.RemoteEnv)
+	for k, v := range o.Configuration.RemoteEnv {
+		if out == nil {
+			out = map[string]*string{}
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// mergedRemoteEnv decodes mergedConfiguration.remoteEnv as either one object or
+// an array of objects applied in order. Anything else is ignored rather than
+// failing the read — remoteEnv is an addition to what worked without it.
+func mergedRemoteEnv(raw json.RawMessage) map[string]*string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var one map[string]*string
+	if err := json.Unmarshal(raw, &one); err == nil {
+		return one
+	}
+	var many []map[string]*string
+	if err := json.Unmarshal(raw, &many); err != nil {
+		return nil
+	}
+	var out map[string]*string
+	for _, m := range many {
+		for k, v := range m {
+			if out == nil {
+				out = map[string]*string{}
+			}
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // indigoCustomizations picks the settings to use.
@@ -288,10 +347,12 @@ func (c CLI) ReadConfiguration(ctx context.Context, workspaceFolder string) (Con
 	if o, ok := lastJSONObject[readConfigOutput](stdout.Bytes(), func(o readConfigOutput) bool {
 		return o.indigoCustomizations() != IndigoCustomizations{} ||
 			o.Configuration.ShutdownAction != "" ||
-			o.Configuration.IsCompose()
+			o.Configuration.IsCompose() ||
+			len(o.remoteEnv()) > 0
 	}); ok {
 		cfg := o.Configuration
 		cfg.Customizations.Indigo = o.indigoCustomizations()
+		cfg.RemoteEnv = o.remoteEnv()
 		return cfg, nil
 	}
 	// Nothing for us in it, which is the normal case for a project that has

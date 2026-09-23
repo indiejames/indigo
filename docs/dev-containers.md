@@ -174,9 +174,11 @@ binary that is already in the container, so nothing has to be installed there.
 It finds the server the same way — the nearest `.git` above the working
 directory, the user id, and `TMPDIR` — so all three must match the editor's.
 With no editor window attached it starts the server itself, as the `--daemon`
-process a window would start, and a window attaching later joins it. A server
-started that way has no plugins until the last client leaves and a window
-starts it again.
+process a window would start, and a window attaching later joins it. That
+server loads the plugins the most recent window carried in, through
+`/tmp/.indigo-plugins` — so if the agent starts before any window has ever
+attached to the container, it has none until every client has left and the
+server restarts. It also does not get `remoteEnv` (see below).
 
 To check it is sharing the editor's server, make one tool call and run
 `ps -eo args | grep indigo` in the container: there should be exactly one
@@ -186,6 +188,55 @@ Do **not** use the host-side `indigo --mcp-http` recipe from agent-integration.m
 for this: with the server in the container, there is no server on the host for
 the workspace, so it would start a second one and the agent would edit a
 separate copy of every file.
+
+## Language servers, formatters and linters
+
+These run inside the container, started by indigo's server there, so they have
+to be installed in the image — nothing on your machine is used. The server looks
+them up on its `PATH` (formatters and linters also in the project's
+`node_modules/.bin`), and it uses the same built-in defaults as on your machine:
+`gopls`, `rust-analyzer`, `typescript-language-server`, `pylsp`, `clangd`, … (see
+[language-support.md](language-support.md)). Install one of those and it is
+picked up with no configuration:
+
+```jsonc
+// .devcontainer/devcontainer.json
+{
+  "features": { "ghcr.io/devcontainers/features/go:1": {} },   // gopls
+  "postCreateCommand": "npm i -g typescript typescript-language-server"
+}
+```
+
+**Which `PATH`.** The server starts with the image's `ENV PATH` plus
+devcontainer.json's `remoteEnv` — not what a login shell's `.bashrc`, nvm or
+pyenv add. If a tool lands somewhere else, put it on `PATH` with `remoteEnv`:
+
+```jsonc
+"remoteEnv": { "PATH": "${containerEnv:PATH}:/home/vscode/.local/bin:/home/vscode/go/bin" }
+```
+
+`${containerEnv:NAME}` is resolved against the container's environment and
+`${localEnv:NAME}` against your machine's. `remoteEnv` is applied when a window
+starts the server, so after changing it close every window on the container and
+reattach. A server started by an agent's `--mcp` with no window attached does
+not get it. (`userEnvProbe` is not implemented: indigo does not run a login
+shell to discover its `PATH`.)
+
+**Overrides go in the container's config.** `[[language_server]]`,
+`[[formatter]]`, `[[linter]]` and `format_on_save` are read by the server, so
+they come from the
+container user's `~/.config/indigo/config.toml`, not the one on your machine.
+Ship it with the project, for example:
+
+```jsonc
+"postCreateCommand": "mkdir -p ~/.config/indigo && cp .devcontainer/indigo.toml ~/.config/indigo/config.toml"
+```
+
+An absolute `command = "/path/to/server"` there sidesteps `PATH` entirely.
+
+**When one does not start**, its log is `/tmp/indigo-lsp-<command>.log` inside
+the container; a missing binary shows up as `LookPath(...) failed` followed by
+the `PATH` the server actually had.
 
 ## Paths
 
@@ -206,7 +257,9 @@ two projects that both mount at `/workspaces/api` keep separate lists.
 |---|---|---|
 | rendering, keys, theme, undo, syntax highlighting | ✅ | |
 | clipboard | ✅ | |
-| your `config.toml`, recent files | ✅ | |
+| recent files | ✅ | |
+| `config.toml`: editor settings (keys, theme, display, `picker_ignore_dirs`) | ✅ | |
+| `config.toml`: `[[language_server]]`, `[[formatter]]`, `[[linter]]`, `format_on_save`, recovery settings, and the indent settings passed to formatters | | ✅ — the container user's own `~/.config/indigo/config.toml` |
 | buffers, editing, save | | ✅ |
 | language servers, formatters, linters | | ✅ |
 | file picker listing, workspace grep | | ✅ |

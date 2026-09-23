@@ -122,10 +122,12 @@ func TestAttachCopiesThenStartsTheServer(t *testing.T) {
 	}
 	defer stream.Close() //nolint:errcheck
 
-	// The two runs are the stable-link update (TestAttachLinksTheStableServerPath)
-	// and the git safe.directory fixup, which has to land before the server
-	// starts — see TestAttachMarksTheWorkspaceSafeForGit.
-	want := []string{"arch", "exists:" + remote, "copy", "run", "run", "exec"}
+	// The three runs are the stable server link (TestAttachLinksTheStableServerPath),
+	// clearing the plugins link since there are no plugins here
+	// (TestAttachLinksTheStablePluginsPath), and the git safe.directory fixup,
+	// which has to land before the server starts — see
+	// TestAttachMarksTheWorkspaceSafeForGit.
+	want := []string{"arch", "exists:" + remote, "copy", "run", "run", "run", "exec"}
 	if strings.Join(rt.calls, ",") != strings.Join(want, ",") {
 		t.Errorf("calls = %v, want %v", rt.calls, want)
 	}

@@ -26,7 +26,7 @@ func TestAttachLinksTheStableServerPath(t *testing.T) {
 		stream.Close() //nolint:errcheck
 
 		env := strings.Join(rt.ranEnv, " ")
-		if !strings.Contains(env, "INDIGO_SRV="+remote) || !strings.Contains(env, "INDIGO_LINK="+StableServerLink) {
+		if !strings.Contains(env, "INDIGO_TARGET="+remote) || !strings.Contains(env, "INDIGO_LINK="+StableServerLink) {
 			t.Errorf("exists=%v: no link update to %s found in run env %q", exists, remote, env)
 		}
 	}
@@ -66,11 +66,51 @@ func TestStableLinkScriptReplacesAnOlderLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(shellForTest, "-c", stableLinkScript)
-	cmd.Env = append(os.Environ(), "INDIGO_SRV="+newSrv, "INDIGO_LINK="+link)
+	cmd.Env = append(os.Environ(), "INDIGO_TARGET="+newSrv, "INDIGO_LINK="+link)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("link script: %v\n%s", err, out)
 	}
 	if got, err := os.Readlink(link); err != nil || got != newSrv {
 		t.Errorf("link -> %q (%v), want %q", got, err, newSrv)
 	}
+}
+
+// The plugins link is what a server started without a window (an agent's
+// --mcp) falls back to. It must point at the plugins this attach carried in,
+// and be removed when there are none, so the two ways of starting a server
+// cannot disagree about which plugins it has.
+func TestAttachLinksTheStablePluginsPath(t *testing.T) {
+	t.Run("plugins carried in", func(t *testing.T) {
+		rt := &fakeRuntime{arch: "arm64", exists: true}
+		locate, _, _ := locateReal(t, "a server binary")
+		stream, err := Attach(context.Background(), rt, "c1", "/w", AttachOptions{
+			Locate: locate, PluginsDir: t.TempDir(), PluginsHash: "abc",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stream.Close() //nolint:errcheck
+		env := strings.Join(rt.ranEnv, " ")
+		if !strings.Contains(env, "INDIGO_TARGET="+PluginsPath("abc")+" INDIGO_LINK="+StablePluginsLink) {
+			t.Errorf("no plugins link update in run env %q", env)
+		}
+	})
+	t.Run("no plugins", func(t *testing.T) {
+		rt := &fakeRuntime{arch: "arm64", exists: true}
+		locate, _, _ := locateReal(t, "a server binary")
+		stream, err := Attach(context.Background(), rt, "c1", "/w", AttachOptions{Locate: locate})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stream.Close() //nolint:errcheck
+		removed := false
+		for _, argv := range rt.ranArgv {
+			if strings.Contains(argv, "rm -f") {
+				removed = true
+			}
+		}
+		if !removed || !strings.Contains(strings.Join(rt.ranEnv, " "), "INDIGO_LINK="+StablePluginsLink) {
+			t.Errorf("stale plugins link not removed; ran %q with env %q", rt.ranArgv, rt.ranEnv)
+		}
+	})
 }

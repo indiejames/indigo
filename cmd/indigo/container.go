@@ -44,6 +44,9 @@ var (
 	composeProject bool
 	// clientToken identifies this window's bridge process inside the container.
 	clientToken string
+	// remoteEnv is devcontainer.json's remoteEnv, unresolved. Resolved against
+	// the container at attach time — see container.ResolveRemoteEnv.
+	remoteEnv map[string]*string
 )
 
 // pathMap translates between the workspace as this machine names it and as the
@@ -186,6 +189,7 @@ func bringUpDevcontainer(hostWorkDir string) {
 		projectServerPath = cfg.Customizations.Indigo.ServerPath
 		stopOnExit = cfg.ShouldStopOnExit()
 		composeProject = cfg.IsCompose()
+		remoteEnv = cfg.RemoteEnv
 	}
 }
 
@@ -230,6 +234,10 @@ func connect(workDir string) (*client.RPC, error) {
 		ClientToken: clientToken,
 		Locate:      container.LocateServerBinary,
 		Warn:        func(msg string) { fmt.Fprintf(os.Stderr, "indigo: %s\n", msg) },
+	}
+
+	if len(remoteEnv) > 0 {
+		opts.Env = serverRemoteEnv(ctx)
 	}
 
 	// Plugins run wherever the server runs, so the user's have to be carried
@@ -310,6 +318,23 @@ func shutdownContainer() {
 	if err := rt.Stop(ctx, containerName); err != nil {
 		fmt.Fprintf(os.Stderr, "indigo: could not stop the dev container: %v\n", err)
 	}
+}
+
+// serverRemoteEnv resolves remoteEnv against the container's environment.
+//
+// Not fatal when the container's environment cannot be read: the references
+// then resolve to their defaults (usually empty), which for the common
+// "${containerEnv:PATH}:/extra" would *replace* PATH with just "/extra" and
+// break every tool on it. So the entries that need the container are dropped
+// instead, and the ones that do not are still applied.
+func serverRemoteEnv(ctx context.Context) []string {
+	cenv, err := (container.Docker{User: remoteUser}).InspectEnv(ctx, containerName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "indigo: could not read the container's environment, "+
+			"so remoteEnv entries that refer to it are not applied: %v\n", err)
+		return container.ResolveRemoteEnv(container.WithoutContainerEnvRefs(remoteEnv), nil, os.LookupEnv)
+	}
+	return container.ResolveRemoteEnv(remoteEnv, cenv, os.LookupEnv)
 }
 
 // newClientToken returns a value unique to this window, for marking its bridge

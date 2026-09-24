@@ -93,8 +93,11 @@ func (s *editorService) SetActiveContext(_ context.Context, call proto.EditorSer
 }
 
 func (s *editorService) GetActiveContext(_ context.Context, call proto.EditorService_getActiveContext) error {
+	// Both read under one lock, so the selection returned is the context's own
+	// and not a report that landed in between.
 	s.activeCtxMu.RLock()
 	ac := s.activeCtx
+	sel := s.activeSel
 	s.activeCtxMu.RUnlock()
 
 	res, err := call.AllocResults()
@@ -117,5 +120,18 @@ func (s *editorService) GetActiveContext(_ context.Context, call proto.EditorSer
 	result.SetLine(ac.line)
 	result.SetCol(ac.col)
 	result.SetUpdatedAt(ac.updatedAt.UnixNano())
+	// Only the same window's selection, in the same buffer. activeSel is
+	// whichever client reported a selection last; with two windows open that
+	// can be a different window from the one this context describes, and
+	// reporting it here would attach one window's selection to another's
+	// cursor.
+	if sel.active && sel.clientID == ac.clientID && sel.bufID == ac.bufID {
+		result.SetHasSelection(true)
+		result.SetSelStartLine(sel.startLine)
+		result.SetSelStartCol(sel.startCol)
+		result.SetSelEndLine(sel.endLine)
+		result.SetSelEndCol(sel.endCol)
+		result.SetSelIsLine(sel.isLine)
+	}
 	return nil
 }

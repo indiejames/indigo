@@ -581,6 +581,16 @@ struct ActiveContext {
   col       @4 :UInt32;
   updatedAt @5 :Int64;  # Unix nanoseconds
   found     @6 :Bool;
+  # The selection belonging to *this* context: the same client's, in the same
+  # buffer, read in the same critical section. getActiveSelection returns
+  # whichever client reported a selection last, which with two windows open
+  # can belong to a different window from the one described here.
+  hasSelection @7 :Bool;
+  selStartLine @8 :UInt32;
+  selStartCol  @9 :UInt32;
+  selEndLine   @10 :UInt32;
+  selEndCol    @11 :UInt32;  # inclusive
+  selIsLine    @12 :Bool;
 }
 
 # BufferConsistency pairs the server's view of one buffer with what each client

@@ -147,6 +147,11 @@ func appendedContent(existing, text string) string {
 // place and left dirty; a path with no open buffer (which may not exist yet)
 // is patched directly on disk.
 func (s *editorService) appendTextToFile(clientID uint64, path, text string) error {
+	// text comes from the source buffer, which may be a mixed-ending file that
+	// kept its "\r"s. Normalized once, for both destinations below: an open
+	// buffer holds "\n" only, and a file on disk gets its own line endings
+	// back from RestoreCRLF.
+	text = document.NormalizeNewlines(text)
 	canonPath := canonicalPath(path)
 	// Find and apply under one continuous lock hold — same reasoning as
 	// MoveTextToFile above: appendOpsForBuffer/Apply are pure in-memory work,
@@ -175,16 +180,19 @@ func (s *editorService) appendTextToFile(clientID uint64, path, text string) err
 	}
 	s.mu.Unlock()
 
-	existing := ""
+	existing, crlf := "", false
 	if data, err := os.ReadFile(path); err == nil {
-		existing = string(data)
+		// Appended in the destination's own line endings, so moving a
+		// function into a CRLF file does not leave a block of LF lines.
+		existing, crlf = document.NormalizeCRLF(string(data))
 	} else if !os.IsNotExist(err) {
 		return err
 	}
 
 	s.markSaving(path)
 	defer s.unmarkSaving(path)
-	if err := atomicWriteFile(path, []byte(appendedContent(existing, text)), 0644); err != nil {
+	appended := appendedContent(existing, text)
+	if err := atomicWriteFile(path, []byte(document.RestoreCRLF(appended, crlf)), 0644); err != nil {
 		return err
 	}
 	s.addPathWatch(path)

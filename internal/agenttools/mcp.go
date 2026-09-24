@@ -531,11 +531,20 @@ var readOnlyTools = map[string]bool{
 	"find_definition":           true,
 	"find_references":           true,
 	"list_symbols":              true,
+	"get_active_context":        true,
+	// The diagnostic tools only read logs and state. report_bundle is left
+	// out: it writes a file.
+	"get_logs":                 true,
+	"get_sync_events":          true,
+	"get_sync_state":           true,
+	"check_buffer_consistency": true,
 }
 
 // mcpTools exposes the buffer-aware file tools, the language-server query
-// tools, and goto_file (no native equivalent — it drives the indigo editor UI,
-// not the filesystem).
+// tools, goto_file and get_active_context (no native equivalent — they drive
+// and read the indigo editor UI, not the filesystem), and the diagnostic tools.
+// TestEveryToolIsExposedOverMCP fails for any AllTools entry missing here and
+// not deliberately excluded.
 //
 // list_files/search_files are omitted: claude's native Glob/Grep cover those
 // and disk-based search has no buffer-consistency problem. The LSP tools are
@@ -544,10 +553,16 @@ var readOnlyTools = map[string]bool{
 func mcpTools() []mcpTool {
 	exposed := map[string]bool{
 		"read_file": true, "apply_edits": true, "insert_at_line": true,
-		"save_file": true, "goto_file": true,
+		"save_file": true, "goto_file": true, "get_active_context": true,
 		"get_diagnostics": true, "get_workspace_diagnostics": true,
 		"find_definition": true,
 		"find_references": true, "list_symbols": true,
+		// The diagnostic tools exist so a sync problem on someone else's
+		// machine can be diagnosed through the agent attached to it. They were
+		// defined and dispatched but never listed here, so no agent could see
+		// them.
+		"get_logs": true, "get_sync_events": true, "get_sync_state": true,
+		"check_buffer_consistency": true, "report_bundle": true,
 	}
 	var out []mcpTool
 	for _, t := range AllTools() {

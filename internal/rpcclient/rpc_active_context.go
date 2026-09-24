@@ -16,6 +16,9 @@ type ActiveContext struct {
 	Line      uint32
 	Col       uint32
 	UpdatedAt time.Time
+	// Selection is the same client's selection in the same buffer, read in
+	// the same server snapshot as the rest; Found is false when there is none.
+	Selection ActiveSelection
 }
 
 // ActiveSelection describes the current editor selection, in document order
@@ -112,7 +115,7 @@ func (r *RPC) GetActiveContext(ctx context.Context) (ActiveContext, error) {
 	if err != nil {
 		return ActiveContext{}, err
 	}
-	return ActiveContext{
+	ac := ActiveContext{
 		Found:     true,
 		ClientID:  result.ClientId(),
 		BufID:     result.BufId(),
@@ -120,5 +123,17 @@ func (r *RPC) GetActiveContext(ctx context.Context) (ActiveContext, error) {
 		Line:      result.Line(),
 		Col:       result.Col(),
 		UpdatedAt: time.Unix(0, result.UpdatedAt()),
-	}, nil
+	}
+	if result.HasSelection() {
+		ac.Selection = ActiveSelection{
+			Found:     true,
+			BufID:     ac.BufID,
+			StartLine: result.SelStartLine(),
+			StartCol:  result.SelStartCol(),
+			EndLine:   result.SelEndLine(),
+			EndCol:    result.SelEndCol(),
+			IsLine:    result.SelIsLine(),
+		}
+	}
+	return ac, nil
 }

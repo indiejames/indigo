@@ -87,6 +87,14 @@ func AllTools() []ToolDef {
 			},
 		},
 		{
+			Name: "get_active_context",
+			Description: "The file open in the user's indigo editor, the cursor's line and column, and any selection. " +
+				"Call this first whenever the user says \"the current file\", \"this file\", \"here\", \"at the cursor\", " +
+				"\"line N\" without naming a file, or \"the selected code\" — the answer is not otherwise visible to you. " +
+				"Lines and columns are 1-based, as insert_at_line, goto_file and read_file take them.",
+			InputSchema: ToolSchema{Type: "object", Properties: map[string]SchemaProp{}},
+		},
+		{
 			Name:        "goto_file",
 			Description: "Navigate the user's editor window to a file (and optionally a line), so they can see it directly instead of just reading a path in chat. Use this after locating where something is implemented, e.g. in response to 'take me to X' or 'where is X handled'.",
 			InputSchema: ToolSchema{
@@ -314,6 +322,8 @@ func ExecTool(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDir, nam
 			return fmt.Sprintf("bad input: %v", err), true
 		}
 		return execInsertAtLine(ctx, rpc, ap, workDir, in)
+	case "get_active_context":
+		return execGetActiveContext(ctx, rpc)
 	case "goto_file":
 		var in gotoFileInput
 		if err := json.Unmarshal(rawInput, &in); err != nil {
@@ -594,6 +604,11 @@ func requestEditApproval(ap Approver, req EditRequest) bool {
 
 func execApplyEdits(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDir string, in applyEditsInput) (string, bool) {
 	abs := absPath(workDir, in.Path)
+	// The buffer holds "\n" line endings only. An agent that read a CRLF file
+	// with its own file tools will quote "\r\n" back; the replacement is
+	// normalized outright, and old_text below only when it does not match as
+	// given (a mixed-ending file's lines really can contain "\r").
+	in.NewText = document.NormalizeNewlines(in.NewText)
 
 	if !requestEditApproval(ap, EditRequest{
 		File:   in.Path,
@@ -617,6 +632,13 @@ func execApplyEdits(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDi
 	weOpened := count == 1
 
 	idx := strings.Index(content, in.OldText)
+	if idx == -1 {
+		if norm := document.NormalizeNewlines(in.OldText); norm != in.OldText {
+			if i := strings.Index(content, norm); i != -1 {
+				idx, in.OldText = i, norm
+			}
+		}
+	}
 	if idx == -1 {
 		if weOpened {
 			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
@@ -705,6 +727,7 @@ func insertLineOp(content, text string, line int) document.Op {
 
 func execInsertAtLine(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDir string, in insertAtLineInput) (string, bool) {
 	abs := absPath(workDir, in.Path)
+	in.Text = document.NormalizeNewlines(in.Text) // see execApplyEdits
 
 	if !requestEditApproval(ap, EditRequest{
 		File:   fmt.Sprintf("%s (insert at line %d)", in.Path, in.Line),
@@ -886,7 +909,10 @@ func verifySavedAgainst(want string, snapErr error, abs string) string {
 		return fmt.Sprintf(" — WARNING: the file could not be read back after saving (%v); "+
 			"do not assume the change is on disk", err)
 	}
-	if string(got) != want {
+	// Compared as the buffer holds it: a CRLF file is saved with its "\r\n"
+	// restored (document.RestoreCRLF), so the bytes on disk legitimately
+	// differ from the buffer's "\n" by exactly that.
+	if disk, _ := document.NormalizeCRLF(string(got)); disk != want {
 		return fmt.Sprintf(" — WARNING: %s on disk does not match the buffer after saving. "+
 			"The edit is applied in the editor but the file has NOT changed on disk; "+
 			"disk-based builds, tests and greps will not see it.", abs)

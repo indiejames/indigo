@@ -32,7 +32,7 @@ func TestLoadContentReportsUnreadableFile(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(path, 0o644) }) //nolint:errcheck
 
 	s := &editorService{buffers: map[uint32]*bufferEntry{}, recDir: t.TempDir()}
-	content, fromRecovery, err := s.loadContent(path)
+	content, fromRecovery, _, err := s.loadContent(path)
 
 	if err == nil {
 		t.Fatalf("loadContent returned no error for an unreadable file (content=%q, fromRecovery=%v) — "+
@@ -50,7 +50,7 @@ func TestLoadContentEmptyCasesAreNotErrors(t *testing.T) {
 	s := &editorService{buffers: map[uint32]*bufferEntry{}, recDir: t.TempDir()}
 
 	t.Run("untitled buffer", func(t *testing.T) {
-		content, fromRecovery, err := s.loadContent("")
+		content, fromRecovery, _, err := s.loadContent("")
 		if err != nil || content != "" || fromRecovery {
 			t.Errorf("loadContent(\"\") = (%q, %v, %v), want (\"\", false, nil)", content, fromRecovery, err)
 		}
@@ -58,7 +58,7 @@ func TestLoadContentEmptyCasesAreNotErrors(t *testing.T) {
 
 	t.Run("file does not exist yet", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "brand-new.go")
-		content, fromRecovery, err := s.loadContent(path)
+		content, fromRecovery, _, err := s.loadContent(path)
 		if err != nil || content != "" || fromRecovery {
 			t.Errorf("loadContent(new file) = (%q, %v, %v), want (\"\", false, nil)", content, fromRecovery, err)
 		}
@@ -70,7 +70,7 @@ func TestLoadContentEmptyCasesAreNotErrors(t *testing.T) {
 		if err := os.WriteFile(path, []byte("package a\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		content, fromRecovery, err := s.loadContent(path)
+		content, fromRecovery, _, err := s.loadContent(path)
 		if err != nil || content != "package a\n" || fromRecovery {
 			t.Errorf("loadContent(readable) = (%q, %v, %v), want (\"package a\\n\", false, nil)", content, fromRecovery, err)
 		}

@@ -585,6 +585,7 @@ func expandTabsRemap(runes []rune) (expanded []rune, colMap []int) {
 			}
 			vcol += spaces
 		} else {
+			r = displayRune(r)
 			expanded = append(expanded, r)
 			// Wide runes (CJK, emoji, ...) occupy two terminal cells;
 			// combining runes (accents stacked onto the previous rune)
@@ -594,6 +595,36 @@ func expandTabsRemap(runes []rune) (expanded []rune, colMap []int) {
 	}
 	colMap[len(runes)] = vcol
 	return
+}
+
+// displayRune maps a control character to a visible stand-in, and returns any
+// other rune unchanged.
+//
+// Buffer text is written to the terminal verbatim, so a control character in
+// a file is a command to the terminal rather than something to show: "\r"
+// returns the cursor to column 0 and the rest of the row overwrites the line
+// (a CRLF file rendered as scattered fragments), and ESC starts an escape
+// sequence the file's author never meant the terminal to run. C0 controls and
+// DEL become their Unicode Control Pictures (␍, ␛, ␡); C1 controls, which some
+// terminals also act on, become U+FFFD. Every replacement is one cell wide, so
+// column positions are unaffected. Tab is not touched: expandTabsRemap expands
+// it.
+func displayRune(r rune) rune {
+	switch {
+	case r < 0x20 && r != '\t':
+		return 0x2400 + r
+	case r == 0x7f:
+		return 0x2421
+	case r >= 0x80 && r <= 0x9f:
+		return '\uFFFD'
+	}
+	return r
+}
+
+// displayText applies displayRune to every rune of s, for text drawn from the
+// buffer without going through expandTabsRemap.
+func displayText(s string) string {
+	return strings.Map(displayRune, s)
 }
 
 // runeColForVisualCol converts a tab-expanded visual column back to the
@@ -896,7 +927,9 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 			}
 		}
 		if avail := m.width - gutterW; avail > 0 {
-			text := truncateBackCells(vl.text, avail)
+			// Plugin-supplied text (a removed line from a diff) can carry the
+			// same control characters a buffer line can — a CRLF file's "\r".
+			text := truncateBackCells(displayText(vl.text), avail)
 			// Emphasise the runes that actually differ from the line that
 			// replaced this one, so a one-word edit doesn't read as a wholly
 			// rewritten line. Skipped when truncation has cut into the

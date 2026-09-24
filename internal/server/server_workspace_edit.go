@@ -193,8 +193,11 @@ func (s *editorService) applyWorkspaceEditsOnDisk(path string, clientID uint64, 
 	// with the live-buffer path. It has no clients, so the delivery queueing
 	// inside is a no-op — which is correct: nothing has this file open, so
 	// there is nobody to deliver to.
-	buf := document.New(path, string(data))
-	entry := &bufferEntry{buf: buf}
+	// Normalized like an open buffer, and restored on write: the language
+	// server computed these positions treating "\r\n" as one line break.
+	content, crlf := document.NormalizeCRLF(string(data))
+	buf := document.New(path, content)
+	entry := &bufferEntry{buf: buf, crlf: crlf}
 	applied, skippedIdx = applyWorkspaceEditsToBuffer(entry, clientID, items)
 	if applied == 0 {
 		return applied, skippedIdx, nil
@@ -202,7 +205,7 @@ func (s *editorService) applyWorkspaceEditsOnDisk(path string, clientID uint64, 
 
 	s.markSaving(path)
 	defer s.unmarkSaving(path)
-	if err := atomicWriteFile(path, []byte(buf.Content()), 0644); err != nil {
+	if err := atomicWriteFile(path, []byte(document.RestoreCRLF(buf.Content(), crlf)), 0644); err != nil {
 		return 0, nil, err
 	}
 	s.addPathWatch(path)

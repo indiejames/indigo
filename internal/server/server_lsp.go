@@ -1051,6 +1051,9 @@ func (s *editorService) Format(_ context.Context, call proto.EditorService_forma
 	s.mu.Unlock()
 
 	formatted, changed, fmtErr := s.fmtMgr.Format(path, content)
+	// The buffer holds "\n" only; a formatter emitting "\r\n" means the file
+	// is CRLF from here on. See Save for the same handling.
+	formatted, fmtCRLF := document.NormalizeCRLF(formatted)
 
 	noFormatter := errors.Is(fmtErr, format.ErrNoFormatter)
 	if fmtErr != nil && !noFormatter {
@@ -1070,6 +1073,7 @@ func (s *editorService) Format(_ context.Context, call proto.EditorService_forma
 			newBuf := document.New(path, formatted)
 			newBuf.MarkDirty()
 			entry.buf = newBuf
+			entry.crlf = entry.crlf || fmtCRLF
 			entry.generation++
 			resetOutgoing(entry)
 			generation = entry.generation
@@ -1300,7 +1304,9 @@ func (s *editorService) workspaceEditItemsFromLSP(path string, edits []lsp.TextE
 		if err != nil {
 			return nil, err
 		}
-		content = string(data)
+		// Same line-ending treatment an open buffer gets, so a line from a
+		// CRLF file carries no trailing "\r" into what is shown.
+		content, _ = document.NormalizeCRLF(string(data))
 	}
 	lines := strings.Split(content, "\n")
 

@@ -175,16 +175,18 @@ func (s *editorService) appendTextToFile(clientID uint64, path, text string) err
 	}
 	s.mu.Unlock()
 
-	existing := ""
+	existing, crlf := "", false
 	if data, err := os.ReadFile(path); err == nil {
-		existing = string(data)
+		// Appended in the destination's own line endings, so moving a
+		// function into a CRLF file does not leave a block of LF lines.
+		existing, crlf = document.NormalizeCRLF(string(data))
 	} else if !os.IsNotExist(err) {
 		return err
 	}
 
 	s.markSaving(path)
 	defer s.unmarkSaving(path)
-	if err := atomicWriteFile(path, []byte(appendedContent(existing, text)), 0644); err != nil {
+	if err := atomicWriteFile(path, []byte(document.RestoreCRLF(appendedContent(existing, text), crlf)), 0644); err != nil {
 		return err
 	}
 	s.addPathWatch(path)

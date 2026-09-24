@@ -676,14 +676,14 @@ func (m Model) buildSearchOverlays(layout []layoutEntry, cw int) [][]lineOverlay
 				if m.cursor.Col > sm.col {
 					rows[row] = append(rows[row], lineOverlay{
 						col:  visCol - chunkStart,
-						text: style.Render(string(lineRunes[sm.col:m.cursor.Col])),
+						text: style.Render(displayText(string(lineRunes[sm.col:m.cursor.Col]))),
 						w:    m.cursor.Col - sm.col,
 					})
 				}
 				if m.cursor.Col+1 < matchEnd {
 					rows[row] = append(rows[row], lineOverlay{
 						col:  cursorVisCol + 1 - chunkStart,
-						text: style.Render(string(lineRunes[m.cursor.Col+1 : matchEnd])),
+						text: style.Render(displayText(string(lineRunes[m.cursor.Col+1 : matchEnd]))),
 						w:    matchEnd - (m.cursor.Col + 1),
 					})
 				}
@@ -694,7 +694,7 @@ func (m Model) buildSearchOverlays(layout []layoutEntry, cw int) [][]lineOverlay
 
 		rows[row] = append(rows[row], lineOverlay{
 			col:  visCol - chunkStart,
-			text: style.Render(string(lineRunes[sm.col:matchEnd])),
+			text: style.Render(displayText(string(lineRunes[sm.col:matchEnd]))),
 			w:    sm.length,
 		})
 		m.appendReplacePreview(rows, layout, cw, colMap[matchEnd], sm)

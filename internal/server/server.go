@@ -105,6 +105,11 @@ type bufferEntry struct {
 	// the entry is created (or renamed via SaveAs) — see canonicalPath's doc
 	// comment for why this exists.
 	canonPath string
+	// crlf records that the file on disk uses "\r\n" line endings throughout.
+	// The buffer itself holds "\n" only (see document.NormalizeCRLF); every
+	// write of it back to this file goes through document.RestoreCRLF, so a
+	// Windows-edited file is saved the way it was found.
+	crlf bool
 	// generation increments every time buf is replaced with a new
 	// *document.Buffer object (format-on-save, SaveAs, DiscardRecovery,
 	// explicit Format) rather than edited via buf.Apply. See the

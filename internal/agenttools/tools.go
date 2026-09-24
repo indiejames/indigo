@@ -87,6 +87,14 @@ func AllTools() []ToolDef {
 			},
 		},
 		{
+			Name: "get_active_context",
+			Description: "The file open in the user's indigo editor, the cursor's line and column, and any selection. " +
+				"Call this first whenever the user says \"the current file\", \"this file\", \"here\", \"at the cursor\", " +
+				"\"line N\" without naming a file, or \"the selected code\" — the answer is not otherwise visible to you. " +
+				"Lines and columns are 1-based, as insert_at_line, goto_file and read_file take them.",
+			InputSchema: ToolSchema{Type: "object", Properties: map[string]SchemaProp{}},
+		},
+		{
 			Name:        "goto_file",
 			Description: "Navigate the user's editor window to a file (and optionally a line), so they can see it directly instead of just reading a path in chat. Use this after locating where something is implemented, e.g. in response to 'take me to X' or 'where is X handled'.",
 			InputSchema: ToolSchema{
@@ -314,6 +322,8 @@ func ExecTool(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDir, nam
 			return fmt.Sprintf("bad input: %v", err), true
 		}
 		return execInsertAtLine(ctx, rpc, ap, workDir, in)
+	case "get_active_context":
+		return execGetActiveContext(ctx, rpc)
 	case "goto_file":
 		var in gotoFileInput
 		if err := json.Unmarshal(rawInput, &in); err != nil {
@@ -886,7 +896,10 @@ func verifySavedAgainst(want string, snapErr error, abs string) string {
 		return fmt.Sprintf(" — WARNING: the file could not be read back after saving (%v); "+
 			"do not assume the change is on disk", err)
 	}
-	if string(got) != want {
+	// Compared as the buffer holds it: a CRLF file is saved with its "\r\n"
+	// restored (document.RestoreCRLF), so the bytes on disk legitimately
+	// differ from the buffer's "\n" by exactly that.
+	if disk, _ := document.NormalizeCRLF(string(got)); disk != want {
 		return fmt.Sprintf(" — WARNING: %s on disk does not match the buffer after saving. "+
 			"The edit is applied in the editor but the file has NOT changed on disk; "+
 			"disk-based builds, tests and greps will not see it.", abs)

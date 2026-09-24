@@ -68,7 +68,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 
 	// Read outside the lock — a slow or hung filesystem must not block every
 	// other RPC on this connection.
-	content, fromRecovery, err := s.loadContent(path)
+	content, fromRecovery, crlf, err := s.loadContent(path)
 	if err != nil {
 		serverLog("OpenFile: reading %q failed: %v", path, err)
 		return fmt.Errorf("read %s: %w", path, err)
@@ -94,6 +94,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 		buf:           buf,
 		clients:       map[uint64]struct{}{clientID: {}},
 		canonPath:     canonicalPath(path),
+		crlf:          crlf,
 		sinceByClient: map[uint64]uint64{clientID: buf.Version()},
 	}
 	ver := buf.Version()
@@ -197,9 +198,9 @@ func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorServ
 
 	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
 
-	content := ""
+	content, crlf := "", false
 	if data, err := os.ReadFile(path); err == nil {
-		content = string(data)
+		content, crlf = document.NormalizeCRLF(string(data))
 	}
 
 	s.mu.Lock()
@@ -217,6 +218,7 @@ func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorServ
 		return fmt.Errorf("buffer %d changed while discarding recovery; try again", bufID)
 	}
 	entry.buf = document.New(path, content)
+	entry.crlf = crlf
 	entry.generation++
 	// Queued ops describe the old buffer object and cannot be rebased onto the
 	// new one; clients learn of the swap from the generation bump and resync.
@@ -272,7 +274,7 @@ func (s *editorService) ReloadBuffer(_ context.Context, call proto.EditorService
 		serverLog("ReloadBuffer: reading %q failed: %v", path, err)
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	content := string(data)
+	content, crlf := document.NormalizeCRLF(string(data))
 
 	s.mu.Lock()
 	entry, ok = s.buffers[bufID]
@@ -291,6 +293,7 @@ func (s *editorService) ReloadBuffer(_ context.Context, call proto.EditorService
 		return fmt.Errorf("buffer %d changed while reloading; try again", bufID)
 	}
 	entry.buf = document.New(path, content)
+	entry.crlf = crlf
 	entry.generation++
 	resetOutgoing(entry)
 	version := entry.buf.Version()
@@ -329,9 +332,9 @@ func (s *editorService) ReloadBuffer(_ context.Context, call proto.EditorService
 // here: that's the ordinary new-file case (and a file that's since been
 // deleted may still have a recovery file worth replaying), so it keeps
 // falling through to the recovery check with empty content.
-func (s *editorService) loadContent(path string) (content string, fromRecovery bool, err error) {
+func (s *editorService) loadContent(path string) (content string, fromRecovery, crlf bool, err error) {
 	if path == "" {
-		return "", false, nil // untitled buffer: no content, no recovery
+		return "", false, false, nil // untitled buffer: no content, no recovery
 	}
 	var origModTime time.Time
 	if info, statErr := os.Stat(path); statErr == nil {
@@ -340,17 +343,22 @@ func (s *editorService) loadContent(path string) (content string, fromRecovery b
 	data, readErr := os.ReadFile(path)
 	switch {
 	case readErr == nil:
-		content = string(data)
+		// The line-ending style is the file's, even when the content below
+		// comes from a recovery snapshot: it describes how to write back.
+		content, crlf = document.NormalizeCRLF(string(data))
 	case !os.IsNotExist(readErr):
-		return "", false, readErr
+		return "", false, false, readErr
 	}
 	rp := recoveryFilePath(s.recDir, path)
 	if recInfo, statErr := os.Stat(rp); statErr == nil && recInfo.ModTime().After(origModTime) {
 		if recData, recErr := os.ReadFile(rp); recErr == nil {
-			return string(recData), true, nil
+			// Snapshots are written from the buffer, so already "\n"; one
+			// from before line endings were normalized may not be.
+			rec, _ := document.NormalizeCRLF(string(recData))
+			return rec, true, crlf, nil
 		}
 	}
-	return content, false, nil
+	return content, false, crlf, nil
 }
 
 func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_getUpdates) error {
@@ -822,10 +830,15 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 	baseBuf := entry.buf
 	baseVersion := baseBuf.Version()
 	content := baseBuf.Content()
+	crlf := entry.crlf
 	s.mu.Unlock()
 
 	if s.cfg.FormatOnSave {
 		if formatted, changed, err := s.fmtMgr.Format(path, content); err == nil && changed {
+			// A formatter may emit "\r\n" (prettier's endOfLine, say); the
+			// buffer must not hold it. If it did, the file is CRLF now.
+			formatted, fmtCRLF := document.NormalizeCRLF(formatted)
+			crlf = crlf || fmtCRLF
 			s.mu.Lock()
 			entry, ok = s.buffers[bufID]
 			// Same compare-and-swap Format() uses: only apply the formatted
@@ -836,6 +849,7 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 				newBuf := document.New(path, formatted)
 				newBuf.MarkDirty()
 				entry.buf = newBuf
+				entry.crlf = crlf
 				entry.generation++
 				resetOutgoing(entry)
 				baseBuf = newBuf
@@ -858,7 +872,7 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 	}
 
 	s.markSaving(path)
-	if err := atomicWriteFile(path, []byte(content), 0644); err != nil {
+	if err := atomicWriteFile(path, []byte(document.RestoreCRLF(content, crlf)), 0644); err != nil {
 		s.unmarkSaving(path)
 		return err
 	}
@@ -925,10 +939,13 @@ func (s *editorService) SaveAs(_ context.Context, call proto.EditorService_saveA
 	baseVersion := baseBuf.Version()
 	content := baseBuf.Content()
 	oldPath := baseBuf.Path()
+	// A copy keeps the buffer's line endings: Save As is "this content,
+	// elsewhere", and the content includes how its lines end.
+	crlf := entry.crlf
 	s.mu.Unlock()
 
 	s.markSaving(newPath)
-	if err := atomicWriteFile(newPath, []byte(content), 0o644); err != nil {
+	if err := atomicWriteFile(newPath, []byte(document.RestoreCRLF(content, crlf)), 0o644); err != nil {
 		s.unmarkSaving(newPath)
 		return err
 	}

@@ -58,3 +58,21 @@ func TestVerifySavedReportsDiskMismatch(t *testing.T) {
 		}
 	})
 }
+
+// A CRLF file is saved with its "\r\n" restored, so the bytes on disk differ
+// from the buffer's "\n" by exactly that. The check must not report that as the
+// edit failing to reach disk — every save of a Windows-edited file would then
+// carry a false warning telling the agent its change was lost.
+func TestVerifySavedAcceptsRestoredCRLF(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "win.js")
+	if err := os.WriteFile(path, []byte("a\r\nb\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if msg := verifySavedAgainst("a\nb\n", nil, path); msg != "" {
+		t.Errorf("a correctly saved CRLF file was reported as not on disk: %s", msg)
+	}
+	// A real mismatch is still caught.
+	if msg := verifySavedAgainst("a\nCHANGED\n", nil, path); msg == "" {
+		t.Error("a genuine mismatch with a CRLF file was not reported")
+	}
+}

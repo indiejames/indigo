@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"github.com/indiejames/indigo/internal/document"
 )
 
 // clipboardWriter is the seam production code uses to write the system
@@ -32,7 +34,9 @@ func readClipboard() (string, error) {
 		return "", fmt.Errorf("clipboard not supported on %s", runtime.GOOS)
 	}
 	out, err := cmd.Output()
-	return string(out), err
+	// Text copied on Windows, or from a CRLF file in another editor, carries
+	// "\r\n". The buffer holds "\n" only — see document.NormalizeNewlines.
+	return document.NormalizeNewlines(string(out)), err
 }
 
 // writeClipboard copies text to the system clipboard.

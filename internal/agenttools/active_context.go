@@ -19,19 +19,25 @@ import (
 // removed, the MCP tools that replaced it never exposed it, so an agent asked
 // about "the currently open file" had no way to find out which one that was.
 
-// execGetActiveContext reads the most recent active context and selection from
-// the server and reports them.
+// execGetActiveContext reads the most recent active context from the server
+// and reports it.
+//
+// The selection comes back inside the same result — the same client's, in the
+// same buffer, from one server snapshot — rather than from a second
+// GetActiveSelection call. That call returns whichever window reported a
+// selection last, which with two windows open can be the wrong one, and as a
+// separate read it could straddle an update; its error was also dropped, so a
+// failed read looked like "no selection". One call has one error, reported.
 func execGetActiveContext(ctx context.Context, rpc *rpcclient.RPC) (string, bool) {
 	ac, err := rpc.GetActiveContext(ctx)
 	if err != nil {
 		return fmt.Sprintf("could not read the editor's active context: %v", err), true
 	}
-	sel, _ := rpc.GetActiveSelection(ctx) // zero value on error = no selection
 	openCount, countErr := uint32(1), error(nil)
 	if ac.Found {
 		openCount, countErr = rpc.BufferClientCount(ctx, ac.BufID)
 	}
-	return formatActiveContext(ac, sel, openCount, countErr, time.Now()), false
+	return formatActiveContext(ac, openCount, countErr, time.Now()), false
 }
 
 // formatActiveContext renders the result. Split from execGetActiveContext so
@@ -45,7 +51,7 @@ func execGetActiveContext(ctx context.Context, rpc *rpcclient.RPC) (string, bool
 // on this workspace. That is stated in the output along with its age, because
 // with two windows open it is the one last *touched*, which is usually but not
 // necessarily the one the user means.
-func formatActiveContext(ac rpcclient.ActiveContext, sel rpcclient.ActiveSelection, openCount uint32, countErr error, now time.Time) string {
+func formatActiveContext(ac rpcclient.ActiveContext, openCount uint32, countErr error, now time.Time) string {
 	if !ac.Found {
 		return "No editor window has reported an active file. Is an indigo window open on this workspace? " +
 			"(The active file is reported by the editor window, not by this tool's connection.)"
@@ -58,7 +64,7 @@ func formatActiveContext(ac rpcclient.ActiveContext, sel rpcclient.ActiveSelecti
 	}
 	fmt.Fprintf(&b, "Cursor: line %d, column %d (1-based)\n", ac.Line+1, ac.Col+1)
 
-	if sel.Found && sel.BufID == ac.BufID {
+	if sel := ac.Selection; sel.Found && sel.BufID == ac.BufID {
 		if sel.IsLine {
 			fmt.Fprintf(&b, "Selection: lines %d-%d (whole lines)\n", sel.StartLine+1, sel.EndLine+1)
 		} else {

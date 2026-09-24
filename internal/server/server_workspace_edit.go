@@ -40,6 +40,10 @@ func applyWorkspaceEditsToBuffer(entry *bufferEntry, clientID uint64, items []wo
 			skippedIdx = append(skippedIdx, i)
 			continue
 		}
+		// The replacement enters the buffer here, so this is where its line
+		// endings are normalized (document.NormalizeNewlines); the buffer
+		// holds "\n" only.
+		newText := document.NormalizeNewlines(it.newText)
 		// Applied per item, not batched: colShift below depends on each edit
 		// having landed before the next item reads the line again.
 		applyServerOriginated(entry, clientID,
@@ -53,9 +57,9 @@ func applyWorkspaceEditsToBuffer(entry *bufferEntry, clientID uint64, items []wo
 				ClientID:   clientID,
 				Type:       document.OpInsert,
 				InsertLine: it.line, InsertCol: col,
-				InsertText: it.newText,
+				InsertText: newText,
 			})
-		colShift[it.line] += len([]rune(it.newText)) - len(oldRunes)
+		colShift[it.line] += len([]rune(newText)) - len(oldRunes)
 		applied++
 	}
 	return applied, skippedIdx

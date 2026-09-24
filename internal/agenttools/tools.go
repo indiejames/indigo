@@ -604,6 +604,11 @@ func requestEditApproval(ap Approver, req EditRequest) bool {
 
 func execApplyEdits(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDir string, in applyEditsInput) (string, bool) {
 	abs := absPath(workDir, in.Path)
+	// The buffer holds "\n" line endings only. An agent that read a CRLF file
+	// with its own file tools will quote "\r\n" back; the replacement is
+	// normalized outright, and old_text below only when it does not match as
+	// given (a mixed-ending file's lines really can contain "\r").
+	in.NewText = document.NormalizeNewlines(in.NewText)
 
 	if !requestEditApproval(ap, EditRequest{
 		File:   in.Path,
@@ -627,6 +632,13 @@ func execApplyEdits(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDi
 	weOpened := count == 1
 
 	idx := strings.Index(content, in.OldText)
+	if idx == -1 {
+		if norm := document.NormalizeNewlines(in.OldText); norm != in.OldText {
+			if i := strings.Index(content, norm); i != -1 {
+				idx, in.OldText = i, norm
+			}
+		}
+	}
 	if idx == -1 {
 		if weOpened {
 			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
@@ -715,6 +727,7 @@ func insertLineOp(content, text string, line int) document.Op {
 
 func execInsertAtLine(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDir string, in insertAtLineInput) (string, bool) {
 	abs := absPath(workDir, in.Path)
+	in.Text = document.NormalizeNewlines(in.Text) // see execApplyEdits
 
 	if !requestEditApproval(ap, EditRequest{
 		File:   fmt.Sprintf("%s (insert at line %d)", in.Path, in.Line),

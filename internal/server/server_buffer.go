@@ -863,6 +863,10 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 				baseBuf = entry.buf
 				baseVersion = baseBuf.Version()
 				content = baseBuf.Content()
+				// And its line endings: the buffer may have been swapped
+				// (a reload) since crlf was read, and the formatter's
+				// CRLF-ness belongs to the discarded result, not this one.
+				crlf = entry.crlf
 				s.mu.Unlock()
 			} else {
 				s.mu.Unlock()

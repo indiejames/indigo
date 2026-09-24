@@ -836,6 +836,9 @@ func (m Model) applyCompletionEdits(edits []ClientLspEdit) (Model, tea.Cmd) {
 // Normal mode ignores a paste, which is also what v1 did: the whole pasted
 // string arrived as one key event, matched no binding, and was dropped.
 func (m Model) handlePaste(text string) (tea.Model, tea.Cmd) {
+	// A bracketed paste from a Windows clipboard carries "\r\n"; the buffer
+	// (and the command and search lines) take "\n" only.
+	text = document.NormalizeNewlines(text)
 	if text == "" {
 		return m, nil
 	}

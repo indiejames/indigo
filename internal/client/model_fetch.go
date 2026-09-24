@@ -459,7 +459,9 @@ func applyLspEdits(m Model, edits []ClientLspEdit) (Model, tea.Cmd) {
 				Type:       document.OpInsert,
 				InsertLine: e.FromLine,
 				InsertCol:  e.FromCol,
-				InsertText: e.NewText,
+				// A language server editing a CRLF file commonly sends
+				// "\r\n" in replacement text; the buffer holds "\n" only.
+				InsertText: document.NormalizeNewlines(e.NewText),
 				ClientID:   clientID,
 			})
 		}

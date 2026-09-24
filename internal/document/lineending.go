@@ -24,11 +24,32 @@ func NormalizeCRLF(content string) (string, bool) {
 }
 
 // RestoreCRLF is NormalizeCRLF's inverse for writing a buffer back to disk:
-// with crlf set, every "\n" becomes "\r\n". The buffer itself never holds a
-// "\r\n" when crlf is set, so this cannot double one up.
+// with crlf set, every line ends in "\r\n".
+//
+// A "\r\n" already present is kept as one, not doubled to "\r\r\n". The
+// buffer is meant to hold "\n" only, but text inserted after loading need not
+// have been normalized — a language server editing a CRLF file commonly sends
+// "\r\n" in its replacement text — and a blind "\n" → "\r\n" would then
+// write a stray carriage return into every such line. Collapsing first makes
+// the result correct whatever reached the buffer.
 func RestoreCRLF(content string, crlf bool) string {
 	if !crlf {
 		return content
 	}
-	return strings.ReplaceAll(content, "\n", "\r\n")
+	return strings.ReplaceAll(NormalizeNewlines(content), "\n", "\r\n")
+}
+
+// NormalizeNewlines converts every "\r\n" in s to "\n", leaving any lone "\r".
+//
+// For text arriving from outside the buffer — a paste, an agent's replacement
+// text, a language server's edit — which may carry the line endings of wherever
+// it came from. Unlike NormalizeCRLF it converts whatever is there, mixed or
+// not: this is new text being inserted, not a file whose existing lines a save
+// must reproduce.
+//
+// Applied where such text *originates*, never inside Buffer.Apply: an op's text
+// is also what operational transform computes positions from, and every
+// replica applying different text from what the op says would diverge.
+func NormalizeNewlines(s string) string {
+	return strings.ReplaceAll(s, "\r\n", "\n")
 }

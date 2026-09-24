@@ -18,7 +18,7 @@ func TestFormatActiveContext(t *testing.T) {
 	ac := rpcclient.ActiveContext{Found: true, BufID: 3, FilePath: "/w/a.js", Line: 29, Col: 4, UpdatedAt: now.Add(-3 * time.Second)}
 
 	t.Run("file and cursor, 1-based", func(t *testing.T) {
-		out := formatActiveContext(ac, rpcclient.ActiveSelection{}, 1, nil, now)
+		out := formatActiveContext(ac, 1, nil, now)
 		for _, want := range []string{"Active file: /w/a.js", "line 30, column 5", "Selection: none", "3s ago"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("missing %q in:\n%s", want, out)
@@ -26,31 +26,34 @@ func TestFormatActiveContext(t *testing.T) {
 		}
 	})
 	t.Run("character selection", func(t *testing.T) {
-		sel := rpcclient.ActiveSelection{Found: true, BufID: 3, StartLine: 9, StartCol: 0, EndLine: 11, EndCol: 7}
-		out := formatActiveContext(ac, sel, 1, nil, now)
+		a := ac
+		a.Selection = rpcclient.ActiveSelection{Found: true, BufID: 3, StartLine: 9, StartCol: 0, EndLine: 11, EndCol: 7}
+		out := formatActiveContext(a, 1, nil, now)
 		if !strings.Contains(out, "line 10 column 1 to line 12 column 8") {
 			t.Errorf("selection not reported 1-based:\n%s", out)
 		}
 	})
 	t.Run("line selection", func(t *testing.T) {
-		sel := rpcclient.ActiveSelection{Found: true, BufID: 3, StartLine: 9, EndLine: 11, IsLine: true}
-		if out := formatActiveContext(ac, sel, 1, nil, now); !strings.Contains(out, "lines 10-12 (whole lines)") {
+		a := ac
+		a.Selection = rpcclient.ActiveSelection{Found: true, BufID: 3, StartLine: 9, EndLine: 11, IsLine: true}
+		if out := formatActiveContext(a, 1, nil, now); !strings.Contains(out, "lines 10-12 (whole lines)") {
 			t.Errorf("line selection not reported:\n%s", out)
 		}
 	})
 	t.Run("a selection in another buffer is not this file's", func(t *testing.T) {
-		sel := rpcclient.ActiveSelection{Found: true, BufID: 99, StartLine: 1, EndLine: 2}
-		if out := formatActiveContext(ac, sel, 1, nil, now); !strings.Contains(out, "Selection: none") {
+		a := ac
+		a.Selection = rpcclient.ActiveSelection{Found: true, BufID: 99, StartLine: 1, EndLine: 2}
+		if out := formatActiveContext(a, 1, nil, now); !strings.Contains(out, "Selection: none") {
 			t.Errorf("reported another buffer's selection:\n%s", out)
 		}
 	})
 	t.Run("closed since", func(t *testing.T) {
-		if out := formatActiveContext(ac, rpcclient.ActiveSelection{}, 0, nil, now); !strings.Contains(out, "since been closed") {
+		if out := formatActiveContext(ac, 0, nil, now); !strings.Contains(out, "since been closed") {
 			t.Errorf("a closed buffer was reported as open:\n%s", out)
 		}
 	})
 	t.Run("could not check", func(t *testing.T) {
-		out := formatActiveContext(ac, rpcclient.ActiveSelection{}, 0, errors.New("boom"), now)
+		out := formatActiveContext(ac, 0, errors.New("boom"), now)
 		if !strings.Contains(out, "Could not confirm") || strings.Contains(out, "since been closed") {
 			t.Errorf("an unverified buffer was reported as closed:\n%s", out)
 		}
@@ -58,12 +61,12 @@ func TestFormatActiveContext(t *testing.T) {
 	t.Run("untitled", func(t *testing.T) {
 		u := ac
 		u.FilePath = ""
-		if out := formatActiveContext(u, rpcclient.ActiveSelection{}, 1, nil, now); !strings.Contains(out, "untitled") {
+		if out := formatActiveContext(u, 1, nil, now); !strings.Contains(out, "untitled") {
 			t.Errorf("untitled buffer not called out:\n%s", out)
 		}
 	})
 	t.Run("no window", func(t *testing.T) {
-		if out := formatActiveContext(rpcclient.ActiveContext{}, rpcclient.ActiveSelection{}, 0, nil, now); !strings.Contains(out, "No editor window") {
+		if out := formatActiveContext(rpcclient.ActiveContext{}, 0, nil, now); !strings.Contains(out, "No editor window") {
 			t.Errorf("no-window case not explained:\n%s", out)
 		}
 	})
@@ -122,6 +125,32 @@ func TestGetActiveContextThroughARealServer(t *testing.T) {
 	}
 	if strings.Contains(out, "since been closed") {
 		t.Errorf("an open buffer was reported closed:\n%s", out)
+	}
+
+	// A second window selects text in the same buffer. That selection is not
+	// the active window's, and must not be reported as though it were.
+	other := dial()
+	otherBuf, _, _, _, _, err := other.OpenFile(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherSel := rpcclient.ActiveSelection{Found: true, StartLine: 2, EndLine: 4, IsLine: true}
+	if err := other.SetActiveSelection(ctx, other.ClientID(), otherBuf, otherSel); err != nil {
+		t.Fatal(err)
+	}
+	out, _ = ExecTool(ctx, agent, nil, dir, "get_active_context", nil)
+	if !strings.Contains(out, "Selection: none") {
+		t.Errorf("another window's selection was attached to the active window's cursor:\n%s", out)
+	}
+
+	// The active window's own selection is reported.
+	ownSel := rpcclient.ActiveSelection{Found: true, StartLine: 27, EndLine: 29, IsLine: true}
+	if err := window.SetActiveSelection(ctx, window.ClientID(), bufID, ownSel); err != nil {
+		t.Fatal(err)
+	}
+	out, _ = ExecTool(ctx, agent, nil, dir, "get_active_context", nil)
+	if !strings.Contains(out, "lines 28-30 (whole lines)") {
+		t.Errorf("the active window's own selection was not reported:\n%s", out)
 	}
 }
 

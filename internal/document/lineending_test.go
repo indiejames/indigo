@@ -34,3 +34,18 @@ func TestCRLFRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// Text inserted into a CRLF buffer after loading can carry its own "\r\n" —
+// a language server's edit to a CRLF file usually does. Saving must not turn
+// that into "\r\r\n".
+func TestRestoreCRLFDoesNotDoubleCarriageReturns(t *testing.T) {
+	if got, want := RestoreCRLF("a\nfrom lsp\r\nb\n", true), "a\r\nfrom lsp\r\nb\r\n"; got != want {
+		t.Errorf("RestoreCRLF = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeNewlines(t *testing.T) {
+	if got, want := NormalizeNewlines("a\r\nb\nc\rd"), "a\nb\nc\rd"; got != want {
+		t.Errorf("NormalizeNewlines = %q, want %q", got, want)
+	}
+}

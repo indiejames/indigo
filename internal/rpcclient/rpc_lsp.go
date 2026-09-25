@@ -377,6 +377,29 @@ func kindLabel(k uint8) string {
 		return "pk"
 	case 3: // Namespace
 		return "ns"
+	// The rest of the spec's kinds. Array and Object matter most: a server
+	// may report a top-level map or list as one of these, which the symbol
+	// picker shows by default, and it used to show with a blank label.
+	case 1: // File
+		return "fl"
+	case 15: // String
+		return "sr"
+	case 16: // Number
+		return "nu"
+	case 17: // Boolean
+		return "bo"
+	case 18: // Array
+		return "ar"
+	case 19: // Object
+		return "ob"
+	case 20: // Key
+		return "ke"
+	case 21: // Null
+		return "nl"
+	case 24: // Event
+		return "ev"
+	case 25: // Operator
+		return "op"
 	default:
 		return "  "
 	}

@@ -204,8 +204,10 @@ func (p *appPluginPopup) render() string {
 		Foreground(lipgloss.Color("#4488CC")).
 		Render(strings.Repeat("─", innerW)))
 
-	if start > 0 {
-		rows = append(rows, pluginPopupItemStyle.Width(innerW).Render("  ↑ more"))
+	// Both indicator rows are reserved whenever the list overflows, blank
+	// when there is nothing more that way, so scrolling never resizes the box.
+	if start > 0 || end < len(p.items) {
+		rows = append(rows, pluginPopupItemStyle.Width(innerW).Render(moreLabel(start > 0, "↑")))
 	}
 	for i := start; i < end; i++ {
 		item := p.items[i]
@@ -224,8 +226,8 @@ func (p *appPluginPopup) render() string {
 			rows = append(rows, pluginPopupItemStyle.Width(innerW).Render(label))
 		}
 	}
-	if end < len(p.items) {
-		rows = append(rows, pluginPopupItemStyle.Width(innerW).Render("  ↓ more"))
+	if start > 0 || end < len(p.items) {
+		rows = append(rows, pluginPopupItemStyle.Width(innerW).Render(moreLabel(end < len(p.items), "↓")))
 	}
 
 	return pluginPopupBorderStyle.Render(strings.Join(rows, "\n"))

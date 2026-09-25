@@ -103,7 +103,7 @@ func (bp *bufPicker) render() string {
 	innerW = max(innerW, 30)
 
 	// Scroll window centred on selection.
-	vis := min(len(bp.items), bufPickerMaxVisible)
+	vis := visibleRows(len(bp.items), bufPickerMaxVisible, bp.height, 4) // title, separator, 2 borders
 	start := max(0, min(bp.cursor-vis/2, len(bp.items)-vis))
 	end := min(start+vis, len(bp.items))
 
@@ -116,8 +116,10 @@ func (bp *bufPicker) render() string {
 		Foreground(lipgloss.Color("#4488CC")).
 		Render(strings.Repeat("─", innerW)))
 
-	if start > 0 {
-		rows = append(rows, bufPickerItemStyle.Width(innerW).Render("  ↑ more"))
+	// Both indicator rows are reserved whenever the list overflows, blank
+	// when there is nothing more that way, so scrolling never resizes the box.
+	if start > 0 || end < len(bp.items) {
+		rows = append(rows, bufPickerItemStyle.Width(innerW).Render(moreLabel(start > 0, "↑")))
 	}
 
 	for i := start; i < end; i++ {
@@ -143,8 +145,8 @@ func (bp *bufPicker) render() string {
 		}
 	}
 
-	if end < len(bp.items) {
-		rows = append(rows, bufPickerItemStyle.Width(innerW).Render("  ↓ more"))
+	if start > 0 || end < len(bp.items) {
+		rows = append(rows, bufPickerItemStyle.Width(innerW).Render(moreLabel(end < len(bp.items), "↓")))
 	}
 
 	return bufPickerBorderStyle.Render(strings.Join(rows, "\n"))

@@ -220,9 +220,20 @@ type SemanticTokensClientCapabilities struct {
 	Formats        []string                                `json:"formats"`
 }
 
+// DocumentSymbolClientCapabilities advertises that the client accepts the
+// hierarchical DocumentSymbol[] form of textDocument/documentSymbol. Per the
+// spec a server should otherwise answer with the flat SymbolInformation[]
+// form, whose containerName is optional — and the tree is how the document
+// symbol picker tells a top-level symbol from one nested in a function or
+// class (see Client.DocumentSymbols).
+type DocumentSymbolClientCapabilities struct {
+	HierarchicalDocumentSymbolSupport bool `json:"hierarchicalDocumentSymbolSupport"`
+}
+
 type TextDocumentClientCapabilities struct {
 	CodeAction         *CodeActionClientCapabilities         `json:"codeAction,omitempty"`
 	Completion         *CompletionClientCapabilities         `json:"completion,omitempty"`
+	DocumentSymbol     *DocumentSymbolClientCapabilities     `json:"documentSymbol,omitempty"`
 	PublishDiagnostics *PublishDiagnosticsClientCapabilities `json:"publishDiagnostics,omitempty"`
 	SemanticTokens     *SemanticTokensClientCapabilities     `json:"semanticTokens,omitempty"`
 }

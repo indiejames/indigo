@@ -141,6 +141,7 @@ func (c *Client) Initialize() error {
 						},
 					},
 				},
+				DocumentSymbol:     &DocumentSymbolClientCapabilities{HierarchicalDocumentSymbolSupport: true},
 				PublishDiagnostics: &PublishDiagnosticsClientCapabilities{RelatedInformation: true, VersionSupport: true},
 				SemanticTokens: &SemanticTokensClientCapabilities{
 					Requests: SemanticTokensRequestClientCapabilities{Range: true},
@@ -437,6 +438,14 @@ func (c *Client) WorkspaceSymbols(query string) ([]SymbolInformation, error) {
 
 // DocumentSymbols returns symbols in path, flattened to a list.
 // The server may return []DocumentSymbol (hierarchical) or []SymbolInformation (flat).
+//
+// Either way, ContainerName is empty exactly for a top-level symbol — the rule
+// the document symbol picker's "Top-level only" filter uses. A flat answer
+// carries containerName from the server. A hierarchical one has no such field,
+// so flattening sets it to the parent's name: a const at the top of a file is
+// a root (empty), a variable declared inside a function is that function's
+// child. Dropping the parent, as flattening once did, lost the only thing that
+// told the two apart.
 func (c *Client) DocumentSymbols(path string) ([]SymbolInformation, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -460,24 +469,31 @@ func (c *Client) DocumentSymbols(path string) ([]SymbolInformation, error) {
 	if err := json.Unmarshal(raw, &hier); err != nil {
 		return nil, err
 	}
-	uri := pathToURI(path)
+	return flattenDocumentSymbols(hier, pathToURI(path)), nil
+}
+
+// flattenDocumentSymbols lists a DocumentSymbol tree depth-first, recording
+// each symbol's parent as its ContainerName — empty for a root, which is what
+// makes a symbol top-level. See DocumentSymbols.
+func flattenDocumentSymbols(hier []DocumentSymbol, uri string) []SymbolInformation {
 	var result []SymbolInformation
-	var flatten func(syms []DocumentSymbol)
-	flatten = func(syms []DocumentSymbol) {
+	var flatten func(syms []DocumentSymbol, parent string)
+	flatten = func(syms []DocumentSymbol, parent string) {
 		for _, s := range syms {
 			result = append(result, SymbolInformation{
-				Name: s.Name,
-				Kind: s.Kind,
+				Name:          s.Name,
+				Kind:          s.Kind,
+				ContainerName: parent,
 				Location: Location{
 					URI:   uri,
 					Range: s.SelectionRange,
 				},
 			})
-			flatten(s.Children)
+			flatten(s.Children, s.Name)
 		}
 	}
-	flatten(hier)
-	return result, nil
+	flatten(hier, "")
+	return result
 }
 
 // References returns all reference locations for the symbol at (line, col) in path.

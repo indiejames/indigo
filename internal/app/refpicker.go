@@ -49,35 +49,26 @@ func (a App) handleRefPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 const refPickerMaxVisible = 16
 
+// The reference picker uses the "Go to Symbol in File" picker's colours. It
+// had its own orange-and-rust set, which read as an error dialog; sharing the
+// styles keeps the two navigation pickers looking like one family and stops
+// them drifting apart again.
 var (
-	refPickerBg = lipgloss.Color("#1E2A38")
-
-	refPickerBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#AA6644")).
-				Background(refPickerBg)
-
-	refPickerTitleStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#0D1B2A")).
-				Foreground(lipgloss.Color("#DDAA88")).
-				Bold(true).
-				Padding(0, 1)
-
-	refPickerItemStyle = lipgloss.NewStyle().
-				Background(refPickerBg).
-				Foreground(lipgloss.Color("#AABBCC")).
-				Padding(0, 1)
-
-	refPickerSelStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#6A3010")).
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Padding(0, 1)
-
-	refPickerLocStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#AA7755"))
-
+	refPickerBg          = symPickerBg
+	refPickerBorderStyle = symPickerBorderStyle
+	refPickerTitleStyle  = symPickerTitleStyle
+	refPickerItemStyle   = symPickerItemStyle
+	refPickerSelStyle    = symPickerSelStyle
+	// Locations take the symbol picker's kind-label colour, the same role:
+	// the short tag in front of each row.
+	refPickerLocStyle = symPickerKindStyle
+	// The code preview keeps a neutral grey: the symbol picker's nearest
+	// equivalent (its container colour) is too dim to read a line of code in.
 	refPickerPreviewStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#778899"))
+	// refPickerRuleColor is the separator under the title — the symbol
+	// picker's, where this one used the old border orange.
+	refPickerRuleColor = lipgloss.Color("#44AACC")
 )
 
 func (p *refPickerState) render() string {
@@ -92,15 +83,17 @@ func (p *refPickerState) render() string {
 	rows = append(rows, refPickerTitleStyle.Width(innerW).Render(title))
 	rows = append(rows, lipgloss.NewStyle().
 		Background(refPickerBg).
-		Foreground(lipgloss.Color("#AA6644")).
+		Foreground(refPickerRuleColor).
 		Render(strings.Repeat("─", innerW)))
 
-	vis := min(len(p.refs), refPickerMaxVisible)
+	vis := visibleRows(len(p.refs), refPickerMaxVisible, p.height, 4) // title, separator, 2 borders
 	start := max(0, min(p.cursor-vis/2, len(p.refs)-vis))
 	end := min(start+vis, len(p.refs))
 
-	if start > 0 {
-		rows = append(rows, refPickerItemStyle.Width(innerW).Render("  ↑ more"))
+	// Both indicator rows are reserved whenever the list overflows, blank
+	// when there is nothing more that way, so scrolling never resizes the box.
+	if start > 0 || end < len(p.refs) {
+		rows = append(rows, refPickerItemStyle.Width(innerW).Render(moreLabel(start > 0, "↑")))
 	}
 	for i := start; i < end; i++ {
 		ref := p.refs[i]
@@ -122,8 +115,8 @@ func (p *refPickerState) render() string {
 			rows = append(rows, refPickerItemStyle.Width(innerW).Render(label))
 		}
 	}
-	if end < len(p.refs) {
-		rows = append(rows, refPickerItemStyle.Width(innerW).Render("  ↓ more"))
+	if start > 0 || end < len(p.refs) {
+		rows = append(rows, refPickerItemStyle.Width(innerW).Render(moreLabel(end < len(p.refs), "↓")))
 	}
 
 	return refPickerBorderStyle.Render(strings.Join(rows, "\n"))

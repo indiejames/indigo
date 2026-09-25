@@ -251,6 +251,67 @@ Press `Space`, then `s`, in normal mode to open a floating search & replace dial
 - **All** applies the replacement to every result at once, after a confirmation showing how many files/lines will change. Files already open elsewhere are edited in memory (left dirty, not saved); files with no open buffer are written to disk directly. Any match whose text no longer matches what was found (e.g. edited concurrently) is skipped and reported rather than applied blindly.
 - **Esc** closes the dialog.
 
+### Go to symbol in file
+
+Press `gs` in normal mode to list the symbols in the current file, as reported by its language server.
+
+```
+╭──────────────────────────────────────────────────────────────────╮
+│ Go to Symbol in File  3/9   Tab: filters                         │
+│                                                                  │
+│ [x] Top-level only  [x] Functions  [x] Types  [x] Variables      │
+│ [ ] Members  [ ] Other                                           │
+│──────────────────────────────────────────────────────────────────│
+│ [co] handlers                                                    │
+│ [if] Options                                                     │
+│ [fn] run                                                         │
+╰──────────────────────────────────────────────────────────────────╯
+```
+
+- Type to filter by name. **↑** / **↓** move the selection and **Enter** jumps to the symbol.
+- Symbols are listed alphabetically (case-insensitively). A name that appears more than once is listed in file order.
+- The title shows how many symbols are displayed out of the total in the file.
+- **Tab** / **Shift+Tab** move focus between the filter and the checkboxes. **Space** (or **Enter**) toggles the focused checkbox. Typing always returns focus to the filter.
+- **Top-level only** hides anything declared inside a function, class or object: methods, fields, local variables, and the properties of a top-level object. A top-level `const` map or array is still shown.
+- The other checkboxes select which kinds of symbol are listed. By default, top-level functions, types and variables are shown.
+- Your checkbox choices are remembered until indigo exits.
+- **Esc** closes the dialog.
+
+Each row starts with a two-letter code for the symbol's kind, as the language server reports it:
+
+| Code | Kind | Checkbox |
+|------|------|----------|
+| `fn` | Function | Functions |
+| `me` | Method | Functions |
+| `ct` | Constructor | Functions |
+| `cl` | Class | Types |
+| `st` | Struct | Types |
+| `if` | Interface | Types |
+| `en` | Enum | Types |
+| `mo` | Module | Types |
+| `ns` | Namespace | Types |
+| `pk` | Package | Types |
+| `va` | Variable | Variables |
+| `co` | Constant | Variables |
+| `sr` | String | Variables |
+| `nu` | Number | Variables |
+| `bo` | Boolean | Variables |
+| `ar` | Array | Variables |
+| `ob` | Object | Variables |
+| `nl` | Null | Variables |
+| `pr` | Property | Members |
+| `fi` | Field | Members |
+| `ke` | Key | Members |
+| `em` | Enum member | Members |
+| `ev` | Event | Members |
+| `tp` | Type parameter | Other |
+| `op` | Operator | Other |
+| `fl` | File | Other |
+
+Which symbols a file reports, and what kind each one is, depends on its language server. For example, gopls does not report local variables at all, while TypeScript's server reports them nested inside their function. A top-level map or list may appear as `va`, `co`, `ob` or `ar` depending on the language.
+
+`gS` opens **Go to symbol in project**, which searches every file the language server indexes and uses the same kind codes. It has no checkboxes, and lists results in the order the language server returns them, which is usually best match first.
+
 ### Command mode
 
 Type `:` in normal mode, then one of:

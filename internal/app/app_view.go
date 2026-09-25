@@ -190,10 +190,7 @@ func (p *appPluginPopup) render() string {
 	}
 	innerW = max(innerW, 30)
 
-	vis := min(len(p.items), pluginPopupMaxVisible)
-	if vis == 0 {
-		vis = 1
-	}
+	vis := visibleRows(len(p.items), pluginPopupMaxVisible, p.height, 4) // title, separator, 2 borders
 	start := max(0, min(p.idx-vis/2, len(p.items)-vis))
 	end := min(start+vis, len(p.items))
 
@@ -204,8 +201,10 @@ func (p *appPluginPopup) render() string {
 		Foreground(lipgloss.Color("#4488CC")).
 		Render(strings.Repeat("─", innerW)))
 
-	if start > 0 {
-		rows = append(rows, pluginPopupItemStyle.Width(innerW).Render("  ↑ more"))
+	// Both indicator rows are reserved whenever the list overflows, blank
+	// when there is nothing more that way, so scrolling never resizes the box.
+	if start > 0 || end < len(p.items) {
+		rows = append(rows, pluginPopupItemStyle.Width(innerW).Render(moreLabel(start > 0, "↑")))
 	}
 	for i := start; i < end; i++ {
 		item := p.items[i]
@@ -224,8 +223,8 @@ func (p *appPluginPopup) render() string {
 			rows = append(rows, pluginPopupItemStyle.Width(innerW).Render(label))
 		}
 	}
-	if end < len(p.items) {
-		rows = append(rows, pluginPopupItemStyle.Width(innerW).Render("  ↓ more"))
+	if start > 0 || end < len(p.items) {
+		rows = append(rows, pluginPopupItemStyle.Width(innerW).Render(moreLabel(end < len(p.items), "↓")))
 	}
 
 	return pluginPopupBorderStyle.Render(strings.Join(rows, "\n"))

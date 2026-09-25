@@ -120,7 +120,10 @@ type App struct {
 
 	symbolPicker    *symbolPickerState    // non-nil when workspace symbol picker is open
 	docSymbolPicker *docSymbolPickerState // non-nil when document symbol picker is open
-	refPicker       *refPickerState       // non-nil when reference picker is open
+	// docSymFilters remembers the document symbol picker's checkboxes between
+	// opens, for the session; nil means the defaults.
+	docSymFilters *docSymbolFilters
+	refPicker     *refPickerState // non-nil when reference picker is open
 
 	// fileChangedIdx is the index of a dirty buffer awaiting user decision after
 	// an external modification. -1 means no prompt is active.
@@ -1033,7 +1036,11 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case client.OpenDocSymbolPickerMsg:
-		a.docSymbolPicker = newDocSymbolPicker(msg.Syms, a.width, a.height)
+		filters := defaultDocSymbolFilters()
+		if a.docSymFilters != nil {
+			filters = *a.docSymFilters
+		}
+		a.docSymbolPicker = newDocSymbolPicker(msg.Syms, filters, a.width, a.height)
 		return a, nil
 
 	case client.OpenRefPickerMsg:

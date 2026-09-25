@@ -63,4 +63,10 @@ func TestInitializeDeclaresPublishDiagnosticsCapability(t *testing.T) {
 		t.Fatal("initialize request did not declare the publishDiagnostics client capability — " +
 			"typescript-language-server will never send a single diagnostic without it")
 	}
+	// Without it a server may answer documentSymbol in the flat form, whose
+	// containerName is optional — and the document symbol picker's "Top-level
+	// only" filter relies on knowing each symbol's parent.
+	if td.DocumentSymbol == nil || !td.DocumentSymbol.HierarchicalDocumentSymbolSupport {
+		t.Error("initialize request does not advertise hierarchicalDocumentSymbolSupport")
+	}
 }

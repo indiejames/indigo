@@ -254,6 +254,26 @@ func moreLabel(show bool, arrow string) string {
 	return "  " + arrow + " more"
 }
 
+// visibleRows is how many list items a centered picker can show: at most
+// maxVisible, and no more than fit in termHeight after chrome — the rows that
+// are not list items (borders, title, input, separators). When the list then
+// overflows, the two indicator rows moreLabel fills are reserved too.
+//
+// overlayCenter drops whatever falls off-screen, so a picker taller than a
+// short terminal lost rows at the top and bottom — possibly the selected one.
+// termHeight <= 0 (not yet known) leaves the count at maxVisible, and at
+// least one item is always shown.
+func visibleRows(n, maxVisible, termHeight, chrome int) int {
+	vis := min(n, maxVisible)
+	if termHeight > 0 {
+		vis = min(vis, termHeight-chrome)
+		if vis < n {
+			vis = min(vis, termHeight-chrome-2)
+		}
+	}
+	return max(vis, 1)
+}
+
 const symbolPickerMaxVisible = 16
 
 var (
@@ -370,7 +390,7 @@ func (p *symbolPickerState) render() string {
 	} else if len(p.results) == 0 {
 		rows = append(rows, symPickerItemStyle.Width(innerW).Render("  no results"))
 	} else {
-		vis := min(len(p.results), symbolPickerMaxVisible)
+		vis := visibleRows(len(p.results), symbolPickerMaxVisible, p.height, 5)
 		start := max(0, min(p.cursor-vis/2, len(p.results)-vis))
 		end := min(start+vis, len(p.results))
 
@@ -418,7 +438,8 @@ func (p *docSymbolPickerState) render() string {
 		cursor = "" // focus is on a checkbox; no caret in the text box
 	}
 	rows = append(rows, symPickerInputStyle.Width(innerW).Render(" "+p.filter+cursor))
-	rows = append(rows, p.renderFilterRows(innerW)...)
+	filterRows := p.renderFilterRows(innerW)
+	rows = append(rows, filterRows...)
 	rows = append(rows, lipgloss.NewStyle().
 		Background(symPickerBg).
 		Foreground(lipgloss.Color("#44AACC")).
@@ -431,7 +452,9 @@ func (p *docSymbolPickerState) render() string {
 		}
 		rows = append(rows, symPickerItemStyle.Width(innerW).Render(msg))
 	} else {
-		vis := min(len(p.filtered), symbolPickerMaxVisible)
+		// Chrome: title, input, the filter rows (as many as the checkboxes
+		// wrapped onto), separator, and two borders.
+		vis := visibleRows(len(p.filtered), symbolPickerMaxVisible, p.height, 5+len(filterRows))
 		start := max(0, min(p.cursor-vis/2, len(p.filtered)-vis))
 		end := min(start+vis, len(p.filtered))
 

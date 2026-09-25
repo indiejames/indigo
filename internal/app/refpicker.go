@@ -86,7 +86,7 @@ func (p *refPickerState) render() string {
 		Foreground(refPickerRuleColor).
 		Render(strings.Repeat("─", innerW)))
 
-	vis := min(len(p.refs), refPickerMaxVisible)
+	vis := visibleRows(len(p.refs), refPickerMaxVisible, p.height, 4) // title, separator, 2 borders
 	start := max(0, min(p.cursor-vis/2, len(p.refs)-vis))
 	end := min(start+vis, len(p.refs))
 

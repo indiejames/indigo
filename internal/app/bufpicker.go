@@ -103,7 +103,7 @@ func (bp *bufPicker) render() string {
 	innerW = max(innerW, 30)
 
 	// Scroll window centred on selection.
-	vis := min(len(bp.items), bufPickerMaxVisible)
+	vis := visibleRows(len(bp.items), bufPickerMaxVisible, bp.height, 4) // title, separator, 2 borders
 	start := max(0, min(bp.cursor-vis/2, len(bp.items)-vis))
 	end := min(start+vis, len(bp.items))
 

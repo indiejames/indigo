@@ -190,10 +190,7 @@ func (p *appPluginPopup) render() string {
 	}
 	innerW = max(innerW, 30)
 
-	vis := min(len(p.items), pluginPopupMaxVisible)
-	if vis == 0 {
-		vis = 1
-	}
+	vis := visibleRows(len(p.items), pluginPopupMaxVisible, p.height, 4) // title, separator, 2 borders
 	start := max(0, min(p.idx-vis/2, len(p.items)-vis))
 	end := min(start+vis, len(p.items))
 

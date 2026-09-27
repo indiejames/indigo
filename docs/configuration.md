@@ -333,6 +333,57 @@ its language has already been opened) — indigo never launches a language serve
 run a workspace scan. There's no configuration for this; it's automatic wherever the
 attached server happens to support it.
 
+## Debug configurations
+
+Named launch configurations for the debugger (Go, via Delve), offered by **Space d l**. They
+live in two places, with the same `[[debug]]` shape:
+
+- `.indigo/debug.toml` in the workspace root — per project, and read afresh every time the
+  menu opens, so an edit shows up without restarting anything. Listed first, and wins a name
+  clash.
+- `config.toml` — yours across every workspace.
+
+```toml
+[[debug]]
+name = "server"
+program = "./cmd/server"      # default: the workspace root
+mode = "debug"                # "debug" (a main package) or "test"; default "debug"
+args = ["--port", "8080"]
+cwd = "."                     # default: the workspace root
+build_flags = "-tags dev"
+env = { LOG_LEVEL = "debug" }
+
+[[debug]]
+name = "store tests"
+program = "./internal/store"
+mode = "test"
+args = ["-test.run", "^TestStore", "-test.v"]
+```
+
+Relative paths are resolved against the workspace root, and `${workspaceFolder}` is replaced
+by it in `program`, `cwd` and `args`. Every entry needs a `name`. A file that can't be read is
+reported, and the configurations that did load are still offered.
+
+Entries in a project's `.vscode/launch.json` are offered too, between the two files above.
+Two more keys: `adapter` picks a debugger other than Go's (`python`, `lldb`, or one of your
+own), and `launch` passes adapter-specific settings straight to its launch request. Add or
+replace debuggers with `[[debug_adapter]]`:
+
+```toml
+[[debug_adapter]]
+name = "python"
+command = "/home/me/venvs/dev/bin/python"
+args = ["-m", "debugpy.adapter"]
+extensions = [".py"]
+```
+
+Everything about debugging, including these, is in [Debugging](debugging.md).
+
+You don't need a configuration for the common cases: **Space d d** debugs the current file's
+package (its tests, in a `_test.go` file), and **Space d t** debugs only the test function the
+cursor is in. **F5** with no session running — or **Space d r** — starts whichever of these
+you ran last again, stopping a running session first for Space d r.
+
 ## File type aliases
 
 Map a file extension or an exact filename to an existing syntax-highlighting language, for

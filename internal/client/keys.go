@@ -56,6 +56,16 @@ func executeOpenSymbolPicker(m Model) (tea.Model, tea.Cmd) {
 // prefixCmds is the root of the prefix-command tree for Normal mode.
 var prefixCmds = []command{
 	{key: "ctrl+p", name: "open-file-picker", category: "Files & Buffers", label: "Open file picker", execute: executeOpenFilePicker},
+	// Debugging: the function keys other editors use. Listed here, not
+	// appended in an init(): defaultPrefixCmds (keybinds.go) snapshots this
+	// table during package initialisation, before init() runs, and a user
+	// keybinding override rebuilds from that snapshot.
+	{key: "f5", name: "debug-continue-or-start", category: "Debug", label: "Continue / start debugging", execute: executeDebugContinueOrStart},
+	{key: "shift+f5", name: "debug-stop", category: "Debug", label: "Stop debugging", execute: executeDebugStop},
+	{key: "f9", name: "debug-toggle-breakpoint", category: "Debug", label: "Toggle breakpoint", execute: executeToggleBreakpoint},
+	{key: "f10", name: "debug-step-over", category: "Debug", label: "Step over", execute: executeDebugNext},
+	{key: "f11", name: "debug-step-in", category: "Debug", label: "Step in", execute: executeDebugStepIn},
+	{key: "shift+f11", name: "debug-step-out", category: "Debug", label: "Step out", execute: executeDebugStepOut},
 	{key: "n", name: "search-next", category: "Search", label: "Search next", execute: func(m Model) (tea.Model, tea.Cmd) {
 		if len(m.searchMatches) == 0 {
 			// searchQuery == "" means the search was actually cleared (see
@@ -346,6 +356,7 @@ var commandMenuRoot = command{
 			m.cmdCompletionIdx = -1
 			return m, nil
 		}},
+		debugMenu, // see debug_view.go
 	},
 }
 
@@ -380,6 +391,13 @@ func findIn(cmds []command, seq []string) (*command, bool) {
 // resolving the rest of seq against it. This lets plugins add entries (and
 // submenus) without the core prefixCmds tree knowing about them ahead of time.
 func (m Model) resolveCommand(seq []string) (*command, bool) {
+	if len(seq) > 0 && seq[0] == debugConfigsMenuKey {
+		node := debugConfigsCommand(m.debugConfigMenu)
+		if len(seq) == 1 {
+			return &node, true
+		}
+		return findIn(node.children, seq[1:])
+	}
 	if len(seq) == 0 || seq[0] != "space" {
 		return findCommand(seq)
 	}

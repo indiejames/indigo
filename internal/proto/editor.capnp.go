@@ -256,6 +256,26 @@ func (c ClientCallback) ReportBufferState(ctx context.Context, params func(Clien
 
 }
 
+func (c ClientCallback) DebugChanged(ctx context.Context, params func(ClientCallback_debugChanged_Params) error) (ClientCallback_debugChanged_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xa16aa1ea8b7d14ed,
+			MethodID:      12,
+			InterfaceName: "editor.capnp:ClientCallback",
+			MethodName:    "debugChanged",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 24, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(ClientCallback_debugChanged_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return ClientCallback_debugChanged_Results_Future{Future: ans.Future()}, release
+
+}
+
 func (c ClientCallback) WaitStreaming() error {
 	return capnp.Client(c).WaitStreaming()
 }
@@ -352,6 +372,8 @@ type ClientCallback_Server interface {
 	DecorationsChanged(context.Context, ClientCallback_decorationsChanged) error
 
 	ReportBufferState(context.Context, ClientCallback_reportBufferState) error
+
+	DebugChanged(context.Context, ClientCallback_debugChanged) error
 }
 
 // ClientCallback_NewServer creates a new Server from an implementation of ClientCallback_Server.
@@ -370,7 +392,7 @@ func ClientCallback_ServerToClient(s ClientCallback_Server) ClientCallback {
 // This can be used to create a more complicated Server.
 func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []server.Method {
 	if cap(methods) == 0 {
-		methods = make([]server.Method, 0, 12)
+		methods = make([]server.Method, 0, 13)
 	}
 
 	methods = append(methods, server.Method{
@@ -514,6 +536,18 @@ func ClientCallback_Methods(methods []server.Method, s ClientCallback_Server) []
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
 			return s.ReportBufferState(ctx, ClientCallback_reportBufferState{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xa16aa1ea8b7d14ed,
+			MethodID:      12,
+			InterfaceName: "editor.capnp:ClientCallback",
+			MethodName:    "debugChanged",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.DebugChanged(ctx, ClientCallback_debugChanged{call})
 		},
 	})
 
@@ -722,6 +756,23 @@ func (c ClientCallback_reportBufferState) Args() ClientCallback_reportBufferStat
 func (c ClientCallback_reportBufferState) AllocResults() (ClientCallback_reportBufferState_Results, error) {
 	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 24, PointerCount: 1})
 	return ClientCallback_reportBufferState_Results(r), err
+}
+
+// ClientCallback_debugChanged holds the state for a server call to ClientCallback.debugChanged.
+// See server.Call for documentation.
+type ClientCallback_debugChanged struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c ClientCallback_debugChanged) Args() ClientCallback_debugChanged_Params {
+	return ClientCallback_debugChanged_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c ClientCallback_debugChanged) AllocResults() (ClientCallback_debugChanged_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_debugChanged_Results(r), err
 }
 
 // ClientCallback_List is a list of ClientCallback.
@@ -2541,6 +2592,159 @@ func (f ClientCallback_reportBufferState_Results_Future) Struct() (ClientCallbac
 	return ClientCallback_reportBufferState_Results(p.Struct()), err
 }
 
+type ClientCallback_debugChanged_Params capnp.Struct
+
+// ClientCallback_debugChanged_Params_TypeID is the unique identifier for the type ClientCallback_debugChanged_Params.
+const ClientCallback_debugChanged_Params_TypeID = 0xebdd8c24c6dbd38b
+
+func NewClientCallback_debugChanged_Params(s *capnp.Segment) (ClientCallback_debugChanged_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 24, PointerCount: 0})
+	return ClientCallback_debugChanged_Params(st), err
+}
+
+func NewRootClientCallback_debugChanged_Params(s *capnp.Segment) (ClientCallback_debugChanged_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 24, PointerCount: 0})
+	return ClientCallback_debugChanged_Params(st), err
+}
+
+func ReadRootClientCallback_debugChanged_Params(msg *capnp.Message) (ClientCallback_debugChanged_Params, error) {
+	root, err := msg.Root()
+	return ClientCallback_debugChanged_Params(root.Struct()), err
+}
+
+func (s ClientCallback_debugChanged_Params) String() string {
+	str, _ := text.Marshal(0xebdd8c24c6dbd38b, capnp.Struct(s))
+	return str
+}
+
+func (s ClientCallback_debugChanged_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ClientCallback_debugChanged_Params) DecodeFromPtr(p capnp.Ptr) ClientCallback_debugChanged_Params {
+	return ClientCallback_debugChanged_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ClientCallback_debugChanged_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ClientCallback_debugChanged_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ClientCallback_debugChanged_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ClientCallback_debugChanged_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s ClientCallback_debugChanged_Params) StateSeq() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s ClientCallback_debugChanged_Params) SetStateSeq(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
+func (s ClientCallback_debugChanged_Params) OutputSeq() uint64 {
+	return capnp.Struct(s).Uint64(8)
+}
+
+func (s ClientCallback_debugChanged_Params) SetOutputSeq(v uint64) {
+	capnp.Struct(s).SetUint64(8, v)
+}
+
+func (s ClientCallback_debugChanged_Params) BreakpointsSeq() uint64 {
+	return capnp.Struct(s).Uint64(16)
+}
+
+func (s ClientCallback_debugChanged_Params) SetBreakpointsSeq(v uint64) {
+	capnp.Struct(s).SetUint64(16, v)
+}
+
+// ClientCallback_debugChanged_Params_List is a list of ClientCallback_debugChanged_Params.
+type ClientCallback_debugChanged_Params_List = capnp.StructList[ClientCallback_debugChanged_Params]
+
+// NewClientCallback_debugChanged_Params creates a new list of ClientCallback_debugChanged_Params.
+func NewClientCallback_debugChanged_Params_List(s *capnp.Segment, sz int32) (ClientCallback_debugChanged_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 24, PointerCount: 0}, sz)
+	return capnp.StructList[ClientCallback_debugChanged_Params](l), err
+}
+
+// ClientCallback_debugChanged_Params_Future is a wrapper for a ClientCallback_debugChanged_Params promised by a client call.
+type ClientCallback_debugChanged_Params_Future struct{ *capnp.Future }
+
+func (f ClientCallback_debugChanged_Params_Future) Struct() (ClientCallback_debugChanged_Params, error) {
+	p, err := f.Future.Ptr()
+	return ClientCallback_debugChanged_Params(p.Struct()), err
+}
+
+type ClientCallback_debugChanged_Results capnp.Struct
+
+// ClientCallback_debugChanged_Results_TypeID is the unique identifier for the type ClientCallback_debugChanged_Results.
+const ClientCallback_debugChanged_Results_TypeID = 0xdba7cf4c0f21530c
+
+func NewClientCallback_debugChanged_Results(s *capnp.Segment) (ClientCallback_debugChanged_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_debugChanged_Results(st), err
+}
+
+func NewRootClientCallback_debugChanged_Results(s *capnp.Segment) (ClientCallback_debugChanged_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClientCallback_debugChanged_Results(st), err
+}
+
+func ReadRootClientCallback_debugChanged_Results(msg *capnp.Message) (ClientCallback_debugChanged_Results, error) {
+	root, err := msg.Root()
+	return ClientCallback_debugChanged_Results(root.Struct()), err
+}
+
+func (s ClientCallback_debugChanged_Results) String() string {
+	str, _ := text.Marshal(0xdba7cf4c0f21530c, capnp.Struct(s))
+	return str
+}
+
+func (s ClientCallback_debugChanged_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ClientCallback_debugChanged_Results) DecodeFromPtr(p capnp.Ptr) ClientCallback_debugChanged_Results {
+	return ClientCallback_debugChanged_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ClientCallback_debugChanged_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ClientCallback_debugChanged_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ClientCallback_debugChanged_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ClientCallback_debugChanged_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// ClientCallback_debugChanged_Results_List is a list of ClientCallback_debugChanged_Results.
+type ClientCallback_debugChanged_Results_List = capnp.StructList[ClientCallback_debugChanged_Results]
+
+// NewClientCallback_debugChanged_Results creates a new list of ClientCallback_debugChanged_Results.
+func NewClientCallback_debugChanged_Results_List(s *capnp.Segment, sz int32) (ClientCallback_debugChanged_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[ClientCallback_debugChanged_Results](l), err
+}
+
+// ClientCallback_debugChanged_Results_Future is a wrapper for a ClientCallback_debugChanged_Results promised by a client call.
+type ClientCallback_debugChanged_Results_Future struct{ *capnp.Future }
+
+func (f ClientCallback_debugChanged_Results_Future) Struct() (ClientCallback_debugChanged_Results, error) {
+	p, err := f.Future.Ptr()
+	return ClientCallback_debugChanged_Results(p.Struct()), err
+}
+
 type EditorService capnp.Client
 
 // EditorService_TypeID is the unique identifier for the type EditorService.
@@ -3826,6 +4030,266 @@ func (c EditorService) SetIgnoredDirs(ctx context.Context, params func(EditorSer
 
 }
 
+func (c EditorService) ToggleBreakpoint(ctx context.Context, params func(EditorService_toggleBreakpoint_Params) error) (EditorService_toggleBreakpoint_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      64,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "toggleBreakpoint",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_toggleBreakpoint_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_toggleBreakpoint_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) ListBreakpoints(ctx context.Context, params func(EditorService_listBreakpoints_Params) error) (EditorService_listBreakpoints_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      65,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "listBreakpoints",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_listBreakpoints_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_listBreakpoints_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) DebugStart(ctx context.Context, params func(EditorService_debugStart_Params) error) (EditorService_debugStart_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      66,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugStart",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_debugStart_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_debugStart_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) DebugControl(ctx context.Context, params func(EditorService_debugControl_Params) error) (EditorService_debugControl_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      67,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugControl",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_debugControl_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_debugControl_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) DebugState(ctx context.Context, params func(EditorService_debugState_Params) error) (EditorService_debugState_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      68,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugState",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_debugState_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_debugState_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) DebugStackTrace(ctx context.Context, params func(EditorService_debugStackTrace_Params) error) (EditorService_debugStackTrace_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      69,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugStackTrace",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_debugStackTrace_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_debugStackTrace_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) DebugScopes(ctx context.Context, params func(EditorService_debugScopes_Params) error) (EditorService_debugScopes_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      70,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugScopes",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_debugScopes_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_debugScopes_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) DebugVariables(ctx context.Context, params func(EditorService_debugVariables_Params) error) (EditorService_debugVariables_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      71,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugVariables",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_debugVariables_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_debugVariables_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) DebugEvaluate(ctx context.Context, params func(EditorService_debugEvaluate_Params) error) (EditorService_debugEvaluate_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      72,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugEvaluate",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 2}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_debugEvaluate_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_debugEvaluate_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) DebugOutput(ctx context.Context, params func(EditorService_debugOutput_Params) error) (EditorService_debugOutput_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      73,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugOutput",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_debugOutput_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_debugOutput_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) DebugConfigs(ctx context.Context, params func(EditorService_debugConfigs_Params) error) (EditorService_debugConfigs_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      74,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugConfigs",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_debugConfigs_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_debugConfigs_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) DebugRestart(ctx context.Context, params func(EditorService_debugRestart_Params) error) (EditorService_debugRestart_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      75,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugRestart",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 1}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_debugRestart_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_debugRestart_Results_Future{Future: ans.Future()}, release
+
+}
+
+func (c EditorService) SetBreakpoint(ctx context.Context, params func(EditorService_setBreakpoint_Params) error) (EditorService_setBreakpoint_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      76,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "setBreakpoint",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 8, PointerCount: 3}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(EditorService_setBreakpoint_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return EditorService_setBreakpoint_Results_Future{Future: ans.Future()}, release
+
+}
+
 func (c EditorService) WaitStreaming() error {
 	return capnp.Client(c).WaitStreaming()
 }
@@ -4026,6 +4490,32 @@ type EditorService_Server interface {
 	CreateDir(context.Context, EditorService_createDir) error
 
 	SetIgnoredDirs(context.Context, EditorService_setIgnoredDirs) error
+
+	ToggleBreakpoint(context.Context, EditorService_toggleBreakpoint) error
+
+	ListBreakpoints(context.Context, EditorService_listBreakpoints) error
+
+	DebugStart(context.Context, EditorService_debugStart) error
+
+	DebugControl(context.Context, EditorService_debugControl) error
+
+	DebugState(context.Context, EditorService_debugState) error
+
+	DebugStackTrace(context.Context, EditorService_debugStackTrace) error
+
+	DebugScopes(context.Context, EditorService_debugScopes) error
+
+	DebugVariables(context.Context, EditorService_debugVariables) error
+
+	DebugEvaluate(context.Context, EditorService_debugEvaluate) error
+
+	DebugOutput(context.Context, EditorService_debugOutput) error
+
+	DebugConfigs(context.Context, EditorService_debugConfigs) error
+
+	DebugRestart(context.Context, EditorService_debugRestart) error
+
+	SetBreakpoint(context.Context, EditorService_setBreakpoint) error
 }
 
 // EditorService_NewServer creates a new Server from an implementation of EditorService_Server.
@@ -4044,7 +4534,7 @@ func EditorService_ServerToClient(s EditorService_Server) EditorService {
 // This can be used to create a more complicated Server.
 func EditorService_Methods(methods []server.Method, s EditorService_Server) []server.Method {
 	if cap(methods) == 0 {
-		methods = make([]server.Method, 0, 64)
+		methods = make([]server.Method, 0, 77)
 	}
 
 	methods = append(methods, server.Method{
@@ -4812,6 +5302,162 @@ func EditorService_Methods(methods []server.Method, s EditorService_Server) []se
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
 			return s.SetIgnoredDirs(ctx, EditorService_setIgnoredDirs{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      64,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "toggleBreakpoint",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.ToggleBreakpoint(ctx, EditorService_toggleBreakpoint{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      65,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "listBreakpoints",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.ListBreakpoints(ctx, EditorService_listBreakpoints{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      66,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugStart",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.DebugStart(ctx, EditorService_debugStart{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      67,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugControl",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.DebugControl(ctx, EditorService_debugControl{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      68,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugState",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.DebugState(ctx, EditorService_debugState{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      69,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugStackTrace",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.DebugStackTrace(ctx, EditorService_debugStackTrace{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      70,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugScopes",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.DebugScopes(ctx, EditorService_debugScopes{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      71,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugVariables",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.DebugVariables(ctx, EditorService_debugVariables{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      72,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugEvaluate",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.DebugEvaluate(ctx, EditorService_debugEvaluate{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      73,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugOutput",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.DebugOutput(ctx, EditorService_debugOutput{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      74,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugConfigs",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.DebugConfigs(ctx, EditorService_debugConfigs{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      75,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "debugRestart",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.DebugRestart(ctx, EditorService_debugRestart{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xd281f133906f9f01,
+			MethodID:      76,
+			InterfaceName: "editor.capnp:EditorService",
+			MethodName:    "setBreakpoint",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.SetBreakpoint(ctx, EditorService_setBreakpoint{call})
 		},
 	})
 
@@ -5904,6 +6550,227 @@ func (c EditorService_setIgnoredDirs) Args() EditorService_setIgnoredDirs_Params
 func (c EditorService_setIgnoredDirs) AllocResults() (EditorService_setIgnoredDirs_Results, error) {
 	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
 	return EditorService_setIgnoredDirs_Results(r), err
+}
+
+// EditorService_toggleBreakpoint holds the state for a server call to EditorService.toggleBreakpoint.
+// See server.Call for documentation.
+type EditorService_toggleBreakpoint struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_toggleBreakpoint) Args() EditorService_toggleBreakpoint_Params {
+	return EditorService_toggleBreakpoint_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_toggleBreakpoint) AllocResults() (EditorService_toggleBreakpoint_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_toggleBreakpoint_Results(r), err
+}
+
+// EditorService_listBreakpoints holds the state for a server call to EditorService.listBreakpoints.
+// See server.Call for documentation.
+type EditorService_listBreakpoints struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_listBreakpoints) Args() EditorService_listBreakpoints_Params {
+	return EditorService_listBreakpoints_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_listBreakpoints) AllocResults() (EditorService_listBreakpoints_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 8, PointerCount: 1})
+	return EditorService_listBreakpoints_Results(r), err
+}
+
+// EditorService_debugStart holds the state for a server call to EditorService.debugStart.
+// See server.Call for documentation.
+type EditorService_debugStart struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_debugStart) Args() EditorService_debugStart_Params {
+	return EditorService_debugStart_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_debugStart) AllocResults() (EditorService_debugStart_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugStart_Results(r), err
+}
+
+// EditorService_debugControl holds the state for a server call to EditorService.debugControl.
+// See server.Call for documentation.
+type EditorService_debugControl struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_debugControl) Args() EditorService_debugControl_Params {
+	return EditorService_debugControl_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_debugControl) AllocResults() (EditorService_debugControl_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugControl_Results(r), err
+}
+
+// EditorService_debugState holds the state for a server call to EditorService.debugState.
+// See server.Call for documentation.
+type EditorService_debugState struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_debugState) Args() EditorService_debugState_Params {
+	return EditorService_debugState_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_debugState) AllocResults() (EditorService_debugState_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugState_Results(r), err
+}
+
+// EditorService_debugStackTrace holds the state for a server call to EditorService.debugStackTrace.
+// See server.Call for documentation.
+type EditorService_debugStackTrace struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_debugStackTrace) Args() EditorService_debugStackTrace_Params {
+	return EditorService_debugStackTrace_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_debugStackTrace) AllocResults() (EditorService_debugStackTrace_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugStackTrace_Results(r), err
+}
+
+// EditorService_debugScopes holds the state for a server call to EditorService.debugScopes.
+// See server.Call for documentation.
+type EditorService_debugScopes struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_debugScopes) Args() EditorService_debugScopes_Params {
+	return EditorService_debugScopes_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_debugScopes) AllocResults() (EditorService_debugScopes_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugScopes_Results(r), err
+}
+
+// EditorService_debugVariables holds the state for a server call to EditorService.debugVariables.
+// See server.Call for documentation.
+type EditorService_debugVariables struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_debugVariables) Args() EditorService_debugVariables_Params {
+	return EditorService_debugVariables_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_debugVariables) AllocResults() (EditorService_debugVariables_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugVariables_Results(r), err
+}
+
+// EditorService_debugEvaluate holds the state for a server call to EditorService.debugEvaluate.
+// See server.Call for documentation.
+type EditorService_debugEvaluate struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_debugEvaluate) Args() EditorService_debugEvaluate_Params {
+	return EditorService_debugEvaluate_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_debugEvaluate) AllocResults() (EditorService_debugEvaluate_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugEvaluate_Results(r), err
+}
+
+// EditorService_debugOutput holds the state for a server call to EditorService.debugOutput.
+// See server.Call for documentation.
+type EditorService_debugOutput struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_debugOutput) Args() EditorService_debugOutput_Params {
+	return EditorService_debugOutput_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_debugOutput) AllocResults() (EditorService_debugOutput_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	return EditorService_debugOutput_Results(r), err
+}
+
+// EditorService_debugConfigs holds the state for a server call to EditorService.debugConfigs.
+// See server.Call for documentation.
+type EditorService_debugConfigs struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_debugConfigs) Args() EditorService_debugConfigs_Params {
+	return EditorService_debugConfigs_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_debugConfigs) AllocResults() (EditorService_debugConfigs_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugConfigs_Results(r), err
+}
+
+// EditorService_debugRestart holds the state for a server call to EditorService.debugRestart.
+// See server.Call for documentation.
+type EditorService_debugRestart struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_debugRestart) Args() EditorService_debugRestart_Params {
+	return EditorService_debugRestart_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_debugRestart) AllocResults() (EditorService_debugRestart_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugRestart_Results(r), err
+}
+
+// EditorService_setBreakpoint holds the state for a server call to EditorService.setBreakpoint.
+// See server.Call for documentation.
+type EditorService_setBreakpoint struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c EditorService_setBreakpoint) Args() EditorService_setBreakpoint_Params {
+	return EditorService_setBreakpoint_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c EditorService_setBreakpoint) AllocResults() (EditorService_setBreakpoint_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_setBreakpoint_Results(r), err
 }
 
 // EditorService_List is a list of EditorService.
@@ -16917,6 +17784,3480 @@ func (f EditorService_setIgnoredDirs_Results_Future) Struct() (EditorService_set
 	return EditorService_setIgnoredDirs_Results(p.Struct()), err
 }
 
+type EditorService_toggleBreakpoint_Params capnp.Struct
+
+// EditorService_toggleBreakpoint_Params_TypeID is the unique identifier for the type EditorService_toggleBreakpoint_Params.
+const EditorService_toggleBreakpoint_Params_TypeID = 0x990bf528b0dc7b29
+
+func NewEditorService_toggleBreakpoint_Params(s *capnp.Segment) (EditorService_toggleBreakpoint_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1})
+	return EditorService_toggleBreakpoint_Params(st), err
+}
+
+func NewRootEditorService_toggleBreakpoint_Params(s *capnp.Segment) (EditorService_toggleBreakpoint_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1})
+	return EditorService_toggleBreakpoint_Params(st), err
+}
+
+func ReadRootEditorService_toggleBreakpoint_Params(msg *capnp.Message) (EditorService_toggleBreakpoint_Params, error) {
+	root, err := msg.Root()
+	return EditorService_toggleBreakpoint_Params(root.Struct()), err
+}
+
+func (s EditorService_toggleBreakpoint_Params) String() string {
+	str, _ := text.Marshal(0x990bf528b0dc7b29, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_toggleBreakpoint_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_toggleBreakpoint_Params) DecodeFromPtr(p capnp.Ptr) EditorService_toggleBreakpoint_Params {
+	return EditorService_toggleBreakpoint_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_toggleBreakpoint_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_toggleBreakpoint_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_toggleBreakpoint_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_toggleBreakpoint_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_toggleBreakpoint_Params) Path() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s EditorService_toggleBreakpoint_Params) HasPath() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_toggleBreakpoint_Params) PathBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_toggleBreakpoint_Params) SetPath(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s EditorService_toggleBreakpoint_Params) Line() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s EditorService_toggleBreakpoint_Params) SetLine(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+// EditorService_toggleBreakpoint_Params_List is a list of EditorService_toggleBreakpoint_Params.
+type EditorService_toggleBreakpoint_Params_List = capnp.StructList[EditorService_toggleBreakpoint_Params]
+
+// NewEditorService_toggleBreakpoint_Params creates a new list of EditorService_toggleBreakpoint_Params.
+func NewEditorService_toggleBreakpoint_Params_List(s *capnp.Segment, sz int32) (EditorService_toggleBreakpoint_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_toggleBreakpoint_Params](l), err
+}
+
+// EditorService_toggleBreakpoint_Params_Future is a wrapper for a EditorService_toggleBreakpoint_Params promised by a client call.
+type EditorService_toggleBreakpoint_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_toggleBreakpoint_Params_Future) Struct() (EditorService_toggleBreakpoint_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_toggleBreakpoint_Params(p.Struct()), err
+}
+
+type EditorService_toggleBreakpoint_Results capnp.Struct
+
+// EditorService_toggleBreakpoint_Results_TypeID is the unique identifier for the type EditorService_toggleBreakpoint_Results.
+const EditorService_toggleBreakpoint_Results_TypeID = 0xb4dabe4bcf7fa635
+
+func NewEditorService_toggleBreakpoint_Results(s *capnp.Segment) (EditorService_toggleBreakpoint_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_toggleBreakpoint_Results(st), err
+}
+
+func NewRootEditorService_toggleBreakpoint_Results(s *capnp.Segment) (EditorService_toggleBreakpoint_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_toggleBreakpoint_Results(st), err
+}
+
+func ReadRootEditorService_toggleBreakpoint_Results(msg *capnp.Message) (EditorService_toggleBreakpoint_Results, error) {
+	root, err := msg.Root()
+	return EditorService_toggleBreakpoint_Results(root.Struct()), err
+}
+
+func (s EditorService_toggleBreakpoint_Results) String() string {
+	str, _ := text.Marshal(0xb4dabe4bcf7fa635, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_toggleBreakpoint_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_toggleBreakpoint_Results) DecodeFromPtr(p capnp.Ptr) EditorService_toggleBreakpoint_Results {
+	return EditorService_toggleBreakpoint_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_toggleBreakpoint_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_toggleBreakpoint_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_toggleBreakpoint_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_toggleBreakpoint_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_toggleBreakpoint_Results) Set() bool {
+	return capnp.Struct(s).Bit(0)
+}
+
+func (s EditorService_toggleBreakpoint_Results) SetSet(v bool) {
+	capnp.Struct(s).SetBit(0, v)
+}
+
+// EditorService_toggleBreakpoint_Results_List is a list of EditorService_toggleBreakpoint_Results.
+type EditorService_toggleBreakpoint_Results_List = capnp.StructList[EditorService_toggleBreakpoint_Results]
+
+// NewEditorService_toggleBreakpoint_Results creates a new list of EditorService_toggleBreakpoint_Results.
+func NewEditorService_toggleBreakpoint_Results_List(s *capnp.Segment, sz int32) (EditorService_toggleBreakpoint_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_toggleBreakpoint_Results](l), err
+}
+
+// EditorService_toggleBreakpoint_Results_Future is a wrapper for a EditorService_toggleBreakpoint_Results promised by a client call.
+type EditorService_toggleBreakpoint_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_toggleBreakpoint_Results_Future) Struct() (EditorService_toggleBreakpoint_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_toggleBreakpoint_Results(p.Struct()), err
+}
+
+type EditorService_listBreakpoints_Params capnp.Struct
+
+// EditorService_listBreakpoints_Params_TypeID is the unique identifier for the type EditorService_listBreakpoints_Params.
+const EditorService_listBreakpoints_Params_TypeID = 0x8b820a19bcc81434
+
+func NewEditorService_listBreakpoints_Params(s *capnp.Segment) (EditorService_listBreakpoints_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_listBreakpoints_Params(st), err
+}
+
+func NewRootEditorService_listBreakpoints_Params(s *capnp.Segment) (EditorService_listBreakpoints_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_listBreakpoints_Params(st), err
+}
+
+func ReadRootEditorService_listBreakpoints_Params(msg *capnp.Message) (EditorService_listBreakpoints_Params, error) {
+	root, err := msg.Root()
+	return EditorService_listBreakpoints_Params(root.Struct()), err
+}
+
+func (s EditorService_listBreakpoints_Params) String() string {
+	str, _ := text.Marshal(0x8b820a19bcc81434, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_listBreakpoints_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_listBreakpoints_Params) DecodeFromPtr(p capnp.Ptr) EditorService_listBreakpoints_Params {
+	return EditorService_listBreakpoints_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_listBreakpoints_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_listBreakpoints_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_listBreakpoints_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_listBreakpoints_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_listBreakpoints_Params) Path() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s EditorService_listBreakpoints_Params) HasPath() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_listBreakpoints_Params) PathBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_listBreakpoints_Params) SetPath(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+// EditorService_listBreakpoints_Params_List is a list of EditorService_listBreakpoints_Params.
+type EditorService_listBreakpoints_Params_List = capnp.StructList[EditorService_listBreakpoints_Params]
+
+// NewEditorService_listBreakpoints_Params creates a new list of EditorService_listBreakpoints_Params.
+func NewEditorService_listBreakpoints_Params_List(s *capnp.Segment, sz int32) (EditorService_listBreakpoints_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_listBreakpoints_Params](l), err
+}
+
+// EditorService_listBreakpoints_Params_Future is a wrapper for a EditorService_listBreakpoints_Params promised by a client call.
+type EditorService_listBreakpoints_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_listBreakpoints_Params_Future) Struct() (EditorService_listBreakpoints_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_listBreakpoints_Params(p.Struct()), err
+}
+
+type EditorService_listBreakpoints_Results capnp.Struct
+
+// EditorService_listBreakpoints_Results_TypeID is the unique identifier for the type EditorService_listBreakpoints_Results.
+const EditorService_listBreakpoints_Results_TypeID = 0xa9643f938fd99949
+
+func NewEditorService_listBreakpoints_Results(s *capnp.Segment) (EditorService_listBreakpoints_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1})
+	return EditorService_listBreakpoints_Results(st), err
+}
+
+func NewRootEditorService_listBreakpoints_Results(s *capnp.Segment) (EditorService_listBreakpoints_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1})
+	return EditorService_listBreakpoints_Results(st), err
+}
+
+func ReadRootEditorService_listBreakpoints_Results(msg *capnp.Message) (EditorService_listBreakpoints_Results, error) {
+	root, err := msg.Root()
+	return EditorService_listBreakpoints_Results(root.Struct()), err
+}
+
+func (s EditorService_listBreakpoints_Results) String() string {
+	str, _ := text.Marshal(0xa9643f938fd99949, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_listBreakpoints_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_listBreakpoints_Results) DecodeFromPtr(p capnp.Ptr) EditorService_listBreakpoints_Results {
+	return EditorService_listBreakpoints_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_listBreakpoints_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_listBreakpoints_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_listBreakpoints_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_listBreakpoints_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_listBreakpoints_Results) Breakpoints() (DebugBreakpoint_List, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return DebugBreakpoint_List(p.List()), err
+}
+
+func (s EditorService_listBreakpoints_Results) HasBreakpoints() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_listBreakpoints_Results) SetBreakpoints(v DebugBreakpoint_List) error {
+	return capnp.Struct(s).SetPtr(0, v.ToPtr())
+}
+
+// NewBreakpoints sets the breakpoints field to a newly
+// allocated DebugBreakpoint_List, preferring placement in s's segment.
+func (s EditorService_listBreakpoints_Results) NewBreakpoints(n int32) (DebugBreakpoint_List, error) {
+	l, err := NewDebugBreakpoint_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return DebugBreakpoint_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, l.ToPtr())
+	return l, err
+}
+func (s EditorService_listBreakpoints_Results) Seq() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s EditorService_listBreakpoints_Results) SetSeq(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
+// EditorService_listBreakpoints_Results_List is a list of EditorService_listBreakpoints_Results.
+type EditorService_listBreakpoints_Results_List = capnp.StructList[EditorService_listBreakpoints_Results]
+
+// NewEditorService_listBreakpoints_Results creates a new list of EditorService_listBreakpoints_Results.
+func NewEditorService_listBreakpoints_Results_List(s *capnp.Segment, sz int32) (EditorService_listBreakpoints_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_listBreakpoints_Results](l), err
+}
+
+// EditorService_listBreakpoints_Results_Future is a wrapper for a EditorService_listBreakpoints_Results promised by a client call.
+type EditorService_listBreakpoints_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_listBreakpoints_Results_Future) Struct() (EditorService_listBreakpoints_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_listBreakpoints_Results(p.Struct()), err
+}
+
+type EditorService_debugStart_Params capnp.Struct
+
+// EditorService_debugStart_Params_TypeID is the unique identifier for the type EditorService_debugStart_Params.
+const EditorService_debugStart_Params_TypeID = 0xd83683c38af40c87
+
+func NewEditorService_debugStart_Params(s *capnp.Segment) (EditorService_debugStart_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugStart_Params(st), err
+}
+
+func NewRootEditorService_debugStart_Params(s *capnp.Segment) (EditorService_debugStart_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugStart_Params(st), err
+}
+
+func ReadRootEditorService_debugStart_Params(msg *capnp.Message) (EditorService_debugStart_Params, error) {
+	root, err := msg.Root()
+	return EditorService_debugStart_Params(root.Struct()), err
+}
+
+func (s EditorService_debugStart_Params) String() string {
+	str, _ := text.Marshal(0xd83683c38af40c87, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugStart_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugStart_Params) DecodeFromPtr(p capnp.Ptr) EditorService_debugStart_Params {
+	return EditorService_debugStart_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugStart_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugStart_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugStart_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugStart_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugStart_Params) Config() (DebugConfig, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return DebugConfig(p.Struct()), err
+}
+
+func (s EditorService_debugStart_Params) HasConfig() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_debugStart_Params) SetConfig(v DebugConfig) error {
+	return capnp.Struct(s).SetPtr(0, capnp.Struct(v).ToPtr())
+}
+
+// NewConfig sets the config field to a newly
+// allocated DebugConfig struct, preferring placement in s's segment.
+func (s EditorService_debugStart_Params) NewConfig() (DebugConfig, error) {
+	ss, err := NewDebugConfig(capnp.Struct(s).Segment())
+	if err != nil {
+		return DebugConfig{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, capnp.Struct(ss).ToPtr())
+	return ss, err
+}
+
+// EditorService_debugStart_Params_List is a list of EditorService_debugStart_Params.
+type EditorService_debugStart_Params_List = capnp.StructList[EditorService_debugStart_Params]
+
+// NewEditorService_debugStart_Params creates a new list of EditorService_debugStart_Params.
+func NewEditorService_debugStart_Params_List(s *capnp.Segment, sz int32) (EditorService_debugStart_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_debugStart_Params](l), err
+}
+
+// EditorService_debugStart_Params_Future is a wrapper for a EditorService_debugStart_Params promised by a client call.
+type EditorService_debugStart_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_debugStart_Params_Future) Struct() (EditorService_debugStart_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugStart_Params(p.Struct()), err
+}
+func (p EditorService_debugStart_Params_Future) Config() DebugConfig_Future {
+	return DebugConfig_Future{Future: p.Future.Field(0, nil)}
+}
+
+type EditorService_debugStart_Results capnp.Struct
+
+// EditorService_debugStart_Results_TypeID is the unique identifier for the type EditorService_debugStart_Results.
+const EditorService_debugStart_Results_TypeID = 0xd85c6029ea505f94
+
+func NewEditorService_debugStart_Results(s *capnp.Segment) (EditorService_debugStart_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugStart_Results(st), err
+}
+
+func NewRootEditorService_debugStart_Results(s *capnp.Segment) (EditorService_debugStart_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugStart_Results(st), err
+}
+
+func ReadRootEditorService_debugStart_Results(msg *capnp.Message) (EditorService_debugStart_Results, error) {
+	root, err := msg.Root()
+	return EditorService_debugStart_Results(root.Struct()), err
+}
+
+func (s EditorService_debugStart_Results) String() string {
+	str, _ := text.Marshal(0xd85c6029ea505f94, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugStart_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugStart_Results) DecodeFromPtr(p capnp.Ptr) EditorService_debugStart_Results {
+	return EditorService_debugStart_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugStart_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugStart_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugStart_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugStart_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugStart_Results) Error() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s EditorService_debugStart_Results) HasError() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_debugStart_Results) ErrorBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_debugStart_Results) SetError(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+// EditorService_debugStart_Results_List is a list of EditorService_debugStart_Results.
+type EditorService_debugStart_Results_List = capnp.StructList[EditorService_debugStart_Results]
+
+// NewEditorService_debugStart_Results creates a new list of EditorService_debugStart_Results.
+func NewEditorService_debugStart_Results_List(s *capnp.Segment, sz int32) (EditorService_debugStart_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_debugStart_Results](l), err
+}
+
+// EditorService_debugStart_Results_Future is a wrapper for a EditorService_debugStart_Results promised by a client call.
+type EditorService_debugStart_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_debugStart_Results_Future) Struct() (EditorService_debugStart_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugStart_Results(p.Struct()), err
+}
+
+type EditorService_debugControl_Params capnp.Struct
+
+// EditorService_debugControl_Params_TypeID is the unique identifier for the type EditorService_debugControl_Params.
+const EditorService_debugControl_Params_TypeID = 0x838885c3db79ce63
+
+func NewEditorService_debugControl_Params(s *capnp.Segment) (EditorService_debugControl_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_debugControl_Params(st), err
+}
+
+func NewRootEditorService_debugControl_Params(s *capnp.Segment) (EditorService_debugControl_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_debugControl_Params(st), err
+}
+
+func ReadRootEditorService_debugControl_Params(msg *capnp.Message) (EditorService_debugControl_Params, error) {
+	root, err := msg.Root()
+	return EditorService_debugControl_Params(root.Struct()), err
+}
+
+func (s EditorService_debugControl_Params) String() string {
+	str, _ := text.Marshal(0x838885c3db79ce63, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugControl_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugControl_Params) DecodeFromPtr(p capnp.Ptr) EditorService_debugControl_Params {
+	return EditorService_debugControl_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugControl_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugControl_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugControl_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugControl_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugControl_Params) Action() DebugAction {
+	return DebugAction(capnp.Struct(s).Uint16(0))
+}
+
+func (s EditorService_debugControl_Params) SetAction(v DebugAction) {
+	capnp.Struct(s).SetUint16(0, uint16(v))
+}
+
+// EditorService_debugControl_Params_List is a list of EditorService_debugControl_Params.
+type EditorService_debugControl_Params_List = capnp.StructList[EditorService_debugControl_Params]
+
+// NewEditorService_debugControl_Params creates a new list of EditorService_debugControl_Params.
+func NewEditorService_debugControl_Params_List(s *capnp.Segment, sz int32) (EditorService_debugControl_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_debugControl_Params](l), err
+}
+
+// EditorService_debugControl_Params_Future is a wrapper for a EditorService_debugControl_Params promised by a client call.
+type EditorService_debugControl_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_debugControl_Params_Future) Struct() (EditorService_debugControl_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugControl_Params(p.Struct()), err
+}
+
+type EditorService_debugControl_Results capnp.Struct
+
+// EditorService_debugControl_Results_TypeID is the unique identifier for the type EditorService_debugControl_Results.
+const EditorService_debugControl_Results_TypeID = 0x928f5acb45600b86
+
+func NewEditorService_debugControl_Results(s *capnp.Segment) (EditorService_debugControl_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugControl_Results(st), err
+}
+
+func NewRootEditorService_debugControl_Results(s *capnp.Segment) (EditorService_debugControl_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugControl_Results(st), err
+}
+
+func ReadRootEditorService_debugControl_Results(msg *capnp.Message) (EditorService_debugControl_Results, error) {
+	root, err := msg.Root()
+	return EditorService_debugControl_Results(root.Struct()), err
+}
+
+func (s EditorService_debugControl_Results) String() string {
+	str, _ := text.Marshal(0x928f5acb45600b86, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugControl_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugControl_Results) DecodeFromPtr(p capnp.Ptr) EditorService_debugControl_Results {
+	return EditorService_debugControl_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugControl_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugControl_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugControl_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugControl_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugControl_Results) Error() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s EditorService_debugControl_Results) HasError() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_debugControl_Results) ErrorBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_debugControl_Results) SetError(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+// EditorService_debugControl_Results_List is a list of EditorService_debugControl_Results.
+type EditorService_debugControl_Results_List = capnp.StructList[EditorService_debugControl_Results]
+
+// NewEditorService_debugControl_Results creates a new list of EditorService_debugControl_Results.
+func NewEditorService_debugControl_Results_List(s *capnp.Segment, sz int32) (EditorService_debugControl_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_debugControl_Results](l), err
+}
+
+// EditorService_debugControl_Results_Future is a wrapper for a EditorService_debugControl_Results promised by a client call.
+type EditorService_debugControl_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_debugControl_Results_Future) Struct() (EditorService_debugControl_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugControl_Results(p.Struct()), err
+}
+
+type EditorService_debugState_Params capnp.Struct
+
+// EditorService_debugState_Params_TypeID is the unique identifier for the type EditorService_debugState_Params.
+const EditorService_debugState_Params_TypeID = 0x9a6b04b7a2bdef78
+
+func NewEditorService_debugState_Params(s *capnp.Segment) (EditorService_debugState_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_debugState_Params(st), err
+}
+
+func NewRootEditorService_debugState_Params(s *capnp.Segment) (EditorService_debugState_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_debugState_Params(st), err
+}
+
+func ReadRootEditorService_debugState_Params(msg *capnp.Message) (EditorService_debugState_Params, error) {
+	root, err := msg.Root()
+	return EditorService_debugState_Params(root.Struct()), err
+}
+
+func (s EditorService_debugState_Params) String() string {
+	str, _ := text.Marshal(0x9a6b04b7a2bdef78, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugState_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugState_Params) DecodeFromPtr(p capnp.Ptr) EditorService_debugState_Params {
+	return EditorService_debugState_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugState_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugState_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugState_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugState_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// EditorService_debugState_Params_List is a list of EditorService_debugState_Params.
+type EditorService_debugState_Params_List = capnp.StructList[EditorService_debugState_Params]
+
+// NewEditorService_debugState_Params creates a new list of EditorService_debugState_Params.
+func NewEditorService_debugState_Params_List(s *capnp.Segment, sz int32) (EditorService_debugState_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_debugState_Params](l), err
+}
+
+// EditorService_debugState_Params_Future is a wrapper for a EditorService_debugState_Params promised by a client call.
+type EditorService_debugState_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_debugState_Params_Future) Struct() (EditorService_debugState_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugState_Params(p.Struct()), err
+}
+
+type EditorService_debugState_Results capnp.Struct
+
+// EditorService_debugState_Results_TypeID is the unique identifier for the type EditorService_debugState_Results.
+const EditorService_debugState_Results_TypeID = 0x9cd684df4ea262b4
+
+func NewEditorService_debugState_Results(s *capnp.Segment) (EditorService_debugState_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugState_Results(st), err
+}
+
+func NewRootEditorService_debugState_Results(s *capnp.Segment) (EditorService_debugState_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugState_Results(st), err
+}
+
+func ReadRootEditorService_debugState_Results(msg *capnp.Message) (EditorService_debugState_Results, error) {
+	root, err := msg.Root()
+	return EditorService_debugState_Results(root.Struct()), err
+}
+
+func (s EditorService_debugState_Results) String() string {
+	str, _ := text.Marshal(0x9cd684df4ea262b4, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugState_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugState_Results) DecodeFromPtr(p capnp.Ptr) EditorService_debugState_Results {
+	return EditorService_debugState_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugState_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugState_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugState_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugState_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugState_Results) State() (DebugState, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return DebugState(p.Struct()), err
+}
+
+func (s EditorService_debugState_Results) HasState() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_debugState_Results) SetState(v DebugState) error {
+	return capnp.Struct(s).SetPtr(0, capnp.Struct(v).ToPtr())
+}
+
+// NewState sets the state field to a newly
+// allocated DebugState struct, preferring placement in s's segment.
+func (s EditorService_debugState_Results) NewState() (DebugState, error) {
+	ss, err := NewDebugState(capnp.Struct(s).Segment())
+	if err != nil {
+		return DebugState{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, capnp.Struct(ss).ToPtr())
+	return ss, err
+}
+
+// EditorService_debugState_Results_List is a list of EditorService_debugState_Results.
+type EditorService_debugState_Results_List = capnp.StructList[EditorService_debugState_Results]
+
+// NewEditorService_debugState_Results creates a new list of EditorService_debugState_Results.
+func NewEditorService_debugState_Results_List(s *capnp.Segment, sz int32) (EditorService_debugState_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_debugState_Results](l), err
+}
+
+// EditorService_debugState_Results_Future is a wrapper for a EditorService_debugState_Results promised by a client call.
+type EditorService_debugState_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_debugState_Results_Future) Struct() (EditorService_debugState_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugState_Results(p.Struct()), err
+}
+func (p EditorService_debugState_Results_Future) State() DebugState_Future {
+	return DebugState_Future{Future: p.Future.Field(0, nil)}
+}
+
+type EditorService_debugStackTrace_Params capnp.Struct
+
+// EditorService_debugStackTrace_Params_TypeID is the unique identifier for the type EditorService_debugStackTrace_Params.
+const EditorService_debugStackTrace_Params_TypeID = 0xfdf7af5ce49fa3b5
+
+func NewEditorService_debugStackTrace_Params(s *capnp.Segment) (EditorService_debugStackTrace_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_debugStackTrace_Params(st), err
+}
+
+func NewRootEditorService_debugStackTrace_Params(s *capnp.Segment) (EditorService_debugStackTrace_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_debugStackTrace_Params(st), err
+}
+
+func ReadRootEditorService_debugStackTrace_Params(msg *capnp.Message) (EditorService_debugStackTrace_Params, error) {
+	root, err := msg.Root()
+	return EditorService_debugStackTrace_Params(root.Struct()), err
+}
+
+func (s EditorService_debugStackTrace_Params) String() string {
+	str, _ := text.Marshal(0xfdf7af5ce49fa3b5, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugStackTrace_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugStackTrace_Params) DecodeFromPtr(p capnp.Ptr) EditorService_debugStackTrace_Params {
+	return EditorService_debugStackTrace_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugStackTrace_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugStackTrace_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugStackTrace_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugStackTrace_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugStackTrace_Params) ThreadId() int64 {
+	return int64(capnp.Struct(s).Uint64(0))
+}
+
+func (s EditorService_debugStackTrace_Params) SetThreadId(v int64) {
+	capnp.Struct(s).SetUint64(0, uint64(v))
+}
+
+// EditorService_debugStackTrace_Params_List is a list of EditorService_debugStackTrace_Params.
+type EditorService_debugStackTrace_Params_List = capnp.StructList[EditorService_debugStackTrace_Params]
+
+// NewEditorService_debugStackTrace_Params creates a new list of EditorService_debugStackTrace_Params.
+func NewEditorService_debugStackTrace_Params_List(s *capnp.Segment, sz int32) (EditorService_debugStackTrace_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_debugStackTrace_Params](l), err
+}
+
+// EditorService_debugStackTrace_Params_Future is a wrapper for a EditorService_debugStackTrace_Params promised by a client call.
+type EditorService_debugStackTrace_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_debugStackTrace_Params_Future) Struct() (EditorService_debugStackTrace_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugStackTrace_Params(p.Struct()), err
+}
+
+type EditorService_debugStackTrace_Results capnp.Struct
+
+// EditorService_debugStackTrace_Results_TypeID is the unique identifier for the type EditorService_debugStackTrace_Results.
+const EditorService_debugStackTrace_Results_TypeID = 0xf434408b3cf4e018
+
+func NewEditorService_debugStackTrace_Results(s *capnp.Segment) (EditorService_debugStackTrace_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugStackTrace_Results(st), err
+}
+
+func NewRootEditorService_debugStackTrace_Results(s *capnp.Segment) (EditorService_debugStackTrace_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugStackTrace_Results(st), err
+}
+
+func ReadRootEditorService_debugStackTrace_Results(msg *capnp.Message) (EditorService_debugStackTrace_Results, error) {
+	root, err := msg.Root()
+	return EditorService_debugStackTrace_Results(root.Struct()), err
+}
+
+func (s EditorService_debugStackTrace_Results) String() string {
+	str, _ := text.Marshal(0xf434408b3cf4e018, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugStackTrace_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugStackTrace_Results) DecodeFromPtr(p capnp.Ptr) EditorService_debugStackTrace_Results {
+	return EditorService_debugStackTrace_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugStackTrace_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugStackTrace_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugStackTrace_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugStackTrace_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugStackTrace_Results) Frames() (DebugFrame_List, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return DebugFrame_List(p.List()), err
+}
+
+func (s EditorService_debugStackTrace_Results) HasFrames() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_debugStackTrace_Results) SetFrames(v DebugFrame_List) error {
+	return capnp.Struct(s).SetPtr(0, v.ToPtr())
+}
+
+// NewFrames sets the frames field to a newly
+// allocated DebugFrame_List, preferring placement in s's segment.
+func (s EditorService_debugStackTrace_Results) NewFrames(n int32) (DebugFrame_List, error) {
+	l, err := NewDebugFrame_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return DebugFrame_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, l.ToPtr())
+	return l, err
+}
+func (s EditorService_debugStackTrace_Results) Error() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s EditorService_debugStackTrace_Results) HasError() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s EditorService_debugStackTrace_Results) ErrorBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_debugStackTrace_Results) SetError(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+// EditorService_debugStackTrace_Results_List is a list of EditorService_debugStackTrace_Results.
+type EditorService_debugStackTrace_Results_List = capnp.StructList[EditorService_debugStackTrace_Results]
+
+// NewEditorService_debugStackTrace_Results creates a new list of EditorService_debugStackTrace_Results.
+func NewEditorService_debugStackTrace_Results_List(s *capnp.Segment, sz int32) (EditorService_debugStackTrace_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return capnp.StructList[EditorService_debugStackTrace_Results](l), err
+}
+
+// EditorService_debugStackTrace_Results_Future is a wrapper for a EditorService_debugStackTrace_Results promised by a client call.
+type EditorService_debugStackTrace_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_debugStackTrace_Results_Future) Struct() (EditorService_debugStackTrace_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugStackTrace_Results(p.Struct()), err
+}
+
+type EditorService_debugScopes_Params capnp.Struct
+
+// EditorService_debugScopes_Params_TypeID is the unique identifier for the type EditorService_debugScopes_Params.
+const EditorService_debugScopes_Params_TypeID = 0xbc404d7933933db4
+
+func NewEditorService_debugScopes_Params(s *capnp.Segment) (EditorService_debugScopes_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_debugScopes_Params(st), err
+}
+
+func NewRootEditorService_debugScopes_Params(s *capnp.Segment) (EditorService_debugScopes_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_debugScopes_Params(st), err
+}
+
+func ReadRootEditorService_debugScopes_Params(msg *capnp.Message) (EditorService_debugScopes_Params, error) {
+	root, err := msg.Root()
+	return EditorService_debugScopes_Params(root.Struct()), err
+}
+
+func (s EditorService_debugScopes_Params) String() string {
+	str, _ := text.Marshal(0xbc404d7933933db4, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugScopes_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugScopes_Params) DecodeFromPtr(p capnp.Ptr) EditorService_debugScopes_Params {
+	return EditorService_debugScopes_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugScopes_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugScopes_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugScopes_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugScopes_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugScopes_Params) FrameId() int64 {
+	return int64(capnp.Struct(s).Uint64(0))
+}
+
+func (s EditorService_debugScopes_Params) SetFrameId(v int64) {
+	capnp.Struct(s).SetUint64(0, uint64(v))
+}
+
+// EditorService_debugScopes_Params_List is a list of EditorService_debugScopes_Params.
+type EditorService_debugScopes_Params_List = capnp.StructList[EditorService_debugScopes_Params]
+
+// NewEditorService_debugScopes_Params creates a new list of EditorService_debugScopes_Params.
+func NewEditorService_debugScopes_Params_List(s *capnp.Segment, sz int32) (EditorService_debugScopes_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_debugScopes_Params](l), err
+}
+
+// EditorService_debugScopes_Params_Future is a wrapper for a EditorService_debugScopes_Params promised by a client call.
+type EditorService_debugScopes_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_debugScopes_Params_Future) Struct() (EditorService_debugScopes_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugScopes_Params(p.Struct()), err
+}
+
+type EditorService_debugScopes_Results capnp.Struct
+
+// EditorService_debugScopes_Results_TypeID is the unique identifier for the type EditorService_debugScopes_Results.
+const EditorService_debugScopes_Results_TypeID = 0xa9da130079c0575d
+
+func NewEditorService_debugScopes_Results(s *capnp.Segment) (EditorService_debugScopes_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugScopes_Results(st), err
+}
+
+func NewRootEditorService_debugScopes_Results(s *capnp.Segment) (EditorService_debugScopes_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugScopes_Results(st), err
+}
+
+func ReadRootEditorService_debugScopes_Results(msg *capnp.Message) (EditorService_debugScopes_Results, error) {
+	root, err := msg.Root()
+	return EditorService_debugScopes_Results(root.Struct()), err
+}
+
+func (s EditorService_debugScopes_Results) String() string {
+	str, _ := text.Marshal(0xa9da130079c0575d, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugScopes_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugScopes_Results) DecodeFromPtr(p capnp.Ptr) EditorService_debugScopes_Results {
+	return EditorService_debugScopes_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugScopes_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugScopes_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugScopes_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugScopes_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugScopes_Results) Scopes() (DebugScope_List, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return DebugScope_List(p.List()), err
+}
+
+func (s EditorService_debugScopes_Results) HasScopes() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_debugScopes_Results) SetScopes(v DebugScope_List) error {
+	return capnp.Struct(s).SetPtr(0, v.ToPtr())
+}
+
+// NewScopes sets the scopes field to a newly
+// allocated DebugScope_List, preferring placement in s's segment.
+func (s EditorService_debugScopes_Results) NewScopes(n int32) (DebugScope_List, error) {
+	l, err := NewDebugScope_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return DebugScope_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, l.ToPtr())
+	return l, err
+}
+func (s EditorService_debugScopes_Results) Error() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s EditorService_debugScopes_Results) HasError() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s EditorService_debugScopes_Results) ErrorBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_debugScopes_Results) SetError(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+// EditorService_debugScopes_Results_List is a list of EditorService_debugScopes_Results.
+type EditorService_debugScopes_Results_List = capnp.StructList[EditorService_debugScopes_Results]
+
+// NewEditorService_debugScopes_Results creates a new list of EditorService_debugScopes_Results.
+func NewEditorService_debugScopes_Results_List(s *capnp.Segment, sz int32) (EditorService_debugScopes_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return capnp.StructList[EditorService_debugScopes_Results](l), err
+}
+
+// EditorService_debugScopes_Results_Future is a wrapper for a EditorService_debugScopes_Results promised by a client call.
+type EditorService_debugScopes_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_debugScopes_Results_Future) Struct() (EditorService_debugScopes_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugScopes_Results(p.Struct()), err
+}
+
+type EditorService_debugVariables_Params capnp.Struct
+
+// EditorService_debugVariables_Params_TypeID is the unique identifier for the type EditorService_debugVariables_Params.
+const EditorService_debugVariables_Params_TypeID = 0x99cd327a9b8a2aee
+
+func NewEditorService_debugVariables_Params(s *capnp.Segment) (EditorService_debugVariables_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_debugVariables_Params(st), err
+}
+
+func NewRootEditorService_debugVariables_Params(s *capnp.Segment) (EditorService_debugVariables_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_debugVariables_Params(st), err
+}
+
+func ReadRootEditorService_debugVariables_Params(msg *capnp.Message) (EditorService_debugVariables_Params, error) {
+	root, err := msg.Root()
+	return EditorService_debugVariables_Params(root.Struct()), err
+}
+
+func (s EditorService_debugVariables_Params) String() string {
+	str, _ := text.Marshal(0x99cd327a9b8a2aee, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugVariables_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugVariables_Params) DecodeFromPtr(p capnp.Ptr) EditorService_debugVariables_Params {
+	return EditorService_debugVariables_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugVariables_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugVariables_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugVariables_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugVariables_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugVariables_Params) Ref() int64 {
+	return int64(capnp.Struct(s).Uint64(0))
+}
+
+func (s EditorService_debugVariables_Params) SetRef(v int64) {
+	capnp.Struct(s).SetUint64(0, uint64(v))
+}
+
+// EditorService_debugVariables_Params_List is a list of EditorService_debugVariables_Params.
+type EditorService_debugVariables_Params_List = capnp.StructList[EditorService_debugVariables_Params]
+
+// NewEditorService_debugVariables_Params creates a new list of EditorService_debugVariables_Params.
+func NewEditorService_debugVariables_Params_List(s *capnp.Segment, sz int32) (EditorService_debugVariables_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_debugVariables_Params](l), err
+}
+
+// EditorService_debugVariables_Params_Future is a wrapper for a EditorService_debugVariables_Params promised by a client call.
+type EditorService_debugVariables_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_debugVariables_Params_Future) Struct() (EditorService_debugVariables_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugVariables_Params(p.Struct()), err
+}
+
+type EditorService_debugVariables_Results capnp.Struct
+
+// EditorService_debugVariables_Results_TypeID is the unique identifier for the type EditorService_debugVariables_Results.
+const EditorService_debugVariables_Results_TypeID = 0x89872c970034f53b
+
+func NewEditorService_debugVariables_Results(s *capnp.Segment) (EditorService_debugVariables_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugVariables_Results(st), err
+}
+
+func NewRootEditorService_debugVariables_Results(s *capnp.Segment) (EditorService_debugVariables_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugVariables_Results(st), err
+}
+
+func ReadRootEditorService_debugVariables_Results(msg *capnp.Message) (EditorService_debugVariables_Results, error) {
+	root, err := msg.Root()
+	return EditorService_debugVariables_Results(root.Struct()), err
+}
+
+func (s EditorService_debugVariables_Results) String() string {
+	str, _ := text.Marshal(0x89872c970034f53b, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugVariables_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugVariables_Results) DecodeFromPtr(p capnp.Ptr) EditorService_debugVariables_Results {
+	return EditorService_debugVariables_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugVariables_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugVariables_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugVariables_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugVariables_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugVariables_Results) Variables() (DebugVariable_List, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return DebugVariable_List(p.List()), err
+}
+
+func (s EditorService_debugVariables_Results) HasVariables() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_debugVariables_Results) SetVariables(v DebugVariable_List) error {
+	return capnp.Struct(s).SetPtr(0, v.ToPtr())
+}
+
+// NewVariables sets the variables field to a newly
+// allocated DebugVariable_List, preferring placement in s's segment.
+func (s EditorService_debugVariables_Results) NewVariables(n int32) (DebugVariable_List, error) {
+	l, err := NewDebugVariable_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return DebugVariable_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, l.ToPtr())
+	return l, err
+}
+func (s EditorService_debugVariables_Results) Error() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s EditorService_debugVariables_Results) HasError() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s EditorService_debugVariables_Results) ErrorBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_debugVariables_Results) SetError(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+// EditorService_debugVariables_Results_List is a list of EditorService_debugVariables_Results.
+type EditorService_debugVariables_Results_List = capnp.StructList[EditorService_debugVariables_Results]
+
+// NewEditorService_debugVariables_Results creates a new list of EditorService_debugVariables_Results.
+func NewEditorService_debugVariables_Results_List(s *capnp.Segment, sz int32) (EditorService_debugVariables_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return capnp.StructList[EditorService_debugVariables_Results](l), err
+}
+
+// EditorService_debugVariables_Results_Future is a wrapper for a EditorService_debugVariables_Results promised by a client call.
+type EditorService_debugVariables_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_debugVariables_Results_Future) Struct() (EditorService_debugVariables_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugVariables_Results(p.Struct()), err
+}
+
+type EditorService_debugEvaluate_Params capnp.Struct
+
+// EditorService_debugEvaluate_Params_TypeID is the unique identifier for the type EditorService_debugEvaluate_Params.
+const EditorService_debugEvaluate_Params_TypeID = 0xf0f5e9b78c85a12f
+
+func NewEditorService_debugEvaluate_Params(s *capnp.Segment) (EditorService_debugEvaluate_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2})
+	return EditorService_debugEvaluate_Params(st), err
+}
+
+func NewRootEditorService_debugEvaluate_Params(s *capnp.Segment) (EditorService_debugEvaluate_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2})
+	return EditorService_debugEvaluate_Params(st), err
+}
+
+func ReadRootEditorService_debugEvaluate_Params(msg *capnp.Message) (EditorService_debugEvaluate_Params, error) {
+	root, err := msg.Root()
+	return EditorService_debugEvaluate_Params(root.Struct()), err
+}
+
+func (s EditorService_debugEvaluate_Params) String() string {
+	str, _ := text.Marshal(0xf0f5e9b78c85a12f, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugEvaluate_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugEvaluate_Params) DecodeFromPtr(p capnp.Ptr) EditorService_debugEvaluate_Params {
+	return EditorService_debugEvaluate_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugEvaluate_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugEvaluate_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugEvaluate_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugEvaluate_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugEvaluate_Params) Expression() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s EditorService_debugEvaluate_Params) HasExpression() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_debugEvaluate_Params) ExpressionBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_debugEvaluate_Params) SetExpression(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s EditorService_debugEvaluate_Params) FrameId() int64 {
+	return int64(capnp.Struct(s).Uint64(0))
+}
+
+func (s EditorService_debugEvaluate_Params) SetFrameId(v int64) {
+	capnp.Struct(s).SetUint64(0, uint64(v))
+}
+
+func (s EditorService_debugEvaluate_Params) Context() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s EditorService_debugEvaluate_Params) HasContext() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s EditorService_debugEvaluate_Params) ContextBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_debugEvaluate_Params) SetContext(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+// EditorService_debugEvaluate_Params_List is a list of EditorService_debugEvaluate_Params.
+type EditorService_debugEvaluate_Params_List = capnp.StructList[EditorService_debugEvaluate_Params]
+
+// NewEditorService_debugEvaluate_Params creates a new list of EditorService_debugEvaluate_Params.
+func NewEditorService_debugEvaluate_Params_List(s *capnp.Segment, sz int32) (EditorService_debugEvaluate_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2}, sz)
+	return capnp.StructList[EditorService_debugEvaluate_Params](l), err
+}
+
+// EditorService_debugEvaluate_Params_Future is a wrapper for a EditorService_debugEvaluate_Params promised by a client call.
+type EditorService_debugEvaluate_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_debugEvaluate_Params_Future) Struct() (EditorService_debugEvaluate_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugEvaluate_Params(p.Struct()), err
+}
+
+type EditorService_debugEvaluate_Results capnp.Struct
+
+// EditorService_debugEvaluate_Results_TypeID is the unique identifier for the type EditorService_debugEvaluate_Results.
+const EditorService_debugEvaluate_Results_TypeID = 0xc4dcad53a814bd46
+
+func NewEditorService_debugEvaluate_Results(s *capnp.Segment) (EditorService_debugEvaluate_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugEvaluate_Results(st), err
+}
+
+func NewRootEditorService_debugEvaluate_Results(s *capnp.Segment) (EditorService_debugEvaluate_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugEvaluate_Results(st), err
+}
+
+func ReadRootEditorService_debugEvaluate_Results(msg *capnp.Message) (EditorService_debugEvaluate_Results, error) {
+	root, err := msg.Root()
+	return EditorService_debugEvaluate_Results(root.Struct()), err
+}
+
+func (s EditorService_debugEvaluate_Results) String() string {
+	str, _ := text.Marshal(0xc4dcad53a814bd46, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugEvaluate_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugEvaluate_Results) DecodeFromPtr(p capnp.Ptr) EditorService_debugEvaluate_Results {
+	return EditorService_debugEvaluate_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugEvaluate_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugEvaluate_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugEvaluate_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugEvaluate_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugEvaluate_Results) Result() (DebugVariable, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return DebugVariable(p.Struct()), err
+}
+
+func (s EditorService_debugEvaluate_Results) HasResult() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_debugEvaluate_Results) SetResult(v DebugVariable) error {
+	return capnp.Struct(s).SetPtr(0, capnp.Struct(v).ToPtr())
+}
+
+// NewResult sets the result field to a newly
+// allocated DebugVariable struct, preferring placement in s's segment.
+func (s EditorService_debugEvaluate_Results) NewResult() (DebugVariable, error) {
+	ss, err := NewDebugVariable(capnp.Struct(s).Segment())
+	if err != nil {
+		return DebugVariable{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, capnp.Struct(ss).ToPtr())
+	return ss, err
+}
+
+func (s EditorService_debugEvaluate_Results) Error() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s EditorService_debugEvaluate_Results) HasError() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s EditorService_debugEvaluate_Results) ErrorBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_debugEvaluate_Results) SetError(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+// EditorService_debugEvaluate_Results_List is a list of EditorService_debugEvaluate_Results.
+type EditorService_debugEvaluate_Results_List = capnp.StructList[EditorService_debugEvaluate_Results]
+
+// NewEditorService_debugEvaluate_Results creates a new list of EditorService_debugEvaluate_Results.
+func NewEditorService_debugEvaluate_Results_List(s *capnp.Segment, sz int32) (EditorService_debugEvaluate_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return capnp.StructList[EditorService_debugEvaluate_Results](l), err
+}
+
+// EditorService_debugEvaluate_Results_Future is a wrapper for a EditorService_debugEvaluate_Results promised by a client call.
+type EditorService_debugEvaluate_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_debugEvaluate_Results_Future) Struct() (EditorService_debugEvaluate_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugEvaluate_Results(p.Struct()), err
+}
+func (p EditorService_debugEvaluate_Results_Future) Result() DebugVariable_Future {
+	return DebugVariable_Future{Future: p.Future.Field(0, nil)}
+}
+
+type EditorService_debugOutput_Params capnp.Struct
+
+// EditorService_debugOutput_Params_TypeID is the unique identifier for the type EditorService_debugOutput_Params.
+const EditorService_debugOutput_Params_TypeID = 0xe77f160094156137
+
+func NewEditorService_debugOutput_Params(s *capnp.Segment) (EditorService_debugOutput_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_debugOutput_Params(st), err
+}
+
+func NewRootEditorService_debugOutput_Params(s *capnp.Segment) (EditorService_debugOutput_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
+	return EditorService_debugOutput_Params(st), err
+}
+
+func ReadRootEditorService_debugOutput_Params(msg *capnp.Message) (EditorService_debugOutput_Params, error) {
+	root, err := msg.Root()
+	return EditorService_debugOutput_Params(root.Struct()), err
+}
+
+func (s EditorService_debugOutput_Params) String() string {
+	str, _ := text.Marshal(0xe77f160094156137, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugOutput_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugOutput_Params) DecodeFromPtr(p capnp.Ptr) EditorService_debugOutput_Params {
+	return EditorService_debugOutput_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugOutput_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugOutput_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugOutput_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugOutput_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugOutput_Params) SinceSeq() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s EditorService_debugOutput_Params) SetSinceSeq(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
+// EditorService_debugOutput_Params_List is a list of EditorService_debugOutput_Params.
+type EditorService_debugOutput_Params_List = capnp.StructList[EditorService_debugOutput_Params]
+
+// NewEditorService_debugOutput_Params creates a new list of EditorService_debugOutput_Params.
+func NewEditorService_debugOutput_Params_List(s *capnp.Segment, sz int32) (EditorService_debugOutput_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_debugOutput_Params](l), err
+}
+
+// EditorService_debugOutput_Params_Future is a wrapper for a EditorService_debugOutput_Params promised by a client call.
+type EditorService_debugOutput_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_debugOutput_Params_Future) Struct() (EditorService_debugOutput_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugOutput_Params(p.Struct()), err
+}
+
+type EditorService_debugOutput_Results capnp.Struct
+
+// EditorService_debugOutput_Results_TypeID is the unique identifier for the type EditorService_debugOutput_Results.
+const EditorService_debugOutput_Results_TypeID = 0xaf72eb620b1efeb8
+
+func NewEditorService_debugOutput_Results(s *capnp.Segment) (EditorService_debugOutput_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	return EditorService_debugOutput_Results(st), err
+}
+
+func NewRootEditorService_debugOutput_Results(s *capnp.Segment) (EditorService_debugOutput_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	return EditorService_debugOutput_Results(st), err
+}
+
+func ReadRootEditorService_debugOutput_Results(msg *capnp.Message) (EditorService_debugOutput_Results, error) {
+	root, err := msg.Root()
+	return EditorService_debugOutput_Results(root.Struct()), err
+}
+
+func (s EditorService_debugOutput_Results) String() string {
+	str, _ := text.Marshal(0xaf72eb620b1efeb8, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugOutput_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugOutput_Results) DecodeFromPtr(p capnp.Ptr) EditorService_debugOutput_Results {
+	return EditorService_debugOutput_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugOutput_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugOutput_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugOutput_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugOutput_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugOutput_Results) Chunks() (DebugOutput_List, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return DebugOutput_List(p.List()), err
+}
+
+func (s EditorService_debugOutput_Results) HasChunks() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_debugOutput_Results) SetChunks(v DebugOutput_List) error {
+	return capnp.Struct(s).SetPtr(0, v.ToPtr())
+}
+
+// NewChunks sets the chunks field to a newly
+// allocated DebugOutput_List, preferring placement in s's segment.
+func (s EditorService_debugOutput_Results) NewChunks(n int32) (DebugOutput_List, error) {
+	l, err := NewDebugOutput_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return DebugOutput_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, l.ToPtr())
+	return l, err
+}
+func (s EditorService_debugOutput_Results) Latest() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s EditorService_debugOutput_Results) SetLatest(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
+func (s EditorService_debugOutput_Results) Truncated() bool {
+	return capnp.Struct(s).Bit(64)
+}
+
+func (s EditorService_debugOutput_Results) SetTruncated(v bool) {
+	capnp.Struct(s).SetBit(64, v)
+}
+
+// EditorService_debugOutput_Results_List is a list of EditorService_debugOutput_Results.
+type EditorService_debugOutput_Results_List = capnp.StructList[EditorService_debugOutput_Results]
+
+// NewEditorService_debugOutput_Results creates a new list of EditorService_debugOutput_Results.
+func NewEditorService_debugOutput_Results_List(s *capnp.Segment, sz int32) (EditorService_debugOutput_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_debugOutput_Results](l), err
+}
+
+// EditorService_debugOutput_Results_Future is a wrapper for a EditorService_debugOutput_Results promised by a client call.
+type EditorService_debugOutput_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_debugOutput_Results_Future) Struct() (EditorService_debugOutput_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugOutput_Results(p.Struct()), err
+}
+
+type EditorService_debugConfigs_Params capnp.Struct
+
+// EditorService_debugConfigs_Params_TypeID is the unique identifier for the type EditorService_debugConfigs_Params.
+const EditorService_debugConfigs_Params_TypeID = 0xe575ee9ad56e1ac4
+
+func NewEditorService_debugConfigs_Params(s *capnp.Segment) (EditorService_debugConfigs_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugConfigs_Params(st), err
+}
+
+func NewRootEditorService_debugConfigs_Params(s *capnp.Segment) (EditorService_debugConfigs_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugConfigs_Params(st), err
+}
+
+func ReadRootEditorService_debugConfigs_Params(msg *capnp.Message) (EditorService_debugConfigs_Params, error) {
+	root, err := msg.Root()
+	return EditorService_debugConfigs_Params(root.Struct()), err
+}
+
+func (s EditorService_debugConfigs_Params) String() string {
+	str, _ := text.Marshal(0xe575ee9ad56e1ac4, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugConfigs_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugConfigs_Params) DecodeFromPtr(p capnp.Ptr) EditorService_debugConfigs_Params {
+	return EditorService_debugConfigs_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugConfigs_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugConfigs_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugConfigs_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugConfigs_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugConfigs_Params) ActiveFile() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s EditorService_debugConfigs_Params) HasActiveFile() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_debugConfigs_Params) ActiveFileBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_debugConfigs_Params) SetActiveFile(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+// EditorService_debugConfigs_Params_List is a list of EditorService_debugConfigs_Params.
+type EditorService_debugConfigs_Params_List = capnp.StructList[EditorService_debugConfigs_Params]
+
+// NewEditorService_debugConfigs_Params creates a new list of EditorService_debugConfigs_Params.
+func NewEditorService_debugConfigs_Params_List(s *capnp.Segment, sz int32) (EditorService_debugConfigs_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_debugConfigs_Params](l), err
+}
+
+// EditorService_debugConfigs_Params_Future is a wrapper for a EditorService_debugConfigs_Params promised by a client call.
+type EditorService_debugConfigs_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_debugConfigs_Params_Future) Struct() (EditorService_debugConfigs_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugConfigs_Params(p.Struct()), err
+}
+
+type EditorService_debugConfigs_Results capnp.Struct
+
+// EditorService_debugConfigs_Results_TypeID is the unique identifier for the type EditorService_debugConfigs_Results.
+const EditorService_debugConfigs_Results_TypeID = 0xdb686eb69f8e36e7
+
+func NewEditorService_debugConfigs_Results(s *capnp.Segment) (EditorService_debugConfigs_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugConfigs_Results(st), err
+}
+
+func NewRootEditorService_debugConfigs_Results(s *capnp.Segment) (EditorService_debugConfigs_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugConfigs_Results(st), err
+}
+
+func ReadRootEditorService_debugConfigs_Results(msg *capnp.Message) (EditorService_debugConfigs_Results, error) {
+	root, err := msg.Root()
+	return EditorService_debugConfigs_Results(root.Struct()), err
+}
+
+func (s EditorService_debugConfigs_Results) String() string {
+	str, _ := text.Marshal(0xdb686eb69f8e36e7, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugConfigs_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugConfigs_Results) DecodeFromPtr(p capnp.Ptr) EditorService_debugConfigs_Results {
+	return EditorService_debugConfigs_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugConfigs_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugConfigs_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugConfigs_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugConfigs_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugConfigs_Results) Configs() (DebugConfig_List, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return DebugConfig_List(p.List()), err
+}
+
+func (s EditorService_debugConfigs_Results) HasConfigs() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_debugConfigs_Results) SetConfigs(v DebugConfig_List) error {
+	return capnp.Struct(s).SetPtr(0, v.ToPtr())
+}
+
+// NewConfigs sets the configs field to a newly
+// allocated DebugConfig_List, preferring placement in s's segment.
+func (s EditorService_debugConfigs_Results) NewConfigs(n int32) (DebugConfig_List, error) {
+	l, err := NewDebugConfig_List(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return DebugConfig_List{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, l.ToPtr())
+	return l, err
+}
+func (s EditorService_debugConfigs_Results) Error() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s EditorService_debugConfigs_Results) HasError() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s EditorService_debugConfigs_Results) ErrorBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_debugConfigs_Results) SetError(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+// EditorService_debugConfigs_Results_List is a list of EditorService_debugConfigs_Results.
+type EditorService_debugConfigs_Results_List = capnp.StructList[EditorService_debugConfigs_Results]
+
+// NewEditorService_debugConfigs_Results creates a new list of EditorService_debugConfigs_Results.
+func NewEditorService_debugConfigs_Results_List(s *capnp.Segment, sz int32) (EditorService_debugConfigs_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return capnp.StructList[EditorService_debugConfigs_Results](l), err
+}
+
+// EditorService_debugConfigs_Results_Future is a wrapper for a EditorService_debugConfigs_Results promised by a client call.
+type EditorService_debugConfigs_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_debugConfigs_Results_Future) Struct() (EditorService_debugConfigs_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugConfigs_Results(p.Struct()), err
+}
+
+type EditorService_debugRestart_Params capnp.Struct
+
+// EditorService_debugRestart_Params_TypeID is the unique identifier for the type EditorService_debugRestart_Params.
+const EditorService_debugRestart_Params_TypeID = 0xebd8d7e830082ac7
+
+func NewEditorService_debugRestart_Params(s *capnp.Segment) (EditorService_debugRestart_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugRestart_Params(st), err
+}
+
+func NewRootEditorService_debugRestart_Params(s *capnp.Segment) (EditorService_debugRestart_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return EditorService_debugRestart_Params(st), err
+}
+
+func ReadRootEditorService_debugRestart_Params(msg *capnp.Message) (EditorService_debugRestart_Params, error) {
+	root, err := msg.Root()
+	return EditorService_debugRestart_Params(root.Struct()), err
+}
+
+func (s EditorService_debugRestart_Params) String() string {
+	str, _ := text.Marshal(0xebd8d7e830082ac7, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugRestart_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugRestart_Params) DecodeFromPtr(p capnp.Ptr) EditorService_debugRestart_Params {
+	return EditorService_debugRestart_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugRestart_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugRestart_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugRestart_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugRestart_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugRestart_Params) Fallback() (DebugConfig, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return DebugConfig(p.Struct()), err
+}
+
+func (s EditorService_debugRestart_Params) HasFallback() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_debugRestart_Params) SetFallback(v DebugConfig) error {
+	return capnp.Struct(s).SetPtr(0, capnp.Struct(v).ToPtr())
+}
+
+// NewFallback sets the fallback field to a newly
+// allocated DebugConfig struct, preferring placement in s's segment.
+func (s EditorService_debugRestart_Params) NewFallback() (DebugConfig, error) {
+	ss, err := NewDebugConfig(capnp.Struct(s).Segment())
+	if err != nil {
+		return DebugConfig{}, err
+	}
+	err = capnp.Struct(s).SetPtr(0, capnp.Struct(ss).ToPtr())
+	return ss, err
+}
+
+// EditorService_debugRestart_Params_List is a list of EditorService_debugRestart_Params.
+type EditorService_debugRestart_Params_List = capnp.StructList[EditorService_debugRestart_Params]
+
+// NewEditorService_debugRestart_Params creates a new list of EditorService_debugRestart_Params.
+func NewEditorService_debugRestart_Params_List(s *capnp.Segment, sz int32) (EditorService_debugRestart_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[EditorService_debugRestart_Params](l), err
+}
+
+// EditorService_debugRestart_Params_Future is a wrapper for a EditorService_debugRestart_Params promised by a client call.
+type EditorService_debugRestart_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_debugRestart_Params_Future) Struct() (EditorService_debugRestart_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugRestart_Params(p.Struct()), err
+}
+func (p EditorService_debugRestart_Params_Future) Fallback() DebugConfig_Future {
+	return DebugConfig_Future{Future: p.Future.Field(0, nil)}
+}
+
+type EditorService_debugRestart_Results capnp.Struct
+
+// EditorService_debugRestart_Results_TypeID is the unique identifier for the type EditorService_debugRestart_Results.
+const EditorService_debugRestart_Results_TypeID = 0xfc8b7ec09a024506
+
+func NewEditorService_debugRestart_Results(s *capnp.Segment) (EditorService_debugRestart_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugRestart_Results(st), err
+}
+
+func NewRootEditorService_debugRestart_Results(s *capnp.Segment) (EditorService_debugRestart_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return EditorService_debugRestart_Results(st), err
+}
+
+func ReadRootEditorService_debugRestart_Results(msg *capnp.Message) (EditorService_debugRestart_Results, error) {
+	root, err := msg.Root()
+	return EditorService_debugRestart_Results(root.Struct()), err
+}
+
+func (s EditorService_debugRestart_Results) String() string {
+	str, _ := text.Marshal(0xfc8b7ec09a024506, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_debugRestart_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_debugRestart_Results) DecodeFromPtr(p capnp.Ptr) EditorService_debugRestart_Results {
+	return EditorService_debugRestart_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_debugRestart_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_debugRestart_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_debugRestart_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_debugRestart_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_debugRestart_Results) Error() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s EditorService_debugRestart_Results) HasError() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_debugRestart_Results) ErrorBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_debugRestart_Results) SetError(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s EditorService_debugRestart_Results) Started() (DebugConfig, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return DebugConfig(p.Struct()), err
+}
+
+func (s EditorService_debugRestart_Results) HasStarted() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s EditorService_debugRestart_Results) SetStarted(v DebugConfig) error {
+	return capnp.Struct(s).SetPtr(1, capnp.Struct(v).ToPtr())
+}
+
+// NewStarted sets the started field to a newly
+// allocated DebugConfig struct, preferring placement in s's segment.
+func (s EditorService_debugRestart_Results) NewStarted() (DebugConfig, error) {
+	ss, err := NewDebugConfig(capnp.Struct(s).Segment())
+	if err != nil {
+		return DebugConfig{}, err
+	}
+	err = capnp.Struct(s).SetPtr(1, capnp.Struct(ss).ToPtr())
+	return ss, err
+}
+
+// EditorService_debugRestart_Results_List is a list of EditorService_debugRestart_Results.
+type EditorService_debugRestart_Results_List = capnp.StructList[EditorService_debugRestart_Results]
+
+// NewEditorService_debugRestart_Results creates a new list of EditorService_debugRestart_Results.
+func NewEditorService_debugRestart_Results_List(s *capnp.Segment, sz int32) (EditorService_debugRestart_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return capnp.StructList[EditorService_debugRestart_Results](l), err
+}
+
+// EditorService_debugRestart_Results_Future is a wrapper for a EditorService_debugRestart_Results promised by a client call.
+type EditorService_debugRestart_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_debugRestart_Results_Future) Struct() (EditorService_debugRestart_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_debugRestart_Results(p.Struct()), err
+}
+func (p EditorService_debugRestart_Results_Future) Started() DebugConfig_Future {
+	return DebugConfig_Future{Future: p.Future.Field(1, nil)}
+}
+
+type EditorService_setBreakpoint_Params capnp.Struct
+
+// EditorService_setBreakpoint_Params_TypeID is the unique identifier for the type EditorService_setBreakpoint_Params.
+const EditorService_setBreakpoint_Params_TypeID = 0x90227ee70a547e33
+
+func NewEditorService_setBreakpoint_Params(s *capnp.Segment) (EditorService_setBreakpoint_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3})
+	return EditorService_setBreakpoint_Params(st), err
+}
+
+func NewRootEditorService_setBreakpoint_Params(s *capnp.Segment) (EditorService_setBreakpoint_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3})
+	return EditorService_setBreakpoint_Params(st), err
+}
+
+func ReadRootEditorService_setBreakpoint_Params(msg *capnp.Message) (EditorService_setBreakpoint_Params, error) {
+	root, err := msg.Root()
+	return EditorService_setBreakpoint_Params(root.Struct()), err
+}
+
+func (s EditorService_setBreakpoint_Params) String() string {
+	str, _ := text.Marshal(0x90227ee70a547e33, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_setBreakpoint_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_setBreakpoint_Params) DecodeFromPtr(p capnp.Ptr) EditorService_setBreakpoint_Params {
+	return EditorService_setBreakpoint_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_setBreakpoint_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_setBreakpoint_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_setBreakpoint_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_setBreakpoint_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s EditorService_setBreakpoint_Params) Path() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s EditorService_setBreakpoint_Params) HasPath() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s EditorService_setBreakpoint_Params) PathBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_setBreakpoint_Params) SetPath(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s EditorService_setBreakpoint_Params) Line() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s EditorService_setBreakpoint_Params) SetLine(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+func (s EditorService_setBreakpoint_Params) Condition() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s EditorService_setBreakpoint_Params) HasCondition() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s EditorService_setBreakpoint_Params) ConditionBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_setBreakpoint_Params) SetCondition(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+func (s EditorService_setBreakpoint_Params) LogMessage() (string, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.Text(), err
+}
+
+func (s EditorService_setBreakpoint_Params) HasLogMessage() bool {
+	return capnp.Struct(s).HasPtr(2)
+}
+
+func (s EditorService_setBreakpoint_Params) LogMessageBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.TextBytes(), err
+}
+
+func (s EditorService_setBreakpoint_Params) SetLogMessage(v string) error {
+	return capnp.Struct(s).SetText(2, v)
+}
+
+// EditorService_setBreakpoint_Params_List is a list of EditorService_setBreakpoint_Params.
+type EditorService_setBreakpoint_Params_List = capnp.StructList[EditorService_setBreakpoint_Params]
+
+// NewEditorService_setBreakpoint_Params creates a new list of EditorService_setBreakpoint_Params.
+func NewEditorService_setBreakpoint_Params_List(s *capnp.Segment, sz int32) (EditorService_setBreakpoint_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3}, sz)
+	return capnp.StructList[EditorService_setBreakpoint_Params](l), err
+}
+
+// EditorService_setBreakpoint_Params_Future is a wrapper for a EditorService_setBreakpoint_Params promised by a client call.
+type EditorService_setBreakpoint_Params_Future struct{ *capnp.Future }
+
+func (f EditorService_setBreakpoint_Params_Future) Struct() (EditorService_setBreakpoint_Params, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_setBreakpoint_Params(p.Struct()), err
+}
+
+type EditorService_setBreakpoint_Results capnp.Struct
+
+// EditorService_setBreakpoint_Results_TypeID is the unique identifier for the type EditorService_setBreakpoint_Results.
+const EditorService_setBreakpoint_Results_TypeID = 0xeb374e41e41fa1fe
+
+func NewEditorService_setBreakpoint_Results(s *capnp.Segment) (EditorService_setBreakpoint_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_setBreakpoint_Results(st), err
+}
+
+func NewRootEditorService_setBreakpoint_Results(s *capnp.Segment) (EditorService_setBreakpoint_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return EditorService_setBreakpoint_Results(st), err
+}
+
+func ReadRootEditorService_setBreakpoint_Results(msg *capnp.Message) (EditorService_setBreakpoint_Results, error) {
+	root, err := msg.Root()
+	return EditorService_setBreakpoint_Results(root.Struct()), err
+}
+
+func (s EditorService_setBreakpoint_Results) String() string {
+	str, _ := text.Marshal(0xeb374e41e41fa1fe, capnp.Struct(s))
+	return str
+}
+
+func (s EditorService_setBreakpoint_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (EditorService_setBreakpoint_Results) DecodeFromPtr(p capnp.Ptr) EditorService_setBreakpoint_Results {
+	return EditorService_setBreakpoint_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s EditorService_setBreakpoint_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s EditorService_setBreakpoint_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s EditorService_setBreakpoint_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s EditorService_setBreakpoint_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// EditorService_setBreakpoint_Results_List is a list of EditorService_setBreakpoint_Results.
+type EditorService_setBreakpoint_Results_List = capnp.StructList[EditorService_setBreakpoint_Results]
+
+// NewEditorService_setBreakpoint_Results creates a new list of EditorService_setBreakpoint_Results.
+func NewEditorService_setBreakpoint_Results_List(s *capnp.Segment, sz int32) (EditorService_setBreakpoint_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[EditorService_setBreakpoint_Results](l), err
+}
+
+// EditorService_setBreakpoint_Results_Future is a wrapper for a EditorService_setBreakpoint_Results promised by a client call.
+type EditorService_setBreakpoint_Results_Future struct{ *capnp.Future }
+
+func (f EditorService_setBreakpoint_Results_Future) Struct() (EditorService_setBreakpoint_Results, error) {
+	p, err := f.Future.Ptr()
+	return EditorService_setBreakpoint_Results(p.Struct()), err
+}
+
+type DebugAction uint16
+
+// DebugAction_TypeID is the unique identifier for the type DebugAction.
+const DebugAction_TypeID = 0xa3d4f8505b46f45d
+
+// Values of DebugAction.
+const (
+	DebugAction_continue DebugAction = 0
+	DebugAction_next     DebugAction = 1
+	DebugAction_stepIn   DebugAction = 2
+	DebugAction_stepOut  DebugAction = 3
+	DebugAction_pause    DebugAction = 4
+	DebugAction_stop     DebugAction = 5
+)
+
+// String returns the enum's constant name.
+func (c DebugAction) String() string {
+	switch c {
+	case DebugAction_continue:
+		return "continue"
+	case DebugAction_next:
+		return "next"
+	case DebugAction_stepIn:
+		return "stepIn"
+	case DebugAction_stepOut:
+		return "stepOut"
+	case DebugAction_pause:
+		return "pause"
+	case DebugAction_stop:
+		return "stop"
+
+	default:
+		return ""
+	}
+}
+
+// DebugActionFromString returns the enum value with a name,
+// or the zero value if there's no such value.
+func DebugActionFromString(c string) DebugAction {
+	switch c {
+	case "continue":
+		return DebugAction_continue
+	case "next":
+		return DebugAction_next
+	case "stepIn":
+		return DebugAction_stepIn
+	case "stepOut":
+		return DebugAction_stepOut
+	case "pause":
+		return DebugAction_pause
+	case "stop":
+		return DebugAction_stop
+
+	default:
+		return 0
+	}
+}
+
+type DebugAction_List = capnp.EnumList[DebugAction]
+
+func NewDebugAction_List(s *capnp.Segment, sz int32) (DebugAction_List, error) {
+	return capnp.NewEnumList[DebugAction](s, sz)
+}
+
+type DebugStatus uint16
+
+// DebugStatus_TypeID is the unique identifier for the type DebugStatus.
+const DebugStatus_TypeID = 0xcf0797174ab8a72a
+
+// Values of DebugStatus.
+const (
+	DebugStatus_inactive   DebugStatus = 0
+	DebugStatus_starting   DebugStatus = 1
+	DebugStatus_running    DebugStatus = 2
+	DebugStatus_stopped    DebugStatus = 3
+	DebugStatus_terminated DebugStatus = 4
+)
+
+// String returns the enum's constant name.
+func (c DebugStatus) String() string {
+	switch c {
+	case DebugStatus_inactive:
+		return "inactive"
+	case DebugStatus_starting:
+		return "starting"
+	case DebugStatus_running:
+		return "running"
+	case DebugStatus_stopped:
+		return "stopped"
+	case DebugStatus_terminated:
+		return "terminated"
+
+	default:
+		return ""
+	}
+}
+
+// DebugStatusFromString returns the enum value with a name,
+// or the zero value if there's no such value.
+func DebugStatusFromString(c string) DebugStatus {
+	switch c {
+	case "inactive":
+		return DebugStatus_inactive
+	case "starting":
+		return DebugStatus_starting
+	case "running":
+		return DebugStatus_running
+	case "stopped":
+		return DebugStatus_stopped
+	case "terminated":
+		return DebugStatus_terminated
+
+	default:
+		return 0
+	}
+}
+
+type DebugStatus_List = capnp.EnumList[DebugStatus]
+
+func NewDebugStatus_List(s *capnp.Segment, sz int32) (DebugStatus_List, error) {
+	return capnp.NewEnumList[DebugStatus](s, sz)
+}
+
+type DebugConfig capnp.Struct
+
+// DebugConfig_TypeID is the unique identifier for the type DebugConfig.
+const DebugConfig_TypeID = 0xc6f16055edb01ab4
+
+func NewDebugConfig(s *capnp.Segment) (DebugConfig, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 9})
+	return DebugConfig(st), err
+}
+
+func NewRootDebugConfig(s *capnp.Segment) (DebugConfig, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 9})
+	return DebugConfig(st), err
+}
+
+func ReadRootDebugConfig(msg *capnp.Message) (DebugConfig, error) {
+	root, err := msg.Root()
+	return DebugConfig(root.Struct()), err
+}
+
+func (s DebugConfig) String() string {
+	str, _ := text.Marshal(0xc6f16055edb01ab4, capnp.Struct(s))
+	return str
+}
+
+func (s DebugConfig) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (DebugConfig) DecodeFromPtr(p capnp.Ptr) DebugConfig {
+	return DebugConfig(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s DebugConfig) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s DebugConfig) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s DebugConfig) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s DebugConfig) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s DebugConfig) Adapter() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s DebugConfig) HasAdapter() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s DebugConfig) AdapterBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s DebugConfig) SetAdapter(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s DebugConfig) Mode() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s DebugConfig) HasMode() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s DebugConfig) ModeBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s DebugConfig) SetMode(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+func (s DebugConfig) Program() (string, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.Text(), err
+}
+
+func (s DebugConfig) HasProgram() bool {
+	return capnp.Struct(s).HasPtr(2)
+}
+
+func (s DebugConfig) ProgramBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.TextBytes(), err
+}
+
+func (s DebugConfig) SetProgram(v string) error {
+	return capnp.Struct(s).SetText(2, v)
+}
+
+func (s DebugConfig) Args() (capnp.TextList, error) {
+	p, err := capnp.Struct(s).Ptr(3)
+	return capnp.TextList(p.List()), err
+}
+
+func (s DebugConfig) HasArgs() bool {
+	return capnp.Struct(s).HasPtr(3)
+}
+
+func (s DebugConfig) SetArgs(v capnp.TextList) error {
+	return capnp.Struct(s).SetPtr(3, v.ToPtr())
+}
+
+// NewArgs sets the args field to a newly
+// allocated capnp.TextList, preferring placement in s's segment.
+func (s DebugConfig) NewArgs(n int32) (capnp.TextList, error) {
+	l, err := capnp.NewTextList(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return capnp.TextList{}, err
+	}
+	err = capnp.Struct(s).SetPtr(3, l.ToPtr())
+	return l, err
+}
+func (s DebugConfig) Cwd() (string, error) {
+	p, err := capnp.Struct(s).Ptr(4)
+	return p.Text(), err
+}
+
+func (s DebugConfig) HasCwd() bool {
+	return capnp.Struct(s).HasPtr(4)
+}
+
+func (s DebugConfig) CwdBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(4)
+	return p.TextBytes(), err
+}
+
+func (s DebugConfig) SetCwd(v string) error {
+	return capnp.Struct(s).SetText(4, v)
+}
+
+func (s DebugConfig) BuildFlags() (string, error) {
+	p, err := capnp.Struct(s).Ptr(5)
+	return p.Text(), err
+}
+
+func (s DebugConfig) HasBuildFlags() bool {
+	return capnp.Struct(s).HasPtr(5)
+}
+
+func (s DebugConfig) BuildFlagsBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(5)
+	return p.TextBytes(), err
+}
+
+func (s DebugConfig) SetBuildFlags(v string) error {
+	return capnp.Struct(s).SetText(5, v)
+}
+
+func (s DebugConfig) Name() (string, error) {
+	p, err := capnp.Struct(s).Ptr(6)
+	return p.Text(), err
+}
+
+func (s DebugConfig) HasName() bool {
+	return capnp.Struct(s).HasPtr(6)
+}
+
+func (s DebugConfig) NameBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(6)
+	return p.TextBytes(), err
+}
+
+func (s DebugConfig) SetName(v string) error {
+	return capnp.Struct(s).SetText(6, v)
+}
+
+func (s DebugConfig) Env() (capnp.TextList, error) {
+	p, err := capnp.Struct(s).Ptr(7)
+	return capnp.TextList(p.List()), err
+}
+
+func (s DebugConfig) HasEnv() bool {
+	return capnp.Struct(s).HasPtr(7)
+}
+
+func (s DebugConfig) SetEnv(v capnp.TextList) error {
+	return capnp.Struct(s).SetPtr(7, v.ToPtr())
+}
+
+// NewEnv sets the env field to a newly
+// allocated capnp.TextList, preferring placement in s's segment.
+func (s DebugConfig) NewEnv(n int32) (capnp.TextList, error) {
+	l, err := capnp.NewTextList(capnp.Struct(s).Segment(), n)
+	if err != nil {
+		return capnp.TextList{}, err
+	}
+	err = capnp.Struct(s).SetPtr(7, l.ToPtr())
+	return l, err
+}
+func (s DebugConfig) LaunchJson() (string, error) {
+	p, err := capnp.Struct(s).Ptr(8)
+	return p.Text(), err
+}
+
+func (s DebugConfig) HasLaunchJson() bool {
+	return capnp.Struct(s).HasPtr(8)
+}
+
+func (s DebugConfig) LaunchJsonBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(8)
+	return p.TextBytes(), err
+}
+
+func (s DebugConfig) SetLaunchJson(v string) error {
+	return capnp.Struct(s).SetText(8, v)
+}
+
+// DebugConfig_List is a list of DebugConfig.
+type DebugConfig_List = capnp.StructList[DebugConfig]
+
+// NewDebugConfig creates a new list of DebugConfig.
+func NewDebugConfig_List(s *capnp.Segment, sz int32) (DebugConfig_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 9}, sz)
+	return capnp.StructList[DebugConfig](l), err
+}
+
+// DebugConfig_Future is a wrapper for a DebugConfig promised by a client call.
+type DebugConfig_Future struct{ *capnp.Future }
+
+func (f DebugConfig_Future) Struct() (DebugConfig, error) {
+	p, err := f.Future.Ptr()
+	return DebugConfig(p.Struct()), err
+}
+
+type DebugState capnp.Struct
+
+// DebugState_TypeID is the unique identifier for the type DebugState.
+const DebugState_TypeID = 0xc0c5fcae835a8d67
+
+func NewDebugState(s *capnp.Segment) (DebugState, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 32, PointerCount: 4})
+	return DebugState(st), err
+}
+
+func NewRootDebugState(s *capnp.Segment) (DebugState, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 32, PointerCount: 4})
+	return DebugState(st), err
+}
+
+func ReadRootDebugState(msg *capnp.Message) (DebugState, error) {
+	root, err := msg.Root()
+	return DebugState(root.Struct()), err
+}
+
+func (s DebugState) String() string {
+	str, _ := text.Marshal(0xc0c5fcae835a8d67, capnp.Struct(s))
+	return str
+}
+
+func (s DebugState) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (DebugState) DecodeFromPtr(p capnp.Ptr) DebugState {
+	return DebugState(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s DebugState) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s DebugState) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s DebugState) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s DebugState) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s DebugState) Status() DebugStatus {
+	return DebugStatus(capnp.Struct(s).Uint16(0))
+}
+
+func (s DebugState) SetStatus(v DebugStatus) {
+	capnp.Struct(s).SetUint16(0, uint16(v))
+}
+
+func (s DebugState) Seq() uint64 {
+	return capnp.Struct(s).Uint64(8)
+}
+
+func (s DebugState) SetSeq(v uint64) {
+	capnp.Struct(s).SetUint64(8, v)
+}
+
+func (s DebugState) ThreadId() int64 {
+	return int64(capnp.Struct(s).Uint64(16))
+}
+
+func (s DebugState) SetThreadId(v int64) {
+	capnp.Struct(s).SetUint64(16, uint64(v))
+}
+
+func (s DebugState) Path() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s DebugState) HasPath() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s DebugState) PathBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s DebugState) SetPath(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s DebugState) Line() uint32 {
+	return capnp.Struct(s).Uint32(4)
+}
+
+func (s DebugState) SetLine(v uint32) {
+	capnp.Struct(s).SetUint32(4, v)
+}
+
+func (s DebugState) Reason() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s DebugState) HasReason() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s DebugState) ReasonBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s DebugState) SetReason(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+func (s DebugState) Description() (string, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.Text(), err
+}
+
+func (s DebugState) HasDescription() bool {
+	return capnp.Struct(s).HasPtr(2)
+}
+
+func (s DebugState) DescriptionBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.TextBytes(), err
+}
+
+func (s DebugState) SetDescription(v string) error {
+	return capnp.Struct(s).SetText(2, v)
+}
+
+func (s DebugState) ExitCode() int32 {
+	return int32(capnp.Struct(s).Uint32(24))
+}
+
+func (s DebugState) SetExitCode(v int32) {
+	capnp.Struct(s).SetUint32(24, uint32(v))
+}
+
+func (s DebugState) HasExitCode() bool {
+	return capnp.Struct(s).Bit(16)
+}
+
+func (s DebugState) SetHasExitCode(v bool) {
+	capnp.Struct(s).SetBit(16, v)
+}
+
+func (s DebugState) Error() (string, error) {
+	p, err := capnp.Struct(s).Ptr(3)
+	return p.Text(), err
+}
+
+func (s DebugState) HasError() bool {
+	return capnp.Struct(s).HasPtr(3)
+}
+
+func (s DebugState) ErrorBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(3)
+	return p.TextBytes(), err
+}
+
+func (s DebugState) SetError(v string) error {
+	return capnp.Struct(s).SetText(3, v)
+}
+
+// DebugState_List is a list of DebugState.
+type DebugState_List = capnp.StructList[DebugState]
+
+// NewDebugState creates a new list of DebugState.
+func NewDebugState_List(s *capnp.Segment, sz int32) (DebugState_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 32, PointerCount: 4}, sz)
+	return capnp.StructList[DebugState](l), err
+}
+
+// DebugState_Future is a wrapper for a DebugState promised by a client call.
+type DebugState_Future struct{ *capnp.Future }
+
+func (f DebugState_Future) Struct() (DebugState, error) {
+	p, err := f.Future.Ptr()
+	return DebugState(p.Struct()), err
+}
+
+type DebugBreakpoint capnp.Struct
+
+// DebugBreakpoint_TypeID is the unique identifier for the type DebugBreakpoint.
+const DebugBreakpoint_TypeID = 0xb2e7942ee7075467
+
+func NewDebugBreakpoint(s *capnp.Segment) (DebugBreakpoint, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 4})
+	return DebugBreakpoint(st), err
+}
+
+func NewRootDebugBreakpoint(s *capnp.Segment) (DebugBreakpoint, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 4})
+	return DebugBreakpoint(st), err
+}
+
+func ReadRootDebugBreakpoint(msg *capnp.Message) (DebugBreakpoint, error) {
+	root, err := msg.Root()
+	return DebugBreakpoint(root.Struct()), err
+}
+
+func (s DebugBreakpoint) String() string {
+	str, _ := text.Marshal(0xb2e7942ee7075467, capnp.Struct(s))
+	return str
+}
+
+func (s DebugBreakpoint) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (DebugBreakpoint) DecodeFromPtr(p capnp.Ptr) DebugBreakpoint {
+	return DebugBreakpoint(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s DebugBreakpoint) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s DebugBreakpoint) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s DebugBreakpoint) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s DebugBreakpoint) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s DebugBreakpoint) Path() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s DebugBreakpoint) HasPath() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s DebugBreakpoint) PathBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s DebugBreakpoint) SetPath(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s DebugBreakpoint) Line() uint32 {
+	return capnp.Struct(s).Uint32(0)
+}
+
+func (s DebugBreakpoint) SetLine(v uint32) {
+	capnp.Struct(s).SetUint32(0, v)
+}
+
+func (s DebugBreakpoint) Verified() bool {
+	return capnp.Struct(s).Bit(32)
+}
+
+func (s DebugBreakpoint) SetVerified(v bool) {
+	capnp.Struct(s).SetBit(32, v)
+}
+
+func (s DebugBreakpoint) Detail() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s DebugBreakpoint) HasDetail() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s DebugBreakpoint) DetailBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s DebugBreakpoint) SetDetail(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+func (s DebugBreakpoint) Condition() (string, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.Text(), err
+}
+
+func (s DebugBreakpoint) HasCondition() bool {
+	return capnp.Struct(s).HasPtr(2)
+}
+
+func (s DebugBreakpoint) ConditionBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.TextBytes(), err
+}
+
+func (s DebugBreakpoint) SetCondition(v string) error {
+	return capnp.Struct(s).SetText(2, v)
+}
+
+func (s DebugBreakpoint) LogMessage() (string, error) {
+	p, err := capnp.Struct(s).Ptr(3)
+	return p.Text(), err
+}
+
+func (s DebugBreakpoint) HasLogMessage() bool {
+	return capnp.Struct(s).HasPtr(3)
+}
+
+func (s DebugBreakpoint) LogMessageBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(3)
+	return p.TextBytes(), err
+}
+
+func (s DebugBreakpoint) SetLogMessage(v string) error {
+	return capnp.Struct(s).SetText(3, v)
+}
+
+// DebugBreakpoint_List is a list of DebugBreakpoint.
+type DebugBreakpoint_List = capnp.StructList[DebugBreakpoint]
+
+// NewDebugBreakpoint creates a new list of DebugBreakpoint.
+func NewDebugBreakpoint_List(s *capnp.Segment, sz int32) (DebugBreakpoint_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 4}, sz)
+	return capnp.StructList[DebugBreakpoint](l), err
+}
+
+// DebugBreakpoint_Future is a wrapper for a DebugBreakpoint promised by a client call.
+type DebugBreakpoint_Future struct{ *capnp.Future }
+
+func (f DebugBreakpoint_Future) Struct() (DebugBreakpoint, error) {
+	p, err := f.Future.Ptr()
+	return DebugBreakpoint(p.Struct()), err
+}
+
+type DebugFrame capnp.Struct
+
+// DebugFrame_TypeID is the unique identifier for the type DebugFrame.
+const DebugFrame_TypeID = 0x8958cd26f8cc2079
+
+func NewDebugFrame(s *capnp.Segment) (DebugFrame, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 2})
+	return DebugFrame(st), err
+}
+
+func NewRootDebugFrame(s *capnp.Segment) (DebugFrame, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 2})
+	return DebugFrame(st), err
+}
+
+func ReadRootDebugFrame(msg *capnp.Message) (DebugFrame, error) {
+	root, err := msg.Root()
+	return DebugFrame(root.Struct()), err
+}
+
+func (s DebugFrame) String() string {
+	str, _ := text.Marshal(0x8958cd26f8cc2079, capnp.Struct(s))
+	return str
+}
+
+func (s DebugFrame) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (DebugFrame) DecodeFromPtr(p capnp.Ptr) DebugFrame {
+	return DebugFrame(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s DebugFrame) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s DebugFrame) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s DebugFrame) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s DebugFrame) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s DebugFrame) Id() int64 {
+	return int64(capnp.Struct(s).Uint64(0))
+}
+
+func (s DebugFrame) SetId(v int64) {
+	capnp.Struct(s).SetUint64(0, uint64(v))
+}
+
+func (s DebugFrame) Name() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s DebugFrame) HasName() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s DebugFrame) NameBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s DebugFrame) SetName(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s DebugFrame) Path() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s DebugFrame) HasPath() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s DebugFrame) PathBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s DebugFrame) SetPath(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+func (s DebugFrame) Line() uint32 {
+	return capnp.Struct(s).Uint32(8)
+}
+
+func (s DebugFrame) SetLine(v uint32) {
+	capnp.Struct(s).SetUint32(8, v)
+}
+
+func (s DebugFrame) Col() uint32 {
+	return capnp.Struct(s).Uint32(12)
+}
+
+func (s DebugFrame) SetCol(v uint32) {
+	capnp.Struct(s).SetUint32(12, v)
+}
+
+// DebugFrame_List is a list of DebugFrame.
+type DebugFrame_List = capnp.StructList[DebugFrame]
+
+// NewDebugFrame creates a new list of DebugFrame.
+func NewDebugFrame_List(s *capnp.Segment, sz int32) (DebugFrame_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 2}, sz)
+	return capnp.StructList[DebugFrame](l), err
+}
+
+// DebugFrame_Future is a wrapper for a DebugFrame promised by a client call.
+type DebugFrame_Future struct{ *capnp.Future }
+
+func (f DebugFrame_Future) Struct() (DebugFrame, error) {
+	p, err := f.Future.Ptr()
+	return DebugFrame(p.Struct()), err
+}
+
+type DebugScope capnp.Struct
+
+// DebugScope_TypeID is the unique identifier for the type DebugScope.
+const DebugScope_TypeID = 0xfc8c601324bf3fc3
+
+func NewDebugScope(s *capnp.Segment) (DebugScope, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	return DebugScope(st), err
+}
+
+func NewRootDebugScope(s *capnp.Segment) (DebugScope, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1})
+	return DebugScope(st), err
+}
+
+func ReadRootDebugScope(msg *capnp.Message) (DebugScope, error) {
+	root, err := msg.Root()
+	return DebugScope(root.Struct()), err
+}
+
+func (s DebugScope) String() string {
+	str, _ := text.Marshal(0xfc8c601324bf3fc3, capnp.Struct(s))
+	return str
+}
+
+func (s DebugScope) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (DebugScope) DecodeFromPtr(p capnp.Ptr) DebugScope {
+	return DebugScope(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s DebugScope) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s DebugScope) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s DebugScope) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s DebugScope) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s DebugScope) Name() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s DebugScope) HasName() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s DebugScope) NameBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s DebugScope) SetName(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s DebugScope) Ref() int64 {
+	return int64(capnp.Struct(s).Uint64(0))
+}
+
+func (s DebugScope) SetRef(v int64) {
+	capnp.Struct(s).SetUint64(0, uint64(v))
+}
+
+func (s DebugScope) Expensive() bool {
+	return capnp.Struct(s).Bit(64)
+}
+
+func (s DebugScope) SetExpensive(v bool) {
+	capnp.Struct(s).SetBit(64, v)
+}
+
+// DebugScope_List is a list of DebugScope.
+type DebugScope_List = capnp.StructList[DebugScope]
+
+// NewDebugScope creates a new list of DebugScope.
+func NewDebugScope_List(s *capnp.Segment, sz int32) (DebugScope_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 16, PointerCount: 1}, sz)
+	return capnp.StructList[DebugScope](l), err
+}
+
+// DebugScope_Future is a wrapper for a DebugScope promised by a client call.
+type DebugScope_Future struct{ *capnp.Future }
+
+func (f DebugScope_Future) Struct() (DebugScope, error) {
+	p, err := f.Future.Ptr()
+	return DebugScope(p.Struct()), err
+}
+
+type DebugVariable capnp.Struct
+
+// DebugVariable_TypeID is the unique identifier for the type DebugVariable.
+const DebugVariable_TypeID = 0xdbe886b1ab488a62
+
+func NewDebugVariable(s *capnp.Segment) (DebugVariable, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3})
+	return DebugVariable(st), err
+}
+
+func NewRootDebugVariable(s *capnp.Segment) (DebugVariable, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3})
+	return DebugVariable(st), err
+}
+
+func ReadRootDebugVariable(msg *capnp.Message) (DebugVariable, error) {
+	root, err := msg.Root()
+	return DebugVariable(root.Struct()), err
+}
+
+func (s DebugVariable) String() string {
+	str, _ := text.Marshal(0xdbe886b1ab488a62, capnp.Struct(s))
+	return str
+}
+
+func (s DebugVariable) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (DebugVariable) DecodeFromPtr(p capnp.Ptr) DebugVariable {
+	return DebugVariable(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s DebugVariable) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s DebugVariable) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s DebugVariable) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s DebugVariable) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s DebugVariable) Name() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s DebugVariable) HasName() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s DebugVariable) NameBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s DebugVariable) SetName(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s DebugVariable) Value() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s DebugVariable) HasValue() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s DebugVariable) ValueBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s DebugVariable) SetValue(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+func (s DebugVariable) Type() (string, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.Text(), err
+}
+
+func (s DebugVariable) HasType() bool {
+	return capnp.Struct(s).HasPtr(2)
+}
+
+func (s DebugVariable) TypeBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return p.TextBytes(), err
+}
+
+func (s DebugVariable) SetType(v string) error {
+	return capnp.Struct(s).SetText(2, v)
+}
+
+func (s DebugVariable) Ref() int64 {
+	return int64(capnp.Struct(s).Uint64(0))
+}
+
+func (s DebugVariable) SetRef(v int64) {
+	capnp.Struct(s).SetUint64(0, uint64(v))
+}
+
+// DebugVariable_List is a list of DebugVariable.
+type DebugVariable_List = capnp.StructList[DebugVariable]
+
+// NewDebugVariable creates a new list of DebugVariable.
+func NewDebugVariable_List(s *capnp.Segment, sz int32) (DebugVariable_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3}, sz)
+	return capnp.StructList[DebugVariable](l), err
+}
+
+// DebugVariable_Future is a wrapper for a DebugVariable promised by a client call.
+type DebugVariable_Future struct{ *capnp.Future }
+
+func (f DebugVariable_Future) Struct() (DebugVariable, error) {
+	p, err := f.Future.Ptr()
+	return DebugVariable(p.Struct()), err
+}
+
+type DebugOutput capnp.Struct
+
+// DebugOutput_TypeID is the unique identifier for the type DebugOutput.
+const DebugOutput_TypeID = 0xe7aefe372a58e16b
+
+func NewDebugOutput(s *capnp.Segment) (DebugOutput, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2})
+	return DebugOutput(st), err
+}
+
+func NewRootDebugOutput(s *capnp.Segment) (DebugOutput, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2})
+	return DebugOutput(st), err
+}
+
+func ReadRootDebugOutput(msg *capnp.Message) (DebugOutput, error) {
+	root, err := msg.Root()
+	return DebugOutput(root.Struct()), err
+}
+
+func (s DebugOutput) String() string {
+	str, _ := text.Marshal(0xe7aefe372a58e16b, capnp.Struct(s))
+	return str
+}
+
+func (s DebugOutput) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (DebugOutput) DecodeFromPtr(p capnp.Ptr) DebugOutput {
+	return DebugOutput(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s DebugOutput) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s DebugOutput) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s DebugOutput) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s DebugOutput) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s DebugOutput) Seq() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s DebugOutput) SetSeq(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
+func (s DebugOutput) Category() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s DebugOutput) HasCategory() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s DebugOutput) CategoryBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s DebugOutput) SetCategory(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+func (s DebugOutput) Text() (string, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.Text(), err
+}
+
+func (s DebugOutput) HasText() bool {
+	return capnp.Struct(s).HasPtr(1)
+}
+
+func (s DebugOutput) TextBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(1)
+	return p.TextBytes(), err
+}
+
+func (s DebugOutput) SetText(v string) error {
+	return capnp.Struct(s).SetText(1, v)
+}
+
+// DebugOutput_List is a list of DebugOutput.
+type DebugOutput_List = capnp.StructList[DebugOutput]
+
+// NewDebugOutput creates a new list of DebugOutput.
+func NewDebugOutput_List(s *capnp.Segment, sz int32) (DebugOutput_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2}, sz)
+	return capnp.StructList[DebugOutput](l), err
+}
+
+// DebugOutput_Future is a wrapper for a DebugOutput promised by a client call.
+type DebugOutput_Future struct{ *capnp.Future }
+
+func (f DebugOutput_Future) Struct() (DebugOutput, error) {
+	p, err := f.Future.Ptr()
+	return DebugOutput(p.Struct()), err
+}
+
 type MenuItemInfo capnp.Struct
 
 // MenuItemInfo_TypeID is the unique identifier for the type MenuItemInfo.
@@ -21104,754 +25445,906 @@ func (f GrepMatch_Future) Struct() (GrepMatch, error) {
 	return GrepMatch(p.Struct()), err
 }
 
-const schema_d75b3b54eb3ed6a2 = "x\xda\xdc}{|\x14\xd5\xf5\xf8=;\xbb;D\xc5" +
-	"\xb0N\xa8b\xf1\x1b\xc0\xa0$\x8a\x92\x00\x82\x11\xdc<" +
-	"\x08\x90\x18$\x9b\xf0L\xc1\xb2\xd9\x9d$\x03\x9b\xdde" +
-	"v\x02\x09\x88!\x08UPTT\xdab\xa5\x1a\x04+" +
-	"V\xacT\xb1B\xc5\x8aJ\x15\xbfE\x8bJ\x0b\xf8\xa8" +
-	"\x0f\xf8\xfa\xd6bK-*\xe6\xf79w\xe6\xce\xdc\xdd" +
-	"\xcc>\xa0\xf6\xd3~~\x7f%{\xe7\xce}\x9c{\xee" +
-	"y\x9f3\xc3n*(q\x16\xf6\xfeU)q\xd4}" +
-	"\xe3p\xb9\xbb\x97\xcd\x1b\xf1\xc8\xea\xbf\xaf\\J<\xdf" +
-	"\x07B\x9c\"!\xc3w\x0e(\x03\xe2\xec~\xaf\xf1\xd6" +
-	"\x9b\x0e\xb8't\x12_opto\xf8\xd3\x95\x1fO" +
-	"\xb9\xe2\x07\x7f&.A$D\xda4\xe0\x0bi\xeb\x00" +
-	"\xec\xbde\xc0\xad@\xa0\xfb\xba\x0ds?;\xffW\xc7" +
-	";\x89\xef\xfb\xe0$\xc4\x05\xf8l\xec\xa0Z 0\xbc" +
-	"rP.vy\xe6\xeeM\xd2\xe1\x9d\x17/\xd3\xa7r" +
-	"9\xb0\x87r\xfe]@@j?\x7f!\x81\xee[\x1e" +
-	"=\xba\xf8\xf03\xe5\xcb\xb8\xb5\xec\xc7\xe7\xce\xbf<%" +
-	"\xcf\x08\x1c~z\x99\xef\xfb`\xbe\xb9\xfb\xfcU\xf8\xe6" +
-	"\xfe\xf3\x7fE\xa0\xbb\x7f\xf9\xc3\x9f\x9d\x91\xb7\xf9zc" +
-	"h:\xf9\xfc\xbcz\xec\xb0$\xcfK\xa0;\xd7Y\xf7" +
-	"\xe8\xf7_\x7f\xf6z\xdc\x0cp\x9b\xc1\x9e\xd2\x96\xbc\x17" +
-	"\xa5\xedy\xf8\xdf\xb6<\\\xc7\xaag\x1f\x9f\xfb\xe2\xb3" +
-	"\xaf^O<\xfd\xd9:\xfa\x0e\xde\x810y\xff\xc0\xc3" +
-	"\xa3\xbe\xbc\xd0\xbd\x9c{\xe2\x1a\xbc\x01\x9f4\xdf\xe9\xb8" +
-	"m\xd8]\x1b\x96sk?\x96w;>\xf9\xe3\xf2[" +
-	"\xaf\x98^w`9\xbf\xb6#y\x1bpm\xc7\xe8\xda" +
-	"\xde\xbb\xee\xd5\xb3*/\xb9tE\xe2\xda(\xa0\x07\x0f" +
-	">$\x15\x0e\xc6\xff\x86\x0e~\x9f@\xb7\xef\xa7}\\" +
-	"\xde\xa7\x97\xae@8;\x8c\x89\xce\xbb\x80\xee4\xff\x02" +
-	"\x04E\xf0\xac\x09#\x9e\x19\xd7q\x03v\x10\x8c\x0e\xbb" +
-	".\xf85\x9e\xc3\xbe\x0b\xe8Q]\xb5\xe3\xa5\xbf\xd4\x8f" +
-	"=\xedF~\x08\xff\x90e8D\xcb\x10\x1c\xe2\xd1C" +
-	"\x03\xaf\x8b^=\x9ev0\x97\xec\xca\xa7'\xd57\x1f" +
-	"!\xb4k\xd7\x10\xf5\x8b)\xdf\xdc\xc8\xef\xa95\x1f'" +
-	"\x91V\xe4\xe3\x9e\x94\x95\xcf\xed\xb8\xe3\xda\xf57q\xe0" +
-	"\xd8\x96\xff\x0a\x82\xe3\xeb\x92\xfe+g\x7f6\xf2\x16\xfe" +
-	"\xd5\xcd\xf9*\xbe\xba\x8d\xbeZu\xc3\x9f\xb7N\xf9\xba" +
-	"\xf8\x16\xe2\xe9\xdd\xe3\xa4>\xcc\x7fW:\x96\x8f\xff\x1d" +
-	"\xa5}\x87\x88\x0f\x15\xa8\x9e\xdf\xde\xca\x0f\xe6)\xa0[" +
-	"9\xaf\x00;\xdcx\xd6\xc6\xc6\x91\x1f\xd5\xaf\xe1\xd61" +
-	"\xa9\x80\x1e\xd8\x9a\xf0\xfe\x8b\x8f\x0c\xdb\xc1?\x19\xab?" +
-	"\xd9\xf4h\xe7\xd3\xb7u9o\xc7\xf3ps+p\xd0" +
-	"S(\xd8 \x8d,8\x9b\xf6\x8e8\x08t\x8f\xba\xf5" +
-	"\xde\xd7r\xaf\xce\xb9\xdd\x00\x16\x1dh\xef\xc5sq\x09" +
-	"\x07/FX\xcd\xbdo\xce\x0b\x17\xf5\xbe\xec\x8e\xc4\xe1" +
-	"\xe8\x86\xc6\x0e=$U\x0e\xc5w*\x86\xfe\x05\x87[" +
-	"\xf7\xc6\xec\xe1Mg.]k\x1c\x8e\x8e\xeb3\x87=" +
-	"\x88\xe3)\xc3\x10\x03\xb2F\xbc\xf3\xa3\xe6?\xbd\xbd\x96" +
-	"[xi!\xde\x92\xee\xc6\xff\xfd\xe1\x9aM\x7f\x18\xf8" +
-	"c\xdb\x1b[X\xf8\x8a4\xb6\x10{_^8\x1d\xd1" +
-	"\xe0\xf1\xd3&\xf9\x9e]8\xf7\xc7<\xecV\x16\xd1K" +
-	"\xb5\xae\x08a7\xe8g\xf9\xed\xb3\x1f\xeb\xfc\xa9\x81I" +
-	"z\x8f=E\x0d\x88J\xfb\x8b\xe8\x95\xbe\xe9\xbe\xd9\x0f" +
-	"\x8e|(\xb4\x8eG\xa5\xa3\xc3\xe9\xe6O\x0cGT\xfa" +
-	"\xcd\xb61\x83\xc6\xcej]\xc7-v\xed\x88\x07q\xb1" +
-	"\xeeu\x13\xc6\xde7\xf26\xfe\xc9\x8a\x11\xcf\xe0\x93\xdf" +
-	"]\xf7\xd6\xda\xa2\xdc\xcd\xeb\xe2\x90k\x04\x85\xc0\x8a\x11" +
-	"\xb80\xe7\xde\x0d\x7f\xf2\xd5<\xbd\x0e\xf7)$\x1e\xd0" +
-	"\xf6\x11\x87\xa4\xdd#(\xd6\x8f@t\xff\xcb\xa2\x8f\xb2" +
-	"\xbfm>\xb4\xde\x80'\x1dm\xd2e\x14Ef^\x86" +
-	"K\x1c\xbf\xf7\xa5\xe7|\x9f|\xb5\x9e\xbf\xb9\x97\xd1\x85" +
-	",\xbft\xd9\xfd\x0b\x1f\xbb\xe2\x9e\xb8\x9b{\x19\xdd\xdd" +
-	"\xd1\xcbp!\x0f\xcf<&\xbf\xfa\xc5Mq\x1d<\xa3" +
-	"\x9e\xc1\x0e\x03Ga\x87\xf5\xf9\xb1\x07\xd4\xae7\xeeI" +
-	"\xc0e\x17.\xd47\xea\x15i\xf6(z\xbc\xa3(0" +
-	"\xd5\xfc_\xecj\xf8\xc9\xb1{x\xfa\xd89\x9a\x1e\xc8" +
-	"\x9a\xd1\x88I\xed7\xffq\xb8\xe6\xf2\xdf\x9b0\x1a=" +
-	"\xde\xa3\xa3\x0fI'F\xe3\x7f\xc7G\xe3\xae\xce\x9f\xbe" +
-	"6\xf4\xf8\xfd\xfd\xbb8J\xb5\xee\xf2e\xb8\xab3o" +
-	"{m\xfcY\xe7^\xdc\xc5\x9f\xd9\x8a\xcb\xe9\xe5^{" +
-	"9\xbe\xfa\xe7\xb7^\x7f\xa9\xed\x9fS\xba\x10\xbc\xae\xc4" +
-	"y\x86\x16\x7f$]^\x8c\xef\x8c,\x1e\x85\x08\xfbi" +
-	"\xce\x92\x9b>\xea\x9a\xdbE<\xbd\xb9\xb3@$\x1a\xf3" +
-	"\xae\xb4i\x0c\xf6\xec\x1a#\x0a\xd2\xce+EB\xba=" +
-	"o\xbfx@\x9e\xf6\xab\xb8\xc97]\xb9\x83\xde\xfe+" +
-	"q\x8fc\x96Ugu>\x7f\xc3}<\xed\xf5R\xec" +
-	"^\xbe4g\xdcW/\xde\xba1\x9e*y\xe9\xbb}" +
-	"\xbd\xf8\xee\xb4G\x8a\xaf\xeb\xff\xec{\x1bm\x89\xfcJ" +
-	"\xef\xaf\xa55^\xfco5\xed\xfc\xf1\x87#\xbbN\x17" +
-	"\x84\xfb\xf9\xb3\xfb\xd0[K\xc9\xb2\x17\xcf\xee\xda?\xdc" +
-	"\xfc\x89\xb7W\xe1\xfd\x1c^\xf4-\xa1\x10\x1c\xf7b\xd5" +
-	"\xb93\xa75\xc7\xbd\x0a%\xf4\xd8=%\xf4\xd5=\xc5" +
-	"\x13\xb7\xfc\xac\xee\x17|\x87\x8a\x12J\xe3|\xb4\x83\xfa" +
-	"I[ \xe4[\xfe\x0bn\xec\xce\x92\x8fp\xec;\xf6" +
-	"\xfe\xe6\xed+&\x97<\xc0\xed\xbf\xb5d\x11\xe5#3" +
-	"\x8f/\xefXV\xf4`\xdc\xfe\xfd%\x94\x91\xcc/\xc1" +
-	"-I\x9f]\xf5\xed\x8c\x85\xad\x0fr\xa3\xee-\xa9\xc5" +
-	"w#\x03\x0e=\xf1\xc8\x80\xa7\x1f\xe4\x17\xb4]\x7fu" +
-	"\x0f]\xd07\xca\x0d\xa3\xab\x8a_\x8d\xebp\xbc\x84\xb2" +
-	"\x15W)v\x18\xef\xe8x\xf3\xf0\x83\xf7>\xcc\xb3\x95" +
-	"\xc1\xa5\x94\xad\x8c,\xa5\xe8{\xfd=C;\xf7\xb9_" +
-	"{\x98?\xdaIe\xb7\xe3\x10\xb3\xcbpy/\x8b\x13" +
-	"\xf7>;\xf3\xdd\x87\xd9\x06\x04zI\xcb\xf0*\x0e\xdf" +
-	"[Fi\xd2\xcf\x0eW\xe4=\xbb\xed\xab\x87\xed0|" +
-	"\xe0\xb8\x1dR\xfe8\xca\x13\xc7!\x9a\x96\x9d\xedi\x94" +
-	"\x9e\x9a\xfd+~\xc9\xbb\xc6Qt\xd87\x0e\x97\x1c\xba" +
-	"\xf8\x97\xd9\xbd\xab\xfbn\x8d\xa3_PA\xe9W\xef\x0a" +
-	"\xba\xe6\xb3_\xb8P\x1a\xd3\xb1|+\xbf\xe6\x81\xe3\xe9" +
-	"\x95+\x1c\x8f\x93\xe4O{a\xdb\x07C\xef\x8c\xeb\xb0" +
-	"w\xfcY\x0e\x02\xd2\x91\xf1H\x8dG\xcd:\xeb\xd5Y" +
-	"\xbf\xf4=\x9a@\x8b\xb0\xa3\xb4g\xc2G\xd2\xfe\x09\xf8" +
-	"\xdf\xbe\x098\xd85YW\xbe}\xdb\x03k\x1e\x8d\x93" +
-	"R&\xbeB\x09\xdbD\\\xf1\x9a\xf3;V\xaf\xbf\xf7" +
-	"\x85Gy o\x9aH\x09\xce\xd6\x898\xc2'U\xee" +
-	"\xc6\xfb\x86\xd5m\xe3Nxj%\x952\xee\xfc\xf5\xc6" +
-	"\xfdom\xed\xff\x04\xcf\x86**)\xd1\x9cZ\x89c" +
-	"\x1f\xfcz\xd1\xf8\x03\x9b/{\x82{\xb5\xb5\x12\x85\x9a" +
-	"\xdf\x95\x1f\xf9t\xed\xcc\x8e\xed\x09\xc4\x94\xd2(\xb9\xf2" +
-	"\x0bi~%\xf6m\xa9\xfc\x05\xde\xf6\xdf\x0c\xc8\x9e\xeb" +
-	"\xfc`\xccv~\x0b\x85\xd5t\x0b\x15\xd5^\x02_\x17" +
-	"\x97\x7f\xf1\xe5]Ol\xe7q\xb4\xb5\xfa\x10>_Y" +
-	"\x8dHp\xdb\xd9\xbf\xdf\xfdP\xe9\xf2\x1d\x89<\x8a\xde" +
-	"\xd1\xe3\xd5_H\xaeI\xf8\x1fLB\xe0^\xf3\xf7K" +
-	"7J\xb3V\xed\xe0g\xdb?\x89\x1e\xcf\x91I\xb8\xa9" +
-	"\xfb\x96\x1e\x19\xf8T\xc7{;\xf4\xdb\xa2w\xe8{5" +
-	"\xed0\xf8j\xec\xf0\xc2\xc3;^\xf9\xb6\xf8\xc7Or" +
-	"\xbb\xae\xb8\x9a^\xa7\x8em;\xb7\xbe\xfb\xa3}Or" +
-	"\x17\xad\xf0j\x0a\xca>\x9e\x9b6\xac)\x08\xee\xb4]" +
-	"\xe2\xc0\xab\x9f\x91\xf2\xaf\xa6\xd8\x7f5E\xa1\xf9\xc7w" +
-	"\xdc\x1c\xba\xf2\x93\x9d\x89\xcc\x88\xe2\xec\xe5\x93\xbf\x92*" +
-	"&S\x16=\x99\"\xf8\xdf\xae\xf1\x0e\xec\xc8\xadz*" +
-	"\xee\x12o\xad\xa1\xd4wW\x0d\x02H\xfd\xc7\x9e+\xde" +
-	"\xfb|\xf7S\x0ck)\x1b8\xcf\xf7\"bm\xa1\x8f" +
-	"\x0e\xb2\xed\xc5Y\xe7^\xf4\x8f\xbf>\xc5\x9f\xf5\xeaZ" +
-	"zY\xd7\xd5\xe2\xae\xef\xefw\xfd\xa5\xca\xbe\xc0\xef\xf8" +
-	"\x0e\xdbk\x17a\x87\xdd\xd8\xe1w\xaf\xcd\xb9d\xc0\x9c" +
-	"M\xbbxY\xfd\xc3Z\x04\xdb\xf0\xe3\xb5TF<\xb6" +
-	"\xea{\x1f\xfe\xe3\xbe!\xbb\x08\xcf6WO\xa9\xa2s" +
-	"LAT\x9c\xd3t\xfeE;\xb2\x1e\xdfE|\xfd\xcd" +
-	"9.\x9fJ\xe7\xa8\x98\x8a\x1b\xb9\xf9\xceg>9\xf6" +
-	"\xe3Y\xcf\xc4m\xa4k*\x12\x84\xe1[\xa7\xd2\x8d," +
-	"\xfc\xde\xb0U\xef\x9d\xbe\xe29\xfeveM\xa7c\xf4" +
-	"\x9d\x8ec\xcc\xbcg\xf4\xd4\xdb\x0e\xac\xf8=\x8f\x00\xed" +
-	"\xd3)V\xaf\x9c\x8e;\xdd\x1dX\xf5h\xd7\xab\x1b~" +
-	"\xcf#\xc0\xe6\xe9\x94\x14o\xa7\x1d\xfa\x1c\xedS{\xf8" +
-	"\xce\x9f?\xcf\x83\xe2\xe0t\x84\xa6\xf4)\xedp\xcb\xa8" +
-	"O\xbf\x1e\xf1?/=\x1fw\"\x9e\x19\x0dT\x86\x9c" +
-	"\x81;\x9d\xf6\xe5\xec\x07r/\xfc\xfc\xf98Xl\x9b" +
-	"\x81\xd4s\xf8\xee\x19\x14\x09Zs\xbe=\xe1\xea\xff\xda" +
-	"\x0b<\xeb>8\x93\xe2\xe1\x873q#\x9f\xfe\xe4\x87" +
-	"\xeb\xdf\xf9\x9f^{\x12\x08\x1b\x95X\xa6\xd6\x1f\x92\xfc" +
-	"\xf5\xf8\xdf\xecz\xec\xfb\xda\x1dwU><\xf1\x82=" +
-	"\x1c\xcen\xaf\xa72\xd3\xfd\x9f\xc9\x9f\x95>P\xf6\"" +
-	"\x0f\xaf\xcd\xf5\xba\xecL_\xfdb\xae\xe7\xa1\xe7\xff\xb4" +
-	"\xfd\x0f\xb6\xa8\xdb\xef\x07;\xa4\x81?\xa0\xe8\xf4\x03\x0a" +
-	"\xfe\x8e\xd7;\xdb\x9fi\x9e\xba7\xb17]\xd5\xfcY" +
-	";\xa4\xf6Y\xf4\xfe\xce\xa2{\x1c\xfa\xf3\x13G\xcbK" +
-	"Z\xf6\xc6\x01j\xf5l\x1d\xedf\xe3\xec\xfe;\xff\x09" +
-	"\xe7\x9e\xf8d/\x0f\xeb\xe3\xb3\xe9ie]\x83\xb0\xf6" +
-	"\xf6=\xd3\xfd\xf2\xcc3_\xe2\x8f3\xff\x1aJ\xb2/" +
-	"\xa7\x1d\xcey}\xc7\x89\xc5\xb7.}\x89xr\x1c\x96" +
-	"\x1c\x8e\xa2\xef5\x87\xa4\xd6k\xe8\xba\xae\x99L\xa0\xbb" +
-	"\xf0\x82\xaf\x9aw\xbc_\xfe2?\xd2\x8ak\xa8\x02\xb2" +
-	"\x96\x8et\xdf\xbd7\x1e|\xae\xe5\xc9\x97y\xf4\xdc\xad" +
-	"w\xd8O;\xf4Z:e\xca\xf2\xf3w\xc5\x8dp\xec" +
-	"\x1a\xca\xae\\?\xc4\x0e3.\xbc\xea\xcc\xc5\xce\x8f_" +
-	"\xe6\x8ea\xe4\x0f\xa9\\\xf8\xec\xe1*\xf1\x8c\xbf~\xf2" +
-	"\xc78^\xf8\xc3\xb9\xf4\x86\xfeP\x97\x8bKN\x1c\xbe" +
-	"\xa2\xd3\xbf\x8f?\xa8\xca9\x94\x90O\x9d\x838\xd5\xb7" +
-	"\xe3\x96Yso\xe9\xf5\x0a7\xf8\xa7s\xa8\x8a\xf9\xf1" +
-	"\x04\xf7\xe4\xd2\xe7\x87\xbc\x92(\xc4d\xe1\xe6\xdf\x9c\xf3" +
-	"\xae\xf4\xe1\x1c*\x87\xce\xa1\xd2\xd7\xbc~\x17\xdfZy" +
-	"\xdf\xa8W\x0c\xfc\xa7\x88W\x19\xa0\xe4df\x00\xcf\x04" +
-	"\xee\x89\xdc6\xfch\xe7+=\xc4\xb3\xed\x81C\xd2\xee" +
-	"\x00e\x9a\x01\xb1\x8ft^\x04\xc5\xb3\xf2\xc5\xf7\xbc\x11" +
-	"\x1eT\xf0*\x0f\x14W\x84\"\x98'\x82@\xb9\xf7\xec" +
-	"\xc6\x9f\xde\xf3\xfe\xce\xd7\xf8\x8d\x15F\xca\xe8\x09Fp" +
-	"c\xd1\x1d\x8f\xe6<q\xdd\x83\x7f\xe26\xb6/B\xc9" +
-	"\xea\xd0\x8f\xaf\xf0}\x91\xa5\xfc\x99\xc7\x8e]\x11*\x83" +
-	"\xec\xa3c\x97N\xbc\xb3\xab\xe2c8\x10w\"\x11z" +
-	"\x11!\x8a\x1d\xde\x9d>\xe0\x8a\xfb\x8fn:\xc0\x8d]" +
-	"\x18\xa5*\xdb\x1b\xf9w)\xeb\xf3\xbe=\xc0\x11\xf3\x81" +
-	"\xd1\x17\xf1\xc9\xa5\xd7\x8dZ\xf1z\xfe\x17\x07y)." +
-	"J\x01\xfd\xc2WW=\xd5\xfad\xc5\xeb\xdc\x13W\x94" +
-	"\xaeT8\xf2\xe2\xff\xf6}|\xd6\xeb\xb6\xb7\xe8X\xe4" +
-	"\x90\x04Q\xfc\xefD\x04y\xd4E\xd1[7\x8b\xf9\xaf" +
-	"\xbe\xceo\xeb\xd3(\xc5\xa3\x13t\xd5\x8bg/\xae\xfe" +
-	"\xd5\x1b\xdf{\x83\xefp\xde|JI\xf3\xe7c\x87\xdb" +
-	"\xbe\x8d\xbd\xb3\xebD\xbf7\xe2\x08e\xe5|\x84\xfa\xf0" +
-	"\xa9\xf3)>='o\xdd\xf0\xf6\xcf\xab\xdf\x88\xbb{" +
-	"+T:\xcbZ\x15\xcfY\xd9~\x00.Yp\xe2\x0d" +
-	"\x1e'\x8f\xaa\x94\xa4C\x8c\x8eq\xd1\x8d\xa3\x0f\x9e\xb5" +
-	"\xea\xec7\xf9\xa3\xf3h\xc58D?\x0d\x87\xa8/\xf7" +
-	"^zi\xe5\xe9o\xf1\xf0_\xa2\xd1\x03Z\xad\xe1B" +
-	"\xff\xf2\x93\x85\xaf>\xfc\xf7\xce\xb78(o\xd1\xa8l" +
-	"\xfe\xec\xa8on-\xfa\xf2&\xfe\xc9z\x8d\x9e\xcc\x84" +
-	"q\x9eU\xab\x83O\xf2OVkT\x8a\x1e\xf9PE" +
-	"\xe4\xe1\x0b\xbe~\x0b\xa1\xecL\x80\xf2\xf0v\xcd\x01\xd2" +
-	"\x0a\x8d\x0a\xc6\x1a\xe5H\xa3\xdf\xf2\xff\xe8\xdc\xf3?{" +
-	"\x97\x07c\xbf\x05\xf4B\xe7/\xc0\xd5\xbd\x1f}\xa7\xf0" +
-	"\x8e\xba\xaf\xde\x8d\x13\xf7*\x17\xe0]\x18>s\x01\x05" +
-	"\xc1c\xdf~\xbed\xd5\xb67\xdf\x8b\xa3\xe4\xf3\x17R" +
-	"\xa1\x7f\xc9B<\xcd_\xe7\x9d\xb7b\xc8\xca\xd2\xc3<" +
-	"\x0cf\xb6\xd1\x0er\x1b\xce\x12\xf5N\xbb\xf4\xbd\xbf\x1d" +
-	":\x1cw\x12+\xdb\xe8:\xd6\xb5!\x187^\xfd\xf3" +
-	"=\x0dj\xee\xff\xc5\xf5\xc8j\xa7g\xd5\xaf\x1d{\x8c" +
-	"\xef\x9fw\xcf\xdd\x9b\xff\xf8\x7fq\x9aw;E\xf4\xb5" +
-	"\xed8\xc9\xc6\x0b\xae\xbf\xdf7a\xd1\x07|\x87m\xed" +
-	"\x94\xab\xed\xa6\x1d\x9a\x0f\xdd\xf2\xb7\xf7\x7f\xf3\xcb\x0fx" +
-	"`\x1ck\xa7G\xe5ZD\xe5\x9e-\xaf?v\xf7\x0f" +
-	"r?\x8c\xa3\xb4\x8b(]\xb8\x9cv\xf8\xd3\x1do\x9d" +
-	"1\xebD\xdb\xc7q\x1b]D\xd5b\x99v\xf0^Z" +
-	"]X\xfd\x8b\xc3\x1f\xf3S\xac]DY\xda&\xda\xa1" +
-	"\xec\xf3\xa7\x1e\xef\\\xfd\x8bO\x89\xa7\xb7\x83\xa7,\xc3" +
-	"w/:\x0b\xa4\xfd\x8b\xa8\xdc\xbb\x08i\xc2\x8e\x8dO" +
-	"\xcc\x9e\xb6\xe6\xddO\x0dZ\xacOv\xf9b\xba\xe1\x8a" +
-	"\xc5\x08\x91\xe7K\xfb\x86\xef[Z\xf6\x19\xbf\x9a\xae\xc5" +
-	"t\xb2\xad\x8bq\xb2\xaff\xbd\x10\xfc\xd9o\x17\x7f\x86" +
-	"C\x98\x87\xbbo1\xd5?\xdeYL\x0f\xb7n\x87\xe7" +
-	"\xbd\x1d/}\x167\xc6\xf1k)s\xc9Z\x82c<" +
-	"\xd9whd\xdc\xd3\xc3?O\xa4\xac\x94\xdd\xe5/y" +
-	"E\x1a\xb9\x84\x1aJ\x96 \"\xb45\x0f\xbf\xe8\x82\xf5" +
-	"\xab?\x8f\xa3\x84\xd7\xe9&\xb0\xebp\xb4\x7f\x0cj\xe8" +
-	"\x7f\xfa\x8a\x0d\x9f\xe3\x8a\xd8u\xaa\xb8N\xd7\xf1\xae\xc3" +
-	"]O\x7fu\xcc\x0d\xaf\x9c\xb7\xf1s\x9e\x03}x\x1d" +
-	"\xe5\x86\xc7\xe9\x08\xf7\x1eV\x7f\xf7\xf39_\x7f\xce\xcb" +
-	".\xfd:\xa8\xf43\xb8\x83N\xb1\xf5\xd3C\x93'}" +
-	"\xfe\xd785\xb2\x83R\x0e\x1f\xed0m\xe5]e/" +
-	"\xc5f\x1f\x8dS(:(\xa6u\xd2\x0e\xa3\x1f\x99\xb7" +
-	"^\xc9y\xe1(\x7f\x88[;(\xe0w\xd2\x0e}\xb2" +
-	"\xb6\xf5i\xe87\xedo\xdc\xf5|\xb3\x83^\xdc\xc9\x1f" +
-	"tE\x07\xdf\xda\xc6?\xd9\xab?\xf9\xb8\xb2\xf4\xe5\xdf" +
-	"_\xb4\xfco\xbc\xc9\xb8C\xc5'\xf7\x9cS\xad\xbc\xba" +
-	"\xee\xcac\xb6\x02\xc5\xe6\x8eC\xd2\xb6\x0e}\x05x`" +
-	"'\xdcC\x1a\x7f\xf2[\xdf?8\xceup)\x05\xf0" +
-	"\x87K\x11'f\xac\x9a\xb8\xf9\x89\xbd\x17~\xc9\xeb:" +
-	"\x9dTt\x8fv\xbd\xda\xef\xec\x87.\xfb\xd2\x96>\x97" +
-	"v~$M\xea\xa4w\xbf\x93J9\xc7\x97}\xb4;" +
-	"?\x7f\xc6\x97=\xf0t\xdb\xb2\xb3@\xda\xbd\x0c_\xda" +
-	"\xb5\x0c\x85\x8a\xeb\x97\xae\x8e\x96\xcc^\xfc\xa5\xad!\xf6" +
-	"\xe0\xb2C\xd2\x11\xec<\xfc\x9de\x14\xdf\xe0\x99\x8dW" +
-	"\\\xf8\xde\xa8\x7f\xc6\xd9\xbe\xae\xa7\xe2\xd0\x89\xeb\xa9\x91" +
-	"\xf4\xfaw;\xaf\xf5\xbc\xffO\xc3$\xae\xdbY\x97#" +
-	"\x02\x0c\x9f\xbf\xfcy\x1cb\xdegN\xa9\xee\x8e\xfa\xe3" +
-	"qF\xf3\xd2\x1f\xe1\x18\xc3'\xfd\x88\xce\xb2\xbb\xec\xfc" +
-	"?\xbfX\xb3\xed8\x07\x85%7Pa0\xb4q\xc2" +
-	"5\xbfm\x98\xfe\x15\xf7\xa4\xe5\x86/\xf0\x89\xdc\x92w" +
-	"\xed\xa8\xaa\x97\xbf\xb2SI\x86\xfbo(\x00i\xfe\x0d" +
-	"zw\xba\x8a\x85E\x87\x9fj.\xba\xffk\xee\xa4G" +
-	"\xae\x9c\x8b\x03\x15-\xb8tL\xe1\x83\xd5\xdf\xd8\xaa\xe3" +
-	"+\x0fICW\xd2\xab\xb3\x12\xd1\xbd\xfb\xd7}n\xbd" +
-	"\xe4\xf1\x87O\xf0\xa8\xb6o%\x15y\xde\\\x89\xa8\xf6" +
-	"\xe3\x0b\x1a\x8b\xc6|\xfe\xc2\x09n\xbd\xb0\x8arb\xff" +
-	"\xed\xd5\xd7\xaa\xfb\x0f\xf1O\x8e\xae\xfc5>)\x7fe" +
-	"\xff\x9c,\xa9\xd7\xb7\xdc\x93wV\x9e\xe6 \xc3\xba\xe5" +
-	"\xa0\xa2E\xd4K\x02\xa2?\x1a\x8e\x16W\xd0_u\xb2" +
-	"\xba@\x09\xc8\x97\xc4\xfc\x0b\xe4\xbcZ9\xd6\x1a\xd2b" +
-	"\x84u\xa4\xfdjB\xadMJ\xb84\xa0)\x91\xdcp" +
-	"\xa5&\xb7\xd4\x00\xf8\xfa\x0bx:@\x88g[\x11!" +
-	"\xbeG\x04\xf0=\xe9\x00\x0f@\x0en\xc4\xb3\xbd\x8c\x10" +
-	"\xdfc\x02\xf8\x9ev\x008r\xf0\xac=;\xab\x08\xf1" +
-	"=)\x80\xef\x05\x07x\x04\xc8A\x9a\xe4\xd9\x8d\x1d\x9f" +
-	"\x16\xc0\xf7\x07\x07x\x9c\x8e\x1c<R\xcf\x9ebB|" +
-	"\xcf\x09\xe0\xfb\xa3\x03<.!\x07\\\x84x\xf6\xe2<" +
-	"/\x08\xe0{\xcd\x01\x1e\xb7#\x07\xdc\x84x\xf6\xd5\x13" +
-	"\xe2\xfb\xa3\x00\xbe7\x1c\x90\x1b\xf27\xc8!8\x838" +
-	"\xe0\x0c\x02\x1d\xaa\x1c\x0d\xf9\x032\xfb\xdd\xdd\xa8FZ" +
-	"\xaa\x95\xb0L\x08\x81^\xc4\x01\xbd\x08t`[y$" +
-	"\xc4~{\xb5\x08\xf6`?s\xb5\x08\xf7\xb0;J\xe1" +
-	"p\xb5\x9f\x08-\xd6\xa8\x0cRN\x1b\x90\xfa\xa3\xd1P" +
-	"\xfb\xe4h^\x8d_\xf5\xb7@\xcc\x97c\xc2l\x09\x82" +
-	"\xe2Z\x01|7\"\xcc\x1c:\xccV`\xe3r\x01|" +
-	"\xb7Y0[}.!\xbe\x1b\x05\xf0\xdd\x890s\xe8" +
-	"0[\x83\x9b\xbeM\x00\xdf\xdd\x083A\x87\xd9\xba\x06" +
-	"B|?\x15\xc0\xb7\xd1\x01\xdd\x81\x90\"\x87\xb5\xca " +
-	"\xee5\x8b8 \x8b@wCkc\xa3\xac\xeam\xc6" +
-	"\x96\x84H\x14\xfa\xf0*\x03\xf4!\xd0\xdd$\x87e\xd5" +
-	"\xaf)D\x88\x84\xad\xb7\xfd1y\x9a\xac\xc6\x88\xa8p" +
-	"\xadl\xf7.;\x84\x92\xb5:\xcd\xaf\xb5\xc6\xca\xfc\xea" +
-	"\x14\xb9M\xa3`\x10Zb\xbe^&\x18\xf2\x07\x11\xe2" +
-	"\xcb\x13\xc07\x8cC\x9d\xa1\x05\x84\xf8\x86\x08\xe0\x1b\xe1" +
-	"\x00q\x9e\xdc\xce@\x9d\xad\xc9mZ\x0f\xb8\xdb\xcd\xdc" +
-	"$k\x88\xad\x0b\xe4\xf2HX\xe3fN\xf9\x12=," +
-	"\x1d\xd5\xc7+m\xfa\x99\xc5\x08\xf1\x9da\xae\xb6\x02\xc1" +
-	">N\x00_\x0d\xb7\xdaI\x88\xbf\x13\x05\xf0M\xb1\x0e" +
-	"\xcd\x87\x98Z-\x80o\x86\xc3\x1ek:\x1a\x95\xb6q" +
-	"~\xcd\xcf~\xe7*\xe1\xa0\xdcf\"Z*\x9c\x0a)" +
-	"1m\x9c\xa2\xea7U\xd0b>\xa7\xb9\xbe\xde\xb8\x94" +
-	"^\x02\xf8\xf2\x1c\xd0!\x875U\x91cp&\x81\x1a" +
-	"\x01\xa0\x8fe\xe7%\x80\x8d\xe6$\x0e:\xc9\xc4\xc8\x02" +
-	"Y\xd5o?!x\xbf\xb9C\xaa\xb2\xce\x83\xed\xba\x10" +
-	"wx\xb1\x00\xbe\xd1\x88l\x08\xe5\xb0\x16C\xc4b\x1b" +
-	"j\x8c\xb4\x86\x83\x00\xc4\x01\xd0\xe3\xb0\xca)r\x96\xfb" +
-	"C\xa1\x06\x7f`\xde%A9\x10At\x8b\x84c\xe5" +
-	"\xcd\xfep\x93\x1c\xcc\xab\xf5\xeat(\xf5\x8b\xcdJP" +
-	"\xae\x0cG[\xb5\x1a5\xd2\x12\xd5(H\xc4\x9eo\xa5" +
-	"<f}\xcb\x90\xfa\x9d\x85\x11u^,\xea\x0f\xc8u" +
-	"\xed-\x0d\x91P\xcc\x9c)\x19\xf0cz?\x0b\xf8\xa6" +
-	"\x93\xc9\x16\xf8uJS\xd8\xaf\xb5\xaareXh\x8c" +
-	" \xf4\xfb\x98\xe3\xfa\x11\xd2\xb3\x04\xf05sH'\xab" +
-	"\x84\xf8\x82\x02\xf8\xa2\x0e\xf08\x0c\xackA\xf4\x0c\xe9" +
-	"4\x05\x04\x9dR\xacXf\x91\x94x\xf2\xd8\x1d\x8c\x04" +
-	"Z[\xe4\xb0Fr)\xec\xcd\xf6(\"\xbe\xac\xc9D" +
-	"P\xb9\x0d\x98\xfeEc\x03~z\xbfj\xfc\xa0wV" +
-	"IF\xc8\x1b\x88\xb4DC\xb2&\x9b\xa4\x80\xbb\\\xb8" +
-	"\xcf\x12\x01|\xd5\xdc>+\x0b\xb8\x1b\xc7\xf69i\x90" +
-	"u\xe3r\x1bZ\x1b+\x83l\xee\xec\x10G\xbc\xc5\x00" +
-	"G\xba3\xa2\x16urHF&\x17\xce\xab\x95s)" +
-	"\xfe\xa5\xe5r\xb5\x84\xf8\x9e\x10\xc0\xf7\x1c\xb7\xbe]U" +
-	"\x1cG\x13\x8c\x83\xd8S\xc6q4\xa7S'\xd9{\x8b" +
-	"9\x8e\xe6\xbaWgs\xfb\xb0\xf1\x0f\x02\xf8\x0e \x9b" +
-	"\xeb\xd2\xd9\xdc\xfe\"\x8e\xcd\xc5\xed\xb9;\xa6\xf9U\xad" +
-	"Z\x09\x13\x90\xe3\xdb\xca#!\x9e\xd5\xc9\xe1 \xcf\xdb" +
-	"\xbcr8\xc8s>%F\x9f\x1a76\xe5\xfdM " +
-	"\xf3\x0cy'\xca\xa1(#\x9b\xff\x15\x07\x1bTb\x01" +
-	"\xbf\x1a\xac\x95\x03H\xdc\xda-\x92\xc9\xd1\xb62\x8b\x01" +
-	"\x99\xfc\xa7\xde\xa2m\x1d\x06m3o\x87-oL\xb5" +
-	"\x08\xa4\xd7\xd3\x19\xfd\x18\xaf\x84\xe4\x98\x85]\x1c\xf5(" +
-	"\xb2\xa8Gn\xd4\xaf5\x9bW\x0f'\xe6)\x86\xdb\x1e" +
-	"\x83\xcd)\xc6)\xfe\xa6p$\xa6)\x81\x18\x93;R" +
-	"^IUn\x94U9\x1cH\xb2\xaeZ\xca\x01\xc17" +
-	"\xc4\x01\xdd\xa1H\x80\x92\x0a\x02\x1ca0\xf5\xc3\xd4\x94" +
-	"\xad\xc6/\xaa~*8\xdal:\xa7\x07qJs_" +
-	"'\xc9\xe1V\x14Dc\xa6\xc0\x9a\x0c\x96\x0a\xf6\xb2V" +
-	"k\xba\x96\x13V\x9bd\x1e\x9dO\x94)\xe1\xa0\x12n" +
-	"\xa2\xf0\x14\xfdi\xc4\x88X\xa2\xec\xd1\x83+\x01{K" +
-	"\xd4&G}N\xe0\x0d\xb8P\xec\x9d\x1c\x9d\xd2\x1e\x95" +
-	"}\x17\xb3\xfdH\x83\xa1\x8a\x90\xba<\x10\xa0n\x18X" +
-	"wH\x1a\x0ae\x84\xd4\x0d\xc1\xf6\x11\xd8\xee\xe8E\xaf" +
-	"\x91T\x08\x05\x84\xd4]\x8c\xed\xa3\xb1]pQ\x12$" +
-	"\x8d\x84zB\xeaF`{\x09\xb6;\xdd\x94\x0aIc" +
-	"\xa1\x96\x90\xba1\xd8>\x11\x1c\x00.J\x87\xa4\x0a\xda" +
-	"}\x1c6\xd7`w\xb7HI\x914\x89.\xa7\x1a\xdb" +
-	"g`\xbb\xd8+\x87\xaa\x90S\xe9rj\xb0}\x16\xb6" +
-	"\xf7\xca\xca\x81^\x84H3\xa1\x98\x90\xba)\xd8>\x07" +
-	"\xdb\xb3N\xcb\x81,B\xa4\xd9PDH\xdd\x0cl\x0f" +
-	"b\xfbi\x90\x03\xa7\x11\"\xf9\xe9\xbcs\xb0=\x04\xf6" +
-	"\xa2l\xc7\x02Y\x8dqbh\xb6\xd6\x1e\x95!\xdb\x82" +
-	"#\x01\xc8&\xd0\xad\x84c2\xd2F\"X\xd4\xc3h" +
-	",\x8f\x10\x08%\xb4M\x91\x89\xc0I\x98\xff\xb2\xbe " +
-	"\xb7E\xe5@\xe2\xa8)e\xbbX\xb4V\x0e\xfb[\xa8" +
-	"\x1e\x96M\xaf\"G\xaa\xe6Zb\x98IG\x0b\xf1~" +
-	"\x0e\x13\xc07\xc6\x01\xdd(\xda(r\xb0\x9cdGZ" +
-	"\xc3\x9a\xb9\x8cF%$\x97GZ\xc3\x04\xb4\x1edS" +
-	"\xbf\xa5\x1c\xc2\x0am\x1a^\xd2\x11&\xf6\xcd\xa6\xc7=" +
-	"\x0b\x8f\xa3\x19,eE\x92\xe9\xf1\x99\xc7d\x88\xbe\x92" +
-	"B\xbb7c\xb3\x06\x16\xff\x93\xe6S\xa4\x0ca{\x1b" +
-	"X,Pj\x85A\x84\xd4E\xb1\xfdZ\xb0\x94=\xa9" +
-	"\x9d\"e\x1b\xb6/\xa7\xd8w\xaf\x8e}\x9dt\xdak" +
-	"\xb1\xfdF\x8a}]:\xf6\xad\x80\xb9\x84\xd4-\xc7\xf6" +
-	"\xdb(\xf6\xf5\xd2\xb1o5m\xbf\x19\xdb\x7fJ\xb1/" +
-	"K\xc7\xbe\xb5\xd0@H\xdd\x9d\xd8~/\xc5\xbe\xd3t" +
-	"\xec[O\xb1\xefnl\x7f\x00\xdbO?=\x07N'" +
-	"D\xdaD\xd7\xb3\x11\xdb\x1f\xc1\xf636\xe4\xc0\x19\x84" +
-	"H[h\xfbC\xd8\xfeD\x12lM\xe0\xd7x\x1c5" +
-	"~\xad\x99\x93\x96\x93\xb3\xb7\xd6h\xd0\xaf\xc9\xc1R<" +
-	";\x17q\x80\xab\x07kn\xf6\xc7\xa8\xdcB\xb2\xa9\x14" +
-	"\xc7\x9acr\xa8\x0e\x85\x00\x92\xcd#\xa8\xd5,\xf2\x88" +
-	"\x1a\x93C\x15(\x1d\xc4\xdd\x13\xbd1\xfe\x9e\xc4\xe4P" +
-	"e\xcc\x9052\x91\x0d\x9ad\xad\x8cj\x9dua\x7f" +
-	"4\xd6\x1c\xd1,\xc4\xe6$\xdc2K\xc25\x05\\l" +
-	"\x9b#\x80/\x84\x84\x0dt\xf9@A\xc6\xdc,\x80O" +
-	"\xe3\xec\x07\xf3\x0b\x0c\xa9\xb7\xad'\xb7N\xa4\x13\xb6\xdc" +
-	";\x1b\xd9mF\x8cG\x95\xe7\xb7\xca1mrT\x0e" +
-	"##7\xe5\x89D\x9eG\x85\x7f\xfa\x10\xe8e:\xc7" +
-	"\xdc\xea:\\\xec\x9d\x02\xf8\xee\xb5\xb6\xba\xbe\xc0\xd2\xdb" +
-	"\xcd\xadv\xa1\x80\x7f\xaf\x00\xbe\x878\xb5\x7f3\xf6\xdc" +
-	"(\x80\xef\x11\xbc@\xa0\xcb\x90[\xb0\xf1\x01\x01|\x8f" +
-	"\xe1\xedq\xe82\xe4V\x94\xa4\x1e\x12\xc0\xf7\x84\x03\xb2" +
-	"\x91\xa0\x98\x986O\x09\x07\xc1M\x1c\xe0&\xba\xe2\xe6" +
-	"G\x0a\x97\xab^\xcdw\xe2!r\xca2\xb5\xce;\xaf" +
-	"\x92\xdb-&\x1d\xc7\xa5\x0b,.\x9d=OnO*" +
-	"\xf0\xd8\x11\xca\x08\x7f\x04T\x11\xb37\xad0\x18\xaf@" +
-	"tZ*\x80\xeff\x0e\xc6+\xcb,\xdd\xc8#\x0c\xd0" +
-	"a\xbc\x1a\xa9\xec\xcd\x02\xf8~\xca\x99\xa3\xd6\xd6[\xc7" +
-	"fgFI\x8bw\xc86P\x0c%\xd9(\x88\x9aW" +
-	"'\xa50\x99FX\xab\xf1g\xa3\xa4\xfd\xdf\xaaA\x19" +
-	"\xcb3_;\xc3\xe65\xdd2B5\xf8r\x7f8 " +
-	"\x87B\xa8\xfa\xdbY \xd3\x09f&U\xe1\xf0\xab\x8a" +
-	"\x93\\\x1b\x8c\x8exf\xa6,h\x06\x06\xdaJ\xae\xd5" +
-	"\xb1(\x13\xa5\x05%\x90`\xf1,\xb0\xd3\x05\x07Y\x16" +
-	"O\x13\xd2;\xcb8\x05\x91\xe9\x82\xbb\x8a9;\xa8\xb3" +
-	"\x8f\x8ec\xbb\xab,\x05\xd1\x10\xc1<{\xcbx\x8b'" +
-	"\x18\x16ON?Lz\\i\xb4\xbd\xee\x98\xbc@V" +
-	"\x15\xad\x1d\x01bP\x83\x8e\x169\x16\xf37\x99T\xc0" +
-	"\x1b\x8b\xb4\xaa\x019C\xca\x18\x8a\xf8\x83:\xa9\xb7D" +
-	"r\x0e5\xcb,\xd441\xb3\x8c\xc7L\xe3NN\xaa" +
-	"\xb7,g\xa7D\xcd\xcde\x9e\x9e\x14\xe1j\"\xd1\xd6" +
-	"\xe8I!\\@\x95\xfd\x9alX\xdd\xb2\x93\xa9n\xa8" +
-	"\xc5\xc8\xaa\x1aQ{\x80\xccNgkTB\x9a\xac\xf6" +
-	"\xd0\x0c{j3\xf1t2\xaa%\xa3\x93:\xda2\xcd" +
-	"\xa82\xdc\x08\xd4\x92\xc4\x11F\\h\x9b\x00\xbe\xe5\x1c" +
-	"\xd6v\x0e\xe2\x0c\xd1\x0ckW\xd4\xf3\x94\xd1\xc0\xda\xd5" +
-	"e\x9c%\x9aY0\xd6T\x19\x96\xe8\x87\x12U8\xde" +
-	"rko\x03\x0dDZZ\xfc\xe1\xa0\xd9)\xd0\xac\x84" +
-	"\x82\xaa\x1c\x8e\xbb\xa4\xa7\xa4\xb0\x8dW\xda\xe4\x98e\xc1" +
-	"\xe5d\xe8z;\x19\xba\x8c\xb3efb\xadM\x009" +
-	"G\x8b\x84p\x13\xc2<\x9d\xc9\x98#\xbf&\xcc}\x0d" +
-	"\x84\xf8j\x04\xf0\xcdJ\xb2\x8a8\x80\x06\xe5X@U" +
-	"\xa2\x9an\x8dO\\\xd7\xe9v\xd6R\xaa\x060\xfb\xea" +
-	"I\x10Y\xea\xf7\x09\xc7\xfec&;\x1d\xc8\x86\x18\xd9" +
-	"\x1e\x0e\xd4ek~MF0\x0f1\x95\x94,\xaau" +
-	"\xf4B)<\x07L\x12#y\xa8\xd2q\x066\x9f\x03" +
-	"\x16\x95\x91\xfaRU\xb5\x0f\xb6\xf7\x07K\xc0\x92\xfaQ" +
-	"\xe1\xff\x1cl\xcf\xa3J\xca\x00]I\x19H\x95\x8e\xfe" +
-	"\xd8>\x84*)\xa0+)\x83A\x8d\xd3\xcc\xdd\x82\xae" +
-	"\xa4\x0c\xa5J\x87\xa5\x813\x15y$U\x16,\x0d\x9c" +
-	"\xa9\xc8c\xe9\xbc\xa6\x06\xee\xc9r\xe8JJ\x05]g" +
-	"\x09S\xa9\xedD\x8f8Y-#\x0a\x99\x1bTT\xcd" +
-	"\x92A\x0c\"[Gr\x9b\xfdE#/\x83\xde\xc4\x01" +
-	"\xbd\xad\xf62\x92\xdd\xae\xc91sD<\xaeDe\xb2" +
-	"Y\x89i\x11\xb5\xbd\x9a\x08r\xd8\x12\x89(\xf6q\xa6" +
-	"\x173\xe6\xd7\x96\xddr\xc8*\xfa\x03\xf3\xf0x\x87\x09" +
-	".BL\x7f?\xb0\x98\x18i>4\x10\x87\xa4\x80\x08" +
-	"V<\x01\xb0\x08pi6\xd4\x13\x874\x15Dp\x98" +
-	"!\x14\xc0\x9c\xb5R%T\x11\x87T\x0a\"\x08f\x18" +
-	",\xb0\xa0Vi$\xa8\xc4!\x0d\x05\x11\x9cf\xa4&" +
-	"\xb0\x9c\x00i \x9d\xb7\x1f\x88\xe0b^x+\x84G" +
-	"\xea\x0d\xcb\x88Cr\x81\x08n3\xe4\x07X\xa0\x80\xe7" +
-	"\xf82\xe2\xf0\x1c\x15A4c\xcf\x80\x85\x0ax\x8e\xe0" +
-	"\xb37E\xe8e\x86\xf1\x03\xcb\x98\xf2\xec\xc3g{D" +
-	"\xc82c6\x81Emyv>H\x1c\x9e\xed\"\x9c" +
-	"f\x86\xed\x01\xcb\xc1\xf2l\xb9\x8b8<\x9bE8\xdd" +
-	"\x0c\xa8\x00\x16\x0c\xe2Y\x7f;qx\xd6\x89\xdd\xb1\xe6" +
-	"\xc8\xc2Ir,FD\x7f\x93\\\x02\xdd-\x91\x05r" +
-	"y\xab\x1a#BD-\x81n&c\x13BJ\xa0{" +
-	"\x9e\xdc^+7)1\x92\xab\xc9\xaa\x1c,1\xcc\x0a" +
-	"\xcd\xfe0\x11\x9b\xe8o\x1c\x0e)\x06\x18\x1c\x16\xdfj" +
-	"V\x82rb\x1b\xf6C\x99\x0f\x0c\xb7\x0d\xeb\x97\xd8\xa6" +
-	"\xdbd&F 2\x8f\xce\xace\x1b\x133\x7f\x110" +
-	"\x87\x91@\x9bU9\x1aQ\xb5\xb2V\xa0\x84B\xf3k" +
-	" \x97@\x0dd\xc82\xc6YN\xa8<\xaf\xce9\x92" +
-	"\xb8\xc0Lwm\xbc\x0f,\xad\xde\x7fR\xae\xac\x8c\x1d" +
-	"\x96\xa6\x00\x81\xcfb\xa6\xe3,\x89\xdd\xc8dy\xf5\x86" +
-	"\xd9\xa8:\xb9\xd9(6O\x89F\xe5`%\x11\x82m" +
-	"\xec\x16\xf7J\x909tS\xe68E\xcd\xad\x08kj" +
-	"{\x82\xdf\xb0\xc0\xc6\xb6^d-&N1\xcdUb" +
-	"\xe3\x14\xb5\x87Q!\x95\x07\x94y\xd5md\xa5\x1cG" +
-	"\x12\xb5\xfe\x8c\xb4\xba\xaa!5d\xc2\x19y\x9c\xb1\x93" +
-	"\xdc\x1a8\x0d\x84!-\x11#a\x8b(\xb2,\x82\x04" +
-	"\x92h\xb7k%\x1c\xf2\xb7OT\xc2Zz\xffA\xb3" +
-	"\x12Gx\xcd\xf0\xe6\x84Y\xdc\xb6\x82|,\xe0\x0f'" +
-	"q&\xc4ktN;<f4$\xa2&\xf3\xe1\xf6" +
-	"\x98/\x12Z \x97\xeb~A]q\xa46v\x1e\x8f" +
-	"\x8al\xf0\x88\x8b\x11H\x10(\x14Mn\x81>VD" +
-	"\xb0\x11\xd4\x90\x0a\xb61\xff\x02\xb94\x96\x99/\xb8\x87" +
-	"\\d\xe7\x0bN\xe1\x810\x13\x8438\xf3\x98\xe6\xd7" +
-	"j\xfcZ\xb3){\x9d\x0c\xaa\xdb;'Z\xfcaM" +
-	"\x09L\x89\xcc\x93\xc3\xb1Z\x14\x06\xf3jruj\x97" +
-	"NQ\xa8\xe5M(\x86\\\xb7\xb2\x8a\x8fN1\x14\x85" +
-	"5e\xbc\x09\xc5P\x14\xd6\x16[!+\xff\x16\x07\xe6" +
-	"Iy\x02\x19\xe9HG\xe1\xab8\xebz\x86!5\xa9" +
-	"\x91G\x95\xa3\xe6\xe52}\xa5\x9c}\xb0\xcc24\x99" +
-	"\x90__\xc6\x1b\x08\x0d\xc8wa\xe3\xdd\x02\xf8\x1e\xb0" +
-	"\x9c\xfd\x9bT;\xfb`\x99\x9d}\xb0\xca2`tD" +
-	"\xfd\x9a&\xab\xa6\x16\xd1\xa1\x84\x03\xa1\xd6\xa0\xa5\xfd\xc8" +
-	"mq\xbf\xbb\x03\xfe\x98\\'\x87c$W\xd1\x94\x05" +
-	"\xa6!\xb8C\x89\xd5\xcaMr\x9bE\xc3\xdb\xa2!%" +
-	"\xa0h\x08\x9cD\xba\xae3\x8e\x9aH\xd4\xdb\x1ae\x11" +
-	"e\xe9\x14\x8b*;\xad\xa9\xc0\xb2\x17$\xb8\x10c\xad" +
-	"\x0d\xb4\x81\xb7\xb3\x07\xed\xb48W\xa6\xda9\x93\x0bN" +
-	"\xc5m\x9b\xda\xdd\xc3\x88^\xba\x00\xb1\"\xfe\x0e\x0a\xc6" +
-	"\x1d,\xe0\x95u\xa7\xa1\xac\x0f\xb2.&0]\x9d\xbb" +
-	"\x97\xe9\xe5\x95\xe4\xa6\xa5\xb0\xbc\x90\xb7\x16\xa7\x84\xa3\xee" +
-	"\xbf\x98\xa6\xc8\x0bQ8\xb3\x0d\xaa\xaa\xe25dG\xcf" +
-	"\xa0*s\xa3\xbeb.\xaa\xca\xce+\xa8E\xa2q\x04" +
-	"\xa2YV\x9a\x9a{\xfa\xbc\xc4\xcc=\xe8u\xad--" +
-	"~\x169\xa0A\x9c\xd7\xa2\x9e\xf3P0\x1cU\xe6r" +
-	"\x1e\x0a\x86\xa3\xf3\x91rF\x05\xf0]\xcb\x11\xc9\xf6Z" +
-	"\x8b\xc6vS\xabQy\xa4\x95\x08\x9c\xfc\xb5\xd0\xaf\x86" +
-	"\x95pS\xa2X\xa6\x84\x1b#\x89\x0aXz\x0f\x9f\xce" +
-	"\xa6\xe3\xd5\xe7dg\xc0\xac\x14s-p\x9b{\x99Z" +
-	"\xccY)\xec(\xa2?0O\x0eN\x93U\x92\xcd+" +
-	"\xa2\xde@$\x1c\xae\x0c\xf60\xd2\xb9m\x05\x9d\x05\x91" +
-	"y\xb2\xcec'\xc9\xe1\xd6R\x16\x92c\x1c\x01w\xfb" +
-	"\x8a-\x1e\xe8U\xf5\xe7}\xac8\xe7\x0c\x18\x7f\x93\xac" +
-	"M\xa5\x18jkO\xb7\xc5\xcc*;\xa8 \xa8\xa6\x08" +
-	"\xe0\x9bs\x12|\"\xa6\x84\x03r\x0fH\x9d\xccm\xca" +
-	"H^\x09\xc5\xa2\x93\xd5&\x7fXY$W\xb6\xe0k" +
-	"\xd6V\x93\xd80S\xa9-\x19\x18\xf0\x0d*ik$" +
-	"\xa3\x12\xb3\x1eo\xa6k\xf8\xcc\x80SJ-5\x96\x05" +
-	"\x84Yp*\xa8{\x98Z@\xaa9/s%\xedn" +
-	"\xc5&\x18dO\x9aD\xdb'b\xfb\x14\xb0bc%" +
-	"\x1f\x8dA\xb0b\x16\\F\x8c\xc3TX\x14\x17\x9b`" +
-	"\xd8\xd8\xa5\xd9\xb4\xddrz\x8bKu\x03\x8eL\x0d2" +
-	"\xa6\xd3\xdb\xd3\xcb\xa1\x1bp\x14\xda\x1e\xc4\xf6(5\xe0" +
-	"\x08\xba\x01\xa7\x85\x1av,\xaf\xf7iN\xdd\xcb\xdcJ" +
-	"\x0dA\x1a\xb6/\xa5^f\x97\xeee^B\xc71\xbd" +
-	"\xdeIip\\(\xac\xee\xd3\xcb\xb6RK\xf4\xe8\x87" +
-	"D\xf9\xa85\x1c\x94\xd5\x90\x12&^\xb9Nk\x0f\xc9" +
-	"\x90m\x05\xf9\x1b\xf1\x12\\\x97\xf2H\xc82dw4" +
-	"*m\xfe\x86\x90\xc5\xea\x13\x0d\xa2\xb6\x91\xd1\xb8F\x1c" +
-	"\x86\x805P$\x14'\xc3\xa5$\x04\x81f90O" +
-	"\xb7\xfb\x95G\xc21%\xa6\xc9\xe1@\xbb-!\xe0c" +
-	"/\xf5\xbb\xc6I\xdcf\xaeq\x06\xfaO\xb2H*\xbb" +
-	"\xd01\xa6\x96\x94Xj\xc9X\xa4\xeac\x04\xf0M\xec" +
-	")\xf8\x9b\xf9\x05\xc624\xb55\x1c\xf0k2\x81\x9e" +
-	"qv\xfa\x9d\x19'7*a\x05/Km.\xddt" +
-	"\xf2\xc8P\xd3o^`\xe77/\xe0\xa2E\x993\xb9" +
-	"e\x90\xc5\xaa\xe2C\x0a\xbe\x03\xf7oL\xd6*\x9b\xc2" +
-	"\x11U\x0e\x8eST\xce\x12\x9f\xc4\xad\x11T\xd4\xa4\x82" +
-	"\x93\xad\xb9\x84Y\xa3\xa8-\xcav\xf82\x8b\xa0uh" +
-	"\xaa\xd2\xd4$\xab\x19\x85\xe0\x04B\x91\x98\xcc\x1cY\x19" +
-	"E!\xc7\xaf\xa5\x07M\xe6\xc9\x1fNE\x12\x9c2q" +
-	"r\x9e\xad\xbb\x9a\xe9Z\xc5vN\x99\xa24r\xde\xbf" +
-	"\x1a\xc4\x84\xd2\xde\x14\xbb\xb8{\xde,O\xaf\xa7W\xbf" +
-	"\x9f\x09\x01\x0fU\x96\xee\xc2v\xd7U`\xa9.&\x8e" +
-	"\xc6\xe9.\x0cG\xb7\xac\xe2\xfc\xacL\xa1\xd9>\x97s" +
-	"\xa92\x85fW\x99\xe1R=\x90\x81\x99\xbc;&\xab" +
-	"\x0bdu\x9aLr\xe3\xcd\xe5z\xfb\x04\x19t\xaby" +
-	"$\xcc\xb1p\xfdY]3\xc9\xe6\xcd\xe4=\xcd\xdcf" +
-	"\x82f\x06\x0e\xab\x1eq\xe56\x19\x12E\xa9\x8dh\xf1" +
-	"\xdc:w~\xab\xac\xb6g\xe4\x7fL\"f\x99w\xc9" +
-	"\xfe\x0cM9\xa8\xab\x88\xd3?\x0d\x0c\xddT\xcf\x9f\xa1" +
-	"\x11\x9f\x13\xa7\x7f\xb2\\\x95\xad\xf5\xdc\xc1\xba\x9c\xfa\x19" +
-	"\xf2\xc1\xd4\x19\xd8S3\xf3)R[TBd\x93\xde" +
-	"\x18\x1f\xd9\x94I\x1aO\xaa\x94\x0b\xa43\x89\xde\x974" +
-	"\x92'\x95\xc6Q\x18\xb7S,Y\xf4\xc29\x8e\x93\xb7" +
-	"2\xb4D\x16\xc8xg\xa7Dh\x8c\x8cy\xa4\\\x00" +
-	"C\x15\x17\xab\xc0\x8etg\x11\x1f\xcc.\xd8\x05\xb3;" +
-	"\xed\x82\xd9]v\xc1\xecn#\x98\xbd\xc8\x0aV\x00\xb7" +
-	"\x11\xcb\x8eC\xbe&\x80\xef\xed\xcc\xe2\xe5\xfe\xd50\xcc" +
-	"\xa0\x1c\xd3\x12\x02\xee2\xb1\x06f\xac\xabr\x1a\x01\xbb" +
-	"\x09S\x0b\xd2\xa8IiITJ++\xef\xca\xb5q" +
-	"V\x14\xf1IU\x03\xd2\xd2\x8cx\x7f`*\xc4j\xf6" +
-	"\x87\x83!\xd94\x96\x9bf\xb4S\xa1\x15\x83\xf8\x007" +
-	"\xb0\x0bp3h\xc5\x96z+\x96\xcd\xa4\x15\xdbj-" +
-	"\x04N\x8fCqYd-\x11\xde\x96\xf5]\xd0\x87\xb8" +
-	"\xe8\x97L\x9dG\xdf\xb5i\xb1\xa7%\xdd.V\x85\xb7" +
-	"\x1a\xa71\x94\xbb\xed0\x8f9\xe5\x98O\x8e\x97\xbf\x92" +
-	"\xcd\x13h\xf6g\x16\x12\x93D\xe0\xb7\x13\xef2%\x8f" +
-	")\xad\xea\xa6\xe5\x9e\xbb\xe1\xc5v\x96\xc7\"\xeb\xda3" +
-	"\xfc\x9dTdY\xa8\xbcr\x9b\x12\xd3bf\xeeL\x9c" +
-	"++IHP\x9a\xd44\x8b\x1b'\xda\x05\xebm\xa2" +
-	"\x1b\x8b\xec\xa2\x1b\xe3\xcc\x82\x8e\x9efA\xf3\x82\xad)" +
-	"\xe2\xe4E;\xae\x9a\xa1a0I\x12cz;\xb8\x15" +
-	"\x1ej\x93\x98S\xc2\x1d\xc4X\\\xe9h\x01|\xe3\x1c" +
-	"\xd0\xa1\x1b|8\xc9\xcb,\xcc\xa3K^I\x00\xcf\xcb" +
-	"\xe3\xe3\x95\xb6JM\xd0\xad\xcf\xc9\xe8'\x93\xb9\xca8" +
-	"\xfa\x99:\xcf\xf8$\xb3\x81\xec\xfdj\xc9\xb5\x12\xe6\xaf" +
-	"\xf9w\x12\x18\xdd<_\x19\x0eyu\x9fc\xf2(f" +
-	"\xcbK1\x88\x93\xf4\x99\x93\x82#\xfc\x1e\xa1\x97\xe1\xa5" +
-	"(\xe0(\xbfs\xa2\x8e\x83\x9b\x1bx/E\xa5\xe1\xa5" +
-	"\x98kI\x89\xc9\xb1.\xee0\xe2\xe3\x9b\xa3\xfe`P" +
-	"\x097U\x13Qn\xd4L\x0eg\xb4\xd6\x92lj\x1e" +
-	"\xb6wMLPeot\x92_\x0b4'\xe8ke" +
-	"\x96\xdd\xd6t\x8d\x15\xf01t\xc6\xfd[1\x88\xbb\x94" +
-	"\xec\xfe\xc5\xf9\xcb\x98Bc\xc6\xd0\xddM\xb1:T\x93" +
-	"\x91\xfa\xdd\x82k\xab\xd6\xa3\xe5X\x1bvF\xc1/S" +
-	"I\xc7\x0c\xa3\xb6\xd1;\xec\x92~\x0bR\x07<d\xee" +
-	"\x87\xd4q\xcf\xe0-\x91\xd6\xb0\x966\xb02\x10g\x04" +
-	"?Y\x1f\xa7\x19\x16ac<\xces\xa0\xfc\x88}-" +
-	"Rb\x96\xe4\xb0\x8dU\xc2\xf9&G/\x99\x1c\x9d\xd2" +
-	".DuS:=\xf2\xf3\x0a\xb0\xbf\xa7o1!\xe0" +
-	"\xa0\x13d\x87#\x91\xa8Wg\x9a\xde\xa0\x1c\x925\xf9" +
-	"d\x8d\xb5\xe9\x9c\xfd8\x1c\xb7r\xb3\x0c\x9f\xad\xfa\x99" +
-	">\xf3\x9aQ\x97\x7f\xd96\x9c\x10\x8cig\xb5K\xe1" +
-	"%7+\xbf%l\xe3\xf44V\xe8H\xb8QQ[" +
-	"2\x8bp\xe4\"*\x98E\xfc\xff\x17\x1f\xb8\xdde\x0f" +
-	"\x9a\xd6\xc4\xff\xaa\xdc\x01\xdb\x98l{\x1f\x82%\xdbV" +
-	"\x8a\x86\xcf\x98\x0f\x01-\"\xa4\xce\x09\x02\xd4\xf5\xe1B" +
-	"@{S\x8f\x80\x19\x19j\x86\x80z\xa8G\xc0\x0a\x0d" +
-	"e!\xa0}\xa9\xc5>\x07\xdb\x07\xf0\x1e\x84\xf3\xe88" +
-	"Vh\xa8\xa1\x88H\x03a\x03\x0b\x01\xa5!\x9dn\x97" +
-	"\xeeA\x18K#R-\x87\x86\xe8\xd6=\x08\x89Y\x95" +
-	"\xbdD\xdd\x83\x90\x98U\x99\xd5K\xf7 L\xa5\xeb4" +
-	"\xb3*Sp;oP\xd6\xfc\x8a\xe5\xff\xb6\xcbi\xd4" +
-	"\x1d\xe0,\xc4\x13\xf9 M\x1a\xf3\x87\x90kT\x04\xc5" +
-	"\x94\xa4$\x16\xc1\xe1\xe2\xb9\x8b\xee'OHq\xd4\xe8" +
-	"`\xba\xe3?~\x98>\xe9\xd2\x0a\x12\x08\x14\x8b\x15L" +
-	"\x08\x8bK+\xac5X\x8c*WS\xb4\x90\xccy*" +
-	"\xfc\x01\xb99\x12\"bPN&\x1cr\x08*\x04\x90" +
-	"\xbe\xd7\x02\x0dEee\xce\x80\x151\x92\x8e\x8ae\xc4" +
-	"!\x1d\x11E\xb0J\xf9\x00\xab\xf4$\x1d\x14\xeb\x89C" +
-	"\xda'\x8a\xe00\xeb@\x02\xab\x0f.\xed\x16\xab\x88C" +
-	"\xda)\x8a \x98%l\x81U\xb5\x93\xb6\xd2w7\x8b" +
-	"\"d\x9b_\x09\x00V\xc2TZO\xe7]#\x8a\xd0" +
-	"\xc7\xacP\x07\xec\xa3\x04\xd2\x0a\xb1\x808\xa4vQ\x04" +
-	"\x8fY\xfc\x12XMW\xa9El \x0eI\x16E8" +
-	"\xcb\xac\x88\x06\xac\x08\xa54S\xbc\x9d8\xa4\xa9\xa2\x08" +
-	"\x92Y\x9b\x18Xi{\xa9R\\F\x1cR\xa9(B" +
-	"\x8eY\xea\x0cX\xe96i\xa4\xb8\x888\xa4\xa1\xa2\x08" +
-	"}\xcd\x92\x87\xc0\xcaqI\x03\xc5\"\xe2\x90\xfa\x8a\"" +
-	"|\xcf,\xa6\x0f\xac\x84\x99\x94%\xaa\xc4!\x81(\xc2" +
-	"\xd9f\xb5~`\xb5\x0d\xa5cn\x84\xd5\xa7n\x11\xce" +
-	"1\xabD\x02+\xbb(\xbd\xe3FX\x1dt\x8b\xd0\xcf" +
-	"\xac\x1b\x08\xacj\x9d\xb4\xd7]L\x1c\xd2.\xb7\x08\xe7" +
-	"\x9a\xd5U\x81Uz\x93\xb6\xb9qG[\xdc\"|\xdf" +
-	"\xack\x0c\xac`\xb0\xd4\xe5\xc6\x1d\xads\x8b\xd0\xdf," +
-	"\xc2\x0d\xac\x90\xb5\xb4\xda\xfd qH+\xdd\"\x9cg" +
-	"\xd6\xbd\x06V ^Z\xe2\xc6\x1d\xb5\xbaE\xc85\x0b" +
-	"\xc3\x02+6-)tU\xb3\xdd\"\x0c0K\x98\x03" +
-	"\xab\xae)\xf9\xe8\xbc\x95n\x11\x06\xb2\xaf8X\xdfJ" +
-	"\x90\xc6\xd2\xa7#\xdd\"\x0c2\xeb\x92\x03+V-\xe5" +
-	"\xbbW\x11\x874\xd8-\xc2\xf9f\x11V`\x05\xb1\xa4" +
-	"~n<\xdf\xben\x11\xfe\xc7,\xf3\x0f\xacv\xbc\x94" +
-	"E\x9f\xba\xdc\"\xe4\x99\xa5\x03\x81\x15\x83\x94\x8e\xbb6" +
-	"\x10\x87t\xcc%\xc2`\xb3\x14'\xb0B\xf0\xd2\x87." +
-	"\x84\xc6\x11\x97\x08\x17\x98U\xe5\x80\x95\x03\x95\x0e\xd2\xa7" +
-	"\xfb]\"\\h\x16U\x06V\xcd^\xdaC\x9f\xeev" +
-	"\x890\xc4\xac\x8e\x0f\xec\x9b\x07\xd2v\x17\x9e\xefV\x97" +
-	"\x08\xf9f)``\x1f\x88\x906\xb9p\xbf].\x11" +
-	"\x0a\xcc\xb2\x92\xc0\x0a\xd1Ik]x\xbe\xab]\"\\" +
-	"dV{\x04V\x01N\xeat!$\xdb]\"\\l" +
-	"VB\x04\xf6\x8d\x03\xa9\x85\x8e\xac\xb8D\x18j~e" +
-	"\x03X\xbdGi6}:\xd3%\xc2%\xe6G:\x80" +
-	"\x15\xdb\x94&\xd1\xa7\x95.\x11.5\x0b\x96\x01+," +
-	"'\x8du!>\x8ft\x890\xcc,x\x06\xac\xa0\x97" +
-	"\x94\xef\xba\x0bO\xd0%B\xa1\xf9)\x00`_\xa8\x90" +
-	"\xfa\xd1\xa7}]\"\x14\x99u\x15\x81\x95y\x97\xb2\xe8" +
-	"\x19\xb9\\\"\x0c7\xeb_\x02\xfb\xf8\x81t\xdc\x89\xd0" +
-	"8\xea\x14a\x84Y)\x0e\xd8\xe7 \xa4#\xce\xb9\xc4" +
-	"!\xbd\xe9\x14a\xa4YP\x19X\xf9mi\x9fs\x07" +
-	"qH{\x9d\"\\f\x16\x09\x07\xf6\x1d\x07i\x97\xb3" +
-	"\x968\xa4\xedN\x11F\xb1:\xc9VUSi\x8b\x13" +
-	"\xe1\xbc\xc9)\xc2h\xb3\";\xb02\xc5\xd2:'b" +
-	"\xddZ\xa7\x08\x97\x9bUb\x81U\x83\x97V:\xf1\xf4" +
-	";\x9d\"\x14\x9b\xf5\xd4\x81\xd5\xc4\x95Z\x9d\xb8\xdf\xf9" +
-	"N\x11\xae0k\xa5\x01\xab\x04)\xc9N\xc4+\xbfS" +
-	"\x04\xab\x92*\xb0\x8fEHS\xe9\xbc>\xa7\x08c\xcc" +
-	"J\xe0\xc0j\xe4J\x15N\x84s\xa9S\x84\xb1\xe6\x87" +
-	"9\xa0\xb8\x9c\xd0J\xdd\xd2H\xe73\xc4!\x15:E" +
-	"\xb8\xd2\xac\xb7\x06\xac\xee\xb94\xd8\xf9\x15\x9e\xa0S\x04" +
-	"\xafY\xb5\x1eX\xe99\xa9\x9f\xf3\x10qH\xfd\x9c\"" +
-	"\xb8\xccb\xce@?\xb8@\x0e\xad\x97z\xd3Sp9" +
-	"Ep\x9b%\xa9\x81\x15\x9e\x94\x8e\x0b\xf8\xf4\xa8 \x82" +
-	"hVi\x06V_\\:\"\xe0\x19\xbd#\x88\xd0\xcb" +
-	",\xd5\x0f\xec3/\xd2~\x01\xb9\xc6\x1eA\x84,\xb3" +
-	"\\2\xb0\x8f\x92H;\x05\xdc\xefvA\x84\xd3\xcc\xa2" +
-	"\xf3\xc0J4K[\x04\xa4f\x9b\x04\x11N7k\xc8" +
-	"\x03\xfb\x92\x83\xb4N@8\xaf\x15D8\xc3,\x8a\x0f" +
-	"\xacF\xb4\xb4R@l\xef\x14D\xe8mV\xf1\x04\xf6" +
-	"\x99\x08\xa9U@\xcci\x11D8\xd3,]\x0e\xac\xcc" +
-	"\xac\xe4\x17\x10sf\x0abG \x12\x0e\xcb\x01\xad\x04" +
-	"\xba\x83J\x8c\xfe \x02\xfd\x19\x9f\xa8\xc0Bz\x88 " +
-	"\xc7J\xa0\xc3\xf0\xdd\x94@v\xcc\xbf@.A\xbdU" +
-	"7\xa5\x10\xb1QVK\x98\x19\xa4<\x04L\x17\x056" +
-	"\x85_\x0d\xd6\x82\x111j\x8cLC\x02\x88W\x0f\x0a" +
-	"(\x81\xdcf|X\x02\xdd\xac\x06\x0e\xc9\xa5Upp" +
-	"\x1a\xa3\xd2\x91\xbe(&{\x13!\x12.\x01ocD" +
-	"m\xf1\xe34\xcc\xa0\x0e\x86E\x1d\xfb\xb2 \x1f\xe2\xd5" +
-	"\xc3|\xf4\x99\xa9.\x05,\xe4<\x1bU6\xee\x01\xc9" +
-	"\xa5\xc1\xeb%\xe0\xd5\x9d\x17\xfc#\xaf\xae\x81\x95\xe8\x81" +
-	"\xfe\xed5\xa1V\xe2\xd5\xd5\xb2\xb8\x91\x8dpf\xba\\" +
-	"\xd6\x11\x98%\x12\xc2q}\x8d\xbc[\xc0A\x99\xfc\x0e" +
-	"\xd1\xd6(M\xff\x155\x9a\x8e\xc1\xb7S\xc1>\x1b%" +
-	"{\xf3Ae\x18\x98\xbe\x96\x8d\x0a[\xe2\x03\xfe\x0d\x96" +
-	"\xf5\xac\x1fi7\xf3\x9a\x02s\x9b\xea 6\xcaY\x01" +
-	"k,\x81\xeeP,Z\x1e\x09\xca\xa5\xc4\xabo\x0eO" +
-	"\xcaHU\x06V\x9f\x85!\x8dM++`\x07\xac\x82" +
-	"\x9d\x05\x9c\xc9\xd1\x18a}\x8c7\x8d\xdcgz\xc2\xdc" +
-	"\x80q\xcd,e\x03X\xce\x06J\xdct\x87ze\x01" +
-	"`\xa8\xac\x0fA\x939I6\xaa\xc64!F\xf7\xd8" +
-	"\x02s\xd9z\xf53\xd37J#I\x09\xb0D\x1e\xba" +
-	"\\\xaf\xee\x01\xa4\x13\xe8\xde\x01`*\x14=Q\xa6\x01" +
-	"\x13A\xd3a\xa3[N\x80\x99N\xc40M\x0c\xb2\x0e" +
-	"\xbeR\xaf\x9d\x92\xdd\xecW\x0d\x1c\xa3FI`\xf5\x1d" +
-	"\xe8\xddaF\x0c`V\x0c}t\x16Z\xe3H\x88\xad" +
-	"!)\x9e\xd5y\xf5\x00L}\x0743\xc1\x91\x18\x9d" +
-	"#\x04t\x08\xea>\x18\x92\xdd\xa8\xdfk\xe6`%4" +
-	"\xde\x11o\xa4\xe1]\x80\x84\x80\x85\x12\xe802Jp" +
-	"\xed\x86}\x16\x98\x81VG9f\xaf&\xb9\xb4\xbd\x84" +
-	")>\xd3#\xc0l\xb9\xd9J\x88ve\xde\x05\x1d=" +
-	"X\xe60\x01UG\x16\x1a\x16C\xbcz`L|~" +
-	"R\x1a\xa5\xdd\xce\x10d\x1b\x00i~,\"\x83\x00H" +
-	"J\xc0\xfe\xab\x8av%8\xaf3\xcd\xc9H(3\xc2" +
-	"\x1c'\xdf\x91\xcb\xc8\xac[w\x92\xc9\x1e\xbco\xed\xcc" +
-	"\x93-\x97\xd9\xa3pT\xe6\x1e9\xd3\xa3\x92\xa9\xe9E" +
-	"\xa7R\xc9+/\xa6\x0c\xefJ\x12\xf3Tg\x15\x86\x13" +
-	"B\xd1\x84\xd85\x16=}\xade^n_\xc6\x99\xdc" +
-	"\x98\x19\xbds\x19oF/1\xcc\xe8E\x96o\xcb\xe2" +
-	"\xbd\x02_\xed\xd2\xfc<\\\\\xbd\xc2:\x05\x8c5Y" +
-	"\xe7\x9e\xb4\x92\xe1I\xd4\xc0c\xcc\x87\x8f\xe3i\x81\x93" +
-	"\xb4\xa2\xda!\x9e.)\xd8\xba@Om@.\xe2\xd9" +
-	"$(\x9c\xd5s\x90q\x04wZ\xc7\x12g\xcad\xc7" +
-	"\xb2\xb6\x96s\x011\xf7\xfd\xfaz\xce\xdd\xc3j\xa7l" +
-	"\xba\xdd\xf2\xec\x88\x91(wD|\xd9\xd93m\x92\x97" +
-	"Q\x94\x09N\xf4\xc7\x084\x9b&+\xdb\x92\x0fF\x02" +
-	"\xe3xP#-x/dP3\x0a\xa7N\xac\xe7c" +
-	"\x93\x15T\x90:\xf5,y\xa8d:3?\x95K\xb8" +
-	"\xcczz\xba\xe9\xcc\xcf\x05v\xb5\x1a\xe2\xfcL\x86\xf9" +
-	"9\xae\xb4\x0d3?\xaf.\xb6\x0c\xd5\x99\xe6zdh" +
-	"o\x16\x92\xd5\x93\xfeOEC4%\xab\xc2\x97\x96{" +
-	"\x9a\x1f\x1eL\xe0\x9eI\xd3vk,*\x9a$m\xd7" +
-	"\xc6\xa8\xc9\xbf\xd4\x83\xceg%{k\x92^\xa1\xc5\xde" +
-	"\xb9\xa1\xf7\xd7\xf9`-\xcd\x85&\x09Uk\xe2\x82\xbe" +
-	"J\x8c\xa0/\xbe&\xb7\xa3T\xc7\xa9\xddE|\xd0\x97" +
-	"\xc3.\xe8\xcb\x88\x1d\xd8[\xcf\x15+u\x95\xe9~[" +
-	"\xbeX)\x0b\xfa:\xa8\x12\xe2; \x80\xefp\xb2\xc4" +
-	"\x91pl!\xf2..[,w^8\xb2\xd0,i" +
-	"\xf6]\x1678Y\xae\x98\xc6+\x96y\xe0C,I" +
-	"e\xea\x93\xc9\xfc\x82\x94\x8e\xa7\x02;\xc7\xd3 \xcb\xf1" +
-	"\xf4]W\xa8\xcb\x80{\xd9eOe\\\xf3\xad\xc1\xae" +
-	"\xe6[\xbd\x95Q\xd5\xa3JP@\xf7d\x9a8\x10\x8e" +
-	"\x8c\xa7\xcb \xa2&\xab\xa7^z\xcb0?\xd8\xb1v" +
-	"^\xb2\x0c\x18\xf7\x15a\xe7\xb1>\xf3H\x00<\x99D" +
-	"\xff$\xa4\xf3\xa7\x8e\xf5\xe8Q\x8c{b\x92\xe3M\xf0" +
-	"\x11\x9b_l\xc8\xac\xa6N\x8f<\x08\x0d\xd2\xe6AT" +
-	"%\xcf\x830\xbfCj\xccNuW\x7f\xb0\xdd.M" +
-	"\xd4\x99\xb2\x18\x93\x8d\x90\x9f6+\xda\x9d\xcaUm\xa8" +
-	"\xb7\xa8\xdd\xa6-,\x1b\xc0^\xa9\x93\x16\xd2\xc5<\xfc" +
-	"\x0bJJ&\xd1\x99v\xe1\xca'\x951\xe7J\x17\xb7" +
-	"l\x07\xa3\x94\xa98\xe6GRO\x1e\xf3NM\x04\x16" +
-	"\x12\x93\xcfh\xb4\xc3UJ\x18\x82\x949\xea*l1" +
-	"\xbd\x9f\x15e4ncl-! x.\xc7?N" +
-	"\xcf\xc8zB\xc0\xe5)l \x04\xdc\x9e\xa1U\x84x" +
-	"\x9bZ5MV;Ps\x0e\xf9\xdb\xa9\xc2\x8fJ\x1b" +
-	"\x01\xd5J\xa0\x02\xb9;$7j\x13Z5\x8d\x08\xb2" +
-	"\xda\xad\xca\xa8\xd7\x06\xab\x89\xa8\x84e=NG\x09k" +
-	"\x84S\xd0l\x03}\xf9\x00\x9d\xc4\xaa\x08\xff\x1e\xd14" +
-	"\xbe\x9a\xb7m\xe1F[\x1c2\xbf\xfe\x95\x89\xd8\xc4J" +
-	"\xb5\xb0J-\xb2\xad.b+\x02\x97\xa5-W\x06)" +
-	"2cT.\x00\xe3?(\\$\xc4\xaa\xd8\x84\xff\xf3" +
-	"tLK\x9e~\x83\xb8Q\xadW\xe5\x86p\x82\x86]" +
-	"\x90iv\xd8 >;\xcc\x80^K\x99\xc5v3\xcb" +
-	"\x07\xeb\x88\xaa\xf2\x02E^\x98Q\xfcW\xa2\xbe\x9c\xee" +
-	"c\x16\x19\x7fO!]Q\x12\xc6P\xff3\x96\xae\xb4" +
-	"\xd7\xe0\x942s\x9d\xe9\xd4\x85S\xc1\xaf\xe4\xc6\xc2\xcc" +
-	"iB\xae\xb3\xee\xd1\xef\xbf\xfe\xec\xf5\x99\xf0\x95\x04\x95" +
-	"8]\x92\xa7_\xefg!\x84\xf9\xd1\xa5\x0c\xca\xaa0" +
-	"\x0b~\xca\xcfx\xa4J\xe8\xc9H\x17L\xf25\x924" +
-	"\x11.=\xder&)gb\x88\xa3\x8cp&\xda\xde" +
-	"\xac HA\x0e'\x84\xb0\x16d\\\x07\xb2\x98\xd3:" +
-	"\x98i\xa1\xd6.\x84\xb5\xd6*\x03\x99\xf42xCr" +
-	"\xb8Ik6\xf1\x97\x06]Ni\x8f\x12\xb0\xc2sZ" +
-	"\"A\xa5Q\x91U\xee\x13\x03\x19%\x84&\xea\xd4\x99" +
-	"\x06\x0a\xb1\xac\x98q\x89\x81B\x89R\xab\xf9\x8d\xed\x0c" +
-	"\xf0+\xee\x03\x05\xa9\xd2\xe1\xaf\x92\xdbk\xe5l\x96\xd9" +
-	"k_\x06\xc6\x8c\xaf.2\xe2\xab\x1f\xe3hw\\\x1e" +
-	"\x1dS\xd4\xe3>J\xc2NhW-\xa7\xd2\xb3/j" +
-	"\xedi\xb0R\xb6:t\xf11h\xe5-\xa4\x0e,\xcd" +
-	"8s\xa6\xd9\x1f\xa3\xc4\x97\x80\xa5}\x05\xfcQ\x941" +
-	"\xae\"\xa2\xdc\x1eK)\xb4M5$*\x9a\xb3\x0e6" +
-	"\xc1\xb6UTh\xf3\x14\xd1`\xdb\xb0\xdc\x1d\xd3T\xbf" +
-	"\xd2\xd4\x8c\xb2Un\xa0U\x0d\xb5'@\x9e\xd3\xb0\x04" +
-	"EK~3N\"\xb8\x1b\xec\x8cn\x86\xf9\x93\xaf\x9a" +
-	"\x9a!#\x8d\x84\x82|\xc6m\xd2\x0c\xdcTZ\xaa]" +
-	"\xbez\x9c\xe1\xcd0\xff\xa0\\\x9b\xd2\xf0f\xa4\xbdj" +
-	"D\xf4\x872\xab\xf9\x1eKZ\x0c\xda7\xc0\\\xcc\xbe" +
-	"*\xcbDd\x1a9\x0e\x16Y\x89\x81f\x02\xe2\x9b\x88" +
-	"\xb8o\x08\xe0\xfb\x80K@<\x82\xaf\x1f\x16\xc0\xf7W" +
-	".\x01\xf1S\x04\xf5\x07\x02\xf8\xfe\xce% \x1eE\x12" +
-	"\xf6\x89\x00\xbe\x7f:\xc0\xe3~[7F\x1d\xc3\xc6\xbf" +
-	"\x0a\xe0\xfb\xc6\x01\x1e\xf1\x1d\x1a\x99\xe99\x8e\x8d\x7f\x17" +
-	"\xa06\xb32\xfe\xff\x96\xcf\xeexugDFz\xb0" +
-	"\xc9\xc525!\xd9}]\x8e\xe5\x03m\xe4\xe8GW" +
-	"=\x9f\xa0!\xf4L\xd0\xc8\xd4B\x9b\xd2\xdc\xff]}" +
-	"e\xaeg\xd2\x14K%8\xd5Bw=X\xaa\x10O" +
-	"8\xac\xbe\xd9\xact\x15\x87\xd8\x05\\\xc2\xabAB\xf6" +
-	"\x17p\xc8\xceH\xc8\xc1A\x1c\xb23\xd0\xbfYfY" +
-	"IM\xd0\xbfS\xcc\xdd\x00W\x1f\x1d\xaf\xe3n\x00+" +
-	"\x0d\x1ew\x03D\x87\x8e\xd7\xfc\x0d\xc8\x90\x02\xfd\xfb\x8a" +
-	"\x87\xa7\xd6r{\x9c\x9cY\x8a\x9d\xc9\x86\x82^8&" +
-	"\x9d\xf8\xce\x12\xf6\xe6p\xc2\xccl<\x85\x19\x02\xf8\x82" +
-	"=x}jV\xa7GYgB}9\xb9\xccF\x92" +
-	"\x8f3\x13\xda\xdc\xa0\x8c\xb2)x\x13U\xa2h\x91!" +
-	"5\xee\x81\xdf\xa7P\x10\x8bYc\xfe_\x00\x00\x00\xff" +
-	"\xff\xa5\x1c\x99q"
+const schema_d75b3b54eb3ed6a2 = "x\xda\xdc}{x\x14\xd5\xf9\xf0ywvw\x12\x01" +
+	"\xc3:P\xc5j#\x08\x0aA\x04\x82A\x8d`n\x04" +
+	"I\x08\x92M\xb8H\x0a-\x93\xddI2\xb0\x99\xdd\xcc" +
+	"\xce\x86\xc4[\x04I\x15\x10\xb9\xabQQ\xc3E\xc5\x0a" +
+	"\xd5*V\xa8XQ\xa9B\x8b\xd6\x0bVA\xad\x17\xfc" +
+	")*R\xacTQ1\xdfs\xce\xcc\x999\xb3\x99\xbd" +
+	"`\xdb\xa7}\xbe\xbf\x92=s\xe6\xcc\xb9\xbc\xe7\xbd_" +
+	"F|\x99[\xe8\x1e\xd9\xab\xfeJ\xe4\xaa^\xcey\xbc" +
+	"]\x0b\xe6^\xf4\xc8\xd2\xaf\x16\xdd\x80|?\x05\x84\xdc" +
+	"<B\xa3\xfa\x9d_\x0c\xc8\xdd\xf5a\xdd\xb2%oz" +
+	"\xaf\x98\x8f\xfc\xbd\xc0\xd5\xb5\xee\x8d\xcb?\x9br\xd9\xcf" +
+	"\xff\x8a<\x1c\x8f\x90\x00\xe7\x7f)\xf4:\x1f\xf7\xce<" +
+	"\x7f\x19 \xe8\xba~\xdd\x9c/\xce\xfd\xcd\xf1\xf9\xc8\xff" +
+	"Sp#\xe4\x01\xfc\xaccp\x15 \x18\xb5qp6" +
+	"\xee\xf2\xec\xdd\x1b\x85\x83;.X\xa0\x7f\xca\xe3\xc2=" +
+	"v\x0d\xb9\x13\x10\x08\xfb\x86\xccC\xd0u\xebcG\xaf" +
+	"9\xf8l\xc9\x02f.#s\xee\x04\xe4\xfe\xdb\xd3\xd2" +
+	"U\x81\x83\xcf,\xf0\xff\x14\xcc7\xfb\xe7,\xc6o\x8e" +
+	"\xcc\xf9\x0d\x82\xae\xc0K\xad\x07\x9ek\xbf\xf9F\xa4\xf7" +
+	" \xaf\xee\xcd\xb9\x1awx+\xa7\x00A\xd7Y%[" +
+	"\xbe\xe89p\xd3\x8d\xc6\xb7\xc9\xec\x8e\xe7\xd4\xe0\x0e\x9e" +
+	"\xa1\xb8C\xb6\xbb\xfa\xb1\x9f\x1ex\xeeF\xbcZ`V" +
+	"\x8b{\x0ayC\xf7\x08EC\xf1\x7fc\x87\xe2\x89." +
+	"~\xee\x899{\x9e{\xedF\xe4;\x8b~m\xed\xd0" +
+	"\xedx\xd3>~s\xcb\xc5_\x9f\xef]\xc8<Y:" +
+	"t\x1d~\xd2\xb0\xda\xb5|\xc4\x9d\xeb\x162\x8b\xbbn" +
+	"\xe8J\xfc\xe4/\x0b\x97]6\xbd\xfa\xcd\x85\xec\xdc\x1a" +
+	"\xf1K \\G\xe6\xf6\xe1\xf5\xaf\x9dVv\xe1\xf0\xf6" +
+	"\xf8\xb9\x91\x93\xd8<t\xbf\xb0\x8d\xccm\xeb\xd0\x8f\x11" +
+	"t\xf9\xef\xe8\xed)x\xe6\x86v\xbc\x15.\xe3C\x1b" +
+	"/ +}\xf4\x02\xbcW\xc1\xd3\xae\xb8\xe8\xd9qm" +
+	"7\xe1\x0e\x9c\xd1\xa1l\xd8o\xf1A\xcd\x18F\xcer" +
+	"\xe2\xf6\x97\xfeV3\xf6\x94\x9b\xd9!\x0e]\xb8\x00\x0f" +
+	"q\xecB<\xc4c\xfb\xfb_\x1f\xb9r\xfc\xcd\xc6v" +
+	"\xebS^:\x9c\x1c\xe5\xda\xe1x\x87v\xee\x1c\xac~" +
+	"9\xe5\xfb\x9b\xd95\x9d\x18\x8e?\"\xf4\x1a\x81\xd7\xd4" +
+	"z\xce\x9f\xbf9o\xefU\x8b\xe2\xa1\xcbEvy\xc4" +
+	"\xb3B\xe9\x08\xfcN\xd1\x08\x0c:__v\xec\xa2\xdb" +
+	"/\xb8i\x11\x038\xfe\x91+\xf1`\xe2H\xfc\xb5\x8b" +
+	"\xfa\xbc\xf8T\xbfS\x16,a\xbf\xf6\x8a\xde\xe1\xfd\x91" +
+	"\xf8k\xf2\xa2\xe7\xb7\xaf\xbav\xed\x12f\xf3!\xf7U" +
+	"\xbc\xf9\xdf\x15\x9e\xb5h\xd6\x17y\xb7\xb2\xaf\x1e\x1b\xa9" +
+	"\xe2W!\x17\xbfZ~\xd3_\x1f\x9d\xf2]\xfe\xad\xc8" +
+	"\xd7\xab;\\\xe4~ \x14\xe5\x92\x19\x93\xbe\x83\xf9\x87" +
+	"sT\xdf\xef\x97\xb1\x83\xcd\xca%\x1b'\x93\x0e\xa3\xae" +
+	"\x9fr\xca\xc7\xd7\x0fXN7\x8e#\xb7D\xef\xb11" +
+	"\x17\x1f\xdf\xcd\xa7m\xa8\xcb\xfb\xb4f\x053\xd3\xf9\xa3" +
+	"\x08\x00\xadP\xf6]\xf0\xd1\x88\xed\xec\x93&\xfd\xc9\xc6" +
+	"\xc7\xe6?\xb3\xbc\xd3\xbd\x12\xef\xa57~/\xc5Q\xeb" +
+	"\x04y\xd4\xe9\xa4w\xd8\x85\xa0\xeb\xe2e\xf7\xbd\x9e}" +
+	"e\x9f\x95\xec]\x81\xd1s\xc8\xd1\x8c\xc6\xbb\xf9\xab\x1e" +
+	"\xb3K\xffT\xb3l%\xbb\x8a\xa6\xd1d\x8e\xd7\x8d\xc6" +
+	"\xab\x98\xb3~\xf6\x8bC{\x8d^\x15\xff=\xb2'k" +
+	"G\xef\x176\x8d&P7\xfao\xf8{\x1do\xcf\x1a" +
+	"U\x7f\xea\x0dk\x0ch\xd2\x8fo\xdb\xa5\x0f\xe1\xf1v" +
+	"_\x8a\xd7\x9cy\xd1\xfb\xbfjx\xe3\xbd5\xcc\xca:" +
+	"\xf3\xf1\xbd\xef\xaa\xfb\xd3/Wl\xfcs\xff\xdb\x1cq" +
+	"\xd0\x8a\xfcW\x85\xb5\xf9d\x07\xf3\xa7c\xb8}\xe2\x94" +
+	"I\xfe\xe7\xe6\xcd\xb9\x8d\x9d\xf8\xa1\xcb\x08\x9a8~\x19" +
+	"\x9e\xf8\x80\xbb\x86\xb4\xcez|\xfe\x1d\x06\xe8\xeb=\x86" +
+	"\x8c\xa9\xc5\xb0\x9f7\x86 \xa9!\xd7\xbc\xfd\xc8\xe0c" +
+	"=:l\xa0\xed\x1fK@[\x1c\x8b\xb7g\xc9\xfaY" +
+	"\x0f\xe5=\x1c\xea`o\xc7\x8e\xb1d\xffv\x8f\xc5\xb7" +
+	"\xe3w[\xc7\x0c\x18;3\xd6\xc1,G\xbc\xfc!\xbc" +
+	"\x1co\xc7\x15c\xd7\xe7-g\x9f\xf8/\x7f\x16?\xf9" +
+	"\xc3\xf5\xef\xae\xc9\xcd\xde\xd4\xc1N\xbd\xe8r\xb2G\xfe" +
+	"\xcb\xf1\xd4\xdd{\xd7\xbd\xe1\xaf|\xa6\x03\xef\x04\x17\x7f" +
+	"\xc6\xed\x97\xef\x17V\\N.\xe1\xe5\xe4\x06\x7f\x91\xb3" +
+	"\xf8\xae\xabs\xf7v\xb0g\xdc\xaf\x90\xec\xc4\x90B<" +
+	"\\\xcb\x91\x1d\xeb~\xe7\x9e{'3\x93\xb2\xc29x" +
+	"&\x8f\xd7\xae\xbb\xf2o\x0b\xdf\xb8\x9b\x9dI^!\xb9" +
+	"\x10E\xf8\xd5\xbf]\xfdi\xd6\x0f\x0d\xfb\xd7\x1a\xa7I" +
+	"\x9e\x8b\x85\x04:\x1a\x0b\xf1\xf2\xc7\xef}\xe9y\xff\xe7" +
+	"\xdf\xaee\x86\xce,\"\x8b\\8|\xc1\xfd\xf3\x1e\xbf" +
+	"\xec^\x1b\x12.$;\xe7)\xc2\xb3\xda2\xe3\x98\xf4" +
+	"\xda\x97Kl\x1d\x06\xe1wA\xc8#\x1d\xd6\x0e\x89>" +
+	"\xa8v\xbe}o\xdce\xf4\xe0M\x90\x8a^\x15\x9a\x8a" +
+	"\x08\xf2,\"G\xa9\x0ey`g\xed\xed\xc7\xeee\xe9" +
+	"\xcd\x9ab\xb2\x09\x1b\x8b\xf1I\xb6\xde\xf2\x97Q\x9aG" +
+	"\xbc/n4\x02\\\x9e\x92\xfd\x82\xaf\x04\xff\xd7\xab\x04" +
+	"\xaf\xea\xdc\xe9kBO\xdc\x7fV'\x83\xd87\x97," +
+	"\xc0\xab:u\xf9\xeb\xe3O;\xf3\x82N\x16\x1e:J" +
+	"\x08\xc0l\"\xaf\xfe\xf5\xdd\x03/\xb5|3\xa5\x13\x1f" +
+	"\x9d'\xfe;E\xe3>\x15&\x8d#\xfb?\xeeb|" +
+	"]\x0e\xf7\xb9n\xc9\xa7\x9ds:\x91\xaf\x17s\xce\x08" +
+	"\x84\xcd\xe3?\x10\xb6\x8d\xc7=\xb7\x8e\xbf\x82\x13NL" +
+	"\xe0\x11\xea\xf2\xbd\xb7\xe7Mi\xdaol\x1f\xffh\xc2" +
+	"v\x82\xaa'\xe05\x8eYP\x919\xff\x85\x9b\xd63" +
+	"\xf3\x9eZF\xee\xd6\xac\xaf\xc6\xff\xbc\xf2\x9b\xd7\xd7#" +
+	"_/\x97\xedC\xa5e{\x04\x7f\x19\x9e\xdc\xa4\xb2\xdb" +
+	"\x11t-\xbc\xa1\xcf\xb8o\xf7,\xdb`\xbb\x12k\xca" +
+	"\xc8G6\x96\xe1\x8fL{$\xff\xfa\xb3\x9e\xfbp\x83" +
+	"#\xf1\xecW\xfe[\xa1\x7f9\xfe\xef\xecr\xdc\xf9\xb3" +
+	"Cy\x9d=8\xee~\xf6\x90[\xcb1\xa3 \xb4\x97" +
+	"\xe3C\xbe\xf6\xcf\xb7|^\x901\xf2~\x06\x806\x96" +
+	"\x93\xad\x1e\xb7\xa7\xfc\xcc\x19\xd3\x1al\xaf\xae('\xf0" +
+	"\xd1\xa9\xbf\xba;\x7f\xc2\xe6\xbb\xaa\x1f`;\xec+'" +
+	"\xc0\xfb>\xe9\xa0~\xde\x12\x08\xf9\x17>\xc0\x8c\xed\x9b" +
+	"\xf8)\x1e{\xd5\xde\xdf\xbdw\xd9\xe4\xc2\x07\x99\x8d\xf2" +
+	"L\xbc\x1a?)\xebxk\xd9\xaa\x82\xe0&\xdb\xfa\x8f" +
+	"\x96\x93\x13\x86\x89\xf3\x10\x1c\x995\xfd\x99Va\xff&" +
+	"\x06\xce\x9a&\x12\xe6\xe3:\xfc\xb8\xeb/3\x8e/l" +
+	"[\x90\xfb\x90m\x80C\x13\x09\x85?Nz\x08_L" +
+	"\xfc\xe1\xaay\xb1\x87\x98iM\xad\xa8\xc2\x1f\x0f\x9f\xb3" +
+	"\xff\xc9G\xcey\xe6!\x1bb\xa8 \xaf\xfa+\xf0\x8a" +
+	"\xbe\x97o\xba\xa4<\xff5[\x87\xf9\x15\x84\xde/%" +
+	"\x1d\xc6\xbb\xda\xde9\xf8\xd0}[Xz\xbf\xb9\x82\xd0" +
+	"\xfb\x1d\x15\xe4\xa2\xdcx\xef\xb0\xf9\xafx_\xdf\xc2\x02" +
+	"\xd1\xbeI\x84|~4\x09O\xefe~\xc2\xde\xe7f" +
+	"|\xb0\xc5F\xb6\xca\xae\xc4\x97~\xd4\xd4+\x09\xee\xbd" +
+	"\xeb`\xe9\xc0\xe7\xb6~\xbb\xc5\xe9.m\x9a\xbc]x" +
+	"t2aV&\xe3\x0bQ|\xba\xafNxz\xd6o" +
+	"\xd8)\x97U\x12x\x9aQ\x89\xa7\xfc\xe4\x0f?\xebQ" +
+	"\xfb\x99\xfa\x1b\xc4\"\x99E\x95dK\xd7T\xe2!B" +
+	"\x17\xfc:\xabWE\xdfGm\x98\xbc\xc8O0\xf9$" +
+	"?Y\xd5\xe9/\x9e/\x8ci[\xf8(\xbb*\xb1\x8a" +
+	"\\\xff\xa6*<\xc6\x90i/n\xfdd\xd8j[\x87" +
+	"^\xd5\xa7\xb9\x10\x08\x83\xaa1]\xaa\x9f\xc2\x7f|\xe1" +
+	"\xea\x8f\x7f\x1b\x0f\xd6\xb8\xa7\x909\xe5S\xa1\xef\x14\x02" +
+	"@S\xc8\x0e\\<\xf3\xb4\xd7f\xfe\xda\xffX\x1c\x86" +
+	"&\x9d\xe5\xa9\x9f\x0a\xb1\xa9\xf8\xbf\xa6\xa9\xf8\xd3\xbf\xc8" +
+	"\xbc\xfc\xbd\xe5\x0f\xaex\x8c\xdd\x01\xdf\xb4W\xf1\xdc\x06" +
+	"M\xc3;\xb0\xe2\xdc\xb6\xa5k\xef{\xf11\xf6\xd0J" +
+	"\xa7\x11T\xe9\x9f\x86G\xc8\xbb\xbf\xed\xe5\x89O\xef\x7f" +
+	"\x9c\xc5\xf0\xc7\xa6\x11\xb8\xf0L\xc7#|^\xee\xad[" +
+	"?\xa2z+\x03R\x83\xa6\x13~s\xf5o7\xec{" +
+	"\xf7\xd1\xb3\x9ed_\xed;\x9d\xd0\x9aA\xe4\xd5\xb7\xbe" +
+	"\xbbz\xfc\x9b\x9bF?\xc9\xbcZ:\x1d\xb3\xb7\x7f(" +
+	"\xf9\xe8\xf0\x9a\x19m\xdb\xe2h\x10A\xbfy\xd3\xbf\x14" +
+	"\x8a\xa6\xe3\xbec\xa7?\x80\x11\xd9\xef\xce\xc9\x9a\xe3\xfe" +
+	"d\xcc6v\x8dPC\xd6\xd8\xb7\xa6\x00\xc1w\xf9%" +
+	"_~}\xe7\x93\xdb\xd8KQZ\xb3\x9f@A\x0d\x86" +
+	"\xba\xe5\xa7\xffq\xd7\xc3E\x0b\xb7\xc7\x13\x7f\x82Uv" +
+	"\xd7|)\xec\xab\xc1\xff\xbdR\x83\xcf\xea\x17_\x0d\xdf" +
+	" \xcc\\\xbc\x9d\xfd\xda\xc6\x9f\x93\xd3\xde\xfas\xbc\xa8" +
+	"\xf57|\xd4\xff\xe9\xb6\x0f\xb7\xeb\xf7[\xef\xf0\x91\xde" +
+	"\xe1\x18\xe9\xf0\xf8\xd8U\xa3Z'\x15>e\xdb\x96\x99" +
+	"\x04w\xf4\x9f\x89;\xbc\xb8e\xfb\xab?\xe4\xdf\xf6\x14" +
+	"\xb3-E3\x09\x86h\xdb\xba\xe3\xd1\x0f~\xf5\xcaS" +
+	"\x0c\xee\x186\x93\xecuo\xdf\x92u+r\x82;\x1c" +
+	"\xd7p\xf6\xccg\x85A3\x8903\x93\x80l\xd3\xf1" +
+	"\xed\xb7\x84.\xff|G<\x91'\xb7(o\xd6\xb7B" +
+	"\xd1,\xb2\xc1\xb3\x08\xc0\xfd\xe3\x17\x05\xfd\xdb\xb2\xcb\x9f" +
+	"\xb6\xa1\x95\xcd\xbf xi\xc7/\xf0\x0e\xaa\xff\xdc}" +
+	"\xd9\x87Gv=Mo\x09AM\xfd~\xb9\x07\xdf\x92" +
+	"a\xbf$\x83l\xdd3\xf3\xcc\xa1\xff\xfc\xfb\xd3\xec\xaa" +
+	"\x17\xcd&\xe8c\xcdl\xbc\xea\xfb\xfb\xdd8\\~%" +
+	"\xf0\x07\xb6\xc3\xd6\xd9\xe4*\xee$\x1d\xea\x97\xd6\xdc\xb8" +
+	"\xe5\xfb]\xcf\xe0I\xbb\xe3o\xc9G\xb3\x9f\x15\x0e\xcf" +
+	"&\xf8n6&o\x7fx}\xf6\x85\xe7\xcc\xde\xb8\x93" +
+	"\x95\x12\xf3\x02\xf8\x14F\x95\x06\x08\xebrl\xf1O\x0e" +
+	"\xfds\xfd\xe0\x9d\xb6\xbb\xffV\xb0\x9c`\xa3 \x06\xfd" +
+	"\xd9\xf5\xe7\x0e\xdd\x9e\xf9\xc4N\xe4?\xcb\x9cQ\xbbD" +
+	"f\xb4B\xc2\xcb\xbee\xf5\xb3\x9f\x1f\xbbm\xe6\xb3\xb6" +
+	"e\x1f\x960B\x1buB\"\xcb\x9e\xf7\x93\x11\x8b?" +
+	"\xec\xd1\xfe<{\xf7\xa7\xd6\x931\xc4z<\xc6\xf8\x1d" +
+	"}\x1e\xac\xde\xfc\xf6\xf36a\xb5\x9e\x80\xcb>\xd2a" +
+	"\xc6\xbd\x97L]\xfef\xfb\x1fY\x80\x1b\xd9@nQ" +
+	"Q\x03\xde\x97]\x81\xc5\x8fu\xbe\xb6\xee\x8f,\xc0\x89" +
+	"\x0d\x84X5\x91\x0e\x8f\x9f\xf9\xc8\xe1\xa9\xb3\x8f\xfe1" +
+	"\x0eef\x12\xde\xb6a\x8f\xb0\xb6\x81\xb0\x12\x0d]x" +
+	"\xc2\xbd\x8f\xf6\xae:\xb8\xfa\x9e\x17\xd8c\xd89g\x0f" +
+	"\x99\xcf\x1c<\xda\xad\x17\x1f\xfe\xee\xa2\x9f\xbd\xf4\x82\x0d" +
+	"\x1a\x8e\xcf\xa9%\x18a.\xde\xb7i_\xcfz0\xfb" +
+	"\xfc#/\xd8vv\xed\\\x8c3Fm\x9eK\x000" +
+	"\xd6\xe7\x87\x13\x9e\xb3^\x7f\x91]\xf5\xce\x10Y\xf5+" +
+	"!\xbc\xea\xc3\xb7\xffr\xed\xfb?\xcb\xd8\x1d7g]" +
+	"jk\xdc/\x945\xe2\xffJ\x1bq\xdf\xd7W\xddY" +
+	"\xb6e\xc2y\xbbY\xb6\xbe\x91\xf0\xc1\xf7\x7f!}Q" +
+	"\xf4`\xf1\x1ev\xf7W4\x92\xab\xb6\x96\xbc\xfa\xe5\x1c" +
+	"\xdf\xc3/\xbc\xb1\xed\xcf\x8e\xd7\x06\x94\xedB\xa6B\x08" +
+	"\xb4B\x0e\xb3\xed\xc0\xfc\xd6g\x1b\xa6\xeeu\x94%g" +
+	"\x84\xb7\x0bb\x98Hba\xb2\xc6a\xf7\x9c8ZR" +
+	"\xd8\xb8\xd7\xb6Q\xb1\x08\x01\xf9\xf9\x11\xfcuq\xf57" +
+	"p\xe6\x89\xcf\xf7\xb2{\xfd~\x84\x1c\xed\xd1\x08\xde\xeb" +
+	"\x82\xbe\xa7z_\x9eq\xeaK6\xf4\xddD\x08X\xff" +
+	"&\xdc\xe1\x8c\x03\xdbO\\\xb3\xec\x86\x97\x90\xaf\x8f\xcb" +
+	"\x12\xcf0\xf2n\xda/\xccj\"\xf3j\x9a\x8c\xa0+" +
+	"\xe7\x81'\xcbO\xbf\x9d\x7f\xb9\x1b\x13\xd6\xd8\xb4Gh" +
+	"%\x1dcMm\x08\xbaF\x9e\xf7m\xc3\xf6\x8fK^" +
+	"f?\xb9\xb5\x89\x08\xd4\xbb\xc8'\xd7\xdfw\xf3[\xcf" +
+	"7>\xf52{+\x8e\xe9\x1d<*\xee\x90q\xc3\x94" +
+	")\x0b\xcf\xddi\x1ba\x90J\xa8|\x1e\xe9p\xd5\xf9" +
+	"\x13O\xbd\xc6\xfd\xd9\xcb\xccyI*a\xdc\x9f;X" +
+	"\xce\xf7\xfc\xfb\xe7\x7fa\xa9\xd1T\x15S\xa3Q\xa2J" +
+	"6uI\xe1\x89\x83\x97\xcd\x17_aO\xb45J\xe8" +
+	"U{\x14\x03_\xdf\xb6[g\xce\xb95\xe3Uf\xf0" +
+	"\xb35\xa22\xf9\xec\x0a\xef\xe4\xa2\x17\x06\xbf\x1aOe" +
+	"\xc9=\xe8\xa5} \xf4\xd3\x08*\xd6\x08{<\xb7\xdf" +
+	"\x05\xcb\xca\xd6_\xfc\xaaq\xab\x08\x84\xb66\x13\x9c\xb7" +
+	"\xa8\x19\x1f\x1e\xdc\x1b^>\xea\xe8\xfcW\xbb\xf1\xcf\x87" +
+	"\x9a\xf7\x0b\xc7\x9a\x09\xef\xd6|\x85 ,]\x88\xf9\xe7" +
+	"\x92k\xee}[\x19\x90\xf3\x1a\xbb)\xb1\x85\x04\x12\xe7" +
+	"/\xc4\x9br\xdf\xe9uw\xdc\xfb\xf1\x8e\xd7\xd9\x85u" +
+	".,&\xdc\xfdB\xbc\xb0\xc8\xf6\xc7\xfa<y\xfdC" +
+	"o\xb0T\xa1\x9d\xe0\xfea\x9f]\xe6\xff2S\xfe+" +
+	"\x0bF#\xdb\x09\x89.j\xc7c\x17MX\xddY\xfa" +
+	"\x19\xbc\xc9~\\j'7\xb6\x89t\xb8\xa9\xe7W\x8b" +
+	"\x9f\xbbq\xb4\xadCg;\xd9\xd5\xcd\xa4\xc3\xea_V" +
+	"~:d\xf6L[\x87\xbd\xedd\xfao\x91\x0e\x1fL" +
+	"?\xe7\xb2\xfb\x8fn|\x93\x99\xdd\xf1v\xa24x{" +
+	"\xc8\x9d\xf2\xda\x81?\xbc\xc9\xd0\xacC\xed{\xf0\x93\xe1" +
+	"\xd7_\xdc~`\xc8\x97o1\xef\xbc\xd3N\x8e\xea\xc5" +
+	"o'>\x1d{\xaa\xf4\x00\xf3d\xaf\xbeV\xee\xa3=" +
+	"\x7f\xea\xfb\xc4\xcc\x03\x8e\x17vG\xfb~aw;\xfe" +
+	"oW;\xa6\xd5\x1f\x8f\xbe\xf5\xde'\x94\x86\x03,\x96" +
+	"\xd9\xfa+\"B\xee\xfc\x15>\xc3\x9e\xd5\xfd\xb3*^" +
+	"~\xe0\x00KOoZ\x8c\xbf34\xb2l\x13?\xe4" +
+	"\xb5\x03\xec\x9e\x9e}\x13\x01\xe2a7\xe1\x05\xd7.\x9e" +
+	"\xf0\xebG\x7f\xf5\xc9\x01G]\xd9\xa4\x9b\xf6\x0b3n" +
+	"\xc2\xffM\xbd\x09O\xe4\x9aY\xd7T\xfc\xe6\xed\x9f\xbc" +
+	"\xcd\x8e6\xe4fBj\xf2n\xc6\xa3-\xff!\xfa\xfe" +
+	"\xce\x13\xfd\xde\xb6Q\x92\xa97\xab\x04\xf2o&\x90\xff" +
+	"\xbc\xf4\xe8\xba\xf7\xee\xa9x\xdb\x86NV,\"S\xea" +
+	"\\\x84W#o{\x13.l>\xf16{{N," +
+	"\"4\xaf\xd7b2\xc6\xd0\x9b/y\xeb\xb4\xc5\xa7\xbf" +
+	"\xc3\x02\xd9\xd9K\xf2\x09G\xb6\x04\x0fQSR0|" +
+	"xY\x8fw\xd9s^\xb4\x84\x80R\xc7\x12<\xd1\xbf" +
+	"\xdd>\xef\xb5-_\xcd\x7f\x97\xd9\xb1mK\x88\x98\xf7" +
+	"\xdc\xc5\xdf/\xcb\xfdz\x09\xfbd\xd3\x12\x02\x01W\x8c" +
+	"\xf3-^\x1a|\x8a}\xd2\xb1\x84\xc8Yy\x0f\x97\x86" +
+	"\xb7\x9c\xf7\xdd\xbb\xf1$\x9d|\xb7}\x89\x0b\x84\x15K" +
+	"\x88\xb6a\x09!\xd9\x97\xbc+\xfe\xea\xccs\xbf\xf8\x80" +
+	"\xdd\xc6AK\x09\xea\xc9[\x8ag\xf7q\xe4\xfd\x91\xab" +
+	"\xaa\xbf\xfd\xc0\xc6\xadO]\x8ao\xed(i)\xd9\x82" +
+	"\xc7\x7f8r\xdd\xe2\xad\xef|h#N\xd7\xddJ\xc4" +
+	"\xc2E\xb7\xe2\xc3\xfa\xed\xc0\xb3\xdb\x07/*:h\xbb" +
+	"-\xcbH\x87\xa6e\xf8+\x91\x82i\xc3?\xfc\xc7\xfe" +
+	"\x83v9u\x19\x99\xc7\xc6ex\x1b\x9f?S\xd9w" +
+	"\xe7\x17\xb1\x8f\xd8!\xfa.'T\xbf\xffr<\xc4\x86" +
+	"+\xef\xd9]\xabf\xff\x9fm\x88\xd2\xe5\xe40\xa7." +
+	"'|\xc1Y\x03\xef\xbd{\xd3_\xfe\x8f\x1db\xd7r" +
+	"rg_\xc1C\x1c\xb9X\xec\xbb\xfa'm\x1f3[" +
+	"qt9\xb9\x90'\xc8\x17\xe6\xbe\x7fU\xce\xc5?l" +
+	"\xf98\x1e>\x09\xad\xea\xbfb\x8f0l\x05\xfeo\xc8" +
+	"\x0a\x8c[6\x9cw\xe3\xfd\xfe+\xae\xfe\xc4\xf6\xb1\x15" +
+	"\x84\x85\xd8\xb7\x02\x8f\xd6\xb0\xff\xd6\x7f|\xfc\xbb_\x7f" +
+	"\xc2\xee\xbcg%\x81\x8b\xbe+\x09\xcf\xba\xf9\xc0\xe3w" +
+	"\xff<\xfb\x10;\xc2\xa5+\x09\xba,#\x1d~\xe8\xcc" +
+	">Xt\xe5\xc5\x9f1WZ^I\xae\xda\x1b\xab\xde" +
+	"\xed9\xf3D\xcbg\xec\xab3V\x92[*\x91W_" +
+	"\xc8\xc9\x18\xf1\xc9_\xdf\xb4uX\xb3\x92\xecf'\xe9" +
+	"\xb0\xe4\xb5\x03\x7f\x1cx\xcb;\x9fa\x92D\x01\x7f\x97" +
+	">\xc2++\xf1\xfa\x0a\x86W\x8c\xacx\xe0\xe0g\xec" +
+	"\xf4c\xab\x08\xbb\xd1\xbe\x0a\x8fP|\xe4\xe9'\xe6/" +
+	"}\xe0p<y\x1c\xb5q\xd5i l]\x85\xb7\xea" +
+	"\xd1Ux\xa8\xed\x1b\x9e\x9c5m\xc5\x07\x87\x0d\xf2\xa7" +
+	"\xcf\xa6\xdfjr0\x83V\xe3\x93{\xa1\xa8\xaf\xb2\xfe" +
+	"\x86\xe2/l\x82\xf2j\xf2\xb1\x15\xab\xf1\xc7\xbe\x9d\xf9" +
+	"b\xf0\xae\xdf_\xf3\x851]\xbd\xc7\xa3\xab\x89\xa4\xbc" +
+	"s5\x81\xd2\xea\xed\xbe\x0f\xb7\xbf\xf4\x85m\x8c\xb7\xd6" +
+	"\x10\xc2\x7fh\x0d\x1e\xe3\xa9\xbe\xc3\xc2\xe3\x9e\x19u\xc4" +
+	"\xf1x3o{U\xe8{\x1b\xfe\xcfw\x1b\x86\xe8\x96" +
+	"\x86QC\xcf[\xbb\xf4\x08;\xdaG\xb7\x91\xc39v" +
+	"\x1b\x1e\xed\x9f\x03j\xcf\xea\xd1\xbe\xee\x08\x9e\x11\xc5\x0b" +
+	"\x83n'\xd04\xf2v\xbc\xea\xe9\xaf\x8d\xb9\xe9\xd5\xb3" +
+	"7\x1ca\x89\xfe\xee\xdb\x09\xa7\xf2\xd6\xed\x84|\x1dT" +
+	"\xffp\xcf\xec\xef\x8e\xb0L\xe8\xf1\xdb\xc9\x19y\xee " +
+	"\x9fx\xf4\xf0\xfe\xc9\x93\x8e\xfc\xdd\xc6\x15\xdcAP\xe0" +
+	"H\xd2axg\xfb-\xbf;t\xec\xef\x885\xbe\xf8" +
+	"\xef \xa78\xeb\x0e\xc2W.\xba\xb3\xf8\xa5\xe8\xac\xa3" +
+	"6\xb5\xde\x1d\xe4\xcedv\xe0!.yd\xeeZ\xb9" +
+	"\xcf\x8bG\xd9c\xbe\xb4\x83\x1cM)\xe9\xd0;sk" +
+	"\xef\xda~\xd3\xfe\xc1`\"\xa9\x83\xe0\xa8\xc9\x9ftF" +
+	"\x06-ka\x9fL\xd5\x9f|VV\xf4\xf2\x1f\x87." +
+	"\xfc\x07+\xa4v\xa8\xf8\xc9\x19\xef}5fI\xe1E" +
+	"_\xb1\xe4ed\x07\xd9\xd6\xa2\x0e\x0c\x09\xf7\x9eQ!" +
+	"\xbf\xd6q\xf91G~qs\xc7~a[\x07!I" +
+	"\x1d\xf8\xccOx\x07\xd7\xdd\xfe{\xff?\x19~\xe3\x9d" +
+	";\xc9`\x87\xef\xc4\x83]\xb5x\xc2\xa6'\xf7\x9e\xff" +
+	"53\x8f\x19w\x11\xa90\xd2\xf9Z\xbf\xd3\x1f\x1e\xfd" +
+	"\xb5#M,\xbd\xebS\xc1\x7f\x17\xee=\xe9.\xc2\xc4" +
+	"\x1e_\xf0\xe9\xae!C\xae\xfa\xba\x1b\xa8o\xbb\xfb4" +
+	"\x10v\xdfM\xc8\xe7\xdd\x98g\xbc\xf1\x86\xa5\x91\xc2Y" +
+	"\xd7|\xedH\xe2\xde\xb9{\xbfp\xe8n\x02Iw\x13" +
+	"\x90\x85g7\\v\xfe\x87\x17\x7f\xc3\xd2\x96ck\x09" +
+	"\xb7\x0b\xf7\x10S\xcd\x8d\x1f\xcc\xbf\xd6\xf7\xf17\x86\xe5" +
+	"N\xdf\xfd{0\x0c\x8d\x8a\xdd\xf3\x02\x1eb\xee\x17n" +
+	"\xa1zU\xcdq\x9bm\xaf\xf4><\xc6(\xff}\xe4" +
+	"+\xbb\x8a\xcf\xfd\xeb\x9e\xca\xad\xc7Y\xb3E'\xe1\xf5" +
+	"C\x1b\xae\xf8\xc5\xefk\xa7\x7f\xcb\x9a-:\xbf\xc4O" +
+	"\xa4\xc6\x81\xd7^\\\xfe\xf2\xb7N\xd2\xee(\xa93\x07" +
+	"\x84X\xa7\xde\x9d\xccb^\xee\xc1\xa7\x1br\xef\xff\x8e" +
+	"\x01\x85K\xd7\x13\x95un\xf3\xf01#\x1f\xaa\xf8\xde" +
+	"I\xf74h\xfd~a\xe4z\xfc\xdf\xb0\xf5\x18X\xbd" +
+	"\xa5\xae;\x9f\xb9~\xc9\xf7,p\xec[O\xa0\xf9\xfd" +
+	"\xf5x;\x9e+\xf8\xc3@a\xf6-\xdf;\x9e\xda\xd8" +
+	"\x0d\xcf\x0a\xa5\x1b\x88\xdev\x03\x1e\xad\xeb\xb7\xbd\x97]" +
+	"\xf8\xc4\x96\x13,d\xbf\xb3\x810h\x876`\xc8\xbe" +
+	"\xed\xbc\xba\xdc1G^<\xc1\xac\xbe\xd7F\xc2K\x89" +
+	"++\xaeU\xf7\xedg\x9f\x9c\xd8\xf0[\xfcd\xeb\xfa" +
+	"{\x0f\xce\xfc\xcd\xd7\xb6A\x0fo \xf7\xe9\x04\x19\xb4" +
+	"\xe4\xd5}\xb33\x85\x8c\x1f\x98W\xfbo<\xc5\x85F" +
+	"tIAY\x0b\xab\x17\x06x1\xa2D\xf2K\xc9\xaf" +
+	"jIm\x96\x03\xd2\x85Q\xb1Y\x1aX%Ec!" +
+	"-\x8ahG\xd2\xaf2\x14\xab\x97\x95\xa2\x80&\x87\xb3" +
+	"\x952Mj\xac\x04\xf0\x9f\xc5a`\x00\x84|[s" +
+	"\x11\xf2?\xc2\x81\xff)\x17\xf8\x00\xfa\xe0I\xf9\xb6\x15" +
+	"#\xe4\x7f\x9c\x03\xff3.\x00W\x1f\x0cZ\xbe\x1d\xe5" +
+	"\x08\xf9\x9f\xe2\xc0\xff\xa2\x0b|\x1c\xf4\xc1X\xd4\xb7\x0b" +
+	"w|\x86\x03\xff\x9f]\xe0s\xbb\xfa`\x08\xf2\xed\xce" +
+	"G\xc8\xff<\x07\xfe\xbf\xb8\xc0\xe7\xe1\xfa\x80\x07!\xdf" +
+	"^\xfc\x9d\x179\xf0\xbf\xee\x02\x9f\xd7\xd5\x07\xbc\x08\xf9" +
+	"^\xa9A\xc8\xff\x17\x0e\xfco\xbb ;$\xd6J!" +
+	"\xe8\x89\\\xd0\x13A\x9b*EBb@\xa2\xbf\xbb\xea" +
+	"\xd4pc\x85\xacH\x08!\xc8@.\xc8@\xd0\x86\xdb" +
+	"J\xc2!\xfa\xbb@\x0b\xe3\x1e\xf4g\xb6\x16f\x1ev" +
+	"E\xc8>\\)\"\xae\xd1\x1a\x95\xee\x94\xdbaK\xc5" +
+	"H$\xd4:92\xb0RT\xc5F\x88\xfa\xfb\x98{" +
+	"v\x1d\xde\x8ak9\xf0\xdf\x8c\xf7\xcc\xa5\xefY;n" +
+	"\\\xc8\x81\x7f\xb9\xb5gK\xcfD\xc8\x7f3\x07\xfe\xd5" +
+	"x\xcf\\\xfa\x9e\xad\xc0\x8b^\xce\x81\xffn\xbcg\x9c" +
+	"\xbeg\x1d\xb5\x08\xf9\xef\xe0\xc0\xbf\xc1\x05]\x81\x90," +
+	")ZY\x10\xaf5\x13\xb9 \x13\xb3\xbe\xb1\xba:I" +
+	"\xd5\xdb\x8c%q\xe1\x08\xf4f\x05P\xe8\x8d\xa0\xab^" +
+	"R$U\xd4d\xc4\x85\x15\xebm1*M\x93\xd4(" +
+	"\xe2e\xa6\x95\xae\xde\xe3\x04P\x92V\xad\x89Z,Z" +
+	",\xaaS\xa4\x16\x8dl\x03\xd7\x18\xf5g\x98\xdb0d" +
+	"\x00B\xfe\x81\x1c\xf8G0\xa03,\x07!\xff`\x0e" +
+	"\xfc\x17\xb9\x80\x9f+\xb5\xd2\xad\xce\xd2\xa4\x16\xad\xdb\xbe" +
+	";}\xb9^\xd20\xb46K%aEc\xbe\x9c\xf4" +
+	"%rX:\xa8\x8f\x97[\xf43\x8b\"\xe4\xefi\xce" +
+	"\xb6\x14o\xfb8\x0e\xfc\x95\xccl'a\xf8\x9d\xc0\x81" +
+	"\x7f\x8auh~\x0c\xa9\x15\x1c\xf8\xafr9CM[" +
+	"\x9d\xdc2N\xd4D\xfa;[V\x82R\x8b\x09h\xc9" +
+	"`*(\xd5\xc6\xea\xf1\xba\xd4ph`\x81>K\xbf" +
+	"\xdb\x9cc/|s28\xf0\xf7qA\x81\x88\xaf\xac" +
+	"\x02Y\x96-\x07\x01d\xa5\xf8@H\x8ej\xe3dU" +
+	"G\x05\x9cf\x1b\xbc\xd8\x18|\xa0\x0b\xda$ESe" +
+	")\x0a\xa7\"\xa8\xe4\x00z[V\x1e\x04\xb8\xd1\xfc\x88" +
+	"\x8b|dB\xb8YRu\xf4\x82\x10F \x0c\x14\x94" +
+	"[\x07N\xb7u$\xde\xc2\x0b8\xf0_\x82\xa1\x19\x1f" +
+	"\xa3\xa2E1\xe4\xd2\x1d\xab\x0b\xc7\x94 \x00r\x01t" +
+	"\x83\x86\x12\x02\xfd%b(T+\x06\xe6^\x18\x94\x02" +
+	"a\x0c\xcfa%Z\xd2 *\xf5Rp`U\x81\x8e" +
+	"\xe8\x92\xbf\xd8 \x07\xa52%\x12\xd3*\xd5pcD" +
+	"#[\xc2w\x7f+)\x1c\xe9K\x86\xe4\xef\xcc\x0b\xab" +
+	"s\xa3\x111 U\xb76\xd6\x86CQ\xf3K\x896" +
+	"?\xaa\xf7\xb36\xdf\xb4\x84;n~\xb5\\\xaf\x88Z" +
+	"L\x95\xca\x14\xae.\x8cw\xbf\xb79\xae\x88wz&" +
+	"\x07\xfe\x06\x06\xaa%\x15!\x7f\x90\x03\x7f\xc4\x05>\x97" +
+	"\x01\xd6\x8d\x18\xfeC:\xd2\x02NGE\xed\x0b,\x9c" +
+	"e\xc7\xbf]\xc1p \xd6()\x1a\xca&{o\xb6" +
+	"G0\xccJ\x9a\x848\x95Y\x80\xe9Ga,@$" +
+	"\x17\xb8R\x04\xbd\xb3\x8a\xd2\xba\x1d\x81pc$$i" +
+	"\x92\x89k\x98\xdb\x8b\xd7Y\xc8\x81\xbf\x82YgY\x0e" +
+	"s\xa5\xe9:'\x0d\xb0\xaetvm\xac\xae,H\xbf" +
+	"\x9d\x15b\xa8\x03\x1f`hCZ\xe8\xa8Z\x0aI\xe4" +
+	"J\x0e\xac\x92\xb2\x09\xfc\xa5$\xa3U\x08\xf9\x9f\xe4\xc0" +
+	"\xff<3\xbf\x9d\xe5\x0c\xc9\xe4\x8c\x83\xd8]\xcc\x90L" +
+	"\xb7[\xa7\x09{\xf3\x19\x92\xe9\xb9O\xa7\xa3\xaf\xe0\xc6" +
+	"?s\xe0\x7f\x13\xd3\xd1N\x9d\x8e\xee\xcbe\xe8\xa8m" +
+	"\xcd]QMT\xb5\x0aYA \xd9\xdbJ\xc2!\x96" +
+	"\x96JJ\x90%\x9e\x05\x92\x12dI\xab\x1c%O\x8d" +
+	"\x1b\x9b\xf4\xfe\xc6\xd1\x11\x0a\xbc\x13\xa4P\x84\xe2\xe5\xff" +
+	"\x89\x83\x0d\xca\xd1\x80\xa8\x06\xab\xa4\x00Fn\xad\x16\xca" +
+	"dp[\xb1E\xe1L\x02Wc\xe1\xb66\x03\xb7\x99" +
+	"\xb7\xc3\x91\xf8&\x9b\x04\xc6\xd7\xd3)\xfe\x18/\x87\xa4" +
+	"\xa8\x05]\x0c\xf6\xc8\xb5\xb0GvD\xd4\x1a\xcc\xab\x87" +
+	"?\xdc\x1dc\x8c\xc3df<\xbe{\x04Y3\x9c\x0b" +
+	"fHZ8\xf0/\xb4\x164?\x87\xe1f\\\xa0o" +
+	"v;n\xbc\x81\x03\xff-\x0c\xe7\xb2(\xc7B\x17&" +
+	"\xe7\xb2t\x80\xc5\xe3pr\x10<\xc8\x05\x1e\x04Y\x8a" +
+	"hQ\xcc,<g\xf3\xc7\x8f;-\xbc\xa4i\xa2*" +
+	"\x8b\xb5\xfa&\xe9\x88\x99=\xac*\x83\x10\x8dc \xa9" +
+	"\x08\xef\xdc\x18\x0e\xfc\x13\\\xd0\xd5l\xbc\x8e\x80A]" +
+	"\xa6NQG]\xd9\x92\xaa\x86\xd5\xb4\x18\x15|v\xc5" +
+	"\xaa$\xce\x8d\x84eE\x8b\x9a\x8c\"sn9\x16=" +
+	"\xb7\xed\x819\xae\xd7\x19\xe3\x98 1N\x16\xeb\x95p" +
+	"T\x93\x03\xe6\xf8IQ\xa8*\xd5I\xaa\xa4\x04\x12\xc0" +
+	"Q\x15a\x89\xc0?\xd8\x05]\xa1p\x80\xa0v\xdbn" +
+	"\x98*\x8e\xe4\x94\xa8R\xe4U\x91H\x12\x0e@\xda\xa7" +
+	"\x1b1I\x81_'IJ\x0cK&QS\x82I\x04" +
+	"\xfb2\xeee\xcd\xd6\xf4\x18\x8a\x9bm\x02\x86\xd6:," +
+	"\x13\x111\x944\xc7\xa2\xa4&!\xc5m\xb39\xf0\x87" +
+	"\x98\xab!\xe3Ml\xe0\xc0\xaf1W\xa3\x09c\x85\x08" +
+	"\x07\xfek]I\xa0\x1d\xf3BAY\x93\xc3\x08,\x8a" +
+	"\x1a\x0a\xd7O\x92\xa2Q\x11q\xf5R\xba;\xa6s(" +
+	"\xc5\xb2\x12\x94\x95z\x02\x19\xbc\x98\x82C\x8e\xc6\xb3\xd5" +
+	"\xdd\xf8!\xa0o\xf1\xda\xe4\x88\xdf\x0d\xac\xa5\x0b\xf2\x0b" +
+	"&G\xa6\xb4F$\xff\x05t\xc7\x84AP\x8eP\xf5" +
+	"@\xe0\xa0z\x04XwN\x18\x06\xc5\x08U\x0f\xc6\xed" +
+	"\x17\xe1vW\x06\xd98a$\xe4 T}\x01n\xbf" +
+	"\x04\xb7s\x1e\xb2wB\x1e\xd4 T}\x11n/\xc4" +
+	"\xedn/\xc1,\xc2X\xa8B\xa8z\x0cn\x9f\x00." +
+	"\x00\x0f\xa1\x80B)\xe9>\x0e7W\xe2\xee^\x9e\x10" +
+	"Aa\x12\x99N\x05n\xbf\x0a\xb7\xf3\x19}\x88X?" +
+	"\x95L\xa7\x12\xb7\xcf\xc4\xed\x19\x99} \x03!a\x06" +
+	"\xe4#T=\x05\xb7\xcf\xc6\xed\x99\xa7\xf4\x81L\x84\x84" +
+	"Y\x90\x8bP\xf5U\xb8=\x88\xdbO\x81>p\x0aB" +
+	"\x82H\xbe;\x1b\xb7\x87\xc0YJkk\x96\xd4(#" +
+	"aei\xad\x11\x09\xb2\xac}48xY\x89J\x98" +
+	"*#\x8e\x81\x0d\xbd\xb1$\x8c \x14\xd76EB\x1c" +
+	"#<\xfd\xcb\xa2\xb0\xd4\x12\x91\x02\xf1\xa3&\x95*\xa2" +
+	"\x91*\x09#t\x0c4Y\x04\xa90xw\x8e%\x00" +
+	"\x98xw$\xbe$#8\xf0\x8fqA\x17f\xaae" +
+	")X\x82\xb2\xc21E3\xa7Q'\x87\xa4\x92pL" +
+	"A\xa0\xa5O\x02\xa8\xf0\x94\x0cS`\x04\xe4\x8c\xc6u" +
+	"4\xc6\xdc\x03\xaeE\xc3X\xec\"\x13\xa8g\x11(\x9a" +
+	"\x89O\xb9\x01,\xf1^\x90\x08T\x98\xa7o\x08\x8b\x82" +
+	"L\xba7\xe0f\x0d,\x86Nh\"\xb0\x1e\xc2\xed-" +
+	"`\xf1tB\x0c\x06 T\x1d\xc1\xed\xd7\x82\xa5\x1e\x11" +
+	"Z\x09\xac\xb7\xe0\xf6\x85\x04\xa8\xef\xd3\x81z>\xf9\xec" +
+	"\xb5\xb8\xfdf\x02\xd4\x9d:P\xb7\xc3\x1c\x84\xaa\x17\xe2" +
+	"\xf6\xe5\x04\xa83t\xa0^J\xdao\xc1\xedw\x10\xa0" +
+	"\xce\xd4\x81z\x0d\xd4\"T\xbd\x1a\xb7\xdfG\x80\xfa\x14" +
+	"\x1d\xa8\xd7\x12\xa0\xbe\x1b\xb7?\x88\xdb{\xf4\xe8\x03=" +
+	"\x10\x126\x92\xf9l\xc0\xed\x8f\xe0\xf6\x9e\xeb\xfa@O" +
+	"\x84\x84\xcd\xa4\xfda\xdc\xfed\x82K\x10\xc7\x80\xe2S" +
+	"\xae\x14\xb5\x06F\xfcK\xcc\x01\xc4\"AQ\x93\x82E" +
+	"\x18$\x0cF\"\x8e\xd7l\x10\xa3\x84\x11GYD," +
+	"\xa1\xcdQ)T\x8d\xb9Z\x94\xc5\xc2\xbd\xd5\xcc\xb3\xf0" +
+	"\x1f\x95B\xa5\x98\xdd\xb5]?\xbd\xd1~\xfd\xa2R\xa8" +
+	",j0\xcf\xe90\xbb\xf5\x92VL\xf44\xd5\x8a\x18" +
+	"\x896\x845\xeb\xbe0\x84\xa6\xd8\x81\xd0\x14;\x11\x9a" +
+	"\x1a\x96\xd0\x18\x1a\xb7\xa6\x1cC\x8ck\xe9\xce~\xc6\xa3" +
+	"\x1fGv\xd4\x99\x0f\xf18\xf2\x12M1)\xaaM\x8e" +
+	"H\x0a\xe6LM\x069\x9e) \xd2,y\x08\xe42" +
+	"\x9da.\xb5\x03Ov5\x07\xfe\xfb\xac\xa5\xae\xcd\xb1" +
+	"4]\xe6R;\xb1\xc4z\x1f\x07\xfe\x87\x19\x9a\xba\x09" +
+	"\xf7\xdc\xc0\x81\xff\x11|\x81@g77\xe3\xc6\x079" +
+	"\xf0?\x8eo\x8fK\x17\x8a\x1e\xc5<\xe8\xc3\x1c\xf8\x9f" +
+	"t\xc51\x9ese%\x08^\xe4\x02\xafN}5\x11" +
+	"#\xcel\xf5\xca\x7f/wj\x92\xe4\x89R\xab\xc5\xc5" +
+	" 'Vp\xa0\x0b\xb2\xe6J\xad\x099x'\xfc\x1b" +
+	"f\x8f\x80h\x16\x9c\x95\x91t\x8f\xdb\x8b\x19\xee\x9d\xee" +
+	"\xf1\xa2b\x86{\xe7\xce\xd1\xf7x)F\xde\xb7p\xe0" +
+	"\xbf\x83Q\xe0\xae\xa9\xb1\x8e\xcdI\xf1\x98\x12\xee05" +
+	"\xc2r\x15\xca\xc2\x92\x95yuNZ:\xd2\xc2\xf5\xf5" +
+	"!)\x8em\x8bSB\xe68\x88h\x8c\x0e2\x093" +
+	"\x96&\x1f])f\x115\xdd\xff\xa82\xc2\x98\x9e\xf9" +
+	"ZO\x87\xd7t-&Q\x86\x95\x88J@\x0a\x85\xa4" +
+	"\xa0\xb3\xb5 \x15\xa7i\xe23\x06\xb2\xcb\x19\xa1\xa2\xd6" +
+	"\xe8\x88\xa1\xc5d\xd3MW|G\xa1\xa2\"\x1a\xa1R" +
+	"\x0e'\x07\xe2\xac\x139Nj\x95\x01\x96u\xc2\xdc\xe9" +
+	"\x1d\xc5\x8c\xae\x85\xaaUv\xe636\x0bwo\x1d\xba" +
+	"w\x95[\xba\x16\x83\xa7\xf4\xed-f\xad\x13`X'" +
+	"\x18UK\xc2\xe3J\xa18\xe9\x8aJ\xcd\x92*k\xad" +
+	"xC\x0c<\xd4\xd6\x88\xd9}\x8b\xd9/\x88\x86cj" +
+	" =\xde?N\x0c6\xf5\xdc\xccq\x0c\xb0\xb8 ^" +
+	"\x95\xea(\x1dM\xad\x97\xae\xd6D\xa2{\xb3\xc3S\x8a" +
+	"\xee\xc9\xb4\x15\x98\x0f\x8b\xe2^\xd0\xdbr$5\xcc\x14" +
+	"\xc9\x09O(,\x06uJj1z\xcc\xfd+\xb6\xee" +
+	"\x9fy\xfd\x8a\xd9\xebg\xa0\xbcI5\x96*\xffG\x11" +
+	"Ks\x9a=\x12\xde\xaa\xcap$\x169\xa9[\x15P" +
+	"%Q\x93\x0c-}V\xb2\xcdsfb\x9dt\x06u" +
+	"rH\x93\xd4n\x9a\xa4\xee<\xb2\x9d\x0cE\xb4\xe4\x8a" +
+	"$*\x99\x97)u\x10\x8eS%\xe5Z\xaa$\xf3j" +
+	"\xce\x1f\xc0\xea\x92\x8c\xab\xd9^\xc3\x12\x1e\xe3j.-" +
+	"fLcT\xe3\xb9\xa2\xdc0\x8d=\x1c\xafB`M" +
+	"I\xceF\x99@\xb8\xb1QT\x82f\xa7@\x83\x1c\x0a" +
+	"\xaa\x92b\xc3D'\xa300\x91\xdfx\xb9\x85\xbdj" +
+	"\x0c\xed\xa9q\x92|\x8a\x19\xdbG:\xe6\xa3\xb8-g" +
+	"\x10.\xa7\xd4\xe3=Oe\xc3bh\x8c\xb9\xe7\xfeZ" +
+	"\x84\xfc\x95\x1c\xf8g&\x98\x85mC\x83R4\xa0\xca" +
+	"\x11M7\x0f\xc6\xcf\xab\x87\x93u\x85\x08o\xd4\x1es" +
+	"\x12\x94\x84\x18\xa2\x95\xe8\x7fM\xc5\xafo\xb2\xc1\xa5\xb7" +
+	"*\x81\xea,\x8c\xa0\xf06\x0f6e\xc0L\"\xd4e" +
+	"`!\xa7\x0f\x98(F\xf0\x11\x99\xae'n>\x03," +
+	",#\xf4%\x0a\x86\xde\xb8\xfd,\xb0\xf8W\xa1\x1f\x91" +
+	"\xad\xce\xc0\xed\x03\x89\x0cx\x8e.\x03\xf6'2\xddY" +
+	"\xb8}0\x91\x01A\x97\x01\x07\x81j\xd3\xa7x9]" +
+	"\x06\x1cFd:KoB\x15\x1byD\x16\xb3\xf4&" +
+	"T\xb11\x96|\xd7\xd4\x9b\xf82]\xba\x0cXJ\xe6" +
+	"YH\x15!N\x9c\x9d\x8d[J\x0bCf\x07eU" +
+	"\xb3X<\x03\xc9V\xa3\xec\x0617o4\xf4B." +
+	"\xe8e\xb5\x17\xa3\xacVM\x8a\x9a#\xe2\xe3\x8aW\x01" +
+	"4\xc8Q-\xac\xb6V NR,\x8e\x93@\x1f\xa3" +
+	"\xfa3\x03r\x1cy\x0a\x06Xy10W\x17\xf1=" +
+	"\x08\x99.S@\xfd#\x85\x15P\x8b\\\xc2\"\xe0\xc1" +
+	"r\xc9\x02\x1a/&\\\x075\xc8%\xc4\x80\x07\x97\xe9" +
+	"\x85\x06\xd4Y\x85H\xff.A\x04\x1e83\x04\x05h" +
+	"\xbc\x880\x15T\xe4\x12&\x01\x0fn3\xac\x01h\xa8" +
+	"\xa1PD\xbe{)\xf0\xe0\xa1^H\x96;\xa70\x0c" +
+	"\x16 \x970\x08x\xf0\x9a\xee\x9f@=\xa9\x84~\xe4" +
+	"\xa9\x0fx\xe0M\x9fi\xa0\xdeT\x82\x07?\xf5\x9d\xe0" +
+	"!\xc3\x0c\x10\x04\x1a\xba\xee;\x8a\x9f\x1d\xe2!\xd3\x0c" +
+	"a\x00\xea,\xec{\xe7!\xe4\xf2\xbd\xc5\xc3)\xa6\xbf" +
+	"9\xd0`x\xdf\xde;\x91\xcb\xb7\x9b\x87\x1e\xa6[\x1a" +
+	"P\x97:\xdf\x8e\x95\xc8\xe5\xdb\xc6CO\xd3)\x10\xa8" +
+	"\x93\xafo\xf3\x1c\xe4\xf2m\xe4\xbb\xa2\x0d\xe1y\x93\xa4" +
+	"h\x14\xf1b\xbdT\x08]\x8d\xe1f\xa9$\xa6F\x11" +
+	"\x17V\x0b\xa1\x8bJ8\x08\xa1B\xe8\x9a+\xb5VI" +
+	"\xf5r\x14ek\x92*\x05\x0b\x0d]Q\x83\xa8 \xbe" +
+	"\x9e\xfc\xc6\xc3a\x84\x02\x06\x01\xc6o5\xc8A)\xbe" +
+	"\x0d\xf7\xc3|/\x18V`\xda/\xbeMW\xb4M\x08" +
+	"Cx.\xf9\xb2\x96e|\x98\x9a\x9f\x81\xda\x9f9\xd2" +
+	"\xacJ\x91\xb0\xaa\x15\xc7\x80\xe0\x11M\xd4@\"\x9dk" +
+	"c\xf5%\x0d\"\xcaR\xc84+!M\x123\xce2" +
+	"r\x9bn\x01\xce&v\xd3\xdf\xc4ncO\xa9\x869" +
+	")Sy\xbc\xc7\x05cU\xd2\xf1\xb7\xee\x04p\x06\xc1" +
+	"\xc6E\xe5\xf8\x0e\xfa\xc6\xe6 \x04._^>B\xc0" +
+	"\xf9\x86\x15#\x04n\xdf\xa0\\\x84\xc0\xe3;;\x07!" +
+	"\x82\x02d%\x86\x8f8K\x91Z\xb4\x82\xa8&E\xca" +
+	"\x946\xfcgrL\xcb\x8e\x88\xb1\xa8\x94\x15\xd5\xc2\x91" +
+	"\xd4\x16z\x93\xd1\xc1\xcf\xa2\xa6C@\x02\xad\xa4I\x9a" +
+	"k\x0c\xa5dEb\xa5dt\xae\x1c\x89H\xc12\xc4" +
+	"\x05[(\xb6\xc9\x88\xe3\x8dtE\xf98Y\xcd.U" +
+	"4\xb55\xce\x1f\xc2I \xcde\x04RV?\x91-" +
+	"G\xc7\xc9j7\xddR2\xcf\x8e\x1fce\xea\x99R" +
+	"eap7\xe9Pp\x16V\x9d8\xccZF\x1c\xa4" +
+	"\xb7\x07\xf1a\xc5B\xde4\xd20\x0eu;\xadZV" +
+	"Bb\xeb\x04b^Ke\x17m\x90m\x04\xc2\x8c2" +
+	"\x8a\xfb\x8a\xd7Q\xe0\x88\x06D%\x81\xd1\xcdI\x1c\x8a" +
+	"\xbb?\x14\x99\x85\xd5D\xbe)\xc9-\x87N\xa6\xe7Z" +
+	"\xcb\x9ai\x1a3\x070\xc6\xccZ\xe3}\xc4\xdb\x96m" +
+	"\x86\xb5\xea\xcb\xe6\xa3RS7a&\xb1H\x17\x08G" +
+	"$\xe7\xeb\x94o@u!\xc3\x9c\x8d\xc5\xdb\x7f\x89>" +
+	"\xc7\x82(y\xd7\x9a\x88\xe9jy\xd2vUU\x8a\x86" +
+	"C\xcdR\x89\xee\x0d\xa2\xeb8\x88}\x8b\x9dOnr" +
+	"\xb5O\x1c[(kR#\xf4\xb6\xa2\x91\xe2\x84Pw" +
+	"\x02\x8f\xca\xa2hz\x1e@\xdd\xb8['\x0f\xa0$v" +
+	"L3\x1bO\x1a7\x02\x0b\xd4\x95\xa2\xd6`r\xd0'" +
+	"\x83\x08\x9c\x0d\x83\x8d\xa2\xa2\xc9\x81)\xe1\xb9\x92\x12\xad" +
+	"\xc2,\xfd\xc0\xcal\x9d\x06\xa5\x12\xf7\xaaX=\xa3\xc1" +
+	"\x9d/*g\x9d\x1e\x0dqoE1\xabg4\xc4\xbd" +
+	"5\xf9\x96'\xe4\x7f\xc4m\xe5\xa4\xfc?(bME" +
+	"w\xcb\x19\xcbV\x9a\x9e\x9a\xc9\x81G\x95\"&\xea1" +
+	"\x0d\xd3\x8c\x12\xbd\xd8\xd2\xc6\x9a;\xbf\xb6\x98\xd5\xa2\x1b" +
+	";\xdf\x89\x1b\xef\xe6\xc0\xff\xa0\xe5\xe2\xb5QuR\xa2" +
+	"\x17;)\xd1\xcb-][[D\xd44I5e\xc1" +
+	"6Y\x09\x84bAK\x86\x95Zl\xbf\xbb\x02bT" +
+	"\xaa\x96\x94(\xca\x965\xb9\xd9\xb4\x96\xb4\xc9\xd1*\xa9" +
+	"^j\xb1(\\K$$\x07d\x0doN<\xd5\xd3" +
+	"\xc9je8R\x10\x8bPG\xe5T\xe2a\xb9\x93\xec" +
+	"\x9bci}\xe2\x1c\x11\xa2\xb1Z\xd2\xc0\x1a\xa3\x82N" +
+	"\xb2\xb8']\x1d\x8b\x83\x13g\xda\xce:\x09\xf1\xf0\xe4" +
+	"\x98\x16\x89i\x16\x1efv!\xdf\xd8\x85\x99\x16\xde\x9b" +
+	"\x81\xdb\xa6p\xe0\x9f\x8d7\xa1P\xdf\x84YU\x96\x95" +
+	"\xa9 \xd0\x10S\xe62\xf8\xc6\x8cS\xd2\xf1MAH" +
+	"\xd4\xa4\xa8fB\xb0\xa6\xc6\x94\x80\xa8I\x08\x82\xe9\xb1" +
+	"&\xa6y\x98\"\xeaT\xbe\xd2\xb9,\xde\xe0\x0c\xbc\xc1" +
+	"z\x17qnCM\xc4x\x17\x01\xd5\x121\xb8$5" +
+	"\xe7\x9bXs\xabH\xf3X3P\xd2\xb3\xd7\x0d\x93\xd3" +
+	"di\x1e\xe6\xfb\x1d\xfd\x8b\xcbY\xdd\x8c\xab\xbb\x7f\xb1" +
+	"\xb9P\x7f>\xe3`\xec\xe4E\xa0\x85#6\xa4\xd6 " +
+	"\xc9\xf5\x0d\xddm\xe4|\xfa\xbeC\xd5\xb1\xc6F\x91\xfa" +
+	"\xb8i`3G\xd60\xa6G\x0aR\xf2\x1c\xc6\xf4H" +
+	"\xefUS\x95\xe5\xe3b\"\xf6\xd6*\x8b.t\x11\x1a" +
+	"_\x12\x8e!\x8e\xe1\xa8\xe7\x89\xaa\"+\xf5\xf1\x8c\xb6" +
+	"\xac\xd4\x85\xe3E\xffd\x1e\x01\x8c\x0c\xa2\xb3NY\x98" +
+	"w:Y{\xe39\x06\xa6,g\xed\x8d\x86iuS" +
+	">\x8b*\x0d[\xd8\xe6*\xcb\xb4h\x063l\xad\xb1" +
+	",\x10I\x0cL\xcd\x92*\xd7\xc9R\x90Av\x05A" +
+	"I\x13e\x0b!\x9d\xb4C\x10\xab\xdf\xb0\xeb\xaf\x12\x81" +
+	"\"U\x13\xce\xb1\xa0\xce<\xd2\xa9\xf9\x8c\x9a\xd0\x89\x98" +
+	"\x89\x81\xb9Rp\x9a\xa4\xa2,V\x13T\x10\x08+J" +
+	"Y\xb0\x1bc\xe9u\xe4\xe0\x9b\xc3s%\x9d=\x9a$" +
+	")\xb1\"\xeaCk@b\x02\xefwU\x7f\xde\xdb\x0a" +
+	"\xb4J\x83g\xab\x97\xb4\xa9\xe4\xa2:Z\xed\x1c/h" +
+	"\xb9\xd3\xae\xcc\xb1\x10j\xda$>*+\x01\xa9\xdbN" +
+	"\x9d\x9cy\xd3\x89md\xcd9QIK\xcb\x0f!\x0e" +
+	"[\xa5\xc5\xc3\x86\xa2\x91\xc9j\xbd\xa8\xc8WKe\x8d" +
+	"\xf85k\x0f\x13X'\x92)\x18\xd2\xb0?\x1a\x94\xd3" +
+	"Q\xfdMdL\xdd\xf3\x1c\x83\xf6\x08S5[Dt" +
+	"\xb0\x96n\x93\xeafK\x89_\x0d\xd1mV0\xee9" +
+	"e\xa4\xbb\xe5+f\x90\x15a\x12i\x9f\x80\xdb\xa7\x80" +
+	"\xe5\xcc*\xf8\x89O\x98\xe5C\xe61|\xce\xa6\xc2\xd5" +
+	"6_1\xc3D(\xcc\"\xed\x96\xb7\x10\x7f\x83\xae\x9a" +
+	"\x95\x88\xaa\xd5\xf4\x16\xf2e\xb8t\xd5\xacL\xda\x83\xb8" +
+	"=BT\xb3\x9c\xae\x9am$*[\xcb]\xe8\x14\xb7" +
+	"\xee\x9e\x13#*^\x0d\xb7\xdf@\xdcs<\xba{\xce" +
+	"ud\x1c\xd3](!\x8d\xb3E\xdd\xe8\xce\x10YV" +
+	"\xdc\xad\xee\x8d\x16\xcf3\xc7\x94\xa0\xa4\x86d\x05\x15H" +
+	"\xd5ZkH\x82,+|\xd1\xf0_c\xba\x94\x84C" +
+	"\x96X\xd7V'\xb7\x88\xb5!\x8b\xfd\x8b7u8\x06" +
+	"a\xe19\xe2a\x10X\x03\x85C6\xbe>)\x86\x09" +
+	"4H\x81\xb9\xbaF\xbf$\xacD\xe5\xa8&)\x81V" +
+	"G\x0c\xc3Fa\xe8\x97\x98\xe1\x8a\xcc\x04=ih\x0c" +
+	"\x12\xf9\xe8:I\xf2\xb9\x96\xe8lJ\xceU\x96$\x1f" +
+	"/\x0c\x9a\x91\x93\xc64\x92qc\x94(\xd6\xc9\x0a\xa6" +
+	"\"JU6Yt\xe2\x18\x91\xe4\x9e\xad9L\xdc\x08" +
+	"\xf5\xc2i\x1c`\xb1\x02v_\xac\x7f\x83\xdfLT\xd2" +
+	"\xca\xea\x95\xb0*\x05\xc7\xc9\xaa\xb39\x9b5X\x06e" +
+	"5!3\xed\xa8\xd8\xa4\x8ad\xa2Fv\x1c\xbe\xd8B" +
+	"hm\x9a*\xd7\xd7KjZ.\x91\xac\xbe\x84J\xcb" +
+	"\x09\x86\xadS\xc5F\xa9,\x98\x96!>\x10\x0aG%" +
+	"j\xf9N+\xcc\xc9\xbe\xc4n\xa8\x9e\xc5\xaa\xf8S\xf1" +
+	"\x01\x016\xf6\xdc\xd1}\x88\x8a\xf5\xf9NV\xdc\xdc\x14" +
+	"\xec\xf9\xbf\xea\xab\x8a\x99\xf4)N\x91\x83\xac\x1d\x8f\xdc" +
+	"\xfa\x02\xfd\xda\xc71\x84\xe5\x16\xf3GW\xd7\x99cI" +
+	"\xc9&\xe8\xdb\xc4d\x0a\xfa\x9b\x173\xde'Tv\xde" +
+	"6\x87q4\xa1\xb2\xf3\xceb\xc3\xd1\xe4\xcd4\xecj" +
+	"]QIm\x96\xd4i\x12\xca\xb6\xdb\xd7\xf4\xf6+$" +
+	"\xd0\xcdla\x85a9\xf4g\xd5\x0d(\x8b\xb5\xabu" +
+	"\xb7\x8b\x99\xd9=\xd2\xb0pw\x0b\\sp\xaf\xcaM" +
+	"\xae\xcd\xb63\x01\xd9M1ImM\xcba!\x01[" +
+	"h^Q\xe734\xf9\xb6\xce\\F\xd5a@\xe8\xc6" +
+	"\x1a\xf6\x0c\x0d\xa6\xde\xa6\xea\xa01+\x8f\xd60\x07\xeb" +
+	"q\xebg\xc8Fk\xa5aPI\xcf\x09\x81(\x85\xe3" +
+	"<M\xf5F\xbb\xa7i:\x81\xc8\xc9b:1\x9e\x89" +
+	"7\xd7\xa6\xe0\x94\x89\xf4@|x\x1ct\x18\xd4\xa7\xeb" +
+	"\x0cWr\x85\x16#\x95\x91\xb1P\xbc%\x1d\xf3Sn" +
+	"\xcc\xa7\xf4f\xd9\xb5^\x84]3-\xec\x14\xc9\x08>" +
+	"by7M\xe9\x86\x12K\xe8G\xd8\xb5>\xb8\xf9\x1c" +
+	"\xb0\xee\xa2p6i\xb7,\xec\xd4\x92\xde\x9f|\xd6\xb2" +
+	"\xb0\x1b\xf1\xe6\xc2 \xe2\x05mY\xd8y\xaf\xce\xae\x0d" +
+	"#\x9f\xb5,\xec\x19\xbduv-\x8f\xf4\xb7,\xec\x94" +
+	"]\x1bK,\xf8\x97\xe0\xf6q\xe0\x82\x82(\x89\x94\x86" +
+	",+\xe3\x97\xce(\xd9\xb4\xefZ\x83*\x89A}\x1b" +
+	"i\x90TB\x0aZ\xa0Jb\x94\xf1\xc5H\xe0\xa1\xd1" +
+	"\"k%\xe1 \xc1\xaen\xe4\x02\xb7\xee ]\x8a\x9b" +
+	"\x11\x1f\x0eZ\x01{\xe9k\xdf\x1b\xc3\xcd\x12\xc6\xb8S" +
+	"\xc2\xc4\xe3\xd4\xbc\x90\x8cS^9\xe3\x7fG/\xe4\x8e" +
+	"\\6\xd6\x91s\x8aut;\xc5:z\x9cb\x1d\xbd" +
+	"F\xacc\xae\xe5\x80\x07^#\xd4\x11\x0f\xf9:\x07\xfe" +
+	"\xf7\xd2\xf3>\xffWc%\x82RT\x8bs_O\xc7" +
+	"l\x90\xb6\x82\x88\x91?)\x1e\x9b\x9a\x93B(OI" +
+	"`\x92\x1a\xabX\xcf\x1d\x07[s.\x1b\xd4\x7fNJ" +
+	"\x8cow\xffH\x06X\x0d\xa2\x12\x0cI\xa6\xcd\xd1\xd4" +
+	"\xb7\xff\x18L?\xc0I}cs\x1770\xfd\xe6\x1a" +
+	"V}c`\xfa\xadU\x16\x00\xa7\x86![\x16\x83\xc6" +
+	"0\xab\xf4\xfew`w\x9b\xb3c\xba\xb6\xff\x7f\xb7\x0d" +
+	"\x82p\xb3\xa5\xcdb(\xa6\xfbtR\xffu\x07\x03\xa0" +
+	"-\xd9\x03\x03\x17\x96\xc6\x86\x8d\xa8\xec\xfd/Z\xfe\x9c" +
+	"<$Y+W\x0a\xc3\x9e\xd7\xe9\x02P_\x0f\xea\xea" +
+	"\xc1\xca\x06\x89\xbe\x13h\x10\x13E\x13\x8d3\xc2\x92\xea" +
+	"\xe4z\xdd-b\xa09\xc4a\x8c\xea>\xe1\xc0\xff\x15" +
+	"\xb3iG\xf1\xb8\x9fs\xe0\xff\x86\xe1\xae\x8f\xe1\x9e\x7f" +
+	"\xe7\xc0\xff=\xc3]\x1f\xc7=\xbf\xa2\xb4\x93\x86\x10\xc5" +
+	"\xd3N\xaa\xa3\xf0\x11\x1d\x82\xe5\x86\xe6\xd51f7\xe2" +
+	"\xc9\xf3:\xd1;\x9b\x8cs\x86\x19\xa6GC\x88F\x92" +
+	"qF\xe0\xf61\xe0\x8261(F4K*\xb2]" +
+	"\x81\xb6\x88\x1a\xae\xc7\xd7\x98>\x14\xd5\xfax\x09\x8d\x0f" +
+	"\xcc\xb3\x18\xa2\xda\x98\x1c\x0a\x8e\x0f\x89\x88\xab\x8f\x9a/" +
+	"\xb1\x1e\x11\xbc\xa44\xc7\x8bx!1\xa6\x04\x1a\xca\xa3" +
+	"\xc4\xef,\x1d\xe62\x81F\xc0I\xfeK\x97\xd1Ij" +
+	"\x8a5\xf5v\x0e\x86\x1a\x9b\xb9*\xd7\"\x01\x14\x97M" +
+	"\xca\xb5L\x04\x05R\x8b\x1c\xd5\xa2&\xd5\xb6y\x87\x9c" +
+	"\xc4=b\xb2XX|u\xbca\xa6\xc6!n$\xd7" +
+	")n\xc4f\x97qu\xb7\xcb\x98\xc8vE.#\xf9" +
+	"9\xf1\xc7iZf\x12$TIm<uD\\\xc5" +
+	")<\x17\xdat\xc4\xc5\xc8Pf\xca\xd9\xa4\xae\x0b\xac" +
+	"d=^n)\xd38\xddd\x99\x88\x96R\x9cY\xcc" +
+	"\xd0\xd2\xe49\x8fN2q@:\x9e\xfb\xac~\x81\xaa" +
+	"-\xfe\x93\xc4F\xb7\xe9\x96)\xa1\x02\xdd\x8d'\xb1\xbd" +
+	"\xc62m\x0f`dvj\xd9f\x98\x00\x1f\x97a\x98" +
+	"\xb6s\x18.\xc0=A\x87\xc1M\xb5\xaci\xbb\xcc0" +
+	"m\xcf\xb1\xe4\xbd\xc4Pg;\x0c{\xe4XD\x0c\x06" +
+	"e\xa5\xbe\x02\xf1R\x9d\xa5\x827Z\xabP\x16\xb1\xcf" +
+	"9\xdb\xb3\xafP\xa5\x82\xc8$Q\x0b4\xc4i^\x8a" +
+	"\xd3M\xc50\xc0)\x15\x03\xebdAU\x13\xa6\xfb\xfc" +
+	"\xdd\x04\xaaC\x95i\xe9\xe7\x1a\xf1\xdc*tGy\xda" +
+	"\x86;c! ]\xae\xd7\x0cPs\xd0 8\xe5\x07" +
+	"\xcaI\xee\xbb\x98\xbe\xf3\x8a\x0e{\x06\x81\x0f\xc7\x14-" +
+	"eLE\xc0f\x85<Y\xc7\x18\xd3$\xef`\xb6\x1a" +
+	"\xe8\xc2\xb2\x04\xeek\xa1\x123\x1b\xa1\xa3\x9b2\xfe\xde" +
+	"\xe4\xc8\x85\x93#SZ\xb9\x88n\xc4#G~v\x0e" +
+	"q\xa9\xec\x9bO\\*\xf1\x07\xb2\x94p8R\xa0s" +
+	".\x05A)$iR\"\x19<\x16\xd5\xd9\x10\x1dz" +
+	"\xf2t\xefL|\x89\xc1\xa5\xbber\xbeA\xbaw\xe6" +
+	"\xd95\x08u\xc9\x8a\x9e\xac\x07!\xa4{\xd8\xc8J=" +
+	"B\xa8M\x8d)\x8a\xac\xd4\xb7E\xb5p$\"\x05\xbb" +
+	"4Im\x94\x15QC\x9c\x14<YCR*\xd7=" +
+	"<\x1c\xb3if^}G\x1dV\xea\xfcP\x0e\xfa\xd8" +
+	"\x1fg\xb7\x8a\x0b\x01q\xb2($\xf1\xea2\xd3\xa9\xc7" +
+	"-\xa3G\x0a\x0b\x19f%\xd5\xc6\xf4\xe2*\x18\xffH" +
+	"j\xad\xfb\xff\xc5g\xcbY\xebN-\x1d\xffSa\x99" +
+	"\x8e\x91`\xce\xf6MK\xb6)\xe3\x0d\x1f'V]\x96" +
+	"\xcb\xaa\xcb,mY\x8e][\x06T[\x96o\x0bH" +
+	"\xa1\x81'}\x09\x07\xcf\xa8\xcb\xb8\x04\xea27U\x97" +
+	"\xad\xa3j1\xa2\xe6\xf2zt\xc9a,Q\x8bY\xc6" +
+	"V\xaa.\x8b\xcf\xc0\x91\xc1\xeb\x92C|\x06\x8e\xcc\x0c" +
+	"]]6\x95\xcc\xd3\xcc\xc0\x91\x84\xd0\xc6\xbbG8\xe5" +
+	"\xbf\xd0\x1d\xb6h`\x09&\xc1$\x13\x80\x18\xc2\x04\xab" +
+	"4\xc8'E%\xd10\x1e\xceN\xd8t\xbf\xae\xb8t" +
+	"\x18\x1a\x19LwT\xb3\x0f\xd3;U\xc4f\x1c\x82\xa2" +
+	"!\x08q\xce\xf5)\xf9\xc4Z\x8bFfk\xb2\x16\x92" +
+	"\x18+\xaa\x18\x90\x1a\xc2!\xc4\x07\xa5D|)\x03\xa0" +
+	"\\\x00\x93\x96\xea\x8b\x80D\xc0\xd0L\xdb@s\xc7\x0a" +
+	"+2\x8b\x91Kh\xcf\xe4\xc1\xcay\x0a4\x03\xaf\xd0" +
+	"\x9aY\x83\\BS&\x0f.\xb3\xba\x02\xd0Zk\x82" +
+	"\x94Y\x8e\\\xc2\xacL\x1e8\xb3\xac\x0d\xd0\xc4\xea\x82" +
+	"\x9f\xbc[\x96\xc9C\x96YC\x12hQ\x12a,\xf9" +
+	"\xee\xc8L\x1ez\x9bI\xd2\x81\x96\xac\x14\x06e\xe6 " +
+	"\x97\xd0/\x93\x07\x9fYR\x02h\x95\x16\xa1Wf-" +
+	"r\x09\x9eL\x1eN3\xf3d\x03-\xed \x1c\xcfX" +
+	"\x89\\\xc2\xb1\x0c\x1e\x04\xb3\xfe\x11\xd0\xba\x86\xc2\xa1\x8c" +
+	"\x05\xc8%\xbc\x9f\xc1C\x1f3I5\xd0\xe4\xe0\xc2\xbe" +
+	"\x8c\xab\x91K\xd8\x9b\xc1C_\xb3>\x00\xd0D\xca\xc2" +
+	"\xce\x8c\\\xe4\x12\xb6f\xf0\xf0\x13\xb3\x92\"\xd0\xe4\xd3" +
+	"\xc2\xa6\x0c\x15\xb9\x84\xce\x0c\x1eN7K5\x02-\x04" +
+	" \xac\xc9\xc0{\xb54\x83\x873\xcc\x92\x0a@k\x14" +
+	"\x08\xf33\xf0^\xb5f\xf0\xd0\xcfL]\x0f4q\xba" +
+	"\xd0\x98\x91\x8f\\\x82\x98\xc1\xc3\x99f\x05\x14\xa0\xf9\xbf" +
+	"\x85\xa9dE\x932x\xf8\xa9Y\x19\x09h\x8d \xa1" +
+	"\x88\xac\xe8\xd2\x0c\x1e\xce2K\x8a\x01\xad\xb6%\x0c\xcb" +
+	"x\x08\xb9\x84!\x19<\x9cm\x16\xe7\x02ZlO8" +
+	"\x9b\xac\xa8o\x06\x0f\xd9f\xf1\x16\xa0\x05\xad\x84L2" +
+	"\xab\x13<\x0f\xe7\x98\x05\xd9\x80\x96\xa2\x10\x8e\xf2\xf8\xbb" +
+	"\x87x\x1e\xfa\xd3\x1a\x9fV\xa1L\xe1\x1d\xf2t\x1f\xcf" +
+	"\xc3\x00\xb3\xca\x1a\xd0\x82X\xc2n~1r\x09\xbbx" +
+	"\x1e\xce5K\x9b\x00\xcdC,l\xe3\xf1\xf9n\xe5y" +
+	"\xf8\x99YS\x11h\x95=a\x13y\xba\x91\xe7a\xa0" +
+	"\x99\xbd\x1eh\xdd\x03\xa1\x83_\x87\\\xc2\x1a\x9e\x87A" +
+	"f\xdd\x0a\xa0e\xed\x84E<\xde\x8dv\x9e\x87\xf3\xcc" +
+	"|\xe0@kg\x08\xad\xe4i\x8c\xe7\xe1|\xb3\x8e\x12" +
+	"\xd0\xba\x7f\x82L\x9eJ<\x0f\x83\xcd:\x82@KP" +
+	"\x0a3x|\xbe~\x9e\x87!fq\x1f\xa0\xd5A\x85" +
+	"R\xb2\xde\"\x9e\x87\x1c\xb3\x0c\x02\xd0\x14\xe2B\x1e\x8f" +
+	"\xcfw\x18\xcf\xc3P\xb3\xe0\x00\xd0\xcc\xdcB\x7f\xb2\x93" +
+	"\xfdx\x1e.0\x93\xf1\x03-()\xf4\"#g\xf2" +
+	"<\x0c3k\xb0\x02-9 \x9c\xf0\xe2\xa7\xc7\xbd<" +
+	"\\h\x96p\x05ZWB8L\x9e\x1e\xf2\xf20\xdc" +
+	"\xcc\x13\x0d4\xe1\xb7\xf0\x8e\x17\xc3\xf3>/\x0f#\xcc" +
+	"<\xd3@3\x1f\x0b\xbb\xbdw\xe2\x13\xf4\xf20\xd2," +
+	"\x9a\x08\xb4<\xa9\xb0\x8d<\xdd\xea\xe5!\xd7L\xed\x0f" +
+	"\xb4\x16\x9d\xb0\xc9\x8b\xcfh\xa3\x97\x87Qf\x09\x06\xa0" +
+	"\x85$\x85\x0e/\xde\x8d\x15^\x1e.2\x13t\x03\xad" +
+	"\xce)\xb4{\xe7 \x97p\x9d\x97\x87<\xb3D\x12\xd0" +
+	"\x92\\B\x93w;r\x09\x8d^\x1eF\x9be\xc6\x80" +
+	"\x16\xcd\x14Do\x15r\x093\xbc<\\Lk\x19Y" +
+	"%@\x84I^\xbc\xcf\xa5^\x1e.1\xab\xbe\x01\xad" +
+	"\x14$\\\xea\xc5P\x97\xe7\xe5\xe1R\xb3\xa4\x0a\xd0\x92" +
+	"u\xc2\x10/>\xfd\xfe^\x1e\xf2\xcd\x9am@+\xcd" +
+	"\x08}\xc9z}^\x1e.3\x93J\x03\xad\x0f x" +
+	"\xbc\x18\xae\xc0\xcb\x83Uv\x04h\xe1M\xe1\x98\x07\x7f" +
+	"\xf7\xa8\x87\x871f\xf1/\xa0\x05e\x84\x8f<x\x9f" +
+	"\xdf\xf7\xf00\xd6\xac\x93\x0a\xf9%\x88\x14\xe7\x12\xf6y" +
+	"\x9eE.\xe1\x15\x0f\x0f\x97\x9by\xa7\x81VN\x13v" +
+	"y\xbe\xc5'\xe8\xe1\xa1\xc0,\xad\x074\xe3\xb7\xb0\xcd" +
+	"\xb3\x1f\xb9\x84m\x1e\x1e<f\xc1% \xe5#\xd1\xfe" +
+	"\xb5\xc2f\x0f>\x85\x8d\x1e\x1e\xbcf\x91)\xa0E\x07" +
+	"\x84\x0e\xf2t\x85\x87\x07\xde\xac}\x04\xb4\xa4\x98\xd0\xee" +
+	"\xc1g4\xdf\xc3C\x86YO\x10h\x8d_!\xe6\xc1" +
+	"TC\xf6\xf0\x90i\x16!\x02Z\x91V\x98E\xd6;" +
+	"\xc3\xc3\xc3)fa;\xa0\x85\x8f\x84I\x1e\x8c\xcdJ" +
+	"=<\xf40\xeb\xd4\x01\xadK)\\\xea\xc1\xfb\x9c\xe7" +
+	"\xe1\xa1\xa7Yx\x0fh\xe5%a\x88\x07C{\x7f\x0f" +
+	"\x0f\xbd\xcc:\x11@\x8b^\x0a}=\x18rzyx" +
+	"8\xd5\xacV\x06\xb4\xa2\x8a\x00\x1e\x0c9\xc7\xdd<\x14" +
+	"\x9a5H\x81\x16y\x13\x0e\xbb\xc9-s\xf3Pd\x16" +
+	"\xbb\x05Z\x97Px\xc7\x8d\xa1}\x9f\x9b\x87b\xb3d" +
+	"\x0c\xd0\xd20\xc2n7\x86\xab\x9dn\x1eJ\xcc:\xc9" +
+	"@k\xbc\x0a[\xddx\x9f7\xbby\x18g\x16\x05\x05" +
+	"Z\x03T\xe8$\xefv\xb8y(5\xd3\x92\x03\xcd\xaf" +
+	"/,%\xdfmw\xf30\xde\xac\x9e\x06\xb3\xa6?\xd3" +
+	"\x8a\x84\xfd\x9b\x84V7\xa6\xbfMn\x1e\xae0\xeb\x91" +
+	"\xc2e\xc7.B\xb7_p\xd3\"Ar\xe3\xf5\xcer" +
+	"\xf30\xc1,1\x00\xb4\xe8\x96\xe0w\xe3S(s\xf3" +
+	"PF\x0bjXE\x01\x85\xb1d\xe4<7\x0f\xe5f" +
+	"I\x0f\xa0Ee\x84!dE\xfd\xdd<L4KT" +
+	"\x00M\xfb.\xf4%O{\xb9y\xa80\xab\xf1\x02-" +
+	"\x82!\x00\xf9\xeeq\x8eo\x0b\x84\x15E\x0ah\x85\xd0" +
+	"\x15\x94\xa3\xe4\x07\xe2\xc8O{\x18*u'E\x9c\x14" +
+	"-\x846\xc3\x0e_\x08YQ\xb1Y*\x84.\xaaL" +
+	"C|\x9d\xa4\x16REXI\x08\xa86\x02\xe8'D" +
+	"5X\x05F\xa0\x8912\xf1\x1aC\x05\xba\xdfX!" +
+	"d7\xe0\x87\x85\xd0E\x13\xa6\xa2l\x922\x15\x7f\xc6" +
+	"H\x8b\xabO\x8a\x8a@\x88\x0b+\x85PP\x17V\x1b" +
+	"E\xfc\x19j^\x03\xc3\xbe\x86\xfbR?PT\xa0{" +
+	"\x82\xea_&\"-\xd08\xbe,,93\x0fP6" +
+	"\x89\x08,\x84\x02\xdd\x94\xc9>*\xd0\x05\xe1B=z" +
+	"\xb2\xb52\x14C\x05\xbatl\x1b\xd9\x88\x82\"\xd3\xa5" +
+	"\x1d\x81\xea\xa2A\xb1\xf552\xcb\x00\x1e\x94\x8aQ\x10" +
+	"\x89EH\x82\x1b^#\xc1\xb6l;\x91\xaf\xb2\xb0\x80" +
+	"e>(S\x80\x8a\xcdYXn\x8e\x7f\xc0\xbeA\xf3" +
+	"\xfa\xe8G\xdaE=`\x80\xba\xc0\xe8[l\xe4>\x06" +
+	"\xdaX\x08]\xa1h\xa4$\x1c\x94\x8aP\x81\xbe8|" +
+	"RF2\x1e\xa0)\x15)\xd08\xb4\xd2t\xea@\xf3" +
+	"\xa9[\x9b39\x12E\xb4\x8f\xf1\xa6\x91\xdd\x87\x9c0" +
+	"3\xa0\xad\x99\xc6\xc1\x02\x0d\x84\xc5\x82\x0fY\xa1\x9e\xb5" +
+	"\x0b((\xebC\x90L\x1e(K\x93\x1a\xa3$\xdcY" +
+	"\xf7\xbe\x01\xea~S\xa0\x9f\x99\xbeP\x12\xcc\x81\x80\x86" +
+	"i\x93\xe9\x16\xe8\xfe\x00\xe4\x03\xba\x91\x0e\xa8$KN" +
+	"\x94*\"\x10\xa7\xe9{\xa3\xeb\xce\x80*\xcfx\x85\x84" +
+	"}[\x07_\xa6\xa7;\xccj\x10U\x03\xc6\x88Z\x1a" +
+	"h\xee4rw\xa8.\x09\xa82I\x1f\x9dz_\xba" +
+	"\xe2\xdc/Q\x92g\xd5\x05z\x0c\x84\xbe\x02\x12\xee\xe9" +
+	"\x8aw\xe0\xe4\x02\xfa\x0e\xea\x16Y\x94U\xa7\xdfk\xea" +
+	",\x83\x88\xaf=\xbe\x91\x86}\x09\xe2\x9c\xcf\x0a\xa1\xcd" +
+	"\x08\xd3\xc5s74\xf4@U\xf4:\xc8Q\x8b\x05\xca" +
+	"&\xed\x85T\xfe\x9c\x1e\x06\xaa\xcd\xcf\x92C\xa4+\xb5" +
+	"/\xe9\xe0A\xd3\xc6 Pu`!\x9e\x93\xa8@\xf7" +
+	"\x9d,\x84.\xeaN\x0e\xd4\x9f\x9c\xbcFcM\xc1\x08" +
+	"6E4N\xbdZ\x13\x11Gp\x02M\xac\x88\xb24" +
+	"5\x1c\xb2=\xd7$\xe6'\x04\xe6NQ\xc5\x80d\x0d" +
+	"\x11\x08#>B\xe6J\x13\x13\xa1\x02=5\x11m*" +
+	"m\x16Q61+\xd3\x96\xc91\x0d\xf1\x91\x98\xfd\xc3" +
+	"ur\xbd\xf9J\x95\x14\xc5;M\xa6F\xb3\xb6\xa2l" +
+	"2{{H}\x0a\x0d\x91\x93\xd6\xd11\xc4\xc0\xacE" +
+	"\x9aF\x88\x01A\xd3\xffSy\xac\xe3\x1cv\xd2\x0dX" +
+	"\x8dKTH\x0d\x84\xff&\xd3\xa8\x99\xca\xfd$#a" +
+	"YC\xfe\xa9i&\xad\"\xf1XY\xc9J)\x04\x88" +
+	"u\x1ez[U9\xd38if\xf8TI\xae\xd2\xb7" +
+	"\xccv+\xab\xd1-\x0bo\xfa.\x0b\xa6\xb53]\xdd" +
+	"\xa4N?\x12\x17PH\xea\x9b\x9d\xc0\xb3\xb8\xda\xca\xef" +
+	"\xce\x85\"q\x8e\xe74\xb4\xecZ\xcb\xf4\xd3\xba\x80\xd1" +
+	"IS\x13\xd7\xfc\x05\xac\x89\xab\xd00q\xe5Zvg" +
+	"\x8b+\xe2\xd8\x18\xf3\x0f\xaf\x7f\xed\xb4\xb2\x0b\x87\xb7\xdb" +
+	"\xcb\x0eT\xcb`\xcc\xc9\x82\xd5\x84\x05\x09N\"\x95}" +
+	"\xd0r\xf4`2\x1f\x9c\x8c\xa5Y\x87Cf\x01,<" +
+	"\xa6\x0a\x92\xeff\xf7\xd0s\x8d\xd820%\x07\x05\xca" +
+	"\xd7\xb0\xee\xbe\x8dp\x92v\x12\xc6\xda\xa4\xe7\xa1\xe3B" +
+	"R\xdc\xb1\xe78\xd5\xa4\xc8e\x03\x0e\\\xdd\x03\x0eh" +
+	"\xc02\x1bo`\xcf\x95\xd1,\x86bV\xd2N\x92Z" +
+	"\x99:\x8d\xa4\x9b\xe7N\xe7\x96\x1d\x1dAR\xaf<E" +
+	"\xc4\x99\x89$\x18\x03\xcc\x00\x03\xd8W[\x17\xc0fU" +
+	"\xa1\x17`M\x15c\x08\xa7\x0emkk\x18\xa37\x8d" +
+	"G\xdc\xb8\xd2\xb2o\xf3\xe1\x08\x03Kl!\xa0S\x1d" +
+	"\xb27av>8A\x8c\"h0\xb5\xe7\x8e9\xef" +
+	"\x8c\xcc(\xe3A\x0d7bp\x93@M+\x9c->" +
+	"_\xacC@\xfd\xbf\x9e\xac3\x81\xc5\x91\xf0\xe6Lj" +
+	"1r\xba\xa9,a9N\xc9\xeal\xd6v\x03&m" +
+	"\xa9S\xa9%li\xbee3K7\xe48M\xd3\x17" +
+	"\x97\xa8\xc2\xd7\x7f\xcb?\xb0>Q\xf2\xf8\x94\xbc\xd5\x9c" +
+	"\xf5\xb3_\x1c\xdak\xf4*\xe7\xbc\x8f\x0ey\x88*-" +
+	"z\x95\xa0\xf2\x93\x83}\x85}\xa9\x1bE\xcdL\xf4\xd6" +
+	"$=\x0f\xa7\xb3\x9dU\xef\xafsIU$\xdb\x13\x8a" +
+	"\xcbMjs\x83.4\xdc\xa0\xd9*i\xae\"\x1d\xa6" +
+	"v\xe5\xb2n\xd0.'7h\xc3\x83jo\x0dS\xdd" +
+	"\xc5S\xac{\xaf\xb0\xd5]\xa8\x1b\xf4[*B\xfe7" +
+	"9\xf0\x1fL\x14\xb8\xabD\xe7a.\x81\x89=\xce\x9e" +
+	"\xab\x84\xe7\x99)\xb3\xff\x9d\xd9\xddN\x96\xffHa\xa0" +
+	"O\xdf\xfd+\x9a\xa0V\xd8\xc9$ \x80\xa46\xf0\x1c" +
+	"'\x1b\xf8\x00\xcb\x06\xfe\xef\xce\x80\x9e\x06\xf5r\x0a\xe2" +
+	"O;\xa7x\xadSNq\xa6xE\xb74\xa9\x01\x9d" +
+	"\xc50a@\x09\x8f'\xd3@\xbc&\xa9\xe9\xa5vv" +
+	"\x16\x10\x88\x0a\xce\x89\x07a\xe5\x8e\x80q_\xf1\xde\xf9" +
+	"\xba\x0e\xf7\xb9n\xc9\xa7\x9ds:\x89KK:>\x90" +
+	"qy\xc2\x92{\xbcu\xab^6!\xc1\xf1\xc6\xb9\xab" +
+	"\x98%;\xd3\x95Y(\x0f\xe9\x10wS\xc3\xac]\xe7" +
+	"Y\xc7\xcb\x88\x0b\xa5]\x18\xa4[,j\\\x8d\x1c\xa7" +
+	"X\xd4\xf2\xc4\xb1\xa8\xee\xbd\xeb\xde\xf0W>\xd3A\x97" +
+	"F\x94Cb\xb0\xd5)}\x8b;i\xaa[\x07\xf92" +
+	"e\xb6\xa2T\xf9Q\x1c\xd0\x08\x0b;$\"\xbfZj" +
+	"b\xd1\xa2\x03\x17\xab\x0f\xa6\xfbL1\xf2\xfc\x00\x87\x1c" +
+	"\xc3\xb6l3\xd0=\xdb\x8c-\xde' jR}X" +
+	"me\xaf\xbdc\x11Do2\xcf#CM\xd6 \xaa" +
+	"\xa9\xab\xe3\x04p\xaf\xe4\xf1\xb1\xa9\xbc\xe7\xfe\x055@" +
+	":1\x1fN!l'\x95\xf5!ue\x9f\xf4D!" +
+	"[\xfc\x9b\xd3\xbe&\x8d\x14\xff\xeb\xbb\x07^j\xf9f" +
+	"Jg\xda7\xbeJ\"\x8eP\xa9\"\xed\xea\x18l\x97" +
+	"XY\x91Z\x1ctPO9\xa6\x04\xa9rJ~q" +
+	"5\x93\xfc\x82d\xef\x8e\xbbBar_\xaa%\x04\x16" +
+	"\xac\x9b\xc9\xe8\x0a\x14-Z\xed\x90r.\x0dt\xf5\xe3" +
+	"\x842.>k\x04q\x05\x9c(+\x10$\xec\x9a\xae" +
+	"r\xcb'\x14\xa3\xb4\x988A\x8e\xad\"N\x90\x97V" +
+	"\x11'\xc8\xbc\x1a\x92\xa2rd-B\xe0\xf5\x0d+G" +
+	"\xa8\xa0>\xa6i\x92\xda\x16n\x96\xd4\x90\xd8\xda\x155" +
+	"\x146\x08T+\xf3\x01H]!\xa9N\xbb\"\xa6i" +
+	"\x88\x93\xd4.Uj\x0c7K\xc1\x0a\xc4\xcb\x8a\xa4\xfb" +
+	"\xcf\x12\x0d,J\x1e\x8c\xc5:\xce\xc6\xa7\xb8\xfb\xcf\x08" +
+	"K\xf6\x82|\x8e\xa5*\x1co$\xf7\xd1\x9e?\xf5}" +
+	"b\xe6\x81\xb4\xa0\x91\xa6G\xa5\xd9Q%G\xe9\xd8Q" +
+	"(+N\x99A\x1c\x92\xc4\x9e\xab\x8cw\xe2\x7f\x91\xdd" +
+	"\x8ds\xe4t\xb8\xf6,\xf1\xd3\x12\x07\xb8c\xd8\xa8\xd0" +
+	"\x0b\xb5\x81\x92X\xcd\x92<\xad\xc3\x006\xad\x83\xb1{" +
+	"\x8d\xc5\x8c\x9a%\xadD\x0em\x11Uj\x96\xa5y\xe9" +
+	"\xd5)\x88S5\xa5\xaaG\x9bvI\xd4T\xf97)" +
+	"O\xf0\xdf\xd1\xcc\xa7\xbc\x06?*\xa5\x8e;\x95\x00\xfb" +
+	"c\xe0+\xb1q#}\x9c\x90\xed\xae~\xec\xa7\x07\x9e" +
+	"\xbb1\x1d*m\x0f1t\xa0PLn{\xa7\xf2\xcc" +
+	"\x16\xc3U\xcc\xa4O\x93Z\"\xaa\x14\x8d\xcalhX" +
+	"|\xc2\x0d]\xa4I\xb3\xfat\x9c.)U\x12\x19\xbd" +
+	"H3\x03\xb7f\xb9\xfa4X\x03j\xfeMZ08" +
+	"Yd\x7fZJ\x94\x04u\x8fSx\xa9v{\xcb\x9d" +
+	" \x85\xa6!\xc7Q\xfc\x9e\x1a\x06\xaa5\xd1\xb0#:" +
+	"f\xcbI\x99h\x96\x9c.\xb3\xe3\xad\xe7\xfc\xf9\x9b\xf3" +
+	"\xf6^\xb5(\x9dh\xadj+\xa4\x83\x93\x94\xb8\x80\x9c" +
+	"\x9c\xb4\x0bZ\xe43\xda\x03\xaa\"\xacr\x0a\xc8\xa9\xb2" +
+	"\xeaY$D!\x05!I\xa9\xd7\x1a\xcc[OBH" +
+	"\xa6\xb4F\x10XR_c8(\xd7\xc9\x92\xca\xd4\xea" +
+	"L+\xffM\xbcn,]\xdf\xe3\\+\xf9\xb0\xdd\xf7" +
+	"8^@\xbc\xeb`\xe9\xc0\xe7\xb6~\xbb%\x1dp\xb7" +
+	"U\xfaL\x96\xfdk\xa2\xd4Z%e\xd1DF\xce\x99" +
+	"P\xcdh\xb1\\#Z\xecq\x06E\xd8\xf2{P\x85" +
+	"\x9b\xad\x1a3=\xa1\x9dU\x8cj\x8e\xa6\xf7\xdb]k" +
+	"%#h\xd3E\x98\xa0\x15\x85\x99<V%\xed\x98\xf0" +
+	"\x061JH\x16\x02K\x8b\x12\x10#\x983\x9b\x88x" +
+	"\xa95\x9a\x94\xd5\x9dj\xf0\xa1$E\x178\x84\x0e\xe9" +
+	"\xf1>\xbe\\\x12:\xa4H]QM\x15\xe5\xfa\x06\xcc" +
+	"\x91f\x07bj\xa85n\xe7\x19M\x09'k\x89o" +
+	"\xc6I\x84\xaa\x81\x93\xf2\xdc0c\xb0\xe5_\xd2d?" +
+	"\xc2\xa1 \x9b\x09(af\xa0d\xda&'\x84cS" +
+	"\xa0\x1bj\\,\x0d$U\xa0\x1b\xe9x4\xc4\x8b\xa1" +
+	"\xf4j\x03F\x13\x96\xee\xf2\x9fcN\xe6\x95rK\xd5" +
+	"k*+\xdf\xca\xb5R^\x98\xa95\xde\xc1\x80\xfb6" +
+	"\x07\xfeO\x98\xd4\x1a\x1f\xe1\xd7\x0fr\xe0\xff;\x93Z" +
+	"\xc3\x16\x84NSk\x1c\xcdg\x82\xd0\xbd\xef\xe9J\xe5" +
+	"c\xf9L\x10:\xff>\x09\xf6\xf0\x1d\xcf\xd7\x83\xd0\xab" +
+	"\xd2+\xf7\xf8\x1f\xa97^\xa0\xab\xc2\xd2R9\x99D" +
+	"5]Up\xb9\x05\x9eT\x15lF7o`\xf0G" +
+	"g\x0d\x1bn\xcau\x0f7M\xd7\xd2\x92\xd4l\xe7\xac" +
+	"I\xad\x15\xa3\xd24I\x8d\xea\xe9_\xd2\x11\xae\xbb\x87" +
+	"\x80\xd3\xc0\xc8\x1f\x9b\x09\xbf\x1b\x85\xe7\xec\x88\xc3\xea\x9b" +
+	"E\xb373\x80\x9d\xc3\xa4r1P\xc8\xbe\x1c\x06\xd8" +
+	")\x0ayk\x00\x03\xect\xeb\xdf)\xb6\xac\x1d\xe6\xd6" +
+	"\xbf\x9f\xcf\xdc\x00Oo\x1d\xaem7\x80\x16r\xb3\xdd" +
+	"\x00\xde\xa5\xc35{\x03\xd2\xc4@\xff\xb9Ro\xc9u" +
+	"\x03\xddN\xce,\x9cGYUN\xcf\x93\x99J\xe8\xa1" +
+	"\xe9\x07f3\xcc\xcc,|\x0aWq\xe0\x0fv\xa3\xf5" +
+	"\xc9I\x9d\x1e\xb8\x95v\xd1:\xaa\x02sr\x9cH\x19" +
+	"'o\xe3\xe9\xda\xc8@R0\x89\x8a\x8c\x0d\x89\x0d\x84" +
+	"#R\xbcr7\xc7A\xb9;\x80\x95\x08\x8d,\xda\xac" +
+	"\x86\xcc\x9e\xa6\xc2\xe6q\xd0\x12\x91\x94\xa8\xdc\xecT&" +
+	"6\x05\xdb\xec \x0f\xda\xcc\x1f\x0e\x18%\xad\x80UV" +
+	"m\x1c\xcfj\xa5I\x9d~\x14G\x9f\xc2\x9c\xe3\x90\x03" +
+	"\xeb_IgMU\x86\xff/\x00\x00\xff\xffr\x9a\xb1" +
+	"\xbe"
 
 func RegisterSchema(reg *schemas.Registry) {
 	reg.Register(&schemas.Schema{
@@ -21863,6 +26356,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0x822cbde413a59cc2,
 			0x8243c2e47bf1b38e,
 			0x82c000e4635865be,
+			0x838885c3db79ce63,
 			0x83a9240ceeae431c,
 			0x83c3db1bb353041f,
 			0x83d3c3ca6ab6c38a,
@@ -21875,25 +26369,34 @@ func RegisterSchema(reg *schemas.Registry) {
 			0x880a3d5adfceba4b,
 			0x88464e707e21dab3,
 			0x88fc54f27228c1c1,
+			0x8958cd26f8cc2079,
+			0x89872c970034f53b,
+			0x8b820a19bcc81434,
 			0x8b9d7c93bac48969,
 			0x8e35ee5d891c40fb,
 			0x8e3afb54b1d7874a,
 			0x8fbb11722aac0728,
+			0x90227ee70a547e33,
 			0x915aea3566a41288,
 			0x91ba30e52cd56e91,
 			0x9204a190c081b3a5,
 			0x92144e1fd4a08f37,
+			0x928f5acb45600b86,
 			0x93360d2bc860a36a,
 			0x95800e67335ddc99,
 			0x95e0d66886e13409,
 			0x9621cca5915fcb66,
 			0x966a77c3514d0ab6,
 			0x9881b45d79299b22,
+			0x990bf528b0dc7b29,
 			0x996cac35aa5da38b,
 			0x99755c3d223cb5b7,
 			0x999035a33d479906,
 			0x99a91f3295de7ebf,
 			0x99c05051d6a2cd04,
+			0x99cd327a9b8a2aee,
+			0x9a6b04b7a2bdef78,
+			0x9cd684df4ea262b4,
 			0x9dda0068fe0fea7a,
 			0x9dfaec51c4cecd46,
 			0x9f3bb477a6822f84,
@@ -21907,6 +26410,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xa16aa1ea8b7d14ed,
 			0xa1af5665d8cae011,
 			0xa387c781094c823c,
+			0xa3d4f8505b46f45d,
 			0xa48fcafa44148084,
 			0xa4e3c31c7e3ab056,
 			0xa603030ba135e9eb,
@@ -21915,6 +26419,8 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xa7539bad483ac97c,
 			0xa784516c6378ec72,
 			0xa8404f3be0b7cd93,
+			0xa9643f938fd99949,
+			0xa9da130079c0575d,
 			0xaa32827f84f959d0,
 			0xaa757758fe4bee13,
 			0xaac020b0b8da206f,
@@ -21924,12 +26430,15 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xaee259c3cd4807cf,
 			0xaefab5c32445e49b,
 			0xaf5dbe1366111742,
+			0xaf72eb620b1efeb8,
 			0xb1154c0d0fab2c6c,
 			0xb1847f3c1327c817,
 			0xb1942de8b5c85629,
+			0xb2e7942ee7075467,
 			0xb351ab5cd3125c37,
 			0xb391a890e03e095e,
 			0xb3c8a09d8d7f2391,
+			0xb4dabe4bcf7fa635,
 			0xb55330a366064aec,
 			0xb81cb1ded5a4b294,
 			0xb836a9d8467afbd9,
@@ -21939,6 +26448,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xba8441acc5c61790,
 			0xba8a5c13a42ff45e,
 			0xbae37fbe21e580a3,
+			0xbc404d7933933db4,
 			0xbc963afed2baaec8,
 			0xbcd186e2b1bdb57f,
 			0xbd642a91a28b1110,
@@ -21947,13 +26457,16 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xbec5efe33bc9f672,
 			0xbef0f62b1a5ccab5,
 			0xbf63d1692f8319a6,
+			0xc0c5fcae835a8d67,
 			0xc100a560202e60d4,
 			0xc128a3f6e9168af5,
 			0xc1b609ba2b236760,
 			0xc25c96f5ecc2948c,
 			0xc4850be38a301677,
+			0xc4dcad53a814bd46,
 			0xc685d89055389f59,
 			0xc6a2d3a1b38a63c5,
+			0xc6f16055edb01ab4,
 			0xc79e94e45210f110,
 			0xc7ce1e34fbed378e,
 			0xc7ef271fa85df756,
@@ -21967,6 +26480,7 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xcdecfd1a01f89461,
 			0xce0e59cf060e153f,
 			0xce808f7bfdbadb18,
+			0xcf0797174ab8a72a,
 			0xcf43e7ba68fa2631,
 			0xcfbc6dc4d988a0a3,
 			0xcfc1238454548008,
@@ -21982,12 +26496,17 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xd6aa7eb814b3ba70,
 			0xd76909f2513beb2d,
 			0xd801eb45a1944841,
+			0xd83683c38af40c87,
+			0xd85c6029ea505f94,
 			0xd8a5f1a63b2057e2,
 			0xd8fe249d699a29dc,
 			0xd9f229db85377e2f,
 			0xdb45bc75be4bfac8,
 			0xdb5cb615cbcae503,
+			0xdb686eb69f8e36e7,
+			0xdba7cf4c0f21530c,
 			0xdbd32907a98f702b,
+			0xdbe886b1ab488a62,
 			0xdc16dcaf4c7b5d7b,
 			0xdc19fdc1e173fe90,
 			0xdc4c9ee0a2b165c4,
@@ -22003,12 +26522,18 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xe3ddb58a7deffeb4,
 			0xe4418928851d24b2,
 			0xe4daf3e32f563f70,
+			0xe575ee9ad56e1ac4,
 			0xe61f7262c99e4ea4,
 			0xe6d0a99c9f241c46,
+			0xe77f160094156137,
+			0xe7aefe372a58e16b,
 			0xe87a4751a68326a4,
 			0xe8abb7e7f38eda68,
 			0xe91f5b9cb4dbadc8,
+			0xeb374e41e41fa1fe,
 			0xeb78fd5c0cde93d6,
+			0xebd8d7e830082ac7,
+			0xebdd8c24c6dbd38b,
 			0xebe4a74c314c2f3f,
 			0xeda78d81b6beef42,
 			0xede291565db8a4ba,
@@ -22021,11 +26546,13 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xefa41dd2873cd357,
 			0xeffb609ebf72e4a0,
 			0xf0ef4d4fdaedb1f6,
+			0xf0f5e9b78c85a12f,
 			0xf15d73ce429a8956,
 			0xf1c814699d6bb038,
 			0xf356196210b50910,
 			0xf3788f2570a1e84f,
 			0xf3842bc6cf4149eb,
+			0xf434408b3cf4e018,
 			0xf53e99d3694c189f,
 			0xf651bb9766280006,
 			0xf727cdb8a9488a58,
@@ -22040,9 +26567,12 @@ func RegisterSchema(reg *schemas.Registry) {
 			0xfacf4a377c246d65,
 			0xfba63268bee43277,
 			0xfc4caa313c2f7632,
+			0xfc8b7ec09a024506,
+			0xfc8c601324bf3fc3,
 			0xfdaeb62e8f10b2ff,
 			0xfdc8ef3c32662696,
 			0xfddad5727c4c9261,
+			0xfdf7af5ce49fa3b5,
 			0xfe08130960d5d243,
 		},
 		Compressed: true,

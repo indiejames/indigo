@@ -934,6 +934,7 @@ type Model struct {
 	diagPopup            bool           // when true, show diagnostic detail popup for cursor line
 	diagPopupSuppressed  bool           // Escape pressed; don't re-show until cursor leaves the range
 	prefixSeq            []string       // keys typed so far for a multi-key Normal-mode command
+	debugConfigMenu      []DebugConfig  // the named debug configurations last fetched, for their menu
 	searchQuery          string         // raw text typed after '/' (see splitSearchQuery)
 	searchReplace        string         // parsed replacement text, only meaningful when searchReplacing
 	searchReplacing      bool           // true once an unescaped '/' delimiter has been typed — live search-and-replace preview
@@ -1057,6 +1058,9 @@ type Model struct {
 
 	// Mark for deferred selection: set with z, select-to with Z.
 	mark *document.Pos
+	// debug is what this buffer shows of the debug session: breakpoints, the
+	// stopped line, the status badge. Set by the App; see debug_view.go.
+	debug DebugView
 
 	// Macro recording: a single, in-memory-only slot (no named registers,
 	// no persistence — see the design discussion this followed). q toggles
@@ -1838,6 +1842,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // stale: different buffer, or the cursor has moved on
 		}
 		m.sigHelp = msg.help
+		return m, nil
+
+	case debugConfigsMsg:
+		return m.handleDebugConfigs(msg), nil
+
+	case debugResultMsg:
+		if msg.err != nil {
+			m = m.pushStatus(fmt.Sprintf("E: %s: %v", msg.what, msg.err))
+		}
 		return m, nil
 
 	case completionsMsg:

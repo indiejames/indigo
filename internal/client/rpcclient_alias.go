@@ -20,6 +20,16 @@ import (
 // with no conversion and methods defined in rpcclient are the same methods.
 
 type (
+	DebugAction                 = rpcclient.DebugAction
+	DebugBreakpoint             = rpcclient.DebugBreakpoint
+	DebugChangedMsg             = rpcclient.DebugChangedMsg
+	DebugConfig                 = rpcclient.DebugConfig
+	DebugFrame                  = rpcclient.DebugFrame
+	DebugOutputChunk            = rpcclient.DebugOutputChunk
+	DebugScope                  = rpcclient.DebugScope
+	DebugState                  = rpcclient.DebugState
+	DebugStatus                 = rpcclient.DebugStatus
+	DebugVariable               = rpcclient.DebugVariable
 	ActiveContext               = rpcclient.ActiveContext
 	ActiveSelection             = rpcclient.ActiveSelection
 	BufferConsistency           = rpcclient.BufferConsistency
@@ -69,6 +79,17 @@ type (
 )
 
 const (
+	DebugInactive               = rpcclient.DebugInactive
+	DebugStarting               = rpcclient.DebugStarting
+	DebugRunning                = rpcclient.DebugRunning
+	DebugStopped                = rpcclient.DebugStopped
+	DebugTerminated             = rpcclient.DebugTerminated
+	DebugContinue               = rpcclient.DebugContinue
+	DebugNext                   = rpcclient.DebugNext
+	DebugStepIn                 = rpcclient.DebugStepIn
+	DebugStepOut                = rpcclient.DebugStepOut
+	DebugPause                  = rpcclient.DebugPause
+	DebugStop                   = rpcclient.DebugStop
 	ClientDecorationGutter      = rpcclient.ClientDecorationGutter
 	ClientDecorationLeftGutter  = rpcclient.ClientDecorationLeftGutter
 	ClientDecorationLineTint    = rpcclient.ClientDecorationLineTint

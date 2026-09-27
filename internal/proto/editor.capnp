@@ -34,6 +34,13 @@ interface ClientCallback {
   # check must not move buffer text over the wire.
   reportBufferState    @11 (bufId :UInt32)
       -> (known :Bool, version :UInt64, generation :UInt64, dirty :Bool, contentSha256 :Data);
+  # Something a window displays about debugging has changed: the session state,
+  # its output, or the breakpoints. Carries sequence numbers, not the data —
+  # the window refetches whichever advanced (debugState, debugOutput,
+  # listBreakpoints). Pushes to different windows run concurrently and can
+  # arrive out of order; with data in them a late "running" could overwrite
+  # "stopped". A late sequence number only causes a redundant fetch.
+  debugChanged         @12 (stateSeq :UInt64, outputSeq :UInt64, breakpointsSeq :UInt64) -> ();
 }
 
 interface EditorService {
@@ -352,6 +359,119 @@ interface EditorService {
   # progress for a given source coalesces this into one more run right
   # after it finishes.
   rescanWorkspaceDiagnostics @53 () -> ();
+
+  # ---- Debugging (DAP) ----
+  # The server owns breakpoints and the debug session, as it owns buffers and
+  # language servers: every window sees one session. Lines are 0-based.
+  # Failures a user should read come back in `error`, not as an RPC failure —
+  # "dlv not found" is not a broken connection.
+  toggleBreakpoint @64 (path :Text, line :UInt32) -> (set :Bool);
+  # Every breakpoint in path, or in all files when path is empty.
+  listBreakpoints  @65 (path :Text) -> (breakpoints :List(DebugBreakpoint), seq :UInt64);
+  # Returns once the program is running (or already stopped at a breakpoint).
+  debugStart       @66 (config :DebugConfig) -> (error :Text);
+  debugControl     @67 (action :DebugAction) -> (error :Text);
+  debugState       @68 () -> (state :DebugState);
+  # threadId 0 means the thread the session is stopped on.
+  debugStackTrace  @69 (threadId :Int64) -> (frames :List(DebugFrame), error :Text);
+  debugScopes      @70 (frameId :Int64) -> (scopes :List(DebugScope), error :Text);
+  debugVariables   @71 (ref :Int64) -> (variables :List(DebugVariable), error :Text);
+  # context is "hover", "watch" or "repl". frameId 0: the stopped thread's top frame.
+  debugEvaluate    @72 (expression :Text, frameId :Int64, context :Text)
+      -> (result :DebugVariable, error :Text);
+  # Output chunks after sinceSeq. truncated: some were dropped to bound memory
+  # before this window asked for them.
+  debugOutput      @73 (sinceSeq :UInt64) -> (chunks :List(DebugOutput), latest :UInt64, truncated :Bool);
+  # The named launch configurations: the workspace's .indigo/debug.toml, its
+  # .vscode/launch.json, then config.toml's [[debug]] entries, paths resolved
+  # against the workspace. activeFile is what launch.json's ${file} means.
+  # error reports a file that could not be read; configs holds what could.
+  debugConfigs     @74 (activeFile :Text) -> (configs :List(DebugConfig), error :Text);
+  # Stops any running session and starts the most recently started
+  # configuration again, or fallback when nothing has been started yet.
+  # started is the configuration that was launched.
+  debugRestart     @75 (fallback :DebugConfig) -> (error :Text, started :DebugConfig);
+  # Sets a breakpoint at path:line with this condition and log message,
+  # creating it if there is none. Both empty makes it a plain breakpoint.
+  setBreakpoint    @76 (path :Text, line :UInt32, condition :Text, logMessage :Text) -> ();
+}
+
+enum DebugAction {
+  continue @0;
+  next     @1;
+  stepIn   @2;
+  stepOut  @3;
+  pause    @4;
+  stop     @5;
+}
+
+enum DebugStatus {
+  inactive   @0;
+  starting   @1;
+  running    @2;
+  stopped    @3;
+  terminated @4;
+}
+
+struct DebugConfig {
+  adapter    @0 :Text;        # "go" in v1
+  mode       @1 :Text;        # Delve: "debug" or "test"
+  program    @2 :Text;        # package directory or file
+  args       @3 :List(Text);
+  cwd        @4 :Text;
+  buildFlags @5 :Text;
+  name       @6 :Text;        # a named configuration's name; "" otherwise
+  env        @7 :List(Text);  # "KEY=value" added to the program's environment
+  launchJson @8 :Text;        # a JSON object merged over the launch request; "" for none
+}
+
+struct DebugState {
+  status      @0 :DebugStatus;
+  seq         @1 :UInt64;
+  threadId    @2 :Int64;
+  path        @3 :Text;       # top frame of the stopped thread
+  line        @4 :UInt32;
+  reason      @5 :Text;       # "breakpoint", "step", "pause", "exception"...
+  description @6 :Text;
+  exitCode    @7 :Int32;
+  hasExitCode @8 :Bool;
+  error       @9 :Text;       # why the session failed to start or ended abnormally
+}
+
+struct DebugBreakpoint {
+  path     @0 :Text;
+  line     @1 :UInt32;
+  verified @2 :Bool;
+  detail   @3 :Text;   # the adapter's reason when unverified ("message" clashes with capnp's Message())
+  condition  @4 :Text; # stop only when this expression is true; "" for always
+  logMessage @5 :Text; # a logpoint: print this ({expr} interpolated) instead of stopping
+}
+
+struct DebugFrame {
+  id   @0 :Int64;
+  name @1 :Text;
+  path @2 :Text;
+  line @3 :UInt32;
+  col  @4 :UInt32;
+}
+
+struct DebugScope {
+  name      @0 :Text;
+  ref       @1 :Int64;
+  expensive @2 :Bool;
+}
+
+struct DebugVariable {
+  name  @0 :Text;
+  value @1 :Text;
+  type  @2 :Text;
+  ref   @3 :Int64;   # non-zero: has children, fetch with debugVariables
+}
+
+struct DebugOutput {
+  seq      @0 :UInt64;
+  category @1 :Text;  # "stdout", "stderr", "console"
+  text     @2 :Text;
 }
 
 # MenuItemInfo is one node in the Command-menu tree contributed by a plugin.

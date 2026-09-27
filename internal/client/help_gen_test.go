@@ -105,7 +105,7 @@ func TestGenerateHelpEntriesCategoryOrder(t *testing.T) {
 	want := []string{
 		"Navigation", "Go to (g)", "Editing", "Insert mode", "Selection",
 		"Match (m)", "Search", "Multi-cursor", "Sort (s)", "Case (~)",
-		"Marks & Macros", "LSP / Diagnostics", "Files & Buffers",
+		"Marks & Macros", "LSP / Diagnostics", "Debug", "Files & Buffers",
 		"Command (space)", "Commands (:)",
 	}
 	if len(headers) != len(want) {

@@ -95,6 +95,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 		clients:       map[uint64]struct{}{clientID: {}},
 		canonPath:     canonicalPath(path),
 		crlf:          crlf,
+		onApplied:     s.shiftBreakpoints,
 		sinceByClient: map[uint64]uint64{clientID: buf.Version()},
 	}
 	ver := buf.Version()
@@ -643,6 +644,11 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	applied, newVersion, rebaseErr := applyRebased(entry, buf, clientID, baseVersion, []document.Op{op})
 	path := buf.Path()
 	content := buf.Content()
+	// Under s.mu, like applyServerOriginated's: breakpoint shifts depend on
+	// order, and two applies' shifts run after unlocking could land in the
+	// opposite order to their ops. (Safe to call here — the debug push it
+	// triggers runs on its own goroutine; see pushDebugChanged.)
+	s.shiftBreakpoints(entry.canonPath, applied)
 	s.mu.Unlock()
 
 	if rebaseErr != nil {
@@ -785,6 +791,7 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 	applied, newVersion, rebaseErr := applyRebased(entry, buf, clientID, baseVersion, ops)
 	path := buf.Path()
 	content := buf.Content()
+	s.shiftBreakpoints(entry.canonPath, applied) // under s.mu: see ApplyOp
 	s.mu.Unlock()
 
 	if rebaseErr != nil {

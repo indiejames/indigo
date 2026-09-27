@@ -238,6 +238,16 @@ An absolute `command = "/path/to/server"` there sidesteps `PATH` entirely.
 the container; a missing binary shows up as `LookPath(...) failed` followed by
 the `PATH` the server actually had.
 
+## Debugging
+
+The debugger runs inside the container, next to the server. With the
+devcontainers Go feature nothing else is needed: it installs `dlv` and grants
+the `SYS_PTRACE` capability a debugger needs. Otherwise, install Delve and add
+`"capAdd": ["SYS_PTRACE"], "securityOpt": ["seccomp=unconfined"]` to
+devcontainer.json. Open the debug window with `indigo --devcontainer --debug`.
+Details, including other languages' debuggers, are in
+[debugging.md](debugging.md#in-a-dev-container).
+
 ## Paths
 
 Attached to a container, indigo shows you the container's paths: a file is

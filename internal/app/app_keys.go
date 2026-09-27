@@ -144,7 +144,11 @@ func (a App) handlePluginPopupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (a App) handlePluginInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
+		own := a.pluginInput != nil && a.pluginInput.onConfirm != nil
 		a.pluginInput = nil
+		if own {
+			return a, nil
+		}
 		rpc := a.rpc
 		return a, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -155,7 +159,11 @@ func (a App) handlePluginInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if a.pluginInput != nil {
 			text := a.pluginInput.text
+			onConfirm := a.pluginInput.onConfirm
 			a.pluginInput = nil
+			if onConfirm != nil {
+				return a, onConfirm(text)
+			}
 			rpc := a.rpc
 			return a, func() tea.Msg {
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

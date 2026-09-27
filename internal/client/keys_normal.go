@@ -167,6 +167,11 @@ func executeSave(m Model) (tea.Model, tea.Cmd) {
 }
 
 func executeHover(m Model) (tea.Model, tea.Cmd) {
+	// Stopped in the debugger, hover shows the value under the cursor — what
+	// hovering is for while debugging — and falls back to the docs.
+	if m.debug.Status == DebugStopped {
+		return m, m.debugHoverCmd()
+	}
 	return m, m.fetchHover()
 }
 

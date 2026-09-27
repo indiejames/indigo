@@ -307,5 +307,8 @@ func applyServerOriginated(entry *bufferEntry, excludeClientID uint64, ops ...do
 		applied = append(applied, op)
 	}
 	broadcast(entry, excludeClientID, applied)
+	if entry.onApplied != nil {
+		entry.onApplied(entry.canonPath, applied)
+	}
 	return version
 }

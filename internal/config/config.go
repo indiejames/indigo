@@ -9,6 +9,102 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// DebugLaunch is a named debug configuration: a [[debug]] entry in
+// config.toml or in a workspace's .indigo/debug.toml. Relative paths are
+// resolved against the workspace root, and "${workspaceFolder}" is replaced by
+// it (the spelling VS Code's launch.json uses).
+//
+//	[[debug]]
+//	name = "server"
+//	program = "./cmd/server"   # default: the workspace root
+//	mode = "debug"             # or "test"; default "debug"
+//	args = ["--port", "8080"]
+//	cwd = "."                  # default: the workspace root
+//	build_flags = "-tags dev"
+//	env = { LOG_LEVEL = "debug" }
+//	adapter = "python"         # a [[debug_adapter]]; default "go" (Delve)
+//	launch = { justMyCode = false }
+type DebugLaunch struct {
+	Name       string            `toml:"name"`
+	Adapter    string            `toml:"adapter"` // "go" (the default) in v1
+	Mode       string            `toml:"mode"`
+	Program    string            `toml:"program"`
+	Args       []string          `toml:"args"`
+	Cwd        string            `toml:"cwd"`
+	BuildFlags string            `toml:"build_flags"`
+	Env        map[string]string `toml:"env"`
+	// Launch is passed to the adapter's launch request as is, over anything
+	// indigo sets itself: the place for adapter-specific settings
+	// (debugpy's justMyCode, lldb-dap's initCommands, Delve's dlvFlags).
+	Launch map[string]any `toml:"launch"`
+}
+
+// DebugAdapter describes a Debug Adapter Protocol server for a language other
+// than Go (Go uses Delve, built in). A [[debug]] entry picks one with
+// adapter = "<name>".
+//
+//	[[debug_adapter]]
+//	name = "python"
+//	command = "python3"
+//	args = ["-m", "debugpy.adapter"]
+//	transport = "stdio"            # or "tcp": the adapter prints "listening at host:port"
+//	extensions = [".py"]           # Space d d debugs the current file directly
+//	launch = { justMyCode = false }
+type DebugAdapter struct {
+	Name      string   `toml:"name"`
+	Command   string   `toml:"command"`
+	Args      []string `toml:"args"`
+	Transport string   `toml:"transport"`
+	// AdapterID is sent in the initialize request; default the name. Some
+	// adapters check it (js-debug expects "pwa-node").
+	AdapterID string `toml:"adapter_id"`
+	// Extensions are the source files this adapter can run directly, so
+	// Space d d on one debugs that file. Leave empty for an adapter whose
+	// program is a built binary rather than a source file (lldb-dap).
+	Extensions []string `toml:"extensions"`
+	// Launch is merged under every launch request to this adapter; a
+	// configuration's own launch table wins.
+	Launch map[string]any `toml:"launch"`
+}
+
+// DefaultDebugAdapters are the adapters indigo knows without configuration.
+// Each is used only if its command can be found when a session starts.
+var DefaultDebugAdapters = []DebugAdapter{
+	{Name: "python", Command: "python3", Args: []string{"-m", "debugpy.adapter"}, Extensions: []string{".py"}},
+	{Name: "lldb", Command: "lldb-dap"},
+	{
+		// VS Code's JavaScript debugger, run standalone (its js-debug-dap
+		// release). js-debug-adapter is the name Mason gives its launcher;
+		// when it is not on PATH, the debug package looks for the release's
+		// dapDebugServer.js in the usual places (findJSDebug).
+		Name: "node", Command: "js-debug-adapter", Args: []string{"0", "127.0.0.1"},
+		Transport: "tcp", AdapterID: "pwa-node",
+		Extensions: []string{".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"},
+		Launch: map[string]any{
+			"type": "pwa-node",
+			// Without it, stepping walks into Node's own internals.
+			"skipFiles": []any{"<node_internals>/**"},
+		},
+	},
+}
+
+// EffectiveDebugAdapters returns the user's [[debug_adapter]] entries followed
+// by the built-in ones they do not replace by name.
+func (c *Config) EffectiveDebugAdapters() []DebugAdapter {
+	named := map[string]bool{}
+	out := make([]DebugAdapter, 0, len(c.DebugAdapters)+len(DefaultDebugAdapters))
+	for _, a := range c.DebugAdapters {
+		out = append(out, a)
+		named[a.Name] = true
+	}
+	for _, a := range DefaultDebugAdapters {
+		if !named[a.Name] {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 // LanguageServer maps file extensions to a language server command.
 // Exactly one of Command or Address must be set: Command spawns a process
 // and talks LSP over its stdio, the normal case; Address instead dials a
@@ -351,6 +447,11 @@ type Config struct {
 	// workspace grep — on top of the built-in defaults (.git, node_modules,
 	// vendor, etc.). Example: ["build", "dist"].
 	PickerIgnoreDirs []string `toml:"picker_ignore_dirs"`
+	// DebugLaunches are named debug configurations ([[debug]]), offered by
+	// Space d l alongside the workspace's own .indigo/debug.toml.
+	DebugLaunches []DebugLaunch `toml:"debug"`
+	// DebugAdapters add or replace debuggers for languages other than Go.
+	DebugAdapters []DebugAdapter `toml:"debug_adapter"`
 }
 
 func defaults() *Config {

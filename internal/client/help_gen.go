@@ -34,6 +34,7 @@ var categoryOrder = []string{
 	"Case (~)",
 	"Marks & Macros",
 	"LSP / Diagnostics",
+	"Debug",
 	"Files & Buffers",
 	"Command (space)",
 	"System",

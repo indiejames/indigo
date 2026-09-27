@@ -853,10 +853,10 @@ func (m *Manager) Shutdown() {
 
 // ---- adapters ----
 
-// findDelve locates dlv on PATH, then where `go install` puts it — a server
+// FindDelve locates dlv on PATH, then where `go install` puts it — a server
 // started from a GUI terminal launcher often has neither GOBIN nor ~/go/bin on
 // its PATH, and "dlv not found" when it is installed would be a poor answer.
-func findDelve() (string, error) {
+func FindDelve() (string, error) {
 	if p, err := exec.LookPath("dlv"); err == nil {
 		return p, nil
 	}

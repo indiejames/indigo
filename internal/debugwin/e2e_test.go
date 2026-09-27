@@ -33,6 +33,9 @@ func TestDebugWindowAgainstRealDelve(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and debugs a program")
 	}
+	if _, err := debug.FindDelve(); err != nil {
+		t.Skip("dlv not installed")
+	}
 	if os.Getenv("INDIGO_DEBUG_TESTS") != "1" {
 		if hint := debug.PermissionHint(); hint != "" {
 			t.Skip(hint + " (or set INDIGO_DEBUG_TESTS=1)")

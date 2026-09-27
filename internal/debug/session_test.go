@@ -68,7 +68,7 @@ func canDebug(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and debugs a program; skipped in -short")
 	}
-	if _, err := findDelve(); err != nil {
+	if _, err := FindDelve(); err != nil {
 		t.Skip("dlv not installed")
 	}
 	if os.Getenv("INDIGO_DEBUG_TESTS") != "1" {
@@ -248,7 +248,7 @@ func TestOutputRetention(t *testing.T) {
 	}
 }
 
-// findDelve must look where `go install` puts dlv, since a server started
+// FindDelve must look where `go install` puts dlv, since a server started
 // from a GUI launcher often lacks it on PATH.
 func TestFindDelveOffPath(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
@@ -262,9 +262,9 @@ func TestFindDelveOffPath(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("GOBIN", "")
 	t.Setenv("GOPATH", "")
-	got, err := findDelve()
+	got, err := FindDelve()
 	if err != nil || got != filepath.Join(bin, "dlv") {
-		t.Errorf("findDelve() = %q, %v; want ~/go/bin/dlv", got, err)
+		t.Errorf("FindDelve() = %q, %v; want ~/go/bin/dlv", got, err)
 	}
 }
 

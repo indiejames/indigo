@@ -175,7 +175,7 @@ func (m *Manager) startDefaultAdapter(ctx context.Context, cfg Config, handler f
 		}
 	}
 	if isGo(cfg.Adapter) {
-		dlv, err := findDelve()
+		dlv, err := FindDelve()
 		if err != nil {
 			return nil, err
 		}

@@ -123,7 +123,11 @@ type App struct {
 	// docSymFilters remembers the document symbol picker's checkboxes between
 	// opens, for the session; nil means the defaults.
 	docSymFilters *docSymbolFilters
-	refPicker     *refPickerState // non-nil when reference picker is open
+	// debug is this window's copy of the server's debug session and
+	// breakpoints; see debug.go. Created lazily by the handlers, so an App
+	// built by hand (tests) works too.
+	debug     *appDebug
+	refPicker *refPickerState // non-nil when reference picker is open
 
 	// fileChangedIdx is the index of a dirty buffer awaiting user decision after
 	// an external modification. -1 means no prompt is active.
@@ -166,6 +170,10 @@ type appPluginInput struct {
 	text        string
 	width       int
 	height      int
+	// onConfirm, when set, makes this a prompt of the App's own: Enter runs
+	// it with the text and Esc just closes, rather than both answering a
+	// plugin over RPC.
+	onConfirm func(text string) tea.Cmd
 }
 
 // configPathAndMtime returns the config file path and its current mtime.
@@ -276,7 +284,7 @@ func (a App) Init() tea.Cmd {
 	// otherwise the server would use its own config's value until the file
 	// happened to change, which in a container is the image's and not the
 	// user's.
-	cmds := []tea.Cmd{watchConfig(a.configPath, a.configModTime), a.pushIgnoredDirs()}
+	cmds := []tea.Cmd{watchConfig(a.configPath, a.configModTime), a.pushIgnoredDirs(), a.initDebug()}
 	if len(a.buffers) > 0 {
 		cmds = append(cmds, a.buffers[0].Init())
 	}
@@ -327,7 +335,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return next, cmd
 	}
-	return updated.stampActiveTab().ensureActiveSized(), cmd
+	return updated.stampActiveTab().ensureActiveSized().ensureActiveDebugView(), cmd
 }
 
 // ensureActiveSized gives the active buffer the window size if it has never had
@@ -884,6 +892,13 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case client.DebugChangedMsg:
+		return a.handleDebugChanged(msg)
+	case debugStateMsg:
+		return a.handleDebugState(msg)
+	case debugBreakpointsMsg:
+		return a.handleDebugBreakpoints(msg), nil
+
 	case client.FileChangedMsg:
 		appLog("FileChangedMsg received: BufID=%d dirty=%v numBufs=%d", msg.BufID, msg.Dirty, len(a.buffers))
 		idx := -1
@@ -1005,6 +1020,15 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			placeholder: msg.Placeholder,
 			width:       a.width,
 			height:      a.height,
+		}
+		return a, nil
+
+	case client.BreakpointPromptMsg:
+		return a.handleBreakpointPrompt(msg), nil
+
+	case breakpointSetMsg:
+		if msg.err != nil {
+			a.status = "E: set breakpoint: " + msg.err.Error()
 		}
 		return a, nil
 

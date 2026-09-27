@@ -95,6 +95,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 		clients:       map[uint64]struct{}{clientID: {}},
 		canonPath:     canonicalPath(path),
 		crlf:          crlf,
+		onApplied:     s.shiftBreakpoints,
 		sinceByClient: map[uint64]uint64{clientID: buf.Version()},
 	}
 	ver := buf.Version()
@@ -642,6 +643,7 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	buf := entry.buf
 	applied, newVersion, rebaseErr := applyRebased(entry, buf, clientID, baseVersion, []document.Op{op})
 	path := buf.Path()
+	canonPath := entry.canonPath // guarded by s.mu (SaveAs rewrites it)
 	content := buf.Content()
 	s.mu.Unlock()
 
@@ -663,6 +665,7 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	go s.lspMgr.DidChange(path, content)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 	s.dispatchLineDeltas(bufID, path, applied)
+	s.shiftBreakpoints(canonPath, applied)
 	return nil
 }
 
@@ -784,6 +787,7 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 	buf := entry.buf
 	applied, newVersion, rebaseErr := applyRebased(entry, buf, clientID, baseVersion, ops)
 	path := buf.Path()
+	canonPath := entry.canonPath // guarded by s.mu (SaveAs rewrites it)
 	content := buf.Content()
 	s.mu.Unlock()
 
@@ -808,6 +812,7 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 	s.lintMgr.RunOnEdit(path, content)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 	s.dispatchLineDeltas(bufID, path, applied)
+	s.shiftBreakpoints(canonPath, applied)
 	return nil
 }
 

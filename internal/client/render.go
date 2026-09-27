@@ -528,7 +528,7 @@ func (m Model) gutterWidth() int {
 	hasRightGutter := m.reservePluginGutter || m.hasGutterDecorations()
 	if m.cfg == nil || !m.cfg.LineNumbers {
 		// No line numbers: fall back to minimal — only show gutters when needed.
-		hasLeftContent := m.mark != nil || m.hasLeftGutterDecorations()
+		hasLeftContent := m.mark != nil || m.hasLeftGutterDecorations() || m.hasDebugGutterContent()
 		if !hasLeftContent && !hasRightGutter {
 			return 0
 		}
@@ -979,8 +979,12 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 		const leftW = 2
 		hasRightGutter := m.reservePluginGutter || m.hasGutterDecorations()
 		if chunk == 0 {
-			// Left gutter: Vim mark (◆) takes priority over plugin markers; blank otherwise.
-			if m.mark != nil && lineNum == m.mark.Line {
+			// Left gutter, in priority order: the debugger's stopped-here arrow
+			// or breakpoint (where execution is matters most while debugging),
+			// then the Vim mark (◆), then plugin markers; blank otherwise.
+			if dm := m.debugGutterMark(lineNum); dm != "" {
+				sb.WriteString(dm)
+			} else if m.mark != nil && lineNum == m.mark.Line {
 				markGutterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00"))
 				sb.WriteString(markGutterStyle.Render("◆ "))
 			} else if lm := m.leftGutterDecorAt(lineNum); lm != nil {

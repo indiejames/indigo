@@ -121,6 +121,13 @@ type tintRange struct {
 // lineTintsFor returns the tints for a buffer line, or nil. Hot path: nil
 // for every line in a file with no diff.
 func (m Model) lineTintsFor(bufLine int) []tintRange {
+	if m.debug.HasStop && bufLine == m.debug.StopLine && debugStopLineBG != "" {
+		// The stopped line is a separate layer from the plugin tints, which
+		// are rebuilt from decorations on every fetch and would drop it. It
+		// goes first so a diff tint on the same line still shows over it.
+		stop := tintRange{StartCol: 0, EndCol: len([]rune(m.buf.Line(bufLine))), BG: debugStopLineBG, ToEOL: true}
+		return append([]tintRange{stop}, m.lineTints[bufLine]...)
+	}
 	if len(m.lineTints) == 0 {
 		return nil
 	}

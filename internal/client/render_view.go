@@ -200,6 +200,13 @@ func (m Model) renderFrame() (string, *tea.Cursor) {
 			}
 		}
 	}
+	if notes := m.buildBreakpointNoteOverlays(layout, cw); notes != nil {
+		for i := range notes {
+			if len(notes[i]) > 0 {
+				rowOverlays[i] = mergeOverlays(rowOverlays[i], notes[i])
+			}
+		}
+	}
 	if extraOverlays := m.buildExtraCursorOverlays(layout, cw); extraOverlays != nil {
 		for i := range vis {
 			if len(extraOverlays[i]) > 0 {
@@ -756,6 +763,9 @@ func (m Model) renderStatusBar() string {
 		ms = insertModeStyle
 	}
 	modeSeg := ms.Render("  " + modeLabel + "  ")
+	// The debug badge rides with the mode label: both answer "what state is
+	// the editor in", and the right-hand group is kept fixed-width on purpose.
+	modeSeg += m.debugStatusBadge()
 	modeW := lipgloss.Width(modeSeg)
 
 	// Right side: [lsp] [file type] [diag counts] [line:col], all fixed

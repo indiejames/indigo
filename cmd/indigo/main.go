@@ -17,6 +17,7 @@ import (
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/debuglog"
+	"github.com/indiejames/indigo/internal/debugwin"
 	"github.com/indiejames/indigo/internal/hangdetect"
 	"github.com/indiejames/indigo/internal/highlight"
 	"github.com/indiejames/indigo/internal/server"
@@ -60,6 +61,15 @@ func main() {
 	// Parse optional +N line argument (e.g. indigo +42 foo.go).
 	startLine := 0
 	args := parseContainerFlags(os.Args[1:])
+
+	// --debug opens the debugger window for the workspace instead of an
+	// editor: stack, variables, watches and output, in its own pane. After
+	// the container flags, so `indigo --devcontainer --debug` attaches to the
+	// session running inside a dev container.
+	if len(args) == 1 && args[0] == "--debug" {
+		runDebugWindow()
+		return
+	}
 	if len(args) >= 2 && strings.HasPrefix(args[0], "+") {
 		if n, err := strconv.Atoi(args[0][1:]); err == nil && n > 0 {
 			startLine = n - 1 // convert to 0-based
@@ -325,6 +335,40 @@ func openUntitled(startLine int) {
 	}
 	shutdownContainer()
 	reportIfServerDisconnected(finalModel)
+}
+
+// runDebugWindow runs `indigo --debug`: the workspace is found from the
+// current directory the way openUntitled finds it, so running it in any pane
+// inside the project attaches to that project's server and session.
+func runDebugWindow() {
+	workDir, err := os.Getwd()
+	if err != nil {
+		fatalf("getwd: %v", err)
+	}
+	workDir = resolvePath(workDir)
+	if root := gitRoot(workDir); root != "" {
+		workDir = root
+	}
+	workDir, _ = resolveWorkspace(workDir, "")
+
+	hangdetect.Start()
+	defer hangdetect.Stop()
+
+	rpc, err := connect(workDir)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	warnIfServerStale(rpc)
+
+	p := tea.NewProgram(debugwin.New(rpc), tea.WithoutSignalHandler())
+	rpc.SetPushSender(p.Send)
+	_, runErr := p.Run()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	rpc.Disconnect(ctx) //nolint:errcheck
+	cancel()
+	if runErr != nil {
+		fatalf("run: %v", runErr)
+	}
 }
 
 // loadAndApplyTheme resolves the theme named in cfg, applies it to the client

@@ -19,6 +19,7 @@ import (
 
 	"github.com/indiejames/indigo/internal/binstamp"
 	"github.com/indiejames/indigo/internal/config"
+	"github.com/indiejames/indigo/internal/debug"
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/format"
 	"github.com/indiejames/indigo/internal/hangdetect"
@@ -110,6 +111,12 @@ type bufferEntry struct {
 	// write of it back to this file goes through document.RestoreCRLF, so a
 	// Windows-edited file is saved the way it was found.
 	crlf bool
+	// onApplied, when set, is told about every op the server applies to this
+	// buffer on its own behalf (applyServerOriginated): workspace edits,
+	// plugin edits, moving text between files. Edits from windows reach the
+	// same place through ApplyOp/ApplyOps. It keeps breakpoints on their
+	// lines. Runs under s.mu.
+	onApplied func(canonPath string, ops []document.Op)
 	// generation increments every time buf is replaced with a new
 	// *document.Buffer object (format-on-save, SaveAs, DiscardRecovery,
 	// explicit Format) rather than edited via buf.Apply. See the
@@ -227,6 +234,10 @@ type editorService struct {
 	activeCtx   activeContext
 	activeSel   activeSelection
 
+	// dbg owns the workspace's breakpoints and debug session. nil in tests
+	// that build an editorService by hand; every use checks.
+	dbg *debug.Manager
+
 	// pluginWorkspaceDiags holds diagnostics published via
 	// publishWorkspaceDiagnostics, keyed by file path then plugin name — the
 	// path-keyed sibling of bufferEntry.pluginDiags, for files that aren't
@@ -284,6 +295,8 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 		pluginWorkspaceDiags: make(map[string]map[string][]lsp.Diagnostic),
 	}
 	svc.pluginMgr = plugin.NewManager(workspaceDir, svc)
+	svc.dbg = debug.NewManager(svc.pushDebugChanged)
+	svc.dbg.SetAdapters(cfg.EffectiveDebugAdapters())
 	if watcher != nil {
 		go svc.watchLoop()
 	}
@@ -971,6 +984,9 @@ func (s *Server) Wait() {
 	s.svc.lspMgr.Shutdown()
 	s.svc.pluginMgr.Shutdown()
 	s.svc.lintMgr.Shutdown()
+	if s.svc.dbg != nil {
+		s.svc.dbg.Shutdown() // a debuggee must not outlive the server
+	}
 	if s.svc.watcher != nil {
 		s.svc.watcher.Close() //nolint:errcheck
 	}

@@ -380,6 +380,14 @@ func (m *Manager) Start(cfg Config) error {
 	c.SetReverseHandler(m.reverseHandler(gen, adapterID(cfg, m.adapter(cfg.Adapter))))
 	client = c
 	m.mu.Lock()
+	if gen != m.gen {
+		// Shutdown ran while the adapter was starting. Recording it now would
+		// leave it running with nothing to stop it, and block every later
+		// Start as "already running".
+		m.mu.Unlock()
+		c.Shutdown()
+		return errors.New("the debug session was stopped while it was starting")
+	}
 	m.client = c
 	m.mu.Unlock()
 	go func() {

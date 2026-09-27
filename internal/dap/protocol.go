@@ -27,7 +27,7 @@ type message struct {
 
 	// Responses.
 	RequestSeq int    `json:"request_seq,omitempty"`
-	Success    bool   `json:"success,omitempty"`
+	Success    bool   `json:"success"` // required in a response, false included
 	Message    string `json:"message,omitempty"`
 
 	// Events.

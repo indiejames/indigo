@@ -1,6 +1,8 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -114,5 +116,25 @@ func TestDebugChangedFetchesOnlyWhatMoved(t *testing.T) {
 	}
 	if _, cmd := a.handleDebugChanged(client.DebugChangedMsg{StateSeq: 6, BreakpointsSeq: 5}); cmd == nil {
 		t.Error("a newer state seq did not trigger a fetch")
+	}
+}
+
+// A path that cannot be resolved yet — a file not saved — is not cached, so
+// once the file exists its symlinks are resolved like any other's.
+func TestCanonicalResolvesAFileSavedLater(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip(err)
+	}
+	resolved, _ := filepath.EvalSymlinks(real)
+	d := newAppDebug()
+	p := filepath.Join(link, "new.go")
+	if got := d.canonical(p); got != p {
+		t.Fatalf("unsaved: %q, want it as given", got)
+	}
+	os.WriteFile(p, nil, 0o644) //nolint:errcheck
+	if got, want := d.canonical(p), filepath.Join(resolved, "new.go"); got != want {
+		t.Errorf("after saving: %q, want %q", got, want)
 	}
 }

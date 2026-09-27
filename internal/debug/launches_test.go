@@ -3,6 +3,8 @@ package debug
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -320,5 +322,54 @@ func TestStartRefusedWhileAdapterIsStarting(t *testing.T) {
 	defer mu.Unlock()
 	if calls != 1 {
 		t.Errorf("adapter started %d times, want 1", calls)
+	}
+}
+
+// Shutdown while the adapter is still starting: the adapter that then comes up
+// must be shut down rather than recorded — recorded, it would run on with
+// nothing to stop it and make every later Start "already running".
+func TestShutdownDuringAdapterStart(t *testing.T) {
+	m := NewManager(nil)
+	entered, release := make(chan struct{}), make(chan struct{})
+	adapterEnd := make(chan net.Conn, 1)
+	m.startAdapter = func(context.Context, Config, func(dap.Event)) (*dap.Client, error) {
+		close(entered)
+		<-release
+		clientEnd, a := net.Pipe()
+		adapterEnd <- a
+		return dap.NewClient(clientEnd, nil), nil
+	}
+	done := make(chan error, 1)
+	go func() { done <- m.Start(Config{Adapter: "go", Program: "/p"}) }()
+	<-entered
+	m.Shutdown()
+	close(release)
+	a := <-adapterEnd
+	// Read what the shutdown sends (a disconnect request) until it closes the
+	// connection, which is the point: the adapter was not left running.
+	closed := make(chan error, 1)
+	go func() {
+		a.SetReadDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck
+		_, err := io.Copy(io.Discard, a)
+		closed <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("Start succeeded for a session that was shut down")
+		}
+	case <-time.After(10 * time.Second):
+		// Recorded rather than shut down, the session goes on to initialize
+		// an adapter that will never answer, until the launch timeout.
+		t.Fatal("Start went on with a session that was shut down")
+	}
+	m.mu.Lock()
+	recorded := m.client != nil
+	m.mu.Unlock()
+	if recorded {
+		t.Error("the adapter was recorded as the running session after Shutdown")
+	}
+	if err := <-closed; err != nil {
+		t.Errorf("the adapter's connection was not closed: %v", err)
 	}
 }

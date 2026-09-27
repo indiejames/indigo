@@ -170,6 +170,11 @@ func TestDebuggingFromTheEditorWindow(t *testing.T) {
 	// F5: start debugging; the program stops at the breakpoint.
 	updated, cmd = a.Update(tea.KeyPressMsg{Code: tea.KeyF5})
 	a = run(t, updated.(App), cmd, 90*time.Second, 0)
+	// The launch has returned by now (F5 waits for it); a failure is on the
+	// status bar, and waiting 30s for a stop that cannot come would hide it.
+	if bar := strings.Join(activeRows(a), "\n"); strings.Contains(bar, "restart debugging:") {
+		t.Fatalf("starting the debugger failed:\n%s", bar)
+	}
 	a = pump(t, a, q, "the stop to be shown", func(a App) bool { return rowStarts(a, 6, "▶") })
 
 	if bar := activeRows(a); !strings.Contains(strings.Join(bar, "\n"), "DEBUG breakpoint") {

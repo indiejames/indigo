@@ -86,6 +86,11 @@ type Model struct {
 	treeGen  int             // bumped when the tree is rebuilt; stale fetches are dropped
 
 	watches []watch
+	// watchGen is bumped whenever the watch list changes or an evaluation
+	// starts, so a slower evaluation of an older list cannot overwrite a
+	// watch added or deleted while it was in flight — treeGen alone does not
+	// move for that.
+	watchGen int
 
 	outLines     []string
 	outPartial   string // the last chunk's unterminated line
@@ -134,8 +139,9 @@ type childrenMsg struct {
 }
 
 type watchesMsg struct {
-	gen     int
-	results []watch
+	gen      int
+	watchGen int
+	results  []watch
 }
 
 type outputMsg struct {
@@ -192,11 +198,13 @@ func (m Model) fetchChildren(n *varNode, gen int) tea.Cmd {
 	})
 }
 
+// evalWatches evaluates every watch in the selected frame. Callers bump
+// m.watchGen first, so this evaluation supersedes any still in flight.
 func (m Model) evalWatches(gen int) tea.Cmd {
 	if len(m.watches) == 0 || m.state.Status != rpcclient.DebugStopped || m.frameIdx >= len(m.frames) {
 		return nil
 	}
-	be := m.be
+	be, watchGen := m.be, m.watchGen
 	frameID := m.frames[m.frameIdx].ID
 	exprs := make([]string, len(m.watches))
 	for i, w := range m.watches {
@@ -211,7 +219,7 @@ func (m Model) evalWatches(gen int) tea.Cmd {
 				out[i].err = err.Error()
 			}
 		}
-		return watchesMsg{gen: gen, results: out}
+		return watchesMsg{gen: gen, watchGen: watchGen, results: out}
 	})
 }
 
@@ -280,7 +288,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case childrenMsg:
 		return m.onChildren(msg)
 	case watchesMsg:
-		if msg.gen == m.treeGen {
+		if msg.gen == m.treeGen && msg.watchGen == m.watchGen {
 			m.watches = msg.results
 		}
 		return m, nil
@@ -340,6 +348,7 @@ func (m Model) selectFrame(i int, reveal bool) (tea.Model, tea.Cmd) {
 	m.treeGen++
 	m.roots = nil
 	f := m.frames[i]
+	m.watchGen++
 	cmds := []tea.Cmd{m.fetchScopes(f.ID, m.treeGen), m.evalWatches(m.treeGen)}
 	if reveal && f.Path != "" {
 		be := m.be
@@ -496,6 +505,7 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.watches = append(m.watches, watch{expr: expr})
 			}
 			m.adding, m.input = false, ""
+			m.watchGen++
 			return m, m.evalWatches(m.treeGen)
 		case "backspace":
 			if r := []rune(m.input); len(r) > 0 {
@@ -556,6 +566,7 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.focus == secWatches && m.cursor[secWatches] < len(m.watches) {
 			i := m.cursor[secWatches]
 			m.watches = append(m.watches[:i], m.watches[i+1:]...)
+			m.watchGen++ // an evaluation in flight still has the deleted one
 			m.clampCursor(secWatches)
 		}
 	case "G":

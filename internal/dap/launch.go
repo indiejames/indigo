@@ -100,6 +100,9 @@ func StartListening(ctx context.Context, name string, args []string, dir string,
 		if !found {
 			close(addrCh)
 		}
+		// Scan stops early on a line longer than its buffer; the rest still
+		// has to be read, for the same reason.
+		io.Copy(io.Discard, stdout) //nolint:errcheck
 	}()
 
 	var addr string

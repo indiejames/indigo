@@ -342,3 +342,28 @@ func TestNoSessionHeader(t *testing.T) {
 		t.Errorf("header:\n%s", screen(m))
 	}
 }
+
+// An evaluation of an older watch list, arriving after a newer one, must not
+// overwrite it: the watch added in between would vanish.
+func TestStaleWatchEvaluationIsDropped(t *testing.T) {
+	f := newFake()
+	m := started(t, f)
+	addWatch := func(m Model, expr string) (Model, tea.Cmd) {
+		m = key(m, "a")
+		for _, r := range expr {
+			updated, _ := m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+			m = updated.(Model)
+		}
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		return updated.(Model), cmd
+	}
+	m, first := addWatch(m, "x")  // evaluates [x], held back
+	m, second := addWatch(m, "y") // evaluates [x y]
+	updated, _ := m.Update(second())
+	m = updated.(Model)
+	updated, _ = m.Update(first()) // the slower, older answer lands last
+	m = updated.(Model)
+	if len(m.watches) != 2 || m.watches[1].expr != "y" {
+		t.Errorf("watches = %+v, want x and y: the stale evaluation overwrote the newer list", m.watches)
+	}
+}

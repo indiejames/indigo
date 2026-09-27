@@ -167,7 +167,8 @@ func (a App) handleDebugBreakpoints(msg debugBreakpointsMsg) App {
 // canonical resolves symlinks in a buffer's path, the spelling the server keys
 // breakpoints by and the debugger reports stops in. Cached: this runs for the
 // active buffer after every message. A path that cannot be resolved — a
-// container path seen from the host, a file not yet saved — is used as is.
+// container path seen from the host, a file not yet saved — is used as is,
+// and not cached: a file saved later must resolve then.
 func (d *appDebug) canonical(p string) string {
 	if p == "" {
 		return ""
@@ -175,12 +176,12 @@ func (d *appDebug) canonical(p string) string {
 	if c, ok := d.canon[p]; ok {
 		return c
 	}
-	c := p
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		c = r
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return p
 	}
-	d.canon[p] = c
-	return c
+	d.canon[p] = r
+	return r
 }
 
 // viewFor is what the buffer at path shows of the debug session.

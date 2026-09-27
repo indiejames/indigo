@@ -643,8 +643,12 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	buf := entry.buf
 	applied, newVersion, rebaseErr := applyRebased(entry, buf, clientID, baseVersion, []document.Op{op})
 	path := buf.Path()
-	canonPath := entry.canonPath // guarded by s.mu (SaveAs rewrites it)
 	content := buf.Content()
+	// Under s.mu, like applyServerOriginated's: breakpoint shifts depend on
+	// order, and two applies' shifts run after unlocking could land in the
+	// opposite order to their ops. (Safe to call here — the debug push it
+	// triggers runs on its own goroutine; see pushDebugChanged.)
+	s.shiftBreakpoints(entry.canonPath, applied)
 	s.mu.Unlock()
 
 	if rebaseErr != nil {
@@ -665,7 +669,6 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	go s.lspMgr.DidChange(path, content)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 	s.dispatchLineDeltas(bufID, path, applied)
-	s.shiftBreakpoints(canonPath, applied)
 	return nil
 }
 
@@ -787,8 +790,8 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 	buf := entry.buf
 	applied, newVersion, rebaseErr := applyRebased(entry, buf, clientID, baseVersion, ops)
 	path := buf.Path()
-	canonPath := entry.canonPath // guarded by s.mu (SaveAs rewrites it)
 	content := buf.Content()
+	s.shiftBreakpoints(entry.canonPath, applied) // under s.mu: see ApplyOp
 	s.mu.Unlock()
 
 	if rebaseErr != nil {
@@ -812,7 +815,6 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 	s.lintMgr.RunOnEdit(path, content)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 	s.dispatchLineDeltas(bufID, path, applied)
-	s.shiftBreakpoints(canonPath, applied)
 	return nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/indiejames/indigo/internal/dap"
 	"github.com/indiejames/indigo/internal/document"
 )
 
@@ -114,5 +115,93 @@ func TestSetResultsFollowsTheAdapter(t *testing.T) {
 	}
 	if bps[1].Line != 9 || bps[1].Verified || bps[1].Message == "" {
 		t.Errorf("second = %+v, want kept at 9, unverified with the reason", bps[1])
+	}
+}
+
+// A session is a tree of connections and each child is a separate program, so
+// a breakpoint one connection could not set is still set if another could —
+// and which answer arrives last must not decide it. The js-debug shape: the
+// root debugs nothing and answers "not verified" for everything, while the
+// child that runs the program verifies. Both orders, because the two are sent
+// from different goroutines at session start and this was a race.
+func TestVerifiedByAnyConnectionWins(t *testing.T) {
+	root, child := &dap.Client{}, &dap.Client{}
+	for _, tc := range []struct {
+		name  string
+		first *dap.Client
+		last  *dap.Client
+	}{
+		{"root answers last", child, root},
+		{"child answers last", root, child},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			answer := func(b *Breakpoints, c *dap.Client) {
+				b.setResults("/w/prog.ts", c, []int{2}, []resultLine{
+					{id: 1, verified: c == child, line: -1},
+				})
+			}
+			b := NewBreakpoints()
+			b.Toggle("/w/prog.ts", 2)
+			answer(b, tc.first)
+			answer(b, tc.last)
+			bps, _ := b.List("/w/prog.ts")
+			if len(bps) != 1 || !bps[0].Verified {
+				t.Errorf("after %s: %+v, want verified — the child set it", tc.name, bps)
+			}
+		})
+	}
+}
+
+// The reason a breakpoint could not be set survives while no connection has
+// set it, and is the root's — the connection a locally-generated message
+// ("this debugger does not support logpoints") comes from.
+func TestUnverifiedKeepsTheFirstReason(t *testing.T) {
+	root, child := &dap.Client{}, &dap.Client{}
+	b := NewBreakpoints()
+	b.Toggle("/w/prog.ts", 2)
+	b.setResults("/w/prog.ts", root, []int{2}, []resultLine{{line: -1, message: "no code at this line"}})
+	b.setResults("/w/prog.ts", child, []int{2}, []resultLine{{id: 1, line: -1, message: "not loaded yet"}})
+	bps, _ := b.List("/w/prog.ts")
+	if bps[0].Verified || bps[0].Message != "no code at this line" {
+		t.Errorf("got %+v, want unverified with the root's reason", bps[0])
+	}
+}
+
+// A child's "verified" must not outlive the child: its program is gone, so
+// the breakpoint is no longer set in anything.
+func TestForgetConnectionDropsADepartedChildsAnswer(t *testing.T) {
+	root, child := &dap.Client{}, &dap.Client{}
+	b := NewBreakpoints()
+	b.Toggle("/w/prog.ts", 2)
+	b.setResults("/w/prog.ts", root, []int{2}, []resultLine{{line: -1}})
+	b.setResults("/w/prog.ts", child, []int{2}, []resultLine{{id: 1, verified: true, line: -1}})
+	if bps, _ := b.List("/w/prog.ts"); !bps[0].Verified {
+		t.Fatalf("before the child left: %+v, want verified", bps[0])
+	}
+	before := b.Seq()
+	b.ForgetConnection(child)
+	bps, _ := b.List("/w/prog.ts")
+	if bps[0].Verified {
+		t.Errorf("after the child left: %+v, want unverified", bps[0])
+	}
+	if b.Seq() == before {
+		t.Error("seq did not move, so no window refetches the change")
+	}
+}
+
+// Changing a breakpoint's condition discards what connections said about the
+// old one: otherwise the next answer from any connection recomputes a
+// "verified" that was given for a different breakpoint.
+func TestChangingAConditionDropsOldAnswers(t *testing.T) {
+	root, child := &dap.Client{}, &dap.Client{}
+	b := NewBreakpoints()
+	b.Toggle("/w/prog.ts", 2)
+	b.setResults("/w/prog.ts", child, []int{2}, []resultLine{{id: 1, verified: true, line: -1}})
+	b.Set("/w/prog.ts", 2, "i > 10", "")
+	// The root has re-answered about the new condition; the child has not.
+	b.setResults("/w/prog.ts", root, []int{2}, []resultLine{{line: -1}})
+	bps, _ := b.List("/w/prog.ts")
+	if bps[0].Verified {
+		t.Errorf("got %+v, want unverified until a connection confirms the condition", bps[0])
 	}
 }

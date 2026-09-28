@@ -30,10 +30,83 @@ type Breakpoint struct {
 	Condition  string
 	LogMessage string
 
-	// ids is the id each session connection gave this breakpoint in its
-	// setBreakpoints answer, for matching its later "breakpoint" events.
-	// Keyed by connection because each numbers its own.
-	ids map[*dap.Client]int
+	// answers is what each of a session's connections said about this
+	// breakpoint, in the order they first answered — the root first, since
+	// it is the connection the session opens with. Verified and Message
+	// above are derived from it by recompute.
+	//
+	// Per connection rather than one shared answer because a session is a
+	// tree and each child is a separate program (see children.go): the root
+	// of a js-debug session does not debug the program at all and answers
+	// "not verified" for every breakpoint, while the child that does answers
+	// "verified". With one shared field, whichever reply landed last won —
+	// and at session start the two are sent from different goroutines, so a
+	// live breakpoint was drawn as one that could not be set, or not,
+	// depending on a race.
+	answers []connAnswer
+}
+
+// connAnswer is one connection's answer about one breakpoint.
+type connAnswer struct {
+	conn     *dap.Client
+	id       int // the adapter's id for it, for matching its later events; 0 when it gave none
+	verified bool
+	message  string
+}
+
+// record stores conn's answer, replacing its previous one.
+func (bp *Breakpoint) record(conn *dap.Client, a connAnswer) {
+	a.conn = conn
+	for i := range bp.answers {
+		if bp.answers[i].conn == conn {
+			bp.answers[i] = a
+			return
+		}
+	}
+	bp.answers = append(bp.answers, a)
+}
+
+// answerFrom returns conn's answer, and whether it gave one.
+func (bp *Breakpoint) answerFrom(conn *dap.Client) (connAnswer, bool) {
+	for _, a := range bp.answers {
+		if a.conn == conn {
+			return a, true
+		}
+	}
+	return connAnswer{}, false
+}
+
+// forget drops conn's answer, for a connection that has gone away.
+func (bp *Breakpoint) forget(conn *dap.Client) {
+	for i := range bp.answers {
+		if bp.answers[i].conn == conn {
+			bp.answers = append(bp.answers[:i], bp.answers[i+1:]...)
+			return
+		}
+	}
+}
+
+// recompute derives Verified and Message from the per-connection answers.
+//
+// Verified is a disjunction: a breakpoint set in *any* of a session's programs
+// is set, whatever the connections debugging the others say about it. Message
+// only means anything when nothing verified it, and is then the first
+// connection with something to say — the root, where a "this debugger does not
+// support logpoints" originates, before any child.
+func (bp *Breakpoint) recompute() {
+	bp.Verified, bp.Message = false, ""
+	for _, a := range bp.answers {
+		if a.verified {
+			bp.Verified = true
+			return
+		}
+	}
+	for _, a := range bp.answers {
+		if a.message != "" {
+			bp.Message = a.message
+			return
+		}
+	}
 }
 
 // Breakpoints is the server's breakpoint store: one set, shared by every
@@ -82,7 +155,10 @@ func (b *Breakpoints) Set(path string, line int, condition, logMessage string) b
 				return false
 			}
 			bp.Condition, bp.LogMessage = condition, logMessage
-			bp.Verified, bp.Message = false, "" // changed: the adapter has not confirmed it
+			// Changed: no connection has confirmed this form of it. The old
+			// answers must go too, or recompute would restore a "verified"
+			// given for the previous condition.
+			bp.Verified, bp.Message, bp.answers = false, "", nil
 			b.seq++
 			return true
 		}
@@ -110,7 +186,14 @@ func (b *Breakpoints) List(path string) ([]Breakpoint, uint64) {
 	var out []Breakpoint
 	for _, p := range paths {
 		for _, bp := range b.byPath[p] {
-			out = append(out, *bp)
+			c := *bp
+			// The copy must not alias the store's per-connection answers:
+			// the slice header would be shared, and record/forget mutate
+			// that backing array under the lock a caller no longer holds.
+			// Nothing outside this file reads them — Verified and Message
+			// are what they are for.
+			c.answers = nil
+			out = append(out, c)
 		}
 	}
 	return out, b.seq
@@ -168,7 +251,9 @@ func (b *Breakpoints) ApplyEdit(path string, op document.Op) bool {
 		}
 		if line != bp.Line {
 			bp.Line = line
-			bp.Verified, bp.Message = false, "" // moved: the adapter has not confirmed the new line
+			// Moved: no connection has confirmed the new line, and the old
+			// answers were about the old one.
+			bp.Verified, bp.Message, bp.answers = false, "", nil
 			changed = true
 		}
 		kept = append(kept, bp)
@@ -243,14 +328,14 @@ func (b *Breakpoints) setResults(path string, conn *dap.Client, sent []int, resu
 			if bp.Line != line {
 				continue
 			}
-			if results[i].id != 0 && conn != nil {
-				if bp.ids == nil {
-					bp.ids = map[*dap.Client]int{}
-				}
-				bp.ids[conn] = results[i].id
+			a := connAnswer{id: results[i].id, verified: results[i].verified, message: results[i].message}
+			if conn == nil {
+				// No connection named: the answer still counts, but an id
+				// under a nil key could not be matched back to a sender.
+				a.id = 0
 			}
-			bp.Verified = results[i].verified
-			bp.Message = results[i].message
+			bp.record(conn, a)
+			bp.recompute()
 			if results[i].verified && results[i].line >= 0 {
 				bp.Line = results[i].line
 			}
@@ -268,10 +353,12 @@ func (b *Breakpoints) updateByID(conn *dap.Client, r resultLine) bool {
 	defer b.mu.Unlock()
 	for path, bps := range b.byPath {
 		for _, bp := range bps {
-			if id, ok := bp.ids[conn]; !ok || id != r.id {
+			prev, ok := bp.answerFrom(conn)
+			if !ok || prev.id == 0 || prev.id != r.id {
 				continue
 			}
-			bp.Verified, bp.Message = r.verified, r.message
+			bp.record(conn, connAnswer{id: r.id, verified: r.verified, message: r.message})
+			bp.recompute()
 			if r.verified && r.line >= 0 {
 				bp.Line = r.line
 			}
@@ -291,10 +378,33 @@ func (b *Breakpoints) resetVerification() {
 	for _, bps := range b.byPath {
 		for _, bp := range bps {
 			bp.Verified, bp.Message = false, ""
-			bp.ids = nil
+			bp.answers = nil
 		}
 	}
 	b.seq++
+}
+
+// ForgetConnection drops everything a connection said, for a child session
+// that has ended. Its answers must not outlive it: a breakpoint is verified
+// while *some* connection has it set, so a departed child's "verified" would
+// otherwise keep a breakpoint looking live in a program that is gone.
+func (b *Breakpoints) ForgetConnection(conn *dap.Client) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	changed := false
+	for _, bps := range b.byPath {
+		for _, bp := range bps {
+			before := bp.Verified
+			bp.forget(conn)
+			bp.recompute()
+			if bp.Verified != before {
+				changed = true
+			}
+		}
+	}
+	if changed {
+		b.seq++
+	}
 }
 
 type resultLine struct {

@@ -141,10 +141,11 @@ func (s *editorService) DebugStart(_ context.Context, call proto.EditorService_d
 	if s.dbg == nil {
 		return res.SetError("debugging is not available")
 	}
-	if err := s.dbg.Start(cfg); err != nil {
+	warning, err := s.dbg.StartWithWarning(cfg)
+	if err != nil {
 		return res.SetError(err.Error())
 	}
-	return nil
+	return res.SetWarning(warning)
 }
 
 // readDebugConfig converts a capnp DebugConfig. Unreadable fields are left
@@ -160,6 +161,11 @@ func readDebugConfig(pc proto.DebugConfig) debug.Config {
 	cfg.Args = readTextList(pc.Args())
 	cfg.Env = readTextList(pc.Env())
 	cfg.Launch = decodeLaunch(pc.LaunchJson())
+	cfg.Request, _ = pc.Request()
+	cfg.Connect, _ = pc.Connect()
+	cfg.ProcessID = int(pc.ProcessId())
+	cfg.PickProcess = pc.PickProcess()
+	cfg.EnvFile, _ = pc.EnvFile()
 	return cfg
 }
 
@@ -186,6 +192,11 @@ func writeDebugConfig(pc proto.DebugConfig, cfg debug.Config) error {
 		func() error { return writeTextList(cfg.Args, pc.NewArgs) },
 		func() error { return writeTextList(cfg.Env, pc.NewEnv) },
 		func() error { return setLaunch(pc, cfg.Launch) },
+		func() error { return pc.SetRequest(cfg.Request) },
+		func() error { return pc.SetConnect(cfg.Connect) },
+		func() error { pc.SetProcessId(int64(cfg.ProcessID)); return nil },
+		func() error { pc.SetPickProcess(cfg.PickProcess); return nil },
+		func() error { return pc.SetEnvFile(cfg.EnvFile) },
 	} {
 		if err := set(); err != nil {
 			return err
@@ -244,6 +255,39 @@ func (s *editorService) DebugConfigs(_ context.Context, call proto.EditorService
 	for i, c := range cfgs {
 		if err := writeDebugConfig(list.At(i), c); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (s *editorService) ListProcesses(_ context.Context, call proto.EditorService_listProcesses) error {
+	call.Go() // reads build information from every executable the first time
+	res, err := call.AllocResults()
+	if err != nil {
+		return err
+	}
+	procs, err := debug.ListProcesses()
+	if err != nil {
+		return res.SetError(err.Error())
+	}
+	list, err := res.NewProcesses(int32(len(procs)))
+	if err != nil {
+		return err
+	}
+	for i, p := range procs {
+		item := list.At(i)
+		item.SetPid(int64(p.PID))
+		item.SetPpid(int64(p.PPID))
+		for _, set := range []func() error{
+			func() error { return item.SetName(p.Name) },
+			func() error { return item.SetExe(p.Exe) },
+			func() error { return item.SetGoVersion(p.GoVersion) },
+			func() error { return item.SetGoModule(p.GoModule) },
+			func() error { return writeTextList(p.Args, item.NewArgs) },
+		} {
+			if err := set(); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

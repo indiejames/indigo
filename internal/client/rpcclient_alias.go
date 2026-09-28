@@ -24,6 +24,7 @@ type (
 	DebugBreakpoint             = rpcclient.DebugBreakpoint
 	DebugChangedMsg             = rpcclient.DebugChangedMsg
 	DebugConfig                 = rpcclient.DebugConfig
+	DebugProcess                = rpcclient.DebugProcess
 	DebugFrame                  = rpcclient.DebugFrame
 	DebugOutputChunk            = rpcclient.DebugOutputChunk
 	DebugScope                  = rpcclient.DebugScope

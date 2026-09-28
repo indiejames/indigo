@@ -33,6 +33,20 @@ type DebugLaunch struct {
 	Cwd        string            `toml:"cwd"`
 	BuildFlags string            `toml:"build_flags"`
 	Env        map[string]string `toml:"env"`
+	// Request is "launch" (the default) or "attach", to a program already
+	// running: by ProcessID, or through Connect — the host:port of a debug
+	// adapter someone else started, such as `dlv debug --headless
+	// --listen=:2345 --accept-multiclient` on a remote machine.
+	Request   string `toml:"request"`
+	Connect   string `toml:"connect"`
+	ProcessID int    `toml:"process_id"`
+	// PickProcess asks which process to attach to each time the
+	// configuration is started, instead of a fixed ProcessID.
+	PickProcess bool `toml:"pick_process"`
+	// EnvFile is a .env file whose variables are added to the program's
+	// environment, read each time the session starts; Env entries win a
+	// clash. Relative to the workspace root.
+	EnvFile string `toml:"env_file"`
 	// Launch is passed to the adapter's launch request as is, over anything
 	// indigo sets itself: the place for adapter-specific settings
 	// (debugpy's justMyCode, lldb-dap's initCommands, Delve's dlvFlags).

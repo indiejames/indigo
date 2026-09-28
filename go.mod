@@ -65,6 +65,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/mattn/go-runewidth v0.0.27
 	github.com/sahilm/fuzzy v0.1.3
+	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.36.0
 )
 
@@ -93,6 +94,5 @@ require (
 	golang.org/x/exp v0.0.0-20250210185358-939b2ce775ac // indirect
 	golang.org/x/net v0.39.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 )

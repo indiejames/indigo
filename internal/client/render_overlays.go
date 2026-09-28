@@ -1129,24 +1129,32 @@ func messageLogMaxScroll(termW, termH int, log []logEntry) int {
 }
 
 // messageLogPopupLines formats each logged status message as "HH:MM:SS  text",
-// truncated to fit innerW columns, styled red for error ("E:"/"ERR:") entries.
+// wrapped to innerW columns with continuation lines indented under the text —
+// the log is where a message that went by too fast is read, so cutting it off
+// defeats it — and styled red for errors ("E:"/"ERR:"), yellow for warnings.
 func messageLogPopupLines(log []logEntry, innerW int) []string {
 	if len(log) == 0 {
 		return []string{popupTextStyle.Render("No messages yet.")}
 	}
-	lines := make([]string, len(log))
-	for i, e := range log {
+	var lines []string
+	for _, e := range log {
 		ts := e.at.Format("15:04:05") + "  "
-		avail := max(0, innerW-len([]rune(ts)))
-		textRunes := []rune(e.text)
-		if len(textRunes) > avail {
-			textRunes = append([]rune(string(textRunes[:max(0, avail-1)])), '…')
-		}
+		indent := strings.Repeat(" ", len([]rune(ts)))
+		avail := max(1, innerW-len([]rune(ts)))
 		style := popupTextStyle
-		if e.isErr {
+		switch {
+		case e.isErr:
 			style = diagErrorStyle.Background(popupBg)
+		case isWarnMessage(e.text):
+			style = diagWarnStyle.Background(popupBg)
 		}
-		lines[i] = popupTextStyle.Render(ts) + style.Render(string(textRunes))
+		for j, part := range wrapToWidth(e.text, avail) {
+			lead := ts
+			if j > 0 {
+				lead = indent
+			}
+			lines = append(lines, popupTextStyle.Render(lead)+style.Render(part))
+		}
 	}
 	return lines
 }
@@ -1223,6 +1231,10 @@ func renderToast(text string, maxW int) []string {
 	body := wrapToWidth(text, innerW)
 	border := lipgloss.NewStyle().Background(popupBg).Foreground(lipgloss.Color(activeDiagError))
 	textStyle := diagErrorStyle.Background(popupBg)
+	if isWarnMessage(text) {
+		border = lipgloss.NewStyle().Background(popupBg).Foreground(lipgloss.Color(activeDiagWarn))
+		textStyle = diagWarnStyle.Background(popupBg)
+	}
 
 	top := border.Render(bdrTL + strings.Repeat(bdrH, innerW) + bdrTR)
 	out := []string{top}

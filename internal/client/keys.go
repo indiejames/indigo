@@ -583,8 +583,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.saveAsInput != nil {
 		return m.handleSaveAsDialog(msg)
 	}
-	// Clear transient error on any key.
-	m = m.pushStatus("")
+	// Clear transient error on any key — but not a warning still being read.
+	if !m.keepThroughKey(msg.String()) {
+		m = m.pushStatus("")
+	}
 	switch m.mode {
 	case ModeNormal:
 		return m.handleNormal(msg)

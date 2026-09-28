@@ -393,6 +393,10 @@ func (a App) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd, bool) {
 		return a, nil, false
 	}
 	switch {
+	case a.procPicker != nil:
+		a.procPicker.query += msg.Content
+		a.procPicker.cursor = 0
+		return a, nil, true
 	case a.picker != nil:
 		a.picker.setQuery(a.picker.query + msg.Content)
 		return a, nil, true

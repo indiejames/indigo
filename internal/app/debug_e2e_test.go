@@ -190,7 +190,7 @@ func TestDebuggingFromTheEditorWindow(t *testing.T) {
 	if rowStarts(a, 6, "▶") {
 		t.Error("the stopped-here arrow is still shown after the session ended")
 	}
-	if !strings.Contains(a.status, "Debug session ended") {
-		t.Errorf("status = %q, want the session end reported", a.status)
+	if !strings.Contains(statusOf(a), "Debug session ended") {
+		t.Errorf("status = %q, want the session end reported", statusOf(a))
 	}
 }

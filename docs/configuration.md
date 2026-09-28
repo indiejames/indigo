@@ -351,7 +351,8 @@ mode = "debug"                # "debug" (a main package) or "test"; default "deb
 args = ["--port", "8080"]
 cwd = "."                     # default: the workspace root
 build_flags = "-tags dev"
-env = { LOG_LEVEL = "debug" }
+env_file = ".env"             # read each time the session starts
+env = { LOG_LEVEL = "debug" } # wins a clash with env_file
 
 [[debug]]
 name = "store tests"

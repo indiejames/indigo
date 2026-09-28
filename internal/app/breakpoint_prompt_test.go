@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,5 +118,32 @@ func TestBreakpointConditionPromptSetsItOnTheServer(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if bps, _, _ := rpc.ListBreakpoints(ctx, main); bps[0].Condition != "n > 1" {
 		t.Errorf("Esc changed the condition to %q", bps[0].Condition)
+	}
+}
+
+// Space d a opens the process picker, which also takes a typed host:port; one
+// nothing listens on is attempted, and the failure reported.
+func TestAttachPickerReportsAnUnreachableAddress(t *testing.T) {
+	a, _, _, _ := promptApp(t)
+	a = pressRun(t, a, "space", "d", "a")
+	if a.procPicker == nil {
+		t.Fatal("Space d a did not open the process picker")
+	}
+	if a.procPicker.loading {
+		t.Error("the process list never arrived")
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close() //nolint:errcheck
+	a = typeText(t, a, addr)
+	a = pressRun(t, a, "enter")
+	if a.procPicker != nil {
+		t.Error("the picker stayed open")
+	}
+	if !strings.Contains(statusOf(a), "E: attach:") || !strings.Contains(statusOf(a), addr) {
+		t.Errorf("status = %q, want the failed connection to %s reported", statusOf(a), addr)
 	}
 }

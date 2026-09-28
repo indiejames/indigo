@@ -136,3 +136,26 @@ func TestDebugConfigurationsArrivingLate(t *testing.T) {
 		t.Errorf("empty list status = %q, want where to add configurations", got.status)
 	}
 }
+
+func TestParseAttachTarget(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want DebugConfig
+	}{
+		{"1234", DebugConfig{Adapter: "go", Request: "attach", ProcessID: 1234}},
+		{" 1234 ", DebugConfig{Adapter: "go", Request: "attach", ProcessID: 1234}},
+		{"devbox:2345", DebugConfig{Adapter: "go", Request: "attach", Connect: "devbox:2345"}},
+		{":2345", DebugConfig{Adapter: "go", Request: "attach", Connect: "127.0.0.1:2345"}},
+		{"[::1]:2345", DebugConfig{Adapter: "go", Request: "attach", Connect: "[::1]:2345"}},
+	} {
+		got, err := ParseAttachTarget(tc.in)
+		if err != nil || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%q: %+v, %v; want %+v", tc.in, got, err, tc.want)
+		}
+	}
+	for _, bad := range []string{"", "0", "-5", "server", "host:port", "host:99999"} {
+		if _, err := ParseAttachTarget(bad); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+}

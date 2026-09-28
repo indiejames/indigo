@@ -3,8 +3,10 @@ package client
 import (
 	"context"
 	"fmt"
+	"net"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -245,6 +247,44 @@ var (
 	executeLogpoint            = breakpointPrompt(true)
 )
 
+// AttachPromptMsg asks the App to open the process picker for an attach
+// (Space d a).
+type AttachPromptMsg struct{}
+
+// PickProcessMsg asks the App to pick the process Config attaches to — a
+// configuration with PickProcess set — and then start it.
+type PickProcessMsg struct{ Config DebugConfig }
+
+func executeDebugAttach(m Model) (tea.Model, tea.Cmd) {
+	return m, func() tea.Msg { return AttachPromptMsg{} }
+}
+
+// ParseAttachTarget reads what was typed into the attach picker: a process id, or the
+// host:port of a Delve already serving (`dlv debug --headless
+// --listen=:2345`). A port alone means this machine. Go only — other
+// languages attach through a named configuration, where their adapter's
+// own attach settings can go.
+func ParseAttachTarget(text string) (DebugConfig, error) {
+	text = strings.TrimSpace(text)
+	if pid, err := strconv.Atoi(text); err == nil {
+		if pid <= 0 {
+			return DebugConfig{}, fmt.Errorf("%d is not a process id", pid)
+		}
+		return DebugConfig{Adapter: "go", Request: "attach", ProcessID: pid}, nil
+	}
+	host, port, err := net.SplitHostPort(text)
+	if err != nil {
+		return DebugConfig{}, fmt.Errorf("%q is neither a process id nor host:port", text)
+	}
+	if n, err := strconv.Atoi(port); err != nil || n <= 0 || n > 65535 {
+		return DebugConfig{}, fmt.Errorf("%q is not a port", port)
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return DebugConfig{Adapter: "go", Request: "attach", Connect: net.JoinHostPort(host, port)}, nil
+}
+
 // debugConfigFor is the launch configuration for debugging this buffer: for
 // Go, its package (as a test run in a test file); for anything else, the file
 // itself, with the adapter left for the server to choose by extension from
@@ -330,6 +370,9 @@ func executeDebugTest(m Model) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) startDebugging(cfg DebugConfig) (tea.Model, tea.Cmd) {
+	if cfg.PickProcess && cfg.ProcessID <= 0 {
+		return m, func() tea.Msg { return PickProcessMsg{Config: cfg} }
+	}
 	rpc := m.rpc
 	m = m.pushStatus("Starting debugger for " + cfg.Describe() + "…")
 	// Long: a launch builds the program. The server has its own bound.
@@ -474,6 +517,7 @@ var debugMenu = command{
 		{key: "t", name: "debug-test", label: "Debug the test at the cursor", execute: executeDebugTest},
 		{key: "l", name: "debug-configurations", label: "Debug a named configuration…", execute: executeDebugConfigs},
 		{key: "r", name: "debug-restart", label: "Restart (the last configuration)", execute: executeDebugRestart},
+		{key: "a", name: "debug-attach", label: "Attach to a running process…", execute: executeDebugAttach},
 		{key: "c", name: "debug-continue", label: "Continue", execute: executeDebugContinue},
 		{key: "n", name: "debug-step-over", label: "Step over", execute: executeDebugNext},
 		{key: "i", name: "debug-step-in", label: "Step in", execute: executeDebugStepIn},

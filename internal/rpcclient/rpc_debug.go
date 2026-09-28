@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -127,12 +128,74 @@ type DebugConfig struct {
 	// Launch is merged over the launch request, for adapter-specific
 	// settings.
 	Launch map[string]any
+	// Request is "launch" ("" too) or "attach". An attach goes to a running
+	// program: by ProcessID, or through Connect, the host:port of a debug
+	// adapter already running (`dlv --headless`).
+	Request   string
+	Connect   string
+	ProcessID int
+	// PickProcess: ask which process to attach to when this is started.
+	PickProcess bool
+	// EnvFile is a .env file the server reads when the session starts.
+	EnvFile string
+}
+
+// DebugProcess is a process the debugger could attach to. GoVersion and
+// GoModule are set for a Go program.
+type DebugProcess struct {
+	PID, PPID int
+	Name, Exe string
+	Args      []string
+	GoVersion string
+	GoModule  string
+}
+
+// IsGo reports whether p is a Go program.
+func (p DebugProcess) IsGo() bool { return p.GoVersion != "" }
+
+// IsNode reports whether p is a Node.js process — including one running
+// TypeScript through Node's type stripping or tsx, which are node too.
+func (p DebugProcess) IsNode() bool { return p.Name == "node" }
+
+// ListProcesses returns the processes on the server's machine the debugger
+// could attach to, Go programs first.
+func (r *RPC) ListProcesses(ctx context.Context) ([]DebugProcess, error) {
+	fut, rel := r.svc.ListProcesses(ctx, nil)
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, err
+	}
+	if err := resultError(res.Error()); err != nil {
+		return nil, err
+	}
+	list, err := res.Processes()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]DebugProcess, list.Len())
+	for i := range out {
+		p := list.At(i)
+		name, _ := p.Name()
+		exe, _ := p.Exe()
+		ver, _ := p.GoVersion()
+		mod, _ := p.GoModule()
+		out[i] = DebugProcess{PID: int(p.Pid()), PPID: int(p.Ppid()), Name: name, Exe: exe,
+			Args: textList(p.Args()), GoVersion: ver, GoModule: mod}
+	}
+	return out, nil
 }
 
 // Describe names cfg for a status line: its name, or what it runs.
 func (cfg DebugConfig) Describe() string {
 	if cfg.Name != "" {
 		return cfg.Name
+	}
+	switch {
+	case cfg.Request == "attach" && cfg.Connect != "":
+		return "the debugger at " + cfg.Connect
+	case cfg.Request == "attach" && cfg.ProcessID > 0:
+		return fmt.Sprintf("process %d", cfg.ProcessID)
 	}
 	what := filepath.Base(cfg.Program)
 	if cfg.Mode == "test" {
@@ -223,6 +286,13 @@ func (r *RPC) ListBreakpoints(ctx context.Context, path string) ([]DebugBreakpoi
 
 // DebugStart launches cfg and returns once the program is running.
 func (r *RPC) DebugStart(ctx context.Context, cfg DebugConfig) error {
+	_, err := r.DebugStartWithWarning(ctx, cfg)
+	return err
+}
+
+// DebugStartWithWarning is DebugStart, also returning the server's warning
+// about a session that started but will not fully work ("" for none).
+func (r *RPC) DebugStartWithWarning(ctx context.Context, cfg DebugConfig) (string, error) {
 	fut, rel := r.svc.DebugStart(ctx, func(p proto.EditorService_debugStart_Params) error {
 		pc, err := p.NewConfig()
 		if err != nil {
@@ -233,9 +303,13 @@ func (r *RPC) DebugStart(ctx context.Context, cfg DebugConfig) error {
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return err
+		return "", err
 	}
-	return resultError(res.Error())
+	if err := resultError(res.Error()); err != nil {
+		return "", err
+	}
+	warning, _ := res.Warning()
+	return warning, nil
 }
 
 // DebugConfigs lists the workspace's named debug configurations; activeFile is
@@ -295,6 +369,11 @@ func writeDebugConfig(pc proto.DebugConfig, cfg DebugConfig) error {
 		func() error { return setTextList(cfg.Args, pc.NewArgs) },
 		func() error { return setTextList(cfg.Env, pc.NewEnv) },
 		func() error { return setLaunch(pc, cfg.Launch) },
+		func() error { return pc.SetRequest(cfg.Request) },
+		func() error { return pc.SetConnect(cfg.Connect) },
+		func() error { pc.SetProcessId(int64(cfg.ProcessID)); return nil },
+		func() error { pc.SetPickProcess(cfg.PickProcess); return nil },
+		func() error { return pc.SetEnvFile(cfg.EnvFile) },
 	} {
 		if err := set(); err != nil {
 			return err
@@ -330,6 +409,11 @@ func readDebugConfig(pc proto.DebugConfig) DebugConfig {
 	cfg.Args = textList(pc.Args())
 	cfg.Env = textList(pc.Env())
 	cfg.Launch = decodeLaunch(pc.LaunchJson())
+	cfg.Request, _ = pc.Request()
+	cfg.Connect, _ = pc.Connect()
+	cfg.ProcessID = int(pc.ProcessId())
+	cfg.PickProcess = pc.PickProcess()
+	cfg.EnvFile, _ = pc.EnvFile()
 	return cfg
 }
 

@@ -2,16 +2,19 @@ package debug
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
 // VS Code's .vscode/launch.json, read so a project that already has one needs
-// no second copy. Only "launch" requests are taken, and only for debuggers
+// no second copy. "launch" and "attach" requests are taken, only for debuggers
 // indigo has: Go ("go"), and any adapter whose name matches the entry's type
 // once VS Code's type names are translated (debugpy → python, lldb-dap →
 // lldb, node/pwa-node → node). Other entries — attach requests, compound configurations, Node — are
@@ -41,7 +44,10 @@ var launchJSONKeysDropped = map[string]bool{
 	"type": true, "request": true, "name": true, "program": true, "args": true,
 	"env": true, "cwd": true, "mode": true, "buildFlags": true,
 	"console": true, "presentation": true, "preLaunchTask": true, "postDebugTask": true,
-	"internalConsoleOptions": true, "serverReadyAction": true, "envFile": true,
+	"internalConsoleOptions": true, "serverReadyAction": true,
+	// Read by indigo (Config.EnvFile), for every debugger — not passed on,
+	// where only js-debug would have understood it.
+	"envFile": true,
 }
 
 // readLaunchJSON returns the usable configurations in root's launch.json. A
@@ -91,7 +97,8 @@ func (m *Manager) fromLaunchJSON(root, activeFile string, e map[string]any) (cfg
 		}
 		adapter = typ
 	}
-	if req, _ := e["request"].(string); req != "launch" {
+	req, _ := e["request"].(string)
+	if req != "launch" && req != "attach" {
 		return Config{}, false, nil
 	}
 	x := &varExpander{root: root, file: activeFile}
@@ -99,7 +106,10 @@ func (m *Manager) fromLaunchJSON(root, activeFile string, e map[string]any) (cfg
 		s, _ := e[key].(string)
 		return x.expand(s)
 	}
-	cfg = Config{Adapter: adapter, Program: str("program"), Cwd: str("cwd")}
+	cfg = Config{Adapter: adapter, Program: str("program"), Cwd: str("cwd"), EnvFile: str("envFile")}
+	if req == "attach" {
+		cfg.Request = "attach"
+	}
 	cfg.Name, _ = e["name"].(string)
 	if cfg.Name == "" {
 		return Config{}, false, fmt.Errorf("no name")
@@ -119,7 +129,49 @@ func (m *Manager) fromLaunchJSON(root, activeFile string, e map[string]any) (cfg
 		}
 		sort.Strings(cfg.Env)
 	}
-	if adapter == "go" {
+	dropped := launchJSONKeysDropped
+	if adapter == "go" && cfg.Request == "attach" {
+		// vscode-go's attach: "local" to a process id, or "remote" to a
+		// headless Delve at host:port — which vscode-go connects to itself,
+		// as indigo does here with Connect.
+		cfg.Mode = str("mode")
+		switch cfg.Mode {
+		case "", "local":
+			cfg.Mode = "local"
+			switch pid := e["processId"].(type) {
+			case float64:
+				cfg.ProcessID = int(pid)
+			case string:
+				if isPickProcessVar(pid) {
+					cfg.PickProcess = true
+					break
+				}
+				n, err := strconv.Atoi(x.expand(pid))
+				if err != nil && x.err == nil {
+					return Config{}, false, fmt.Errorf("processId %q is not a process id", pid)
+				}
+				cfg.ProcessID = n
+			default:
+				return Config{}, false, errors.New("an attach needs a processId")
+			}
+		case "remote":
+			host := str("host")
+			if host == "" {
+				host = "127.0.0.1"
+			}
+			port, ok := e["port"].(float64)
+			if !ok {
+				return Config{}, false, errors.New(`a remote attach needs a "port"`)
+			}
+			cfg.Connect = net.JoinHostPort(host, strconv.Itoa(int(port)))
+		default:
+			return Config{}, false, fmt.Errorf("attach mode %q is not supported (local or remote)", cfg.Mode)
+		}
+		dropped = map[string]bool{"processId": true, "host": true, "port": true}
+		for k := range launchJSONKeysDropped {
+			dropped[k] = true
+		}
+	} else if adapter == "go" {
 		cfg.Mode = str("mode")
 		switch cfg.Mode {
 		case "", "auto":
@@ -148,8 +200,31 @@ func (m *Manager) fromLaunchJSON(root, activeFile string, e map[string]any) (cfg
 			cfg.BuildFlags = strings.Join(parts, " ")
 		}
 	}
+	// Another adapter's processId becomes cfg.ProcessID — indigo sends it on
+	// as processId, and for Node it is what switches the program's inspector
+	// on (js-debug's server attaches only by port) — and the picker is
+	// answered by indigo before the session starts. Either way the raw key is
+	// not passed through as well.
+	if adapter != "go" {
+		takeRaw := false
+		switch pid := e["processId"].(type) {
+		case float64:
+			cfg.ProcessID, takeRaw = int(pid), true
+		case string:
+			if isPickProcessVar(pid) && !cfg.PickProcess {
+				cfg.PickProcess, takeRaw = true, true
+			}
+		}
+		if takeRaw {
+			d := map[string]bool{"processId": true}
+			for k := range dropped {
+				d[k] = true
+			}
+			dropped = d
+		}
+	}
 	for k, v := range e {
-		if launchJSONKeysDropped[k] {
+		if dropped[k] {
 			continue
 		}
 		if cfg.Launch == nil {
@@ -157,7 +232,7 @@ func (m *Manager) fromLaunchJSON(root, activeFile string, e map[string]any) (cfg
 		}
 		cfg.Launch[k] = x.expandAny(v)
 	}
-	if cfg.Program == "" && adapter == "go" {
+	if cfg.Program == "" && adapter == "go" && cfg.Request != "attach" {
 		cfg.Program = root
 	}
 	if cfg.Program != "" && !filepath.IsAbs(cfg.Program) {
@@ -165,6 +240,9 @@ func (m *Manager) fromLaunchJSON(root, activeFile string, e map[string]any) (cfg
 	}
 	if cfg.Cwd != "" && !filepath.IsAbs(cfg.Cwd) {
 		cfg.Cwd = filepath.Join(root, cfg.Cwd)
+	}
+	if cfg.EnvFile != "" && !filepath.IsAbs(cfg.EnvFile) {
+		cfg.EnvFile = filepath.Join(root, cfg.EnvFile)
 	}
 	if x.err != nil {
 		return Config{}, false, x.err
@@ -308,4 +386,15 @@ func stripJSONC(src []byte) []byte {
 		}
 	}
 	return out
+}
+
+// isPickProcessVar reports whether a processId is the process picker: VS
+// Code's ${command:pickProcess}, and the spellings extensions contribute
+// (vscode-go's pickGoProcess, js-debug's PickProcess).
+func isPickProcessVar(s string) bool {
+	switch strings.TrimSpace(s) {
+	case "${command:pickProcess}", "${command:pickGoProcess}", "${command:PickProcess}":
+		return true
+	}
+	return false
 }

@@ -160,7 +160,7 @@ func TestDebugConfigFor(t *testing.T) {
 // The debug keys are reachable both as function keys and under Space d, and
 // survive a keybinding override rebuilding the tables from their defaults.
 func TestDebugKeysAreBound(t *testing.T) {
-	for _, seq := range [][]string{{"f5"}, {"f9"}, {"f10"}, {"f11"}, {"shift+f11"}, {"shift+f5"}, {"space", "d", "b"}, {"space", "d", "B"}, {"space", "d", "L"}, {"space", "d", "d"}, {"space", "d", "t"}, {"space", "d", "l"}, {"space", "d", "r"}} {
+	for _, seq := range [][]string{{"f5"}, {"f9"}, {"f10"}, {"f11"}, {"shift+f11"}, {"shift+f5"}, {"space", "d", "b"}, {"space", "d", "B"}, {"space", "d", "L"}, {"space", "d", "d"}, {"space", "d", "t"}, {"space", "d", "l"}, {"space", "d", "r"}, {"space", "d", "a"}} {
 		if _, ok := findIn(prefixCmds, seq); !ok {
 			t.Errorf("%v is not bound", seq)
 		}

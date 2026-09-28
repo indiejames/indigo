@@ -61,7 +61,29 @@ type Config struct {
 	// Launch is merged over the launch request indigo builds, for
 	// adapter-specific settings.
 	Launch map[string]any
+
+	// Request is "launch" (the default: start the program) or "attach" (to
+	// one already running, which a stop then detaches from rather than
+	// ends).
+	Request string
+	// Connect is the host:port of a debug adapter that is already running —
+	// `dlv --headless`, typically on another machine or in a container — to
+	// use instead of starting one.
+	Connect string
+	// ProcessID is the process to attach to, for an attach that is not a
+	// Connect.
+	ProcessID int
+	// PickProcess says the user chooses the process when the configuration
+	// is started (launch.json's ${command:pickProcess}); the editor asks, and
+	// starts it with ProcessID filled in.
+	PickProcess bool
+	// EnvFile is a .env file read each time the session starts (envfile.go);
+	// its variables join Env, and Env's own entries win a clash.
+	EnvFile string
 }
+
+// attaching reports whether cfg attaches to a program rather than starting it.
+func (cfg Config) attaching() bool { return cfg.Request == "attach" }
 
 // Frame is one stack frame.
 type Frame struct {
@@ -126,18 +148,28 @@ type Manager struct {
 	// module is slow; finite, because a launch that never returns is exactly
 	// what macOS does when Developer Mode is off.
 	launchTimeout time.Duration
+	// attachTimeout bounds an attach, which has no build to wait for.
+	attachTimeout time.Duration
 
 	mu       sync.Mutex
 	last     *Config // the most recently started configuration, for Restart
 	adapters []config.DebugAdapter
-	client   *dap.Client    // the root connection, which owns the adapter
-	children []*dap.Client  // sessions the adapter asked for (children.go)
-	active   *dap.Client    // the child that last stopped
-	ending   sync.WaitGroup // sessions whose adapter is still being shut down
-	caps     dap.Capabilities
-	gen      int // bumped per session, so a finished session's events are ignored
-	state    State
-	stateSeq uint64
+	client   *dap.Client   // the root connection, which owns the adapter
+	children []*dap.Client // sessions the adapter asked for (children.go)
+	active   *dap.Client   // the child that last stopped
+	attached bool          // the session attached: stopping detaches, leaving the program running
+	// connected: the session connected to an adapter someone else started
+	// (Config.Connect). Such an adapter outlives the session, so it — not a
+	// disconnect — decides whether the program runs on; see detach.
+	connected bool
+	// attachedPID is the process an OS-level debugger (Delve, lldb) attached
+	// to by id, 0 otherwise; see unstickAfterDetach.
+	attachedPID int
+	ending      sync.WaitGroup // sessions whose adapter is still being shut down
+	caps        dap.Capabilities
+	gen         int // bumped per session, so a finished session's events are ignored
+	state       State
+	stateSeq    uint64
 
 	outMu   sync.Mutex
 	out     []OutputChunk
@@ -162,6 +194,7 @@ func NewManager(notify Notifier) *Manager {
 		Breakpoints:   NewBreakpoints(),
 		notify:        notify,
 		launchTimeout: 3 * time.Minute,
+		attachTimeout: 30 * time.Second,
 	}
 	m.startAdapter = m.startDefaultAdapter
 	return m
@@ -300,7 +333,7 @@ func (m *Manager) sendBreakpoints(ctx context.Context, c *dap.Client, path strin
 		if j >= len(reqIdx) {
 			break
 		}
-		rl := resultLine{id: r.ID, verified: r.Verified, line: r.Line - 1, message: r.Message}
+		rl := resultLine{id: r.ID, verified: r.Verified, line: r.Line - 1, message: readableBreakpointMessage(r.Message)}
 		if r.Line == 0 {
 			rl.line = -1
 		}
@@ -317,30 +350,89 @@ var ErrSessionActive = errors.New("a debug session is already running; stop it f
 // running (or stopped at a breakpoint). Every breakpoint is sent before the
 // program starts.
 func (m *Manager) Start(cfg Config) error {
-	cfg, err := m.chooseAdapter(cfg)
+	_, err := m.StartWithWarning(cfg)
+	return err
+}
+
+// StartWithWarning is Start, also returning a warning about a session that
+// started but will not fully work — "" when there is none. The warning is
+// written to the session's console too.
+func (m *Manager) StartWithWarning(cfg Config) (warning string, err error) {
+	if cfg.PickProcess && cfg.ProcessID <= 0 {
+		return "", errors.New("this configuration attaches to a process chosen when it starts; start it from an editor window")
+	}
+	cfg, err = m.chooseAdapter(cfg)
 	if err != nil {
-		return err
+		return "", err
+	}
+	if cfg.attaching() && cfg.ProcessID > 0 && isJSDebug(m.adapter(cfg.Adapter)) {
+		warning = tsxWarning(cfg.ProcessID)
+	}
+	// What is recorded for Restart is the configuration as asked for — by
+	// process id — so a restart re-attaches the same way.
+	asked := cfg
+	// Refused now, before anything below acts on the outside world — attaching
+	// to Node by pid signals the program — rather than only at the committing
+	// check further down, which a second start would reach having already
+	// sent the signal.
+	m.mu.Lock()
+	busy := m.client != nil || m.state.Status == StatusStarting
+	m.mu.Unlock()
+	if busy {
+		return "", ErrSessionActive
+	}
+	// Before the tsx preload, which adds to NODE_OPTIONS — a NODE_OPTIONS the
+	// .env file sets has to be in Env by then, or it would be replaced.
+	if cfg, err = withEnvFile(cfg); err != nil {
+		return "", err
+	}
+	if isJSDebug(m.adapter(cfg.Adapter)) {
+		cfg = withTSXPreload(cfg)
+	}
+	if cfg.attaching() && cfg.ProcessID > 0 && isJSDebug(m.adapter(cfg.Adapter)) {
+		if _, hasPort := cfg.Launch["port"]; !hasPort {
+			if cfg, err = attachNodeByPID(cfg); err != nil {
+				return "", err
+			}
+		}
 	}
 	m.mu.Lock()
 	// Starting counts as running: the adapter is not recorded until it is
 	// up, and a second Start in that window would launch a second debugger.
 	if m.client != nil || m.state.Status == StatusStarting {
 		m.mu.Unlock()
-		return ErrSessionActive
+		return "", ErrSessionActive
 	}
 	m.gen++
 	gen := m.gen
 	// Remembered even if the launch fails: the usual reason to restart is
 	// to try again after fixing the build error it reported.
-	last := cfg
+	last := asked
 	m.last = &last
+	m.attached = cfg.attaching()
+	m.connected = cfg.Connect != ""
+	m.attachedPID = 0
+	if cfg.attaching() && cfg.ProcessID > 0 && !isJSDebug(m.adapter(cfg.Adapter)) {
+		m.attachedPID = cfg.ProcessID
+	}
 	m.state = State{Status: StatusStarting}
 	m.stateSeq++
 	m.mu.Unlock()
 	m.resetOutput()
+	if warning != "" {
+		m.appendOutput("console", "Warning: "+warning+"\n")
+	}
 	m.fire()
 
-	ctx, cancel := context.WithTimeout(context.Background(), m.launchTimeout)
+	// An attach builds nothing, so it gets far less than a launch: a wedged
+	// adapter (Delve can wedge when attached to in the instant it is starting
+	// its own program) should be reported in seconds, not after a build's
+	// allowance.
+	timeout := m.launchTimeout
+	if cfg.attaching() {
+		timeout = min(timeout, m.attachTimeout)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	var client *dap.Client // set once the adapter is up; fail reads it
@@ -363,7 +455,10 @@ func (m *Manager) Start(cfg Config) error {
 			err = errors.New(msg)
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			msg = fmt.Sprintf("the debugger did not start the program within %v", m.launchTimeout)
+			msg = fmt.Sprintf("the debugger did not start the program within %v", timeout)
+			if cfg.attaching() {
+				msg = fmt.Sprintf("the debugger did not attach within %v", timeout)
+			}
 			if hint := PermissionHint(); hint != "" {
 				msg += " — " + hint
 			}
@@ -373,9 +468,17 @@ func (m *Manager) Start(cfg Config) error {
 		return err
 	}
 
-	c, err := m.startAdapter(ctx, cfg, func(e dap.Event) { m.onEvent(gen, nil, e) })
+	handler := func(e dap.Event) { m.onEvent(gen, nil, e) }
+	var c *dap.Client
+	if cfg.Connect != "" {
+		// An adapter someone else started: connect, and never kill it —
+		// closing the connection is all indigo owns.
+		c, err = dap.Dial(ctx, cfg.Connect, handler)
+	} else {
+		c, err = m.startAdapter(ctx, cfg, handler)
+	}
 	if err != nil {
-		return fail(err)
+		return "", fail(err)
 	}
 	c.SetReverseHandler(m.reverseHandler(gen, adapterID(cfg, m.adapter(cfg.Adapter))))
 	client = c
@@ -386,7 +489,7 @@ func (m *Manager) Start(cfg Config) error {
 		// Start as "already running".
 		m.mu.Unlock()
 		c.Shutdown()
-		return errors.New("the debug session was stopped while it was starting")
+		return "", errors.New("the debug session was stopped while it was starting")
 	}
 	m.client = c
 	m.mu.Unlock()
@@ -404,7 +507,7 @@ func (m *Manager) Start(cfg Config) error {
 
 	caps, err := c.Initialize(ctx, adapterID(cfg, m.adapter(cfg.Adapter)))
 	if err != nil {
-		return fail(err)
+		return "", fail(err)
 	}
 	m.mu.Lock()
 	m.caps = caps
@@ -412,9 +515,13 @@ func (m *Manager) Start(cfg Config) error {
 
 	args, err := launchArgs(cfg, m.adapter(cfg.Adapter))
 	if err != nil {
-		return fail(err)
+		return "", fail(err)
 	}
-	err = c.LaunchSession(ctx, caps, args, func(ctx context.Context) error {
+	request := "launch"
+	if cfg.attaching() {
+		request = "attach"
+	}
+	err = c.StartSession(ctx, caps, request, args, func(ctx context.Context) error {
 		for _, path := range m.Breakpoints.Paths() {
 			if err := m.sendBreakpoints(ctx, c, path); err != nil {
 				return err
@@ -423,7 +530,7 @@ func (m *Manager) Start(cfg Config) error {
 		return nil
 	})
 	if err != nil {
-		return fail(err)
+		return "", fail(err)
 	}
 	// "stopped" may already have arrived (a breakpoint on the first line);
 	// only move from starting to running.
@@ -434,7 +541,7 @@ func (m *Manager) Start(cfg Config) error {
 		m.setState(gen, State{Status: StatusRunning})
 	}
 	m.fire()
-	return nil
+	return warning, nil
 }
 
 // Restart stops any running session and starts the most recently started
@@ -449,7 +556,7 @@ func (m *Manager) Restart(fallback Config) (Config, error) {
 	active := m.client != nil
 	gen := m.gen
 	m.mu.Unlock()
-	if cfg.Program == "" && cfg.Name == "" {
+	if cfg.Program == "" && cfg.Name == "" && !cfg.attaching() {
 		return cfg, errors.New("nothing to restart: no debug session has been started yet")
 	}
 	if active {
@@ -469,10 +576,33 @@ func (m *Manager) endSession(gen int, st State) {
 	}
 	c := m.client
 	children := m.children
+	target := m.targetLocked()
+	terminate := !m.attached
+	resume := m.connected
+	pid := m.attachedPID
+	prev := m.state
 	m.client, m.children, m.active = nil, nil, nil
 	m.state = st
 	m.stateSeq++
 	m.mu.Unlock()
+	if !terminate && c != nil {
+		// Before anything is closed: the detach has to reach the child the
+		// program stopped in, and the breakpoints every connection set.
+		m.ending.Add(1)
+		conns := append([]*dap.Client{c}, children...)
+		go func() {
+			defer m.ending.Done()
+			m.detach(conns, target, prev, resume)
+			for _, child := range children {
+				child.Close() //nolint:errcheck
+			}
+			c.ShutdownWith(false)
+			unstickAfterDetach(pid)
+		}()
+		m.Breakpoints.resetVerification()
+		m.fire()
+		return
+	}
 	for _, child := range children {
 		go child.Close() //nolint:errcheck // the root's disconnect ends the program
 	}
@@ -485,11 +615,74 @@ func (m *Manager) endSession(gen int, st State) {
 		m.ending.Add(1)
 		go func() {
 			defer m.ending.Done()
-			c.Shutdown()
+			c.ShutdownWith(terminate)
 		}()
 	}
 	m.Breakpoints.resetVerification()
 	m.fire()
+}
+
+// detach leaves an attached program as if indigo had never been there: its
+// breakpoints cleared and, if it is stopped, running again. The disconnect
+// that follows cannot be relied on for either. A multi-client Delve server
+// (`dlv --headless --accept-multiclient`) leaves the program exactly as the
+// client left it — halted at the breakpoint that stopped it, with that
+// breakpoint still set — and ignores DAP's suspendDebuggee (checked in Delve
+// 1.26's source, onDisconnectRequest). A program paused on a remote machine
+// with nobody attached is the worst outcome of a detach. Best effort, bounded:
+// an adapter that has already gone fails these at once.
+//
+// resume is set only for a session that connected to an adapter someone else
+// started. An adapter indigo started to attach by process id (dlv, js-debug)
+// resumes the program itself when it detaches, and a continue sent just ahead
+// of that detach races it: Delve halts the process to detach, and under load
+// the halt could land around the still-settling continue and leave the
+// program stopped — seen as process state T in TestAttachToARunningProcess,
+// about one full test run in three.
+func (m *Manager) detach(conns []*dap.Client, target *dap.Client, prev State, resume bool) {
+	// Clear first — resumed with them still set, the program can stop on one
+	// again at once, and a headless Delve would leave it there — then resume.
+	// Each step has its own bound, so a slow first step cannot starve the
+	// resume, the one whose omission leaves the program frozen.
+	clearCtx, cancelClear := context.WithTimeout(context.Background(), 2*time.Second)
+	for _, c := range conns {
+		for _, path := range m.Breakpoints.Paths() {
+			c.SetBreakpoints(clearCtx, path, nil) //nolint:errcheck
+		}
+	}
+	cancelClear()
+	if !resume || prev.Status != StatusStopped || target == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	thread := prev.ThreadID
+	if thread == 0 {
+		if threads, err := target.Threads(ctx); err == nil && len(threads) > 0 {
+			thread = threads[0].ID
+		}
+	}
+	target.Continue(ctx, thread) //nolint:errcheck
+}
+
+// unstickAfterDetach makes sure a process an OS-level debugger attached to by
+// id is not left stopped once it has detached. Delve detaching on macOS can
+// leave the process stopped (state T) when the machine is busy — seen in about
+// one full test run in three, with no request of indigo's in flight; most
+// likely the stop the attach delivered landing after the detach. A detached
+// program must run, so a stopped one is sent SIGCONT, and watched for a
+// moment in case the stray stop arrives late. A running process is left
+// alone: this only ever resumes one that is stopped.
+func unstickAfterDetach(pid int) {
+	if pid <= 0 {
+		return
+	}
+	for i := 0; i < 10; i++ {
+		if processStopped(pid) {
+			continueProcess(pid) //nolint:errcheck // gone, or not ours: nothing to do
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // onEvent handles an event from the session's root connection (from nil) or
@@ -500,6 +693,7 @@ func (m *Manager) onEvent(gen int, from *dap.Client, e dap.Event) {
 		var ev dap.StoppedEvent
 		e.Decode(&ev) //nolint:errcheck
 		st := State{Status: StatusStopped, ThreadID: ev.ThreadID, Reason: ev.Reason, Description: ev.Description}
+		m.confirmHit(gen, from, ev.HitBreakpointIDs)
 		c := m.currentClient(gen)
 		if from != nil {
 			// The stopped program is this child's; stack, variables and
@@ -558,7 +752,7 @@ func (m *Manager) onEvent(gen int, from *dap.Client, e dap.Event) {
 			conn = m.client
 		}
 		m.mu.Unlock()
-		r := resultLine{id: ev.Breakpoint.ID, verified: ev.Breakpoint.Verified, line: ev.Breakpoint.Line - 1, message: ev.Breakpoint.Message}
+		r := resultLine{id: ev.Breakpoint.ID, verified: ev.Breakpoint.Verified, line: ev.Breakpoint.Line - 1, message: readableBreakpointMessage(ev.Breakpoint.Message)}
 		if ev.Breakpoint.Line == 0 {
 			r.line = -1
 		}
@@ -584,6 +778,36 @@ func (m *Manager) onEvent(gen int, from *dap.Client, e dap.Event) {
 		if from == nil && (ev.Category == "console" || ev.Category == "stderr") {
 			m.noteExitStatus(gen, ev.Output)
 		}
+	}
+}
+
+// confirmHit marks the breakpoints that stopped the program as set. A
+// breakpoint that was hit is plainly set, whatever the adapter said when it
+// was sent: js-debug answers "provisional" when attaching to a program whose
+// scripts are already loaded, and never sends the "changed" event that would
+// confirm it — so without this a breakpoint that works is drawn as one that
+// could not be set.
+func (m *Manager) confirmHit(gen int, from *dap.Client, ids []int) {
+	if len(ids) == 0 {
+		return
+	}
+	m.mu.Lock()
+	conn := from
+	if conn == nil && gen == m.gen {
+		conn = m.client
+	}
+	m.mu.Unlock()
+	if conn == nil {
+		return
+	}
+	changed := false
+	for _, id := range ids {
+		if m.Breakpoints.updateByID(conn, resultLine{id: id, verified: true, line: -1}) {
+			changed = true
+		}
+	}
+	if changed {
+		m.fire()
 	}
 }
 
@@ -847,14 +1071,25 @@ func (m *Manager) Shutdown() {
 	m.mu.Lock()
 	c := m.client
 	children := m.children
+	target := m.targetLocked()
+	terminate := !m.attached
+	resume := m.connected
+	pid := m.attachedPID
+	prev := m.state
 	m.client, m.children, m.active = nil, nil, nil
 	m.gen++
 	m.mu.Unlock()
+	if c != nil && !terminate {
+		m.detach(append([]*dap.Client{c}, children...), target, prev, resume)
+	}
 	for _, child := range children {
 		child.Close() //nolint:errcheck
 	}
 	if c != nil {
-		c.Shutdown()
+		c.ShutdownWith(terminate)
+		if !terminate {
+			unstickAfterDetach(pid)
+		}
 	}
 	m.ending.Wait() // sessions already ending, still disconnecting
 }
@@ -916,4 +1151,18 @@ func PermissionHint() string {
 			"prompt; run `sudo DevToolsSecurity -enable`"
 	}
 	return ""
+}
+
+// readableBreakpointMessage turns an adapter's reason for an unset breakpoint
+// into something to show. js-debug sends the same state two ways — the
+// localization key, and elsewhere its English text "Unbound breakpoint" — and
+// indigo shows the reason after the line.
+func readableBreakpointMessage(msg string) string {
+	switch msg {
+	case "breakpoint.provisionalBreakpoint", "Unbound breakpoint":
+		// Not "cannot be set": js-debug says this when attaching even for a
+		// breakpoint that works, and confirms it only by stopping there.
+		return "not confirmed yet — shown as set once the program stops here"
+	}
+	return msg
 }

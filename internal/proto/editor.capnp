@@ -369,7 +369,9 @@ interface EditorService {
   # Every breakpoint in path, or in all files when path is empty.
   listBreakpoints  @65 (path :Text) -> (breakpoints :List(DebugBreakpoint), seq :UInt64);
   # Returns once the program is running (or already stopped at a breakpoint).
-  debugStart       @66 (config :DebugConfig) -> (error :Text);
+  # warning: the session started, but something will not work as expected
+  # (attaching to a program run through tsx, whose breakpoints cannot bind).
+  debugStart       @66 (config :DebugConfig) -> (error :Text, warning :Text);
   debugControl     @67 (action :DebugAction) -> (error :Text);
   debugState       @68 () -> (state :DebugState);
   # threadId 0 means the thread the session is stopped on.
@@ -394,6 +396,9 @@ interface EditorService {
   # Sets a breakpoint at path:line with this condition and log message,
   # creating it if there is none. Both empty makes it a plain breakpoint.
   setBreakpoint    @76 (path :Text, line :UInt32, condition :Text, logMessage :Text) -> ();
+  # The processes the debugger could attach to, on the server's machine (a
+  # container's, inside one): the user's own, Go programs first.
+  listProcesses    @77 () -> (processes :List(DebugProcess), error :Text);
 }
 
 enum DebugAction {
@@ -423,6 +428,21 @@ struct DebugConfig {
   name       @6 :Text;        # a named configuration's name; "" otherwise
   env        @7 :List(Text);  # "KEY=value" added to the program's environment
   launchJson @8 :Text;        # a JSON object merged over the launch request; "" for none
+  request    @9 :Text;        # "launch" ("" too) or "attach"
+  connect    @10 :Text;       # host:port of a debug adapter already running, to use instead of starting one
+  processId  @11 :Int64;      # the process to attach to
+  pickProcess @12 :Bool;      # ask which process when started (launch.json's ${command:pickProcess})
+  envFile    @13 :Text;       # a .env file read when the session starts; env entries win a clash
+}
+
+struct DebugProcess {
+  pid       @0 :Int64;
+  ppid      @1 :Int64;
+  name      @2 :Text;
+  exe       @3 :Text;
+  args      @4 :List(Text);
+  goVersion @5 :Text;          # "" for a program that is not Go
+  goModule  @6 :Text;
 }
 
 struct DebugState {

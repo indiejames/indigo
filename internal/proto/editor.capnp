@@ -432,6 +432,7 @@ struct DebugConfig {
   connect    @10 :Text;       # host:port of a debug adapter already running, to use instead of starting one
   processId  @11 :Int64;      # the process to attach to
   pickProcess @12 :Bool;      # ask which process when started (launch.json's ${command:pickProcess})
+  envFile    @13 :Text;       # a .env file read when the session starts; env entries win a clash
 }
 
 struct DebugProcess {

@@ -44,7 +44,10 @@ var launchJSONKeysDropped = map[string]bool{
 	"type": true, "request": true, "name": true, "program": true, "args": true,
 	"env": true, "cwd": true, "mode": true, "buildFlags": true,
 	"console": true, "presentation": true, "preLaunchTask": true, "postDebugTask": true,
-	"internalConsoleOptions": true, "serverReadyAction": true, "envFile": true,
+	"internalConsoleOptions": true, "serverReadyAction": true,
+	// Read by indigo (Config.EnvFile), for every debugger — not passed on,
+	// where only js-debug would have understood it.
+	"envFile": true,
 }
 
 // readLaunchJSON returns the usable configurations in root's launch.json. A
@@ -103,7 +106,7 @@ func (m *Manager) fromLaunchJSON(root, activeFile string, e map[string]any) (cfg
 		s, _ := e[key].(string)
 		return x.expand(s)
 	}
-	cfg = Config{Adapter: adapter, Program: str("program"), Cwd: str("cwd")}
+	cfg = Config{Adapter: adapter, Program: str("program"), Cwd: str("cwd"), EnvFile: str("envFile")}
 	if req == "attach" {
 		cfg.Request = "attach"
 	}
@@ -224,6 +227,9 @@ func (m *Manager) fromLaunchJSON(root, activeFile string, e map[string]any) (cfg
 	}
 	if cfg.Cwd != "" && !filepath.IsAbs(cfg.Cwd) {
 		cfg.Cwd = filepath.Join(root, cfg.Cwd)
+	}
+	if cfg.EnvFile != "" && !filepath.IsAbs(cfg.EnvFile) {
+		cfg.EnvFile = filepath.Join(root, cfg.EnvFile)
 	}
 	if x.err != nil {
 		return Config{}, false, x.err

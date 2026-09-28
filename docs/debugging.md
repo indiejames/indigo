@@ -142,7 +142,8 @@ without restarting anything.
 name = "server"
 program = "./cmd/server"          # default: the workspace root
 args = ["--port", "8080"]
-env = { LOG_LEVEL = "debug" }
+env_file = ".env"                 # variables from a .env file
+env = { LOG_LEVEL = "debug" }     # …and these, which win a clash
 build_flags = "-tags dev"
 
 [[debug]]
@@ -167,6 +168,7 @@ launch = { justMyCode = false }
 | `args` | Arguments for the program. For `go test`, use `-test.run`, `-test.v`, and so on. |
 | `cwd` | Working directory; default the workspace root. |
 | `env` | Added to the program's environment. |
+| `env_file` | A `.env` file whose variables are added too, relative to the workspace root. indigo reads it itself each time the session starts, so it works with every debugger and an edit applies on the next start or restart. `env` entries win a clash. Supports `KEY=value`, `export KEY=value`, `"double quoted"` (with `\n` escapes), `'single quoted'`, and `#` comments; a line it cannot read stops the launch and names the line. |
 | `build_flags` | Go only: passed to the build, e.g. `-tags dev`. |
 | `launch` | Anything else the debugger's launch request takes, passed as is and over indigo's own settings: Delve's `dlvFlags`, debugpy's `justMyCode`, lldb-dap's `initCommands`, … |
 | `request` | `launch` (the default) or `attach` — see [Attaching](#attaching). |
@@ -273,8 +275,9 @@ If the project has a `.vscode/launch.json`, its `launch` and `attach` entries ap
   using anything else (`${input:…}`, `${command:…}`) is reported and left out.
 - Go's `"mode": "auto"` becomes `test` for a `_test.go` program and `debug`
   otherwise, as in vscode-go.
-- `console`, `preLaunchTask`, `postDebugTask`, `presentation` and `envFile`
-  are ignored. `console` has to be: debugpy refuses to launch with
+- `envFile` works as `env_file` does, for every debugger.
+- `console`, `preLaunchTask`, `postDebugTask` and `presentation` are
+  ignored. `console` has to be: debugpy refuses to launch with
   `"integratedTerminal"` unless the editor can open terminals for it, which
   indigo does not. Left out, it uses its own console, whose output indigo
   shows.

@@ -77,6 +77,9 @@ type Config struct {
 	// is started (launch.json's ${command:pickProcess}); the editor asks, and
 	// starts it with ProcessID filled in.
 	PickProcess bool
+	// EnvFile is a .env file read each time the session starts (envfile.go);
+	// its variables join Env, and Env's own entries win a clash.
+	EnvFile string
 }
 
 // attaching reports whether cfg attaches to a program rather than starting it.
@@ -151,15 +154,22 @@ type Manager struct {
 	mu       sync.Mutex
 	last     *Config // the most recently started configuration, for Restart
 	adapters []config.DebugAdapter
-	client   *dap.Client    // the root connection, which owns the adapter
-	children []*dap.Client  // sessions the adapter asked for (children.go)
-	active   *dap.Client    // the child that last stopped
-	attached bool           // the session attached: stopping detaches, leaving the program running
-	ending   sync.WaitGroup // sessions whose adapter is still being shut down
-	caps     dap.Capabilities
-	gen      int // bumped per session, so a finished session's events are ignored
-	state    State
-	stateSeq uint64
+	client   *dap.Client   // the root connection, which owns the adapter
+	children []*dap.Client // sessions the adapter asked for (children.go)
+	active   *dap.Client   // the child that last stopped
+	attached bool          // the session attached: stopping detaches, leaving the program running
+	// connected: the session connected to an adapter someone else started
+	// (Config.Connect). Such an adapter outlives the session, so it — not a
+	// disconnect — decides whether the program runs on; see detach.
+	connected bool
+	// attachedPID is the process an OS-level debugger (Delve, lldb) attached
+	// to by id, 0 otherwise; see unstickAfterDetach.
+	attachedPID int
+	ending      sync.WaitGroup // sessions whose adapter is still being shut down
+	caps        dap.Capabilities
+	gen         int // bumped per session, so a finished session's events are ignored
+	state       State
+	stateSeq    uint64
 
 	outMu   sync.Mutex
 	out     []OutputChunk
@@ -361,6 +371,11 @@ func (m *Manager) StartWithWarning(cfg Config) (warning string, err error) {
 	// What is recorded for Restart is the configuration as asked for — by
 	// process id — so a restart re-attaches the same way.
 	asked := cfg
+	// Before the tsx preload, which adds to NODE_OPTIONS — a NODE_OPTIONS the
+	// .env file sets has to be in Env by then, or it would be replaced.
+	if cfg, err = withEnvFile(cfg); err != nil {
+		return "", err
+	}
 	if isJSDebug(m.adapter(cfg.Adapter)) {
 		cfg = withTSXPreload(cfg)
 	}
@@ -385,6 +400,11 @@ func (m *Manager) StartWithWarning(cfg Config) (warning string, err error) {
 	last := asked
 	m.last = &last
 	m.attached = cfg.attaching()
+	m.connected = cfg.Connect != ""
+	m.attachedPID = 0
+	if cfg.attaching() && cfg.ProcessID > 0 && !isJSDebug(m.adapter(cfg.Adapter)) {
+		m.attachedPID = cfg.ProcessID
+	}
 	m.state = State{Status: StatusStarting}
 	m.stateSeq++
 	m.mu.Unlock()
@@ -548,6 +568,8 @@ func (m *Manager) endSession(gen int, st State) {
 	children := m.children
 	target := m.targetLocked()
 	terminate := !m.attached
+	resume := m.connected
+	pid := m.attachedPID
 	prev := m.state
 	m.client, m.children, m.active = nil, nil, nil
 	m.state = st
@@ -560,11 +582,12 @@ func (m *Manager) endSession(gen int, st State) {
 		conns := append([]*dap.Client{c}, children...)
 		go func() {
 			defer m.ending.Done()
-			m.detach(conns, target, prev)
+			m.detach(conns, target, prev, resume)
 			for _, child := range children {
 				child.Close() //nolint:errcheck
 			}
 			c.ShutdownWith(false)
+			unstickAfterDetach(pid)
 		}()
 		m.Breakpoints.resetVerification()
 		m.fire()
@@ -598,7 +621,15 @@ func (m *Manager) endSession(gen int, st State) {
 // 1.26's source, onDisconnectRequest). A program paused on a remote machine
 // with nobody attached is the worst outcome of a detach. Best effort, bounded:
 // an adapter that has already gone fails these at once.
-func (m *Manager) detach(conns []*dap.Client, target *dap.Client, prev State) {
+//
+// resume is set only for a session that connected to an adapter someone else
+// started. An adapter indigo started to attach by process id (dlv, js-debug)
+// resumes the program itself when it detaches, and a continue sent just ahead
+// of that detach races it: Delve halts the process to detach, and under load
+// the halt could land around the still-settling continue and leave the
+// program stopped — seen as process state T in TestAttachToARunningProcess,
+// about one full test run in three.
+func (m *Manager) detach(conns []*dap.Client, target *dap.Client, prev State, resume bool) {
 	// Clear first — resumed with them still set, the program can stop on one
 	// again at once, and a headless Delve would leave it there — then resume.
 	// Each step has its own bound, so a slow first step cannot starve the
@@ -610,7 +641,7 @@ func (m *Manager) detach(conns []*dap.Client, target *dap.Client, prev State) {
 		}
 	}
 	cancelClear()
-	if prev.Status != StatusStopped || target == nil {
+	if !resume || prev.Status != StatusStopped || target == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -622,6 +653,26 @@ func (m *Manager) detach(conns []*dap.Client, target *dap.Client, prev State) {
 		}
 	}
 	target.Continue(ctx, thread) //nolint:errcheck
+}
+
+// unstickAfterDetach makes sure a process an OS-level debugger attached to by
+// id is not left stopped once it has detached. Delve detaching on macOS can
+// leave the process stopped (state T) when the machine is busy — seen in about
+// one full test run in three, with no request of indigo's in flight; most
+// likely the stop the attach delivered landing after the detach. A detached
+// program must run, so a stopped one is sent SIGCONT, and watched for a
+// moment in case the stray stop arrives late. A running process is left
+// alone: this only ever resumes one that is stopped.
+func unstickAfterDetach(pid int) {
+	if pid <= 0 {
+		return
+	}
+	for i := 0; i < 10; i++ {
+		if processStopped(pid) {
+			continueProcess(pid) //nolint:errcheck // gone, or not ours: nothing to do
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // onEvent handles an event from the session's root connection (from nil) or
@@ -1012,18 +1063,23 @@ func (m *Manager) Shutdown() {
 	children := m.children
 	target := m.targetLocked()
 	terminate := !m.attached
+	resume := m.connected
+	pid := m.attachedPID
 	prev := m.state
 	m.client, m.children, m.active = nil, nil, nil
 	m.gen++
 	m.mu.Unlock()
 	if c != nil && !terminate {
-		m.detach(append([]*dap.Client{c}, children...), target, prev)
+		m.detach(append([]*dap.Client{c}, children...), target, prev, resume)
 	}
 	for _, child := range children {
 		child.Close() //nolint:errcheck
 	}
 	if c != nil {
 		c.ShutdownWith(terminate)
+		if !terminate {
+			unstickAfterDetach(pid)
+		}
 	}
 	m.ending.Wait() // sessions already ending, still disconnecting
 }

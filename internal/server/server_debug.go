@@ -165,6 +165,7 @@ func readDebugConfig(pc proto.DebugConfig) debug.Config {
 	cfg.Connect, _ = pc.Connect()
 	cfg.ProcessID = int(pc.ProcessId())
 	cfg.PickProcess = pc.PickProcess()
+	cfg.EnvFile, _ = pc.EnvFile()
 	return cfg
 }
 
@@ -195,6 +196,7 @@ func writeDebugConfig(pc proto.DebugConfig, cfg debug.Config) error {
 		func() error { return pc.SetConnect(cfg.Connect) },
 		func() error { pc.SetProcessId(int64(cfg.ProcessID)); return nil },
 		func() error { pc.SetPickProcess(cfg.PickProcess); return nil },
+		func() error { return pc.SetEnvFile(cfg.EnvFile) },
 	} {
 		if err := set(); err != nil {
 			return err

@@ -22,3 +22,18 @@ func processEnv(pid int) []string {
 	}
 	return env
 }
+
+// processStopped reports whether pid is stopped (T, or t for traced), and
+// false when it cannot tell. The state is the field after the command, which
+// is parenthesised and may itself contain spaces or parentheses.
+func processStopped(pid int) bool {
+	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return false
+	}
+	i := bytes.LastIndexByte(data, ')')
+	if i < 0 || i+2 >= len(data) {
+		return false
+	}
+	return data[i+2] == 'T' || data[i+2] == 't'
+}

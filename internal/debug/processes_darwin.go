@@ -84,3 +84,14 @@ func procArgsEnv(pid int) (exe string, args, env []string, ok bool) {
 	}
 	return exe, args, env, true
 }
+
+// darwinSSTOP is p_stat's "stopped" value (SSTOP in <sys/proc.h>), which
+// golang.org/x/sys does not name.
+const darwinSSTOP = 4
+
+// processStopped reports whether pid is stopped (job-control or debugger
+// stopped), and false when it cannot tell.
+func processStopped(pid int) bool {
+	kp, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	return err == nil && kp.Proc.P_pid == int32(pid) && kp.Proc.P_stat == darwinSSTOP
+}

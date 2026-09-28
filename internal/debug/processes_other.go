@@ -12,3 +12,5 @@ func listRawProcesses() ([]rawProcess, error) {
 }
 
 func processEnv(int) []string { return nil }
+
+func processStopped(int) bool { return false }

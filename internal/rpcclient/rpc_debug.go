@@ -136,6 +136,8 @@ type DebugConfig struct {
 	ProcessID int
 	// PickProcess: ask which process to attach to when this is started.
 	PickProcess bool
+	// EnvFile is a .env file the server reads when the session starts.
+	EnvFile string
 }
 
 // DebugProcess is a process the debugger could attach to. GoVersion and
@@ -371,6 +373,7 @@ func writeDebugConfig(pc proto.DebugConfig, cfg DebugConfig) error {
 		func() error { return pc.SetConnect(cfg.Connect) },
 		func() error { pc.SetProcessId(int64(cfg.ProcessID)); return nil },
 		func() error { pc.SetPickProcess(cfg.PickProcess); return nil },
+		func() error { return pc.SetEnvFile(cfg.EnvFile) },
 	} {
 		if err := set(); err != nil {
 			return err
@@ -410,6 +413,7 @@ func readDebugConfig(pc proto.DebugConfig) DebugConfig {
 	cfg.Connect, _ = pc.Connect()
 	cfg.ProcessID = int(pc.ProcessId())
 	cfg.PickProcess = pc.PickProcess()
+	cfg.EnvFile, _ = pc.EnvFile()
 	return cfg
 }
 

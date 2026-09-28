@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -156,5 +157,31 @@ func TestListProcFS(t *testing.T) {
 	ps := filterProcesses(raw, os.Getuid(), -1)
 	if p := find(ps, 4242); p == nil || p.GoModule != "example.com/sleeper" {
 		t.Errorf("not recognised as a Go program: %+v", p)
+	}
+}
+
+// A stopped process is recognised as stopped, and unstickAfterDetach resumes
+// it — what a Delve detach that leaves its process stopped needs — while a
+// running one is not signalled at all.
+func TestUnstickAfterDetach(t *testing.T) {
+	bin := buildGoBinary(t) // a program of ours: sleep(1) is an Apple binary on macOS
+	p := startProc(t, bin)
+	time.Sleep(200 * time.Millisecond)
+	if processStopped(p.Process.Pid) {
+		t.Fatal("a running process reads as stopped")
+	}
+	if err := p.Process.Signal(syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !processStopped(p.Process.Pid) {
+		if time.Now().After(deadline) {
+			t.Fatal("a stopped process does not read as stopped")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	unstickAfterDetach(p.Process.Pid)
+	if processStopped(p.Process.Pid) {
+		t.Error("still stopped after unstickAfterDetach")
 	}
 }

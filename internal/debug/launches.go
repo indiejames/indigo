@@ -109,6 +109,7 @@ func resolveLaunch(root string, l config.DebugLaunch) Config {
 		ProcessID:  l.ProcessID,
 
 		PickProcess: l.PickProcess,
+		EnvFile:     expand(l.EnvFile),
 	}
 	// An adapter left out is chosen when the session starts, by the program's
 	// file type (Manager.chooseAdapter): Go unless another adapter claims it.

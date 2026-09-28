@@ -200,15 +200,28 @@ func (m *Manager) fromLaunchJSON(root, activeFile string, e map[string]any) (cfg
 			cfg.BuildFlags = strings.Join(parts, " ")
 		}
 	}
-	// Another adapter's processId is its own setting, passed through — except
-	// the picker, which indigo answers itself before starting the session.
-	if pid, ok := e["processId"].(string); ok && isPickProcessVar(pid) && !cfg.PickProcess {
-		cfg.PickProcess = true
-		d := map[string]bool{"processId": true}
-		for k := range dropped {
-			d[k] = true
+	// Another adapter's processId becomes cfg.ProcessID — indigo sends it on
+	// as processId, and for Node it is what switches the program's inspector
+	// on (js-debug's server attaches only by port) — and the picker is
+	// answered by indigo before the session starts. Either way the raw key is
+	// not passed through as well.
+	if adapter != "go" {
+		takeRaw := false
+		switch pid := e["processId"].(type) {
+		case float64:
+			cfg.ProcessID, takeRaw = int(pid), true
+		case string:
+			if isPickProcessVar(pid) && !cfg.PickProcess {
+				cfg.PickProcess, takeRaw = true, true
+			}
 		}
-		dropped = d
+		if takeRaw {
+			d := map[string]bool{"processId": true}
+			for k := range dropped {
+				d[k] = true
+			}
+			dropped = d
+		}
 	}
 	for k, v := range e {
 		if dropped[k] {

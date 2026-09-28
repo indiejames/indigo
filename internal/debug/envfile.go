@@ -34,7 +34,11 @@ func parseEnvFile(data []byte) ([]string, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		// "export" is a prefix only when a space or tab follows it: exportFOO=1
+		// is a variable called exportFOO.
+		if len(line) > len("export") && strings.HasPrefix(line, "export") && (line[6] == ' ' || line[6] == '\t') {
+			line = strings.TrimSpace(line[6:])
+		}
 		key, value, ok := strings.Cut(line, "=")
 		key = strings.TrimSpace(key)
 		if !ok || key == "" || strings.ContainsAny(key, " \t") {

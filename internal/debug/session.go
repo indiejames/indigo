@@ -371,6 +371,16 @@ func (m *Manager) StartWithWarning(cfg Config) (warning string, err error) {
 	// What is recorded for Restart is the configuration as asked for — by
 	// process id — so a restart re-attaches the same way.
 	asked := cfg
+	// Refused now, before anything below acts on the outside world — attaching
+	// to Node by pid signals the program — rather than only at the committing
+	// check further down, which a second start would reach having already
+	// sent the signal.
+	m.mu.Lock()
+	busy := m.client != nil || m.state.Status == StatusStarting
+	m.mu.Unlock()
+	if busy {
+		return "", ErrSessionActive
+	}
 	// Before the tsx preload, which adds to NODE_OPTIONS — a NODE_OPTIONS the
 	// .env file sets has to be in Env by then, or it would be replaced.
 	if cfg, err = withEnvFile(cfg); err != nil {

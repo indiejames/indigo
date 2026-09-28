@@ -51,6 +51,11 @@ func attachNodeByPID(cfg Config) (Config, error) {
 			return cfg, fmt.Errorf("another Node program's inspector is already on %s; start this one with --inspect=<port> and attach by port", nodeInspectorAddr)
 		}
 	} else {
+		// SIGUSR1's default action is to terminate: sent to anything but a
+		// Node process it would kill the program instead of attaching to it.
+		if !isNodeProcess(pid) {
+			return cfg, fmt.Errorf("process %d is not a Node program (or could not be checked); not signalling it", pid)
+		}
 		if err := signalInspector(pid); err != nil {
 			return cfg, fmt.Errorf("could not switch on process %d's inspector: %w", pid, err)
 		}
@@ -114,16 +119,50 @@ func inspectorIsProcess(pid int) (bool, error) {
 		}
 	}
 	for _, t := range targets {
-		for _, a := range args {
-			if a == "" || strings.HasPrefix(a, "-") {
-				continue
-			}
-			if strings.HasSuffix(t.URL, "/"+filepath.ToSlash(filepath.Clean(a))) || strings.HasSuffix(t.URL, filepath.ToSlash(filepath.Clean(a))) {
-				return true, nil
-			}
+		if scriptMatches(t.URL, args) {
+			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// scriptMatches reports whether an inspector target's URL is the script one
+// of args names. The match must start at a path separator, so an argument
+// x.js does not match .../index.js; a relative argument (src/index.ts) and an
+// absolute one both match the file:// URL of the same file.
+func scriptMatches(url string, args []string) bool {
+	for _, a := range args {
+		if a == "" || strings.HasPrefix(a, "-") {
+			continue
+		}
+		p := filepath.ToSlash(filepath.Clean(a))
+		if !strings.HasPrefix(p, "/") {
+			p = "/" + p
+		}
+		if strings.HasSuffix(url, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// isNodeProcess reports whether pid is a Node.js process — node, node.exe, or
+// Debian's nodejs — and false when that cannot be established.
+func isNodeProcess(pid int) bool {
+	raw, err := listRawProcesses()
+	if err != nil {
+		return false
+	}
+	for _, p := range raw {
+		if p.pid == pid {
+			switch p.name {
+			case "node", "node.exe", "nodejs":
+				return true
+			}
+			return false
+		}
+	}
+	return false
 }
 
 // tsxWarning explains, for a Node process run through tsx, why breakpoints in

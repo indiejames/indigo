@@ -1174,6 +1174,26 @@ const maxMessageLog = 300
 // same as before this existed.
 const toastDuration = 6 * time.Second
 
+// toastLifetime is how long a toast stays: toastDuration for an error, and
+// for a warning long enough to read it — a second per 20 characters, never
+// less than toastDuration. A warning explains something the user has to act
+// on, at the length that takes.
+func toastLifetime(text string) time.Duration {
+	if !isWarnMessage(text) {
+		return toastDuration
+	}
+	return max(toastDuration, time.Duration(len([]rune(text))/20)*time.Second)
+}
+
+// keepThroughKey reports whether a keypress should leave the status alone
+// rather than clear it: a warning still inside its lifetime survives
+// ordinary typing — the user's next move after attaching is to go and set a
+// breakpoint, which used to wipe the warning before it could be read — and
+// Esc dismisses it.
+func (m Model) keepThroughKey(key string) bool {
+	return key != "esc" && isWarnMessage(m.status) && time.Since(m.statusAt) < toastLifetime(m.status)
+}
+
 // logEntry records one status-bar message for the message-log popup (space l).
 type logEntry struct {
 	at    time.Time
@@ -1190,6 +1210,16 @@ func isErrMessage(text string) bool {
 	return strings.HasPrefix(text, "E:") || strings.HasPrefix(text, "ERR:")
 }
 
+// isWarnMessage reports a warning ("W: ..."): something worked, but not as
+// the user will expect — attaching to a program whose breakpoints cannot
+// bind, say.
+func isWarnMessage(text string) bool { return strings.HasPrefix(text, "W:") }
+
+// isToastMessage reports status text shown as a toast rather than in the
+// status bar's center segment, which truncates to whatever room is left:
+// errors, and warnings, which explain something at the length it takes.
+func isToastMessage(text string) bool { return isErrMessage(text) || isWarnMessage(text) }
+
 // appendMessageLog appends an entry to messageLog for later review (space l),
 // trimming to the most recent maxMessageLog entries.
 func (m Model) appendMessageLog(text string, isErr bool) Model {
@@ -1202,6 +1232,14 @@ func (m Model) appendMessageLog(text string, isErr bool) Model {
 
 // pushStatus sets the transient status-bar/toast message and, unless it's a
 // clear (text == ""), appends it to messageLog for later review.
+// StatusText is the buffer's current status message, "" when none.
+func (m Model) StatusText() string { return m.status }
+
+// WithStatus shows text in this buffer's status line (and its message log),
+// for a message that originates above the buffer — the App's own status,
+// which has nowhere else to go when there is no tab bar to carry it.
+func (m Model) WithStatus(text string) Model { return m.pushStatus(text) }
+
 func (m Model) pushStatus(text string) Model {
 	m.status = text
 	if text == "" {
@@ -1345,7 +1383,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.updateViewportCmd()
 
 	case tickMsg:
-		if m.status != "" && isErrMessage(m.status) && time.Since(m.statusAt) > toastDuration {
+		if m.status != "" && isToastMessage(m.status) && time.Since(m.statusAt) > toastLifetime(m.status) {
 			m.status = ""
 		}
 		m.diagTick++

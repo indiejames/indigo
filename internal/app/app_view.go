@@ -84,6 +84,9 @@ func (a App) renderFrame() (string, *tea.Cursor) {
 	if a.fileChangedIdx >= 0 {
 		return overlayCenter(base, renderFileChangedPrompt(a.width, a.fileChangedSel), a.width, a.height), nil
 	}
+	if a.procPicker != nil {
+		return overlayCenter(base, a.procPicker.render(), a.width, a.height), nil
+	}
 	if a.bufPicker != nil {
 		return overlayCenter(base, a.bufPicker.render(), a.width, a.height), nil
 	}

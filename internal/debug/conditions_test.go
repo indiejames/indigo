@@ -231,3 +231,40 @@ func TestConditionalBreakpointAndLogpointAgainstDelve(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// A breakpoint the program stopped on is marked set, by the id the stopping
+// connection gave it, whatever the adapter said when it was sent.
+func TestHitBreakpointIsConfirmed(t *testing.T) {
+	clientEnd, other := net.Pipe()
+	t.Cleanup(func() { other.Close() }) //nolint:errcheck
+	c := dap.NewClient(clientEnd, nil)
+	t.Cleanup(func() { c.Close() }) //nolint:errcheck
+	m := NewManager(nil)
+	m.Breakpoints.Toggle("/w/a.ts", 4)
+	m.Breakpoints.setResults("/w/a.ts", c, []int{4}, []resultLine{{id: 7, line: -1, message: readableBreakpointMessage("breakpoint.provisionalBreakpoint")}})
+	if bps, _ := m.Breakpoints.List("/w/a.ts"); bps[0].Verified || bps[0].Message != "not confirmed yet — shown as set once the program stops here" {
+		t.Fatalf("before the stop: %+v", bps[0])
+	}
+	m.confirmHit(m.gen, c, []int{99}) // another breakpoint's id
+	if bps, _ := m.Breakpoints.List("/w/a.ts"); bps[0].Verified {
+		t.Error("an unrelated hit confirmed it")
+	}
+	m.confirmHit(m.gen, c, []int{7})
+	if bps, _ := m.Breakpoints.List("/w/a.ts"); !bps[0].Verified || bps[0].Message != "" || bps[0].Line != 4 {
+		t.Errorf("after stopping on it: %+v", bps[0])
+	}
+}
+
+// Both of js-debug's spellings of a provisional breakpoint read the same, and
+// other adapters' reasons pass through untouched.
+func TestReadableBreakpointMessage(t *testing.T) {
+	want := "not confirmed yet — shown as set once the program stops here"
+	for _, in := range []string{"breakpoint.provisionalBreakpoint", "Unbound breakpoint"} {
+		if got := readableBreakpointMessage(in); got != want {
+			t.Errorf("%q → %q", in, got)
+		}
+	}
+	if got := readableBreakpointMessage("could not find file"); got != "could not find file" {
+		t.Errorf("another reason changed: %q", got)
+	}
+}

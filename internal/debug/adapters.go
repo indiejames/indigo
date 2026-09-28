@@ -2,6 +2,7 @@ package debug
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -68,6 +69,9 @@ func (m *Manager) chooseAdapter(cfg Config) (Config, error) {
 		return cfg, nil
 	}
 	cfg.Adapter = "go"
+	if cfg.attaching() && cfg.Program == "" {
+		return cfg, nil // nothing to go by; attaching by PID or address is Delve's in v1
+	}
 	ext := strings.ToLower(filepath.Ext(cfg.Program))
 	if ext == "" || ext == ".go" {
 		return cfg, nil
@@ -102,6 +106,24 @@ func launchArgs(cfg Config, a *config.DebugAdapter) (map[string]any, error) {
 	}
 	var args map[string]any
 	switch {
+	case isGo(cfg.Adapter) && cfg.attaching():
+		// Delve's attach modes: "local" attaches its own debugger to a
+		// process by id; "remote" means the adapter on the other end of
+		// Connect is already debugging a program (`dlv --headless`).
+		mode := cfg.Mode
+		if mode == "" {
+			mode = "local"
+			if cfg.Connect != "" {
+				mode = "remote"
+			}
+		}
+		args = map[string]any{"mode": mode}
+		if mode == "local" {
+			if cfg.ProcessID <= 0 {
+				return nil, errors.New("attach: no process id to attach to")
+			}
+			args["processId"] = cfg.ProcessID
+		}
 	case isGo(cfg.Adapter):
 		mode := cfg.Mode
 		if mode == "" {
@@ -131,10 +153,16 @@ func launchArgs(cfg Config, a *config.DebugAdapter) (map[string]any, error) {
 		if cfg.Program != "" {
 			args["program"] = resolve(cfg.Program)
 		}
+		if cfg.ProcessID > 0 {
+			args["processId"] = cfg.ProcessID // the DAP convention debugpy, lldb-dap and js-debug share
+		}
 	default:
 		return nil, fmt.Errorf("no debugger named %q: add a [[debug_adapter]] for it, or use \"go\"", cfg.Adapter)
 	}
 	args["request"] = "launch"
+	if cfg.attaching() {
+		args["request"] = "attach"
+	}
 	if cfg.Cwd != "" {
 		args["cwd"] = resolve(cfg.Cwd)
 	}

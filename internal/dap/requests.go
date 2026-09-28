@@ -237,6 +237,11 @@ func (c *Client) Pause(ctx context.Context, threadID int) error {
 
 // Disconnect ends the session, terminating a launched debuggee.
 func (c *Client) Disconnect(ctx context.Context, terminateDebuggee bool) error {
-	_, err := c.Request(ctx, "disconnect", disconnectArguments{TerminateDebuggee: terminateDebuggee})
+	args := disconnectArguments{TerminateDebuggee: terminateDebuggee}
+	if !terminateDebuggee {
+		running := false
+		args.SuspendDebuggee = &running // detaching: leave it running
+	}
+	_, err := c.Request(ctx, "disconnect", args)
 	return err
 }

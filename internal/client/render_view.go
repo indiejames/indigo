@@ -449,7 +449,7 @@ func (m Model) renderFrame() (string, *tea.Cursor) {
 
 	// Overlay error toast (bottom, above the status bar): non-modal, doesn't
 	// intercept keys, auto-dismisses via tickMsg (see pushStatus/toastDuration).
-	if m.status != "" && isErrMessage(m.status) {
+	if m.status != "" && isToastMessage(m.status) {
 		popup := renderToast(m.status, m.width)
 		popH := len(popup)
 		popW := lipgloss.Width(popup[0])
@@ -866,7 +866,7 @@ func (m Model) renderStatusBar() string {
 	switch {
 	case m.recoveryPrompt:
 		centerContent = "Recovery file found!   Use it [y]   Ignore and delete [n]"
-	case m.status != "" && !isErrMessage(m.status):
+	case m.status != "" && !isToastMessage(m.status):
 		// Error-class status text renders as the toast overlay instead (see
 		// View()) — the center segment truncates long messages and this spot
 		// is easy to miss once attention moves elsewhere.

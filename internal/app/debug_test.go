@@ -138,3 +138,13 @@ func TestCanonicalResolvesAFileSavedLater(t *testing.T) {
 		t.Errorf("after saving: %q, want %q", got, want)
 	}
 }
+
+// statusOf is the status message the user sees: the App's own, drawn in the
+// tab bar, or — with one buffer and so no tab bar — the one it handed to the
+// active buffer's status line.
+func statusOf(a App) string {
+	if a.status != "" || len(a.buffers) == 0 {
+		return a.status
+	}
+	return a.buffers[a.active].StatusText()
+}

@@ -198,6 +198,10 @@ type EvaluateResult struct {
 
 type disconnectArguments struct {
 	TerminateDebuggee bool `json:"terminateDebuggee"`
+	// SuspendDebuggee false on a detach asks to leave the program running.
+	// Not every adapter honours it — Delve 1.26 ignores it (see the detach in
+	// internal/debug) — so it is a request, not a guarantee.
+	SuspendDebuggee *bool `json:"suspendDebuggee,omitempty"`
 }
 
 // ---- events ----
@@ -210,6 +214,9 @@ type StoppedEvent struct {
 	ThreadID          int    `json:"threadId,omitempty"`
 	AllThreadsStopped bool   `json:"allThreadsStopped,omitempty"`
 	Text              string `json:"text,omitempty"`
+	// HitBreakpointIDs are the breakpoints that stopped it, by the ids the
+	// sending connection gave them.
+	HitBreakpointIDs []int `json:"hitBreakpointIds,omitempty"`
 }
 
 // ContinuedEvent says the debuggee resumed without being asked to by us.

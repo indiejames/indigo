@@ -165,9 +165,14 @@ const shutdownGrace = 3 * time.Second
 // Shutdown asks the adapter to end the session (terminating the debuggee) and
 // then closes the connection and process regardless of the answer — a wedged
 // adapter must not keep a debuggee running.
-func (c *Client) Shutdown() {
+func (c *Client) Shutdown() { c.ShutdownWith(true) }
+
+// ShutdownWith is Shutdown choosing whether the debuggee ends too. A session
+// that attached to a program it did not start detaches (false) and leaves it
+// running, as every debugger does.
+func (c *Client) ShutdownWith(terminateDebuggee bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
-	c.Disconnect(ctx, true) //nolint:errcheck
-	c.Close()               //nolint:errcheck
+	c.Disconnect(ctx, terminateDebuggee) //nolint:errcheck
+	c.Close()                            //nolint:errcheck
 }

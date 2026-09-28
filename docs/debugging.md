@@ -14,10 +14,24 @@ Like language servers, the debugger belongs to indigo's **server**: one session
 per workspace, shared by every window on it. Breakpoints set in one window show
 in all of them, and move with their line as you edit.
 
+## Two kinds of window
+
+- **Editor windows** — indigo as you normally run it (`indigo file.go`). This
+  is where you do almost everything: set breakpoints, start, attach, step,
+  and evaluate. Every `Space d …` key in this document is pressed in an
+  editor window. (The stepping F-keys — F5, F10, F11 — work in both kinds.)
+- **The debug window** — `indigo --debug`, run in a second terminal or pane.
+  It shows the call stack, variables, watches and program output, and has
+  its own single-letter keys for stepping (see [The debug
+  window](#the-debug-window)). It has no Space menu: you cannot start,
+  attach or set breakpoints from it. It is optional — you can debug without
+  it.
+
 ## Quick start (Go)
 
 1. Install Delve: `go install github.com/go-delve/delve/cmd/dlv@latest`.
-2. Put the cursor on a line and press **F9** (or `Space d b`) — a `●` appears
+2. In an editor window, put the cursor on a line and press **F9** (or
+   `Space d b`) — a `●` appears
    in the gutter.
 3. Press **F5**. indigo builds and runs the current file's package, or its
    tests in a `_test.go` file, and stops at the breakpoint: `▶` marks the
@@ -36,9 +50,10 @@ On **macOS**, the debugger needs Developer Mode: run
 authorization prompt that never appears in a terminal, and indigo reports that
 after the launch times out.
 
-## Keys
+## Keys (editor windows)
 
-In any editor window:
+These work in any editor window (the debug window's keys are listed
+[with it](#the-debug-window)):
 
 | Key | Action |
 | --- | --- |
@@ -50,6 +65,7 @@ In any editor window:
 | `Space d t` | Debug the Go test, benchmark, fuzz test or example the cursor is in |
 | `Space d l` | Choose a [named configuration](#named-configurations) |
 | `Space d r` | Restart: stop the session and start the last configuration again |
+| `Space d a` | [Attach](#attaching) to a running Go or Node process, or to a headless Delve |
 | F10 / `Space d n` | Step over |
 | F11 / `Space d i` | Step in |
 | Shift+F11 / `Space d o` | Step out |
@@ -65,7 +81,7 @@ and the reason is shown after the line.
 
 ## Conditional breakpoints and logpoints
 
-**Space d B** asks for a condition, an expression in the program's own
+In an editor window, **Space d B** asks for a condition, an expression in the program's own
 language: `i > 10`, `name == "alice" && len(items) > 0`. The program then stops
 there only when it is true. The condition is shown, dimmed, after the line. To
 edit it, press Space d B again (the prompt is pre-filled); to go back to
@@ -90,7 +106,9 @@ they have that file open, and stay where they are.
 
 Run `indigo --debug` in another terminal or pane, in the project (with
 `--devcontainer` or `--container` for a container, as for the editor). It
-attaches to the workspace's session, including one already running.
+attaches to the workspace's session, including one already running. It only
+shows and steps a session: start one, attach, and set breakpoints from an
+editor window.
 
 | Section | Shows |
 | --- | --- |
@@ -99,15 +117,16 @@ attaches to the workspace's session, including one already running.
 | Watch | Expressions evaluated at every stop, in the selected frame. **a** adds one, **d** deletes one. |
 | Output | The program's output. It follows the end until you scroll up; **G** follows again. |
 
-**Tab** / **Shift+Tab** switch sections, **↑↓** or **j k** move. Execution:
-**c** continue, **n** step over, **i** step in, **o** step out, **p** pause,
-**x** stop, **R** restart — or the same F-keys as the editor. **q** quits.
+Keys in the debug window: **Tab** / **Shift+Tab** switch sections, **↑↓** or
+**j k** move. Execution: **c** continue, **n** step over, **i** step in, **o**
+step out, **p** pause, **x** stop, **R** restart — or the same F-keys as the
+editor. **q** quits.
 
 ## Named configurations
 
 For program arguments, environment variables, build flags, or a package other
 than the current file's, define named configurations and pick one with
-**Space d l**. They are read from three places, and an earlier one wins a name
+**Space d l** in an editor window. They are read from three places, and an earlier one wins a name
 clash:
 
 1. `.indigo/debug.toml` in the workspace — commit it with the project.
@@ -150,6 +169,10 @@ launch = { justMyCode = false }
 | `env` | Added to the program's environment. |
 | `build_flags` | Go only: passed to the build, e.g. `-tags dev`. |
 | `launch` | Anything else the debugger's launch request takes, passed as is and over indigo's own settings: Delve's `dlvFlags`, debugpy's `justMyCode`, lldb-dap's `initCommands`, … |
+| `request` | `launch` (the default) or `attach` — see [Attaching](#attaching). |
+| `connect` | For an attach: the `host:port` of a debugger that is already running, to use instead of starting one. |
+| `process_id` | For an attach: the process to attach to. |
+| `pick_process` | For an attach: `true` to choose the process from the picker each time it is started. |
 
 `${workspaceFolder}` in `program`, `cwd` and `args` is replaced by the
 workspace root.
@@ -158,14 +181,91 @@ Once you have started a configuration, **F5** (with no session running) and
 **Space d r** start it again, so the usual loop is: pick it once, then F5 after
 each fix. That includes a launch that failed to build.
 
+## Attaching
+
+Instead of starting a program, the debugger can attach to one that is already
+running. Stopping the session (Shift+F5) then **detaches**: indigo clears its
+breakpoints, lets the program carry on if it was stopped, and leaves it
+running, where a launched program would be ended.
+
+In an editor window, **Space d a** opens the process picker, listing the Go and Node programs you
+are running, each with its process id and arguments, and for Go its module
+and Go version:
+
+```
+   4312  server  github.com/you/server (go1.26.1)  --port 8080
+   4313  server  github.com/you/server (go1.26.1)  --port 9090
+   5120  node  src/api.ts
+```
+
+Type to filter — every word must match the id, name, module or arguments, so
+`server 9090` picks the second — and press Enter to attach: with Delve for a
+Go program, with js-debug for a Node one (see
+[Attaching to a Node program](#attaching-to-a-node-program-typescript-too)).
+**Tab** shows every process. Esc closes it.
+
+- **A running Go program** — e.g. a server that has started misbehaving. It
+  should be built without optimizations to debug well: `go build
+  -gcflags='all=-N -l'`. The list is read where the debugger runs, so inside a
+  dev container it is the container's processes. Only your own processes are
+  listed (the only ones a debugger could attach to), and not indigo's own
+  helpers.
+- **A process id that is not listed** — type it, and choose "Attach to process
+  N".
+- **`host:port` of a headless Delve** — type it, and choose "Connect to the
+  Delve at host:port". For a program started under Delve on
+  another machine, in a container, or anywhere indigo does not run it
+  itself:
+
+  ```sh
+  dlv debug --headless --listen=:2345 --accept-multiclient --continue ./cmd/server
+  ```
+
+  `:2345` on its own means this machine. `--accept-multiclient` keeps Delve
+  (and the program) running after indigo detaches, so you can attach again;
+  `--continue` starts the program without waiting for a debugger. Give it a
+  moment to start before attaching: Delve can wedge when attached to in the
+  instant it is starting the program, and indigo gives up on an attach after
+  30 seconds.
+
+For attaches you repeat, or for other languages, use a named configuration:
+
+```toml
+[[debug]]
+name = "devbox server"
+request = "attach"
+connect = "devbox:2345"
+
+[[debug]]
+name = "attach to a server"
+request = "attach"
+pick_process = true               # choose from the process picker each time
+```
+
+Other debuggers take their own attach settings in `launch` (`processId`,
+debugpy's `connect`, js-debug's `port`); indigo sends `process_id` as
+`processId`, the name they share.
+
+Attaching to a process needs permission to debug it. On macOS that is
+Developer Mode, as for launching. On Linux, attaching to a process indigo did
+not start is often blocked by the kernel's ptrace restrictions
+(`/proc/sys/kernel/yama/ptrace_scope` set to 1); Delve says so when it happens.
+A headless Delve has already attached, so connecting to one needs nothing.
+
 ## VS Code `launch.json`
 
-If the project has a `.vscode/launch.json`, its `launch` entries appear in the
+If the project has a `.vscode/launch.json`, its `launch` and `attach` entries appear in the
 **Space d l** menu without any change. Comments and trailing commas are fine.
 
 - Supported types: `go`, `node`/`pwa-node`, `debugpy`/`python`,
   `lldb-dap`/`lldb`, and any `[[debug_adapter]]` whose name matches the
-  entry's `type`. Other types (Chrome, …) and `attach` requests are skipped.
+  entry's `type`. Other types (Chrome, …) are skipped.
+- Go attach entries work as in vscode-go: `"mode": "local"` with a
+  `processId`, or `"mode": "remote"` with a `port` (and `host`, default this
+  machine) to connect to a headless Delve. `"processId":
+  "${command:pickProcess}"` (or `pickGoProcess`, or js-debug's `PickProcess`)
+  opens the process picker when the entry is started, for any debugger; for
+  one other than Delve it starts with every process listed.
 - Variables: `${workspaceFolder}`, `${workspaceFolderBasename}`, `${file}`,
   `${fileDirname}`, `${fileBasename}`, `${fileBasenameNoExtension}`,
   `${relativeFile}`, `${relativeFileDirname}`, `${env:NAME}`. The `${file}`
@@ -280,7 +380,8 @@ annotations themselves (22.6 and later need `"runtimeArgs":
 ["--experimental-strip-types"]`). That leaves the line numbers as they are, so
 breakpoints need nothing more. For TypeScript that type stripping cannot
 handle (`enum`, `namespace`, parameter properties), run it through
-[tsx](https://tsx.is) instead, which js-debug follows through source maps:
+[tsx](https://tsx.is) instead; indigo loads the preload tsx needs for its
+source maps to be seen (see [Debugging tsx programs](#debugging-tsx-programs)):
 
 ```toml
 [[debug]]
@@ -296,6 +397,103 @@ back to the `.ts` files: enable `sourceMap` in `tsconfig.json` and set
 sources.
 
 A project's `.vscode/launch.json` Node entries work as they are.
+
+### Attaching to a Node program (TypeScript too)
+
+Whether breakpoints in your `.ts` files work when attaching depends on how the
+program runs TypeScript:
+
+| The program was started with | Attaching |
+| --- | --- |
+| `node server.ts` — Node's own type stripping (Node 23.6+, or 22.6+ with `--experimental-strip-types`) | ✅ Works. |
+| `node dist/server.js`, compiled by `tsc` with `"sourceMap": true` | ✅ Works: breakpoints in the `.ts` files are found through the `.map` files. |
+| `tsx server.ts` | ❌ Breakpoints are never hit — unless it was started with indigo's preload (see [Debugging tsx programs](#debugging-tsx-programs)), then ✅. indigo warns when you attach to one started without it. |
+
+When attaching, js-debug does not confirm breakpoints up front: they show
+hollow (`○`), with "not confirmed yet" after the line, until the program first
+stops on one — then they show as set. A breakpoint that stays hollow while
+the program runs past its line is one that did not bind.
+
+**By process: Space d a** (in an editor window). Pick the `node` process and press Enter — nothing
+to configure. The program need not have been started with `--inspect`: indigo
+switches its inspector on the way VS Code does, by sending it `SIGUSR1`,
+which opens the inspector on `127.0.0.1:9229`. If another Node program's
+inspector already holds 9229, indigo refuses rather than attach to the wrong
+program; start yours with `--inspect=<another port>` and attach by port. To
+repeat it with a configuration, use `pick_process`:
+
+```toml
+[[debug]]
+name = "attach to a Node process"
+adapter = "node"
+request = "attach"
+pick_process = true      # the picker then lists only Node programs
+```
+
+**By port**, for a program started with `node --inspect=9230 server.ts`:
+
+```toml
+[[debug]]
+name = "attach to the API"
+adapter = "node"
+request = "attach"
+launch = { port = 9230 }
+```
+
+or in `launch.json`: `{"type": "node", "request": "attach", "port": 9230}`.
+
+Stopping the session (Shift+F5) detaches; the program keeps running, and you
+can attach again. js-debug has to be installed as described above.
+
+### Debugging tsx programs
+
+On Node 22 and later, a program run with [tsx](https://tsx.is) hides its
+source maps from debuggers. tsx only puts a source map where a debugger can
+see it when `Error.prepareStackTrace` is not already a function, and newer
+Node versions always define one. Without a map, the code actually running is
+tsx's one-line compiled output, and a breakpoint on line 17 of your `.ts` file
+has nothing to bind to. This applies to both launching and attaching, and to
+ES modules (`"type": "module"`) as well as CommonJS.
+
+The fix is a one-line preload that deletes `Error.prepareStackTrace` before
+tsx loads, which puts tsx back on the path it was designed to take. It has to
+be loaded through `NODE_OPTIONS`, so that it also reaches the thread where
+tsx compiles ES modules; a `--require` on the command line is not enough.
+Error stack traces still point at your `.ts` lines. indigo writes the preload
+to `~/.local/share/indigo/tsx-sourcemaps.cjs` the first time it is needed.
+To make it yourself, the whole file is:
+
+```js
+delete Error.prepareStackTrace;
+```
+
+**Launching** — nothing to do: indigo adds the preload itself whenever a
+configuration's `runtimeExecutable` is tsx. Put this in
+`.indigo/debug.toml` and start it with **Space d l** (then **F5** to run it
+again):
+
+```toml
+[[debug]]
+name = "index"
+program = "src/index.ts"
+launch = { runtimeExecutable = "tsx" }
+```
+
+**Attaching** — start the program with the preload, then attach as usual
+with Space d a:
+
+```sh
+NODE_OPTIONS="--require $HOME/.local/share/indigo/tsx-sourcemaps.cjs" tsx --inspect src/index.ts
+```
+
+A program already running without it cannot be fixed from outside; restart
+it. indigo's warning when you attach to one gives the same command.
+
+**Or skip tsx**: if your code only uses type annotations — no `enum`,
+`namespace` or parameter properties — `node src/index.ts` runs it with Node's
+own type stripping, and needs nothing at all.
+
+Missed a message? It stays in the Messages log, **Space l**, in full.
 
 Under the hood js-debug starts a second debug session for the program itself
 (a `startDebugging` request), and for each worker thread or child process
@@ -339,6 +537,13 @@ the container unchanged. `[[debug]]` and `[[debug_adapter]]` entries in
 `config.toml` come from the container user's config, as for language servers.
 Open the debug window with `indigo --devcontainer --debug`.
 
+To debug a program in a container indigo is not attached to, run it under a
+headless Delve there, publish its port, and attach to that with
+Space d a in an editor window (see [Attaching](#attaching)). Source paths must match on both sides
+for breakpoints to line up: mount the source at the same path, or map it with
+Delve's `substitutePath` in a named configuration's `launch`, e.g.
+`launch = { substitutePath = [{ from = "/Users/me/src/app", to = "/app" }] }`.
+
 ## Limitations
 
 - One session per workspace at a time.
@@ -346,7 +551,6 @@ Open the debug window with `indigo --devcontainer --debug`.
   last window on the workspace closes. They follow edits made in indigo, but
   not a change made outside it (a `git checkout`), which can leave one on the
   wrong line.
-- No hit-count breakpoints ("stop on the 5th time"), and no attaching to a
-  running process, yet.
+- No hit-count breakpoints ("stop on the 5th time") yet.
 - Selecting a frame in the debug window moves every editor window to it, not
   just the last one used.

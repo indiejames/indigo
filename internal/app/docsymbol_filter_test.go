@@ -123,6 +123,8 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyPressMsg{Code: tea.KeyTab}
 	case "shift+tab":
 		return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+	case "shift+f5":
+		return tea.KeyPressMsg{Code: tea.KeyF5, Mod: tea.ModShift}
 	case "space":
 		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 	case "enter":

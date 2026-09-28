@@ -373,3 +373,38 @@ func TestShutdownDuringAdapterStart(t *testing.T) {
 		t.Errorf("the adapter's connection was not closed: %v", err)
 	}
 }
+
+// A named attach configuration keeps what it says and gains no launch
+// defaults: no program to build, no build mode.
+func TestNamedAttachConfiguration(t *testing.T) {
+	root := t.TempDir()
+	writeProjectLaunches(t, root, "[[debug]]\nname = \"devbox\"\nrequest = \"attach\"\nconnect = \"devbox:2345\"\n\n[[debug]]\nname = \"pid\"\nrequest = \"attach\"\nprocess_id = 99\n\n[[debug]]\nname = \"pick\"\nrequest = \"attach\"\npick_process = true\n")
+	got, err := NewManager(nil).Launches(root, nil, "")
+	want := []Config{
+		{Name: "devbox", Request: "attach", Connect: "devbox:2345"},
+		{Name: "pid", Request: "attach", ProcessID: 99},
+		{Name: "pick", Request: "attach", PickProcess: true},
+	}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, %v; want %+v", got, err, want)
+	}
+}
+
+// A configuration that picks its process cannot be started without one: the
+// editor asks first. Started from somewhere that cannot ask, it says so.
+func TestPickProcessNeedsAProcess(t *testing.T) {
+	m := NewManager(nil)
+	rec := &recordingAdapter{}
+	m.startAdapter = rec.start
+	err := m.Start(Config{Adapter: "go", Request: "attach", PickProcess: true})
+	if err == nil || !strings.Contains(err.Error(), "chosen when it starts") {
+		t.Errorf("err = %v", err)
+	}
+	if len(rec.programs()) != 0 {
+		t.Error("an adapter was started with no process to attach to")
+	}
+	m.Start(Config{Adapter: "go", Request: "attach", PickProcess: true, ProcessID: 42}) //nolint:errcheck
+	if len(rec.started) != 1 {
+		t.Error("a picked process id was refused")
+	}
+}

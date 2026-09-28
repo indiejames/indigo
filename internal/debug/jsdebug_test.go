@@ -1,9 +1,13 @@
 package debug
 
 import (
+	"bufio"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -185,4 +189,208 @@ func TestWorkerThreadThroughJSDebug(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitState(t, m, StatusTerminated, 30*time.Second)
+}
+
+// Attaching js-debug to a Node program started with --inspect: the
+// configuration the docs show (adapter "node", request "attach", launch.port)
+// stops at a breakpoint, and detaching leaves the program running.
+func TestAttachToNodeInspect(t *testing.T) {
+	adapters := jsDebugAdapter(t)
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "server.js")
+	os.WriteFile(file, []byte("let n = 0;\nsetInterval(() => {\n  n++; console.log('tick', n); // line 3\n}, 50);\n"), 0o644) //nolint:errcheck
+	prog := exec.Command("node", "--inspect=127.0.0.1:0", file)
+	stderr, _ := prog.StderrPipe()
+	stdout, _ := prog.StdoutPipe()
+	if err := prog.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { prog.Process.Kill(); prog.Wait() }) //nolint:errcheck
+	inspector := regexp.MustCompile(`ws://127\.0\.0\.1:(\d+)/`)
+	portCh := make(chan int, 1)
+	go func() {
+		sc := bufio.NewScanner(stderr)
+		for sc.Scan() {
+			if m := inspector.FindStringSubmatch(sc.Text()); m != nil {
+				p, _ := strconv.Atoi(m[1])
+				portCh <- p
+			}
+		}
+	}()
+	ticks := make(chan struct{}, 1000)
+	go func() {
+		sc := bufio.NewScanner(stdout)
+		for sc.Scan() {
+			select {
+			case ticks <- struct{}{}:
+			default:
+			}
+		}
+	}()
+	var port int
+	select {
+	case port = <-portCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("node never reported its inspector port")
+	}
+
+	m := NewManager(nil)
+	t.Cleanup(m.Shutdown)
+	m.SetAdapters(adapters)
+	m.ToggleBreakpoint(file, 2)
+	if err := m.Start(Config{Adapter: "node", Request: "attach", Launch: map[string]any{"port": port}}); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	st := waitState(t, m, StatusStopped, 30*time.Second)
+	if st.Path != file || st.Line != 2 {
+		t.Errorf("stopped at %s:%d, want %s:2", st.Path, st.Line, file)
+	}
+	if err := m.Control(ActionStop); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, m, StatusTerminated, 10*time.Second)
+	m.Shutdown()
+	for len(ticks) > 0 {
+		<-ticks
+	}
+	for i := 0; i < 5; i++ {
+		select {
+		case <-ticks:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("the program stopped running after the detach (%d lines after it)", i)
+		}
+	}
+}
+
+const tsLooper = "let n: number = 0;\nsetInterval((): void => {\n  n++; console.log('tick', n); // line 3\n}, 50);\n"
+
+// startNode starts node with args, returning the process and a channel that
+// receives a value for each line the program prints.
+func startNode(t *testing.T, args ...string) (*exec.Cmd, chan struct{}) {
+	t.Helper()
+	cmd := exec.Command("node", args...)
+	stdout, _ := cmd.StdoutPipe()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() }) //nolint:errcheck
+	ticks := make(chan struct{}, 1000)
+	go func() {
+		sc := bufio.NewScanner(stdout)
+		for sc.Scan() {
+			select {
+			case ticks <- struct{}{}:
+			default:
+			}
+		}
+	}()
+	select {
+	case <-ticks:
+	case <-time.After(10 * time.Second):
+		t.Fatal("node program never started")
+	}
+	return cmd, ticks
+}
+
+// Attaching to a Node program by process id — what the process picker does —
+// with a TypeScript file run by Node's own type stripping: indigo switches
+// the program's inspector on (js-debug's server attaches only by port), the
+// breakpoint in the .ts file stops it, and detaching leaves it running. A
+// second attach finds the inspector already on and checks it is this
+// program's; another program's inspector on the port is refused.
+func TestAttachToNodeByProcessID(t *testing.T) {
+	adapters := jsDebugAdapter(t)
+	// A port of the test's own rather than Node's shared 9229, which a
+	// developer's own program may well be using.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := nodeInspectorAddr
+	nodeInspectorAddr = ln.Addr().String()
+	ln.Close() //nolint:errcheck
+	t.Cleanup(func() { nodeInspectorAddr = saved })
+	_, inspectPort, _ := net.SplitHostPort(nodeInspectorAddr)
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "server.ts")
+	os.WriteFile(file, []byte(tsLooper), 0o644) //nolint:errcheck
+	prog, ticks := startNode(t, "--inspect-port="+inspectPort, file)
+
+	attach := func(round int) {
+		m := NewManager(nil)
+		defer m.Shutdown()
+		m.SetAdapters(adapters)
+		m.ToggleBreakpoint(file, 2)
+		if err := m.Start(Config{Adapter: "node", Request: "attach", ProcessID: prog.Process.Pid, Cwd: dir}); err != nil {
+			t.Fatalf("attach %d: %v", round, err)
+		}
+		st := waitState(t, m, StatusStopped, 30*time.Second)
+		if st.Path != file || st.Line != 2 {
+			t.Errorf("attach %d stopped at %s:%d, want %s:2", round, st.Path, st.Line, file)
+		}
+		// js-debug answers "provisional" when attaching to loaded code and
+		// never confirms it; the hit is the confirmation. Without it the
+		// gutter draws a working breakpoint as one that could not be set.
+		if bps, _ := m.Breakpoints.List(file); len(bps) != 1 || !bps[0].Verified {
+			t.Errorf("attach %d: breakpoint = %+v after stopping on it, want it shown as set", round, bps)
+		}
+		if err := m.Control(ActionStop); err != nil {
+			t.Fatal(err)
+		}
+		waitState(t, m, StatusTerminated, 10*time.Second)
+		m.Shutdown()
+		for len(ticks) > 0 {
+			<-ticks
+		}
+		for i := 0; i < 3; i++ {
+			select {
+			case <-ticks:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("after attach %d the program stopped running (%d lines)", round, i)
+			}
+		}
+	}
+	attach(1)
+	attach(2) // the inspector is already on now
+
+	other := filepath.Join(dir, "other.js")
+	os.WriteFile(other, []byte("setInterval(() => console.log('x'), 50);\n"), 0o644) //nolint:errcheck
+	third, _ := startNode(t, "--inspect-port="+inspectPort, other)
+	m := NewManager(nil)
+	t.Cleanup(m.Shutdown)
+	m.SetAdapters(adapters)
+	err = m.Start(Config{Adapter: "node", Request: "attach", ProcessID: third.Process.Pid})
+	if err == nil || !strings.Contains(err.Error(), "another Node program's inspector") {
+		t.Errorf("attaching while another program holds %s: err = %v", nodeInspectorAddr, err)
+	}
+}
+
+// A Node process run through tsx is recognised — whether its tsx is global or
+// the project's node_modules one — so the attach can warn that its
+// breakpoints will not bind; a plain node process is not flagged.
+func TestTSXWarning(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "node_modules", "tsx", "dist"), 0o755) //nolint:errcheck
+	loader := filepath.Join(dir, "node_modules", "tsx", "dist", "loader.cjs")
+	script := filepath.Join(dir, "app.js")
+	os.WriteFile(loader, nil, 0o644)                                      //nolint:errcheck
+	os.WriteFile(script, []byte("setInterval(() => {}, 1000);\n"), 0o644) //nolint:errcheck
+	underTSX := startProc(t, "node", "--require", loader, script)
+	plain := startProc(t, "node", script)
+	time.Sleep(300 * time.Millisecond)
+	if w := tsxWarning(underTSX.Process.Pid); !strings.Contains(w, "tsx") || !strings.Contains(w, "cannot bind") {
+		t.Errorf("under tsx: %q", w)
+	}
+	if w := tsxWarning(plain.Process.Pid); w != "" {
+		t.Errorf("plain node flagged: %q", w)
+	}
 }

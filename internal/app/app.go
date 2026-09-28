@@ -116,6 +116,7 @@ type App struct {
 	diagBrowser     *diagBrowser         // non-nil when the workspace diagnostic browser is open
 	diagSeq         int                  // bumped on every new diagnostic-browser request; see diagBrowserResultsMsg
 	bufPicker       *bufPicker           // non-nil when buffer picker popup is open
+	procPicker      *procPicker          // non-nil when the attach process picker is open
 	searchReplace   *searchReplaceDialog // non-nil when the global search & replace dialog is open
 
 	symbolPicker    *symbolPickerState    // non-nil when workspace symbol picker is open
@@ -335,7 +336,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return next, cmd
 	}
-	return updated.stampActiveTab().ensureActiveSized().ensureActiveDebugView(), cmd
+	return updated.stampActiveTab().ensureActiveSized().ensureActiveDebugView().ensureStatusShown(), cmd
 }
 
 // ensureActiveSized gives the active buffer the window size if it has never had
@@ -353,6 +354,22 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // the viewport, which the server keeps per client rather than per buffer, and a
 // tab switch has never re-reported it — sizing is the fix here, not a new
 // viewport report.
+// ensureStatusShown moves the App's status message into the active buffer's
+// status line when there is no tab bar to show it in. The App draws its
+// status at the right-hand end of the tab bar, and the tab bar appears only
+// with two or more buffers — so with one file open, every App-level message
+// (an attach's result or warning, a failed attach, a debug session ending)
+// was set and never seen. Handed over once and cleared, so the same message
+// arriving again is shown again.
+func (a App) ensureStatusShown() App {
+	if a.status == "" || a.active < 0 || a.active >= len(a.buffers) || a.showTabBar() {
+		return a
+	}
+	a.buffers[a.active] = a.buffers[a.active].WithStatus(a.status)
+	a.status = ""
+	return a
+}
+
 func (a App) ensureActiveSized() App {
 	if a.width == 0 || a.active < 0 || a.active >= len(a.buffers) || a.buffers[a.active].Sized() {
 		return a
@@ -458,6 +475,9 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.diagBrowser != nil {
 			a.diagBrowser.width = msg.Width
 			a.diagBrowser.height = msg.Height
+		}
+		if a.procPicker != nil {
+			a.procPicker.width, a.procPicker.height = msg.Width, msg.Height
 		}
 		if a.bufPicker != nil {
 			a.bufPicker.width = msg.Width
@@ -1026,6 +1046,26 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case client.BreakpointPromptMsg:
 		return a.handleBreakpointPrompt(msg), nil
 
+	case client.AttachPromptMsg:
+		return a.openProcPicker(client.DebugConfig{Adapter: "go", Request: "attach"}, true)
+
+	case client.PickProcessMsg:
+		return a.openProcPicker(msg.Config, false)
+
+	case procListMsg:
+		return a.handleProcList(msg), nil
+
+	case attachResultMsg:
+		switch {
+		case msg.err != nil:
+			a.status = "E: attach: " + msg.err.Error()
+		case msg.warning != "":
+			a.status = "W: attached to " + msg.what + ", but " + msg.warning
+		default:
+			a.status = "Attached to " + msg.what
+		}
+		return a, nil
+
 	case breakpointSetMsg:
 		if msg.err != nil {
 			a.status = "E: set breakpoint: " + msg.err.Error()
@@ -1130,6 +1170,11 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if a.diagBrowser != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handleDiagBrowserKey(km)
+		}
+	}
+	if a.procPicker != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleProcPickerKey(km)
 		}
 	}
 	if a.bufPicker != nil {

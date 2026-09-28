@@ -1,6 +1,19 @@
 # Configuration
 
-Config file location: `~/.config/indigo/config.toml` (created automatically on first run if absent; all settings have defaults).
+Config file location: `~/.config/indigo/config.toml` (created automatically on first run if
+absent; all settings have defaults). `$XDG_CONFIG_HOME` is honoured if set.
+
+Everything here is optional. A workspace can also carry its own `.indigo/debug.toml` for
+[debug configurations](#debug-configurations); nothing else is per-workspace.
+
+**Contents**
+
+- [General options](#general-options) — every top-level key, plus [cursor shape and blink](#cursor-shape-and-blink)
+- [File picker](#file-picker) · [Indentation](#indentation)
+- [Language servers](#language-servers) · [Formatters](#formatters) · [Linters](#linters)
+- [Debug configurations](#debug-configurations) · [File type aliases](#file-type-aliases)
+- [Search & replace](#search--replace) · [Key bindings](#key-bindings) (and [user-defined menus](#user-defined-menus))
+- [Themes](#themes) · [Plugins](#plugins) · [Full example](#full-example)
 
 ## General options
 
@@ -12,6 +25,11 @@ Config file location: `~/.config/indigo/config.toml` (created automatically on f
 | `format_on_save` | bool | `false` | Run the file's formatter automatically on `:w` |
 | `bracket_colors` | bool | `true` | Colorize matching bracket pairs with cycling colors based on nesting depth |
 | `indent_guides` | bool | `true` | Draw indent-guide lines at each tab-stop in leading whitespace |
+| `ruler_column` | int | `0` | Draw a vertical ruler at this 1-based column (e.g. `80` or `100`); `0` disables it |
+| `indent_style` | string | `"tabs"` | Global indent default, `"tabs"` or `"spaces"` — see [Indentation](#indentation) |
+| `indent_width` | int | `4` | Global indent width, also the display width of a tab — see [Indentation](#indentation) |
+| `picker_ignore_dirs` | string list | `[]` | Extra directory names to hide from the file picker, recent files and workspace grep — see [File picker](#file-picker) |
+| `file_types` | table | `{}` | Map an extension or filename to a language key — see [File type aliases](#file-type-aliases) |
 | `scroll_off` | int | `5` | Minimum lines kept visible above/below the cursor as it moves (Helix/Vim "scrolloff"); `0` disables the margin |
 | `inlay_hints` | bool | `false` | Show LSP inlay hints (parameter names, e.g. `foo(count: 5)`) as dim virtual text |
 | `semantic_tokens` | bool | `false` | Recolor identifiers (variables, parameters, types, etc.) using LSP semantic tokens instead of syntax-only guesses |
@@ -111,6 +129,47 @@ in the picker's search mode surfaces matching files first — paths whose name *
 the query score well above ones that merely contain those characters elsewhere, so an extension
 acts as a de facto filter without excluding anything outright. When `fuzzy_search = false`,
 the picker uses simple substring matching with no ranking.
+
+## Indentation
+
+Indentation is resolved per file, from the file's extension, through four sources. Later
+ones win:
+
+1. indigo's built-in default: **tabs, width 4**.
+2. indigo's built-in **per-language** convention for that extension (the table below).
+3. Your global `indent_style` / `indent_width`.
+4. Your per-language `[indent.<ext>]` override.
+
+```toml
+indent_style = "spaces"    # global default for languages with no entry below
+indent_width = 4
+
+[indent.go]
+style = "tabs"
+
+[indent.md]
+width = 2                  # style inherited from the level above
+```
+
+An entry may set only `style` or only `width`; the other field keeps whatever the previous
+source produced. `<ext>` is a bare extension with no leading dot. `width` is also the
+number of columns a tab is *displayed* as, so it applies even when `style = "tabs"`.
+
+An invalid value is corrected rather than rejected: a `style` other than `tabs`/`spaces`
+falls back to `tabs`, and a `width` of zero or less falls back to `4`.
+
+### Built-in per-language defaults
+
+| Languages | Default |
+|---|---|
+| `go` | tabs, width 4 |
+| `rs` `py` `c` `cpp` `h` `hpp` `java` `zig` `swift` | spaces, width 4 |
+| `js` `jsx` `ts` `tsx` `rb` `json` `jsonc` `yaml` `yml` `html` `css` `lua` `nix` `toml` `sh` `bash` | spaces, width 2 |
+| anything else | tabs, width 4 |
+
+These are conventions, not formatter settings — your formatter still reindents the file its
+own way on `:fmt`. They control what indigo inserts as you type, and how `>` / `<` and
+auto-indent behave.
 
 ## Language servers
 
@@ -553,7 +612,22 @@ Space — Command menu:
 | `p` | Open file picker | `l` | Message Log |
 | `n` | New file | `a` | Code Actions (fixes & refactors) |
 | `r` | Refactor: Rename Symbol | `m` | Refactor: Move Function to File |
-| `i` | Organize Imports | | |
+| `i` | Organize Imports | `d` | Debug — a submenu, see below |
+
+`Space d` — Debug:
+
+| Key | Action | Key | Action |
+| --- | --- | --- | --- |
+| `b` | Toggle breakpoint | `B` | Breakpoint condition… |
+| `L` | Logpoint (log instead of stopping)… | `d` | Debug this package (or file) |
+| `t` | Debug the test at the cursor | `l` | Debug a named configuration… |
+| `r` | Restart (the last configuration) | `a` | Attach to a running process… |
+| `c` | Continue | `n` | Step over |
+| `i` | Step in | `o` | Step out |
+| `p` | Pause | `x` | Stop debugging |
+
+Most of these also have an F-key: F5 continue/start, F9 breakpoint, F10/F11 step,
+Shift+F11 step out, Shift+F5 stop. See [Debugging](debugging.md).
 
 Save As lives on the `:` command line instead of this menu — `:save-as` / `:sa` opens
 a dialog pre-filled with the buffer's current path (blank for an unsaved buffer);
@@ -732,7 +806,16 @@ bracket_colors = true
 indent_guides  = true
 inlay_hints    = true
 semantic_tokens = true
+ruler_column   = 100
+scroll_off     = 8
+cursor_shape   = "bar"
 theme          = "dracula"
+
+indent_style   = "spaces"
+indent_width   = 4
+
+[indent.go]
+style = "tabs"
 
 [file_types]
 "Jenkinsfile" = "sh"

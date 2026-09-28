@@ -199,6 +199,10 @@ settings (`~/.claude/settings.json` for all projects, or a project's
 }
 ```
 
+`mcp__indigo__goto_file` (it moves your editor window) and
+`mcp__indigo__report_bundle` (it writes a file) also prompt; add them the same
+way if you use them often.
+
 This is the only approval gate in the path. In MCP mode indigo does not show an
 in-editor approval popup — `standaloneApprover` is `AlwaysApprove`, and approval
 is deliberately left to the MCP client, the same model every other MCP server
@@ -245,6 +249,7 @@ is a working example to copy. The three things worth stating:
 | `insert_at_line` | Insert lines at an exact 1-based line number. |
 | `save_file` | Write a buffer to disk. |
 | `goto_file` | Move *your* editor window to a file and line. |
+| `get_active_context` | The file, cursor position and selection of the most recently active indigo window — what "this function" or "line 30 of the current file" refers to. |
 
 Directory listing and text search are deliberately **not** exposed: Claude
 Code's own Glob and Grep already cover them, and disk-based search has no
@@ -252,9 +257,33 @@ buffer-consistency problem to solve. The language-server tools are the opposite
 case — there is no native equivalent at all, and they are the main reason to
 attach indigo to an agent session in the first place.
 
+### Diagnosing indigo itself
+
+Five more tools exist so that a synchronization problem on someone else's
+machine can be investigated through the agent attached to it. You will not
+normally call these; they are here for when two windows disagree about a file,
+or one stops keeping up, or something hangs.
+
+| tool | |
+|---|---|
+| `get_logs` | The shared log every indigo process appends to, filtered by `since` / `tag` / `contains`. Always on, and it spans rotated files, so evidence for something that already happened is usually already on disk. |
+| `get_sync_events` | The buffer-synchronization events themselves — rejected ops, generation mismatches, resyncs, stale poll responses, external writes — counted by kind, then listed. `get_logs` gives you the prose around a failure; this gives you the failure. |
+| `get_sync_state` | Where the server and every connected window currently stand per buffer: version, generation, dirty, content hash, and each client's acknowledged version. Flags a window that has fallen behind. |
+| `check_buffer_consistency` | Whether any window's content has actually diverged from the server's. Samples twice, because a window being typed in legitimately differs from the server for a moment. |
+| `report_bundle` | `get_logs` + `get_sync_state` written to one file, for attaching to a bug report. Returns the path. |
+
+**Buffer contents never appear in `get_sync_state` or `report_bundle`** — only a
+sha256 and a byte count. That is enforced at the schema level, because this is
+exactly the output that ends up pasted into an issue. Log lines can still
+contain file paths and plugin output, which the bundle says at the top.
+
+### Approval
+
 `read_file`, `get_diagnostics`, `get_workspace_diagnostics`, `find_definition`,
-`find_references` and `list_symbols` are annotated `readOnlyHint`, which is what
-lets a client run them without prompting. Everything that can change your code
+`find_references`, `list_symbols`, `get_active_context`, `get_logs`,
+`get_sync_events`, `get_sync_state` and `check_buffer_consistency` are annotated
+`readOnlyHint`, which is what lets a client run them without prompting.
+Everything that can change your code — and `report_bundle`, which writes a file —
 is not, and keeps its prompt unless you allowlist it above.
 
 Two properties are worth internalising, because everything surprising follows

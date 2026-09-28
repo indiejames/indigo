@@ -2,7 +2,7 @@
 
 <img src="indigo_logo.png" alt="Indigo logo" width="150" style="display: block; margin: 0 auto;">
 
-A terminal text editor written in go with modal editing and built-in language server support. Inspired by [Vim](https://www.vim.org/), [Kakoune](https://kakoune.org/), and [Helix](https://helix-editor.com/).
+A terminal text editor written in Go, with modal editing and built-in language server support. Inspired by [Vim](https://www.vim.org/), [Kakoune](https://kakoune.org/), and [Helix](https://helix-editor.com/).
 
 ## Who it's for
 
@@ -28,30 +28,100 @@ especially over ssh. I wanted something that worked for _me_ for both types of e
 
 Also, I wanted to build something real in Go, and to use some of the great projects I have read about, like [Cap'n Proto](https://capnproto.org/) and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
+## Documentation
+
+| Document | What's in it |
+|---|---|
+| [Configuration](docs/configuration.md) | Every `config.toml` key, custom language servers / formatters / linters, key rebinding, themes |
+| [Language Support](docs/language-support.md) | Which languages get highlighting, LSP, formatting and linting, and how to install each tool |
+| [Debugging](docs/debugging.md) | Breakpoints, the debug window, named launch configurations, per-language adapters |
+| [Agent Integration](docs/agent-integration.md) | Exposing indigo's live buffers and language servers to Claude Code or any MCP client |
+| [Dev Containers](docs/dev-containers.md) | Editing inside a container while the UI stays on the host |
+| [Plugin Architecture](docs/plugin-architecture.md) | How the out-of-process plugin system works, and why |
+| [Writing a Plugin](docs/plugin-development.md) | Step-by-step guide to building one with the Go SDK |
+| [Security Model](docs/security.md) | Threat model for the sockets and the plugin loader |
+| [Performance](PERFORMANCE.md) | Startup-path investigations and the optimizations that came out of them |
+
 ## Install
 
-Currently `indigo` has only been tested on macOS. It is highly likely to work on Linux, less likely to work on Windows.
+Indigo is developed and tested on **macOS**, and is regularly exercised on **Linux**
+(natively and inside [dev containers](docs/dev-containers.md)). Windows is not supported —
+the client/server transport is Unix domain sockets and process handling is POSIX-only.
 
-> **Note:** Binary releases are not yet available. For now, build from source:
+> **Note:** Binary releases are not yet available. For now, build from source.
 
+### Requirements
+
+- **Go 1.26 or newer** (see `go.mod`).
+- **A C toolchain** (Xcode command line tools, or gcc/clang). The Tree-sitter grammars are
+  C libraries built through cgo. `make build-minimal` skips them, at the cost of syntax
+  highlighting.
+- Optional, but this is where most of indigo's value comes from: a language server,
+  formatter and linter for the languages you use. See
+  [Language Support](docs/language-support.md) for the defaults and how to install them.
+
+### Build and install
+
+```sh
+git clone https://github.com/indiejames/indigo
+cd indigo
+make install          # all grammars, stripped, installed to $(go env GOPATH)/bin
 ```
-make install
+
+Make sure `$(go env GOPATH)/bin` is on your `PATH`. The binary is named `indigo`.
+
+The first build compiles every bundled grammar and takes a few minutes; later builds are
+incremental. For a faster build or a smaller binary, pick a different target:
+
+| Target | Result |
+|---|---|
+| `make build` | All grammars, with debug info. The default. |
+| `make build-release` | All grammars, stripped (`-ldflags="-s -w"`). What `make install` uses. |
+| `make build-no-heavy` | Everything except the two largest grammars (Nim, Swift), which dominate build time. |
+| `make build-custom LANGS="lang_go lang_rust"` | Only the grammars you name. |
+| `make build-minimal` | No grammars at all — no syntax highlighting, no cgo, smallest binary. |
+
+Grammars are selected with Go build tags, so this is a compile-time choice. Everything
+else — LSP, formatting, linting, plugins, debugging — works identically in every variant.
+
+### Installing plugins
+
+Bundled plugins build and install separately, one target pair each:
+
+```sh
+make build-plugins    # build them all
+make install-git      # build and install one, into ~/.config/indigo/plugins/indigo-git/
+make uninstall-git    # remove it again
 ```
 
-The binary is named `indigo`. It requires Go 1.21+.
+See [Plugins](#plugins) below for what each one does.
+
+### Working on indigo
+
+```sh
+make test             # go test -tags lang_all ./...
+make vet              # go vet -tags lang_all ./...
+make lint             # golangci-lint
+```
+
+The `lang_all` build tag matters: a plain `go test ./...` silently skips every test that
+needs a real grammar.
 
 ## Quick start
 
-I highly recommend that you alias `indigo` to `io`
-```
-alias io indigo
+I highly recommend aliasing `indigo` to `io`:
+
+```sh
+alias io=indigo         # bash / zsh — add to ~/.bashrc or ~/.zshrc
+alias io indigo         # fish     — or: alias --save io indigo
 ```
 
-After that
+After that:
 
-```
-io file.go          # open a file
-io .                # open directory (shows file picker)
+```sh
+io                  # new, untitled buffer
+io file.go          # open a file (creating it, and any missing parent directories, if absent)
+io .                # open a directory — shows the file picker
 io +42 file.go      # open a file at line 42
 ```
 
@@ -59,6 +129,27 @@ indigo uses a **client/server model** similar to Kakoune: the first invocation s
 changes in one will show up in the other.
 
 The upshot of this is that instead of `indigo` managing editor panes, you can use your current terminal window/pane system to manage layout. I use [zellij](https://zellij.dev/).
+
+### Command line
+
+Beyond `[+LINE] [path]`, the binary takes a small set of flags. There is no `--help`;
+this is the list.
+
+| Flag | Effect |
+|---|---|
+| `--debug` | Open the [debugger window](docs/debugging.md#the-debug-window) for this workspace — stack, variables, watches and program output — instead of an editor |
+| `--dump-keybinds` | Print every built-in action as a commented-out `[[keybind]]` TOML block, generated from the live keymap. Redirect to a file and uncomment what you want to change |
+| `--import-theme helix:<path>` | Convert a Helix theme into indigo's format under `~/.config/indigo/themes/` and print how to activate it |
+| `--import-theme vscode:<path>` | The same, for a VS Code theme JSON |
+| `--mcp` | Serve the [agent tools](docs/agent-integration.md) over MCP on stdio. Starts a server for the workspace on demand |
+| `--mcp-http [addr]` | Serve the same tools over HTTP, for an agent running in a container |
+| `--devcontainer` | Build and start the container described by `.devcontainer/devcontainer.json`, and edit inside it. See [Dev Containers](docs/dev-containers.md) |
+| `--container <name\|id>` | Edit inside a container you are already running |
+| `--container-dir <path>` | Where the workspace lives inside the container, when it isn't the default. Only meaningful with one of the two flags above |
+| `--warm` | Exit immediately, touching nothing. Used by `make install` so macOS's one-time code-signature check happens during install rather than at first launch |
+
+`--server` and `--server-stdio` exist so indigo can start its own backing server (locally,
+and inside a container). You don't normally invoke them by hand.
 
 ### Editing model
 
@@ -133,9 +224,24 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 
 | Key | Action                                       |
 |-----|----------------------------------------------|
-| `d` | Delete selection (or character under cursor) |
+| `d` | Delete selection (or character under cursor) — no clipboard side effect |
 | `c` | Delete selection and enter insert mode       |
-| `y` | Copy selection to system clipboard           |
+| `y` | Copy selection to the system clipboard       |
+| `v` | Cut: copy the selection to the clipboard, then delete it |
+| `p` | Paste the clipboard at the cursor            |
+
+`d` and `c` deliberately do *not* touch the clipboard — cutting is the explicit `v`. That
+way deleting a line never costs you what you had copied.
+
+**Multi-cursor** — every cursor gets the same edit.
+
+| Key      | Action                                                            |
+|----------|-------------------------------------------------------------------|
+| `Ctrl+d` | Select the next occurrence of the current selection (or the word under the cursor), adding a cursor |
+| `C`      | Add a cursor on the line below                                    |
+| `Alt+s`  | Split a multi-line selection into one cursor per line             |
+| `Alt+Enter` | In search mode: turn every match into a cursor at once         |
+| `Esc`    | Collapse back to a single cursor                                  |
 
 **Other**
 
@@ -145,25 +251,35 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 | `a`          | Enter insert mode, cursor after current char |
 | `A`          | Enter insert mode at end of line             |
 | `o` / `O`    | Open new line below / above                  |
+| `J`          | Join the next line onto this one             |
+| `>` / `<`    | Indent / unindent the line or selection      |
+| `Ctrl+/`     | Toggle comment on the line or selection      |
 | `Mj` / `Mk`  | Move current/selected line(s) down / up      |
 | `Shift+Down` / `Shift+Up` | Move current/selected line(s) down / up (repeatable) |
 | `u` / `U`    | Undo / redo                                  |
+| `z` / `Z`    | Set a mark / select from the mark to the cursor |
 | `q`          | Start/stop recording a macro                 |
 | `@`          | Replay the last recorded macro               |
 | `K`          | Show hover documentation (LSP)               |
+| `D`          | Toggle the diagnostics popup for the current line |
+| `gd` / `gr`  | Go to definition / find references (LSP)     |
+| `-` / `=`    | Jump back / forward in the jump list         |
 | `/`          | Enter search mode                            |
 | `n` / `N`    | Next / previous search match                 |
 | `Space` `s`  | Open the global search & replace dialog      |
-| `Esc`        | Clear selection and search highlights        |
+| `Esc`        | Clear selection, extra cursors and search highlights |
 | `Ctrl+s`     | Save                                         |
 | `Ctrl+p`     | Open file picker                             |
+| `gb`         | Open buffer picker                           |
 | `Ctrl+l` / `Ctrl+h` | Next / previous buffer (also `Ctrl+Shift+→` / `Ctrl+Shift+←`) |
 | `:`          | Enter command mode                           |
 | `?`          | Show all key bindings, including plugin-contributed ones |
 
 This is a curated list of the essentials, not the complete keymap — press `?` in the editor,
 or run `indigo --dump-keybinds`, for the full, always-current list (including the `g`/`~`/`M`/
-`s`/`m`/`Space` multi-key menus and every action's default key).
+`s`/`m`/`Space` multi-key menus and every action's default key). Every binding can be
+remapped, and you can define your own prefix menus: see
+[Key bindings](docs/configuration.md#key-bindings).
 
 ### Insert mode
 
@@ -328,6 +444,7 @@ Type `:` in normal mode, then one of:
 | `:qa!` `:quit-all!`        | Force close all and quit   |
 | `:wqa`                     | Save all and quit          |
 | `:o` `:open`               | Open file picker           |
+| `:new`                     | New, untitled buffer       |
 | `:sa` `:save-as`           | Open Save As dialog (pre-filled with the current path) |
 | `:sa <path>` `:save-as <path>` | Save As — write to `<path>` and continue editing there |
 | `:fmt` `:format`           | Format current file        |
@@ -360,16 +477,17 @@ When a file's extension doesn't resolve to a language on its own (most commonly 
 
 ## Features
 
-**Local search** — Press `/` to search within the current buffer. Supports incremental literal search with smart-case and regex search (prefix with `\`). Match count displayed in the status bar; `n` / `N` navigates between matches. 
+**Local search** — Press `/` to search within the current buffer. Supports incremental literal search with smart-case and regex search (prefix with `\`). Match count displayed in the status bar; `n` / `N` navigates between matches.
 
 **Local replace** — Type `/pattern/replacement` (an unescaped `/` after the pattern) to switch `/` search into a live, incremental replace preview across the current buffer or the selected area. Supports regex with capture groups using `\pattern/replacement` — e.g. `/\foo\((.*?)\)/goo$1()` would replace `foo(4)` with `goo4()`. `Enter` commits every previewed match as one undo entry; `Esc` cancels with no changes. (There is no `:s` command — `:s` is an alias for Save, above.)
 
-**Global search**
-Use `:grep [pattern]` for workspace-wide search across all files.
+**Global search** — `:grep [pattern]` (or `:find`) searches every file in the workspace, using [ripgrep](https://github.com/BurntSushi/ripgrep) when it's on your `PATH` and a built-in walker when it isn't. An optional trailing glob narrows it: `:grep TODO **/*.ts`.
 
 **Global search & replace** — Press `space + s` for a floating dialog that searches and replaces across the whole workspace, with independent case/regex checkboxes, a live per-match diff preview, and either one-at-a-time or all-at-once apply.
 
-**Syntax highlighting** — 40+ languages via Tree-sitter grammars. See [Language Support](docs/language-support.md).
+**Multi-cursor editing** — `Ctrl+D` adds a cursor at the next occurrence of the selection (VS Code-style), `C` adds one on the line below, `Alt+s` splits a multi-line selection into one cursor per line, and `Alt+Enter` in search mode turns every match into a cursor at once. Insert, delete and case conversion all apply at every cursor.
+
+**Syntax highlighting** — 50 languages via Tree-sitter grammars, compiled in at build time. See [Language Support](docs/language-support.md).
 
 **LSP integration** — Language servers start automatically when you open a supported file (no config needed if the server is in your PATH). Provides:
 - Inline diagnostics with gutter markers
@@ -380,7 +498,7 @@ Use `:grep [pattern]` for workspace-wide search across all files.
 
 **Auto-formatting** — On `:w` with `format_on_save = true`, indigo runs the appropriate formatter (gofmt, prettier, rustfmt, etc.) automatically. See [Language Support](docs/language-support.md) for the full list.
 
-**Linting** — On `:w`, indigo runs the appropriate linter (golangci-lint, eslint, ruff, cargo clippy, etc.) asynchronously and merges its results with LSP diagnostics, so they show up the same way (gutter markers, the `D`-popup) with no extra keybinding needed. See [Configuration](docs/configuration.md#linters) for the built-in defaults and how to add custom linters.
+**Linting** — indigo runs the appropriate linter (golangci-lint, eslint, ruff, cargo clippy, etc.) asynchronously and merges its results with LSP diagnostics, so they show up the same way (gutter markers, the `D` popup) with no extra keybinding needed. A linter that reads source on stdin (eslint, ruff) runs live as you type; a compile-based one (golangci-lint, cargo clippy) needs a real file, so it runs on save. See [Linting](docs/language-support.md#linting) for the defaults and [Configuration](docs/configuration.md#linters) for adding your own.
 
 **Debugging** — Breakpoints in the gutter (F9), conditional breakpoints and logpoints, F5 to run, F10/F11 to step, `K` to evaluate while stopped, `Space d t` to debug just the test under the cursor, and `Space d a` to attach to a running process or a headless Delve. `indigo --debug` opens a separate window with the call stack, variables, watches and program output. Go works out of the box with Delve; TypeScript/JavaScript (js-debug), Python (debugpy) and C/C++/Rust/Swift (lldb-dap) are built in, other debuggers can be added, and a project's `.vscode/launch.json` is picked up as is. See [Debugging](docs/debugging.md).
 
@@ -388,24 +506,69 @@ Use `:grep [pattern]` for workspace-wide search across all files.
 
 **Multi-buffer** — Open multiple files in the same session. A tab bar appears when more than one buffer is open. Use `Ctrl+l` / `Ctrl+h` (or `Ctrl+Shift+→` / `Ctrl+Shift+←`), `Ctrl+P`, or clicking a tab directly, to navigate.
 
+**Workspace diagnostics** — `:diagnostics` opens a browser listing every error and warning in the project, not just the open files, gathered from the language servers and whole-project linter runs together. `Enter` jumps to a result, `r` rescans. See [Workspace diagnostic scan](docs/configuration.md#workspace-diagnostic-scan).
+
+**Themes** — Five built in (`default-dark`, `dracula`, `catppuccin-mocha`, `gruvbox-dark`, `one-dark`), or drop your own `<name>.toml` in `~/.config/indigo/themes/`. `indigo --import-theme helix:<path>` and `--import-theme vscode:<path>` convert a theme you already have. See [Themes](docs/configuration.md#themes).
+
 **Crash recovery** — File content is written to a recovery directory every 5 seconds. If indigo exits uncleanly, the next open will offer to restore your unsaved work.
 
-**Shared server** — Opening the same workspace in multiple terminal windows shares one server process. Buffers are synchronized across sessions.
+**Shared server** — Opening the same workspace in multiple terminal windows shares one server process. Buffers are synchronized across sessions: an edit in one window appears in the others as you type, with concurrent edits merged by operational transform rather than one window clobbering the other.
+
+**Dev containers** — `indigo --devcontainer` builds and starts the container described by `.devcontainer/devcontainer.json` and edits inside it, with the UI, key handling and clipboard staying on the host. Language servers, formatters, linters and debuggers all run in the container, against the container's toolchain. `indigo --container <name>` does the same for a container you are already running. See [Dev Containers](docs/dev-containers.md).
 
 **Agent integration (MCP)** — `claude mcp add --scope user indigo -- indigo --mcp` gives Claude Code (or any MCP client) the workspace indigo already has open: it reads your **live buffers** including unsaved edits, and answers "what calls this?" from the language server rather than by grepping. Edits arrive as ordinary undoable buffer ops. One registration covers every repository, and indigo need not be running — a server starts on demand. `indigo --mcp-http` serves the same tools over HTTP for an agent running in a container. See [Agent Integration](docs/agent-integration.md).
 
+## Plugins
+
+Everything above is built in. Anything else is a plugin — a **separate OS process** that
+talks Cap'n Proto to the server over its own socket, the way VS Code runs extensions out
+of process. A hung or crashed plugin cannot freeze the editor — the server notices the
+connection go away, reaps the process, and carries on.
+
+A plugin is installed by being present: a binary plus a `plugin.toml` manifest in
+`~/.config/indigo/plugins/<name>/`. There is no enable/disable list in `config.toml`. Six
+ship with the repo:
+
+| Plugin | What it does | Install |
+|---|---|---|
+| [`indigo-git`](plugins/indigo-git) | Branch and diff status in the status bar, inline blame (`Alt+b`), hunk navigation (`Alt+n` / `Alt+p`), diff view | `make install-git` |
+| [`indigo-spell`](plugins/indigo-spell) | Underlines misspelled words, suggestions on `Shift+F`, with global and per-workspace dictionaries | `make install-spell` |
+| [`jumpy`](plugins/jumpy) | EasyMotion-style jump — labels every visible token, type the 2-character label to go there | `make install-jumpy` |
+| [`bookmarks`](plugins/bookmarks) | Named bookmarks on lines (`Alt+m`), with a picker in the Command menu | `make install-bookmarks` |
+| [`npm-versions`](plugins/npm-versions) | Completes package versions inside `package.json` dependency blocks | `make install-npm-versions` |
+| [`hello`](plugins/hello) | The smallest possible working plugin — read this one first | `make install-hello` |
+
+Plugins can contribute key bindings, `:commands`, Command-menu entries, gutter and inline
+decorations, status-bar segments, completion candidates, diagnostics, and their own popups
+and input prompts — and can read buffers, apply edits, and run external processes. Writing
+one is a few dozen lines against the Go SDK in [`sdk/`](sdk): see
+[Writing a Plugin](docs/plugin-development.md) for a walkthrough, and
+[Plugin Architecture](docs/plugin-architecture.md) for how it fits together.
+
 ## Configuration
 
-Config file: `~/.config/indigo/config.toml`
+Config file: `~/.config/indigo/config.toml`, created with defaults on first run.
 
 ```toml
 line_numbers    = true   # show line numbers in gutter
 hide_tabs       = false  # hide tab bar even when multiple buffers are open
 fuzzy_search    = true   # fuzzy matching in the file picker
 format_on_save  = false  # run formatter automatically on :w
+theme           = "dracula"
+indent_style    = "spaces"   # global default; per-language defaults and
+indent_width    = 4          # [indent.<ext>] overrides both exist
+
+[[language_server]]          # add or replace a server for an extension
+extensions = ["ml", "mli"]
+command    = "ocamllsp"
 ```
 
-Full configuration reference, including how to add custom language servers, formatters, and linters: [Configuration](docs/configuration.md).
+Full configuration reference — every key, custom language servers, formatters and linters,
+key rebinding, user-defined menus, themes, and debug configurations:
+[Configuration](docs/configuration.md).
+
+A workspace can also carry its own `.indigo/debug.toml` with named launch configurations,
+and indigo reads an existing `.vscode/launch.json` as is. See [Debugging](docs/debugging.md).
 
 ## About the Logo
 

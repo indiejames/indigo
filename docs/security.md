@@ -27,8 +27,13 @@ permissions cannot solve).
 The server socket lives inside a private directory:
 
 ```
-/tmp/indigo-<uid>-<workspace-hash>/server.sock
+<tmp>/indigo-<uid>-<workspace-hash>/server.sock
 ```
+
+`<tmp>` is Go's `os.TempDir()`: `$TMPDIR` when set — which on macOS is already a
+per-user directory under `/var/folders/` — and `/tmp` otherwise, which is the
+shared, world-writable case the rest of this document assumes. `<workspace-hash>`
+is the first 8 bytes of the SHA-256 of the absolute workspace path.
 
 The directory is created with mode `0700` before `net.Listen` is called.
 Because the directory is owner-only, no other user can access the socket at
@@ -107,11 +112,44 @@ write access to your home directory.
 
 ---
 
+## Diagnostic logs
+
+Every indigo process — the app, the client, the server, the plugin manager, and
+each plugin's stderr — appends to one shared log file, rotated daily and pruned
+after 24 hours without a write. It is always on; there is no flag to enable it.
+
+```
+<tmp>/indigo-plugins-<YYYY-MM-DD>.log     # or $INDIGO_LOG_DIR/…
+```
+
+Unlike the socket, this file is **not** inside a `0700` directory, so two things
+are enforced on the file itself:
+
+- **Mode `0600`.** Log contents include buffer text, file paths and plugin
+  output. On a shared `/tmp` a default `0644` would publish those to every
+  account on the machine.
+- **`O_NOFOLLOW` on every open, for reading and writing.** The filename is
+  derived from the date and so is entirely predictable. Without this, another
+  user on a multi-user Linux box could pre-create it as a symlink to a file
+  *you* can write, and every log line would be appended to their chosen target.
+  An open that hits a squatted symlink fails with `ELOOP`, the line is dropped,
+  and nothing outside the log is written. macOS is not exposed here (its
+  `/var/folders/…/T` is already per-user) — which is exactly why it is enforced
+  in code rather than assumed from the platform.
+
+`report_bundle` (see [Agent Integration](agent-integration.md)) packages these
+logs for a bug report. Buffer *contents* never appear in the sync-state half of
+that bundle — only a SHA-256 and a byte count, enforced at the schema level — but
+log lines themselves can contain paths and plugin output, which the bundle states
+at the top.
+
 ## Coverage summary
 
 | Threat                                       | Status                                                                   |
 |----------------------------------------------|--------------------------------------------------------------------------|
 | Different user connecting to server socket   | Blocked — `0700` directory                                               |
+| Different user reading the diagnostic log    | Blocked — log file is mode `0600`                                        |
+| Symlink squatting on the log file in `/tmp`  | Blocked — `O_NOFOLLOW` on every open; the write fails rather than following |
 | Different user impersonating a plugin        | Blocked — `0700` directory                                               |
 | Accidental plugin binary corruption          | Detected — SHA-256 hash check (when hash is in manifest)                 |
 | Deliberate plugin binary replacement         | Not blocked — attacker can update the manifest hash too                  |

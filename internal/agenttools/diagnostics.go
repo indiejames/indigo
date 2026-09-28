@@ -182,8 +182,13 @@ func execReportBundle(ctx context.Context, rpc *rpcclient.RPC, workDir string, i
 	var b strings.Builder
 	fmt.Fprintf(&b, "indigo diagnostic bundle\ngenerated: %s\nworkdir:   %s\nlog dir:   %s\nwindow:    last %s\n",
 		time.Now().Format(time.RFC3339), workDir, debuglog.Dir(), since)
-	b.WriteString("\nNo buffer contents are included — buffers appear as sha256 and byte count only.\n")
-	b.WriteString("Log lines may still contain file paths and plugin output; review before sharing.\n")
+	// Scoped deliberately: the sync-state half cannot carry buffer contents
+	// (the capnp type has no content field), but the log half is raw lines,
+	// including every process's stderr, and is not filtered. Saying "no
+	// buffer contents are included" of the whole file would be a promise
+	// this cannot keep about the part most likely to break it.
+	b.WriteString("\nThe sync state below carries no buffer contents — buffers appear as sha256 and byte count only.\n")
+	b.WriteString("The logs are unfiltered and can contain file paths, plugin output and buffer text; review before sharing.\n")
 
 	b.WriteString("\n═══ sync state ═══\n\n")
 	states, err := rpc.GetSyncState(ctx, 0)

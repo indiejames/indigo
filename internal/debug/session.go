@@ -272,9 +272,11 @@ func (m *Manager) syncBreakpoints(path string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		// Every connection: each child session is a separate program. Root
-		// first, so a child's answer — the one about the running code —
-		// is the one recorded.
+		// Every connection: each child session is a separate program. Order
+		// does not decide the outcome — each connection's answer is kept
+		// separately and a breakpoint is verified if any of them set it
+		// (Breakpoint.recompute) — which it must not, since at session start
+		// the root and a child are sent to from different goroutines.
 		var err error
 		for _, c := range conns {
 			if e := m.sendBreakpoints(ctx, c, path); e != nil && err == nil {

@@ -48,6 +48,10 @@ const (
 var (
 	mu        sync.Mutex
 	lastPrune time.Time
+	// modeCheckedPath is the log path whose permissions ensureMode has
+	// already tightened in this process. Empty until the first successful
+	// check; reset implicitly each day, when Path() names a new file.
+	modeCheckedPath string
 )
 
 // Dir returns the directory holding the log files.
@@ -98,7 +102,53 @@ const logFileMode = 0600
 // can predict and get to first, and that is what logOpenFlags guards.
 func Open() (*os.File, error) {
 	maybePrune()
-	return os.OpenFile(Path(), logOpenFlags, logFileMode)
+	path := Path()
+	f, err := os.OpenFile(path, logOpenFlags, logFileMode)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureMode(path, f); err != nil {
+		f.Close() //nolint:errcheck
+		return nil, err
+	}
+	return f, nil
+}
+
+// ensureMode tightens the opened file to logFileMode.
+//
+// The mode passed to os.OpenFile applies only when that call *creates* the
+// file; an existing one keeps whatever mode it already has. Two ways it can
+// be the wrong one: an older indigo that used a looser mode, and — the one
+// that matters — another user on a shared /tmp creating the file first. The
+// name is derived from the date and so is entirely predictable, which is the
+// same exposure O_NOFOLLOW exists for: a symlink is refused, but a plain
+// world-readable file the attacker owns was simply appended to, handing them
+// every log line.
+//
+// A failure is returned rather than ignored, so the caller writes nothing.
+// fchmod on a file owned by someone else fails with EPERM — precisely the
+// case where continuing would publish the log to them.
+//
+// Done once per path per process: Write opens, writes and closes per line, so
+// an unconditional fchmod would add a syscall to every line of a log written
+// on nearly every RPC. The path changes daily, so a new day is re-checked.
+// This closes pre-creation, not a chmod raced in afterwards — that race is
+// unwinnable anyway, since it can equally be run between the check and the
+// write.
+func ensureMode(path string, f *os.File) error {
+	mu.Lock()
+	ok := modeCheckedPath == path
+	mu.Unlock()
+	if ok {
+		return nil
+	}
+	if err := f.Chmod(logFileMode); err != nil {
+		return err
+	}
+	mu.Lock()
+	modeCheckedPath = path
+	mu.Unlock()
+	return nil
 }
 
 // TimeLayout is the timestamp every Write-produced line begins with. Chosen to

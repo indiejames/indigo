@@ -140,6 +140,11 @@ func (m *Manager) removeChild(gen int, child *dap.Client) {
 		m.active = nil
 	}
 	m.mu.Unlock()
+	// A breakpoint is verified while some connection has it set, so this
+	// child's answers must not outlive it — otherwise a breakpoint stays
+	// drawn as set in a program that has gone.
+	m.Breakpoints.ForgetConnection(child)
+	m.fire()
 	// Closing, not Shutdown: disconnecting a child can terminate the
 	// program another child is still debugging.
 	go child.Close() //nolint:errcheck

@@ -136,8 +136,9 @@ tune the fallback.
 
 ## Linting
 
-Linters run on save, asynchronously, and their findings are merged with the file's LSP
-diagnostics — same gutter markers, same `D` popup, same status-bar counts. As with
+Linters run asynchronously — some on every edit, against the buffer you are typing in,
+others only on save (see the table) — and their findings are merged with the file's LSP
+diagnostics: same gutter markers, same `D` popup, same status-bar counts. As with
 formatters, only tools found on `PATH` or in `node_modules/.bin` are used, and a missing
 tool is silently skipped.
 

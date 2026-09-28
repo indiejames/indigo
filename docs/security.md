@@ -125,9 +125,14 @@ after 24 hours without a write. It is always on; there is no flag to enable it.
 Unlike the socket, this file is **not** inside a `0700` directory, so two things
 are enforced on the file itself:
 
-- **Mode `0600`.** Log contents include buffer text, file paths and plugin
-  output. On a shared `/tmp` a default `0644` would publish those to every
-  account on the machine.
+- **Mode `0600`, checked and not just requested.** Log contents include buffer
+  text, file paths and plugin output. On a shared `/tmp` a default `0644` would
+  publish those to every account on the machine. The mode given to `open(2)`
+  only applies when that call *creates* the file, so an existing one — left by
+  an older indigo, or created first by another user, since the dated filename
+  is entirely predictable — is tightened with `fchmod` before anything is
+  written. If that fails, which is what happens when the file belongs to
+  someone else, the open is failed rather than the line appended.
 - **`O_NOFOLLOW` on every open, for reading and writing.** The filename is
   derived from the date and so is entirely predictable. Without this, another
   user on a multi-user Linux box could pre-create it as a symlink to a file
@@ -138,17 +143,18 @@ are enforced on the file itself:
   in code rather than assumed from the platform.
 
 `report_bundle` (see [Agent Integration](agent-integration.md)) packages these
-logs for a bug report. Buffer *contents* never appear in the sync-state half of
-that bundle — only a SHA-256 and a byte count, enforced at the schema level — but
-log lines themselves can contain paths and plugin output, which the bundle states
-at the top.
+logs for a bug report. Its sync-state half cannot carry buffer contents — only a
+SHA-256 and a byte count, enforced at the schema level — but the log half is
+unfiltered and subject to everything above, so a bundle is worth reading before
+it is shared. It says so at the top.
 
 ## Coverage summary
 
 | Threat                                       | Status                                                                   |
 |----------------------------------------------|--------------------------------------------------------------------------|
 | Different user connecting to server socket   | Blocked — `0700` directory                                               |
-| Different user reading the diagnostic log    | Blocked — log file is mode `0600`                                        |
+| Different user reading the diagnostic log    | Blocked — mode `0600`, re-applied on an existing file before any write   |
+| Different user pre-creating the log file     | Blocked — `fchmod` fails on their file, and the open is failed with it   |
 | Symlink squatting on the log file in `/tmp`  | Blocked — `O_NOFOLLOW` on every open; the write fails rather than following |
 | Different user impersonating a plugin        | Blocked — `0700` directory                                               |
 | Accidental plugin binary corruption          | Detected — SHA-256 hash check (when hash is in manifest)                 |

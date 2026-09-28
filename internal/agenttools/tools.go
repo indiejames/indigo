@@ -242,7 +242,8 @@ func AllTools() []ToolDef {
 		{
 			Name: "report_bundle",
 			Description: "Write a single diagnostic file combining sync state for every open buffer with the recent log, and return its path. " +
-				"Use this to capture evidence for a bug report — especially one from another machine, where the useful detail is otherwise unreachable. No buffer contents are included.",
+				"Use this to capture evidence for a bug report — especially one from another machine, where the useful detail is otherwise unreachable. " +
+				"The sync state carries no buffer contents (sha256 and byte count only); the log lines are unfiltered, so tell the user to read the bundle before sharing it.",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]SchemaProp{

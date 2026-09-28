@@ -132,8 +132,19 @@ the picker uses simple substring matching with no ranking.
 
 ## Indentation
 
-Indentation is resolved per file, from the file's extension, through four sources. Later
-ones win:
+**The file's own indentation wins first.** When a buffer is opened, its content is scanned
+for the indentation it already uses, and that is what indigo inserts as you type — so
+editing an existing file stays consistent with it even when it disagrees with your
+settings. Nothing below applies while that detection succeeded.
+
+Only two things override it: an explicit `:set ft=<lang>`, which is you overruling the
+detection on purpose, and the detection coming back inconclusive — an empty file, or one
+with no indented lines at all (the first 64 KB are scanned). A file indented with tabs is
+detected as tabs at width 4; one indented with spaces takes the smallest indent found as
+its width.
+
+Failing that, indentation is resolved from the file's extension through four configured
+sources. Later ones win:
 
 1. indigo's built-in default: **tabs, width 4**.
 2. indigo's built-in **per-language** convention for that extension (the table below).
@@ -169,7 +180,8 @@ falls back to `tabs`, and a `width` of zero or less falls back to `4`.
 
 These are conventions, not formatter settings — your formatter still reindents the file its
 own way on `:fmt`. They control what indigo inserts as you type, and how `>` / `<` and
-auto-indent behave.
+auto-indent behave. And, per the detection above, they apply to a *new* or unindented file:
+an existing one follows itself.
 
 ## Language servers
 

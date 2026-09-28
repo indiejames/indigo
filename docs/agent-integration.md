@@ -272,10 +272,15 @@ or one stops keeping up, or something hangs.
 | `check_buffer_consistency` | Whether any window's content has actually diverged from the server's. Samples twice, because a window being typed in legitimately differs from the server for a moment. |
 | `report_bundle` | `get_logs` + `get_sync_state` written to one file, for attaching to a bug report. Returns the path. |
 
-**Buffer contents never appear in `get_sync_state` or `report_bundle`** — only a
-sha256 and a byte count. That is enforced at the schema level, because this is
-exactly the output that ends up pasted into an issue. Log lines can still
-contain file paths and plugin output, which the bundle says at the top.
+**`get_sync_state` never carries buffer contents** — a buffer appears as a
+sha256 and a byte count, and nothing else. That is enforced at the capnp schema
+level rather than by the formatting code, because this is exactly the output
+that ends up pasted into an issue.
+
+`report_bundle` inherits that guarantee **for its sync-state half only**. Its
+other half is raw log lines, which are not filtered and can contain file paths,
+plugin output, and — since every process's stderr lands in the same log — text
+from a buffer. Read a bundle before sharing it; it says as much at the top.
 
 ### Approval
 

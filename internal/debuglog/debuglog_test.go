@@ -17,6 +17,7 @@ func useTempDir(t *testing.T) string {
 	t.Setenv("INDIGO_LOG_DIR", dir)
 	mu.Lock()
 	lastPrune = time.Time{}
+	modeCheckedPath = ""
 	mu.Unlock()
 	return dir
 }
@@ -206,5 +207,84 @@ func TestOpenCreatesPrivateFile(t *testing.T) {
 	}
 	if perm := fi.Mode().Perm(); perm&0077 != 0 {
 		t.Errorf("log file mode = %o, want no group/other access", perm)
+	}
+}
+
+// The log holds buffer text, file paths and plugin output, so it must be
+// readable only by the user running indigo. The mode passed to os.OpenFile
+// only applies when that call creates the file, so an already-existing one —
+// left by an older indigo, or created first by another user on a shared /tmp,
+// where the dated filename is entirely predictable — would otherwise be
+// appended to at whatever mode it already had.
+func TestExistingLogFileIsTightenedBeforeWriting(t *testing.T) {
+	dir := useTempDir(t)
+	path := filepath.Join(dir, "indigo-plugins-"+time.Now().Format("2006-01-02")+".log")
+
+	if err := os.WriteFile(path, []byte("planted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Explicitly, because the mode above is masked by the umask — under a
+	// restrictive one the file would already be 0600 and the test would pass
+	// while proving nothing.
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	Write("test", "after")
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != logFileMode {
+		t.Errorf("mode = %o, want %o — a pre-existing log was appended to at its own mode", got, logFileMode)
+	}
+	// Tightening must not cost the file its contents: this is an append-only
+	// log, and a reader is mid-file.
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "planted") || !strings.Contains(string(b), "after") {
+		t.Errorf("content = %q, want the existing line kept and the new one appended", b)
+	}
+}
+
+// A file this process creates itself gets the mode from the open, which the
+// check above must not be allowed to mask a regression in.
+func TestNewLogFileIsOwnerOnly(t *testing.T) {
+	dir := useTempDir(t)
+	Write("test", "first line")
+	info, err := os.Stat(filepath.Join(dir, "indigo-plugins-"+time.Now().Format("2006-01-02")+".log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != logFileMode {
+		t.Errorf("mode = %o, want %o", got, logFileMode)
+	}
+}
+
+// Open reports the failure rather than handing back a file at a mode it could
+// not fix, so the caller writes nothing into it. The realistic trigger —
+// fchmod returning EPERM on a file another user owns — needs a second uid and
+// so cannot be driven from a test; this drives the same branch through
+// ensureMode with a closed descriptor, which is the one other way fchmod
+// fails.
+func TestOpenRefusesAFileItCannotTighten(t *testing.T) {
+	dir := useTempDir(t)
+	path := filepath.Join(dir, "probe.log")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close() //nolint:errcheck
+	if err := ensureMode(path, f); err == nil {
+		t.Error("ensureMode returned nil for a descriptor it could not chmod")
+	}
+	mu.Lock()
+	cached := modeCheckedPath
+	mu.Unlock()
+	if cached == path {
+		t.Error("a failed check was cached, so later opens would skip it and write anyway")
 	}
 }

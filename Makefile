@@ -166,7 +166,7 @@ install-npm-versions: build-npm-versions
 uninstall-npm-versions:
 	rm -rf $(NPM_VERSIONS_INSTALL)
 
-build-plugins: build-jumpy build-spell build-git build-bookmarks build-npm-versions
+build-plugins: build-hello build-jumpy build-spell build-git build-bookmarks build-npm-versions
 
 .PHONY: build build-release build-minimal build-no-heavy build-custom install test vet lint clean \
         build-jumpy install-jumpy uninstall-jumpy \

@@ -289,7 +289,7 @@ Built in, used when their command is found:
 | Adapter | Command | Debugs |
 | --- | --- | --- |
 | `go` | `dlv` (Delve) | Go packages and tests |
-| `node` | js-debug — see [TypeScript and JavaScript](#typescript-and-javascript) | `.ts`, `.js`, `.mjs`, `.cjs`, `.mts`, `.cts` files |
+| `node` | js-debug — see [TypeScript and JavaScript](#typescript-and-javascript) | `.ts`, `.js`, `.mjs`, `.cjs`, `.mts`, `.cts` files — not on npm; install by unpacking its `js-debug-dap` release into `~/.local/share/indigo` |
 | `python` | `python3 -m debugpy.adapter` | `.py` files — install with `pip install debugpy` |
 | `lldb` | `lldb-dap` (on macOS, found through Xcode's `xcrun` when not on `PATH`) | Built binaries: C, C++, Rust, Swift. Set `program` to the binary, compiled with debug info (`-g`). |
 

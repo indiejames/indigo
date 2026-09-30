@@ -89,6 +89,16 @@ func (s *callbackServer) setSend(fn func(tea.Msg)) {
 	}
 }
 
+// hasDispatcher reports whether anything is installed to receive push
+// messages. False for a connection that is not an editor — agenttools dials
+// the same way but has no update loop — and briefly true-to-be during a
+// window's startup, before the App wires itself up.
+func (s *callbackServer) hasDispatcher() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.send != nil
+}
+
 func (s *callbackServer) dispatch(msg tea.Msg) {
 	s.mu.Lock()
 	fn := s.send
@@ -262,14 +272,36 @@ type ReportBufferStateMsg struct {
 
 // reportBufferStateTimeout bounds how long the callback waits for the update
 // loop to answer. The server calls this with its own (shorter) timeout, so this
-// is a backstop for the case where there is no program to answer at all —
-// during startup before the sender is wired, or while shutting down.
+// is a backstop for a dispatcher that is installed but no longer running —
+// a window shutting down, or a wedged one, which is the case worth reporting.
+// A connection with no dispatcher at all never reaches the wait: see
+// ReportBufferState.
 const reportBufferStateTimeout = 2 * time.Second
 
 // ReportBufferState answers the server's consistency check with a hash of what
 // this client holds for the requested buffer.
 func (s *callbackServer) ReportBufferState(ctx context.Context, call proto.ClientCallback_reportBufferState) error {
 	bufID := call.Args().BufId()
+
+	// No dispatcher means there is nothing here that holds buffer content, and
+	// never will be for this connection — agenttools dials through DialStream
+	// exactly as a window does, but has no update loop to ask. Answering
+	// "known: false" is the truth: this client keeps no copy of any buffer, so
+	// it cannot have diverged from the server.
+	//
+	// Falling through to the wait below instead cost 2s per buffer and then
+	// returned an error, which check_buffer_consistency renders as NO ANSWER —
+	// the verdict reserved for a *wedged window*. Every consistency check run
+	// from an agent therefore accused the agent's own connection, and a real
+	// report was diagnosed for two sessions on the strength of it.
+	if !s.hasDispatcher() {
+		res, err := call.AllocResults()
+		if err != nil {
+			return err
+		}
+		res.SetKnown(false)
+		return nil
+	}
 
 	reply := make(chan BufferStateReport, 1)
 	s.dispatch(ReportBufferStateMsg{BufID: bufID, Reply: reply})

@@ -805,6 +805,23 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 		s.recordClientProgress(entry, clientID, newVersion)
 	}
 
+	// Logged on success, unlike ApplyOp — three reports of "the tool said it
+	// edited the file and the buffer never changed" have arrived with nothing
+	// on the server side to examine, because only rejections were written
+	// down. An accepted batch that applied nothing is indistinguishable from
+	// one that applied everything, in a log that records neither.
+	//
+	// Both counts, because they can differ: an op whose every deleted
+	// character another client had already deleted rebases away to nothing,
+	// which applyRebased treats as success. applied < sent is the shape to
+	// look for when an edit reports success and leaves no trace.
+	//
+	// ApplyOp stays silent on success deliberately: it is one op per
+	// keystroke, and logging it would bury everything else in the shared log.
+	// A batch is a tool call or a replace-all, which is rare enough to afford.
+	serverLog("ApplyOps: buffer %d (%q) client %d sent %d op(s), applied %d, version %d",
+		bufID, path, clientID, len(ops), len(applied), newVersion)
+
 	res, err := call.AllocResults()
 	if err != nil {
 		return err

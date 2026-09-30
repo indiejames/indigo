@@ -527,11 +527,27 @@ func (m Model) insertPastedText(text string) (tea.Model, tea.Cmd) {
 		InsertCol:  m.cursor.Col,
 		InsertText: strings.Join(append([]string{lines[0]}, rest...), "\n"),
 	}
-	lastLine := lines[0]
+	// Where the cursor lands depends on whether the paste broke the line.
+	//
+	// A paste with no newline in it continues the line the cursor is already
+	// on, so the new column is the old one plus what was inserted. Only a
+	// paste that added lines leaves the cursor on a line whose entire content
+	// is pasted text, and there the column is that last line's length alone —
+	// measured after reindentation, since `rest` has already been reindented.
+	//
+	// The single-line case used to take the multi-line branch too, setting the
+	// column to the pasted text's own length. Pasting into a line at any
+	// column but 0 therefore threw the cursor *backwards*, to a position
+	// unrelated to the text: paste 10 characters at column 60 and the cursor
+	// landed at 10. Only reachable through handlePaste (a terminal
+	// bracketed paste, i.e. cmd+v) — `p` in Normal mode and a typed multi-rune
+	// commit both route single-line text elsewhere, which is why this function
+	// was only ever exercised with the newline it was written for.
+	col := m.cursor.Col + len([]rune(lines[0]))
 	if len(rest) > 0 {
-		lastLine = rest[len(rest)-1]
+		col = len([]rune(rest[len(rest)-1]))
 	}
-	m.cursor = document.Pos{Line: m.cursor.Line + len(lines) - 1, Col: len([]rune(lastLine))}
+	m.cursor = document.Pos{Line: m.cursor.Line + len(lines) - 1, Col: col}
 	return applyOp(m, op)
 }
 

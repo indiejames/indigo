@@ -407,6 +407,9 @@ func executeCutSelection(m Model) (tea.Model, tea.Cmd) {
 }
 
 func executeYank(m Model) (tea.Model, tea.Cmd) {
+	if len(m.extraCursors) > 0 {
+		return yankAllCursorSelections(m)
+	}
 	text := m.selectedText()
 	if m.sel == nil {
 		text = m.charUnderCursor()
@@ -521,10 +524,19 @@ func executeWordEnd(m Model) (tea.Model, tea.Cmd) {
 }
 
 func executePaste(m Model) (tea.Model, tea.Cmd) {
-	text, err := readClipboard()
+	text, err := clipboardReader()
 	if err != nil {
 		m = m.pushStatus("clipboard: " + err.Error())
 		return m, nil
+	}
+	// Before the single-cursor paths below, both of which only ever touch the
+	// primary cursor — insertPastedText in particular is single-cursor by
+	// construction.
+	if len(m.extraCursors) > 0 {
+		if text == "" {
+			return m, nil
+		}
+		return pasteAtAllCursors(m, text)
 	}
 	if strings.Contains(text, "\n") {
 		return m.insertPastedText(text)
@@ -543,7 +555,9 @@ func executePaste(m Model) (tea.Model, tea.Cmd) {
 }
 
 func executeExtendWordBackward(m Model) (tea.Model, tea.Cmd) {
-	m.extendWordBackward()
+	m.applyToAllCursors(func(m *Model) {
+		m.extendWordBackward()
+	})
 	return m, nil
 }
 

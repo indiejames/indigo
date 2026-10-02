@@ -339,7 +339,7 @@ func executeInsertEnter(m Model) (tea.Model, tea.Cmd) {
 
 func executeInsertTab(m Model) (tea.Model, tea.Cmd) {
 	if len(m.extraCursors) > 0 {
-		return applyInsertTextToAllCursors(m, m.tabInsertText)
+		return applyInsertTextToAllCursors(m, func(_, line, col int) string { return m.tabInsertText(line, col) })
 	}
 	text := m.tabInsertText(m.cursor.Line, m.cursor.Col)
 	op := document.Op{

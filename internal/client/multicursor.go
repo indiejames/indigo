@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -303,6 +304,133 @@ func splitSelectionIntoCursors(m *Model) {
 	}
 }
 
+// cursorTextsInDocumentOrder returns what each cursor (primary and extra)
+// currently covers, ordered by position in the buffer rather than by the order
+// the cursors were created — a Ctrl+D that wrapped, or a cursor added above,
+// otherwise puts the clipboard in an order that looks arbitrary to the user.
+//
+// Each cursor contributes its selected text. bareCursors decides what a cursor
+// with *no* selection contributes, and the two callers deliberately differ —
+// each matching its own single-cursor behaviour, so one cursor is the N=1 case
+// of the same rule:
+//
+//   - yank passes true: `y` with no selection copies the character under the
+//     cursor (TestExecuteYankNoSelectionCopiesCharUnderCursor).
+//   - cut passes false: `v` with no selection deletes the character under the
+//     cursor without touching the clipboard, so that a run of bare cuts does
+//     not flood it (TestDeleteAllCursorSelectionsNoSelectionDoesNotTouchClipboard
+//     and its single-cursor sibling).
+//
+// Do not "unify" those into one rule — both are tested on purpose, and an
+// earlier version of this helper lost the cut half by assuming they matched.
+func cursorTextsInDocumentOrder(m Model, bareCursors bool) []string {
+	type at struct {
+		cursor document.Pos
+		sel    *Selection
+	}
+	all := []at{{m.cursor, m.sel}}
+	for _, ec := range m.extraCursors {
+		all = append(all, at{ec.pos, ec.sel})
+	}
+	sort.Slice(all, func(i, j int) bool {
+		ci, cj := all[i].cursor, all[j].cursor
+		if ci.Line != cj.Line {
+			return ci.Line < cj.Line
+		}
+		return ci.Col < cj.Col
+	})
+
+	var parts []string
+	for _, a := range all {
+		cm := m
+		cm.cursor = a.cursor
+		cm.sel = a.sel
+		var text string
+		switch {
+		case a.sel != nil:
+			text = cm.selectedText()
+		case bareCursors:
+			text = cm.charUnderCursor()
+		}
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return parts
+}
+
+// yankAllCursorSelections copies every cursor's text to the clipboard as one
+// newline-joined string, the same shape the multi-cursor cut produces.
+//
+// Written because yank had no multi-cursor path at all: with several cursors
+// open it copied the primary cursor's selection and silently dropped the rest
+// — the very "all but one cursor's text is lost" failure the clipboard comment
+// in deleteAllCursorSelections below exists to prevent on the cut path.
+//
+// One clipboard write, for the same reason cut does it once: the OS clipboard
+// holds a single string, so a write per cursor would leave only whichever
+// landed last.
+func yankAllCursorSelections(m Model) (Model, tea.Cmd) {
+	parts := cursorTextsInDocumentOrder(m, true)
+	if len(parts) == 0 {
+		return m, nil
+	}
+	if err := clipboardWriter(strings.Join(parts, "\n")); err != nil {
+		return m.pushStatus("clipboard: " + err.Error()), nil
+	}
+	m.multiYank = parts // so a later paste can distribute them one per cursor
+	m = m.pushStatus(fmt.Sprintf("copied %d selections", len(parts)))
+	// Cleared at every cursor, matching what single-cursor yank does with its
+	// one selection.
+	m.sel = nil
+	for i := range m.extraCursors {
+		m.extraCursors[i].sel = nil
+	}
+	return m, nil
+}
+
+// distributableYank returns the per-cursor pieces to paste when the clipboard
+// still holds exactly what the last multi-cursor yank or cut wrote and there
+// is one piece per cursor, or nil when it does not.
+//
+// Both conditions are VS Code's: it distributes a multi-cursor copy one
+// selection per cursor only when the counts match, and pastes the whole
+// clipboard at every cursor otherwise — including when the text came from
+// another application, however many lines it has. Splitting on newlines
+// instead would mean three lines copied from a browser landing one-per-cursor,
+// which is not what either editor promises.
+func (m Model) distributableYank(clipboard string) []string {
+	if len(m.multiYank) != len(m.extraCursors)+1 {
+		return nil
+	}
+	if strings.Join(m.multiYank, "\n") != clipboard {
+		return nil // the clipboard moved on; treat it as ordinary text
+	}
+	return m.multiYank
+}
+
+// pasteAtAllCursors pastes the clipboard at every cursor: one piece per cursor
+// when the clipboard came from a matching multi-cursor yank or cut, otherwise
+// the whole text at each.
+//
+// Like single-cursor paste, this inserts at the cursor rather than replacing a
+// selection — VS Code replaces, indigo does not, and that difference is
+// deliberately left alone here so `p` means one thing whatever the cursor
+// count.
+func pasteAtAllCursors(m Model, text string) (Model, tea.Cmd) {
+	// Before the count check below, not after: cursors can coincide — a
+	// remote delete spanning two of them collapses both onto the deletion's
+	// start — and they are then one caret on screen. Deduping afterwards
+	// would leave distributableYank comparing N pieces against N cursors,
+	// agree to distribute, and then hand the pieces to M < N cursors with
+	// the tail silently dropped.
+	m.dedupeCursors(dedupeByPosition)
+	if parts := m.distributableYank(text); parts != nil {
+		return applyInsertTextToAllCursors(m, func(idx, _, _ int) string { return parts[idx] })
+	}
+	return applyInsertToAllCursors(m, text)
+}
+
 // deleteAllCursorSelections deletes the selection at every cursor (primary and
 // extra), processed back-to-front so earlier deletions don't shift later cursor
 // positions. When currentGroup is nil (normal-mode delete), a transient group
@@ -329,26 +457,15 @@ func deleteAllCursorSelections(m Model, copyToClipboard bool) (Model, tea.Cmd) {
 	// individually (as cutSelection does for a single cursor), every write
 	// but the last processed would be clobbered, silently losing all but one
 	// cursor's cut text.
+	// Collected through the same helper yank uses, so the two cannot disagree
+	// about ordering or about what a selection contributes. bareCursors is
+	// false here: a cut with no selection deletes the character under the
+	// cursor without copying it — see the helper for why that differs from
+	// yank.
 	if copyToClipboard {
-		docOrder := append([]entry(nil), entries...)
-		sort.Slice(docOrder, func(i, j int) bool {
-			ci, cj := docOrder[i].cursor, docOrder[j].cursor
-			if ci.Line != cj.Line {
-				return ci.Line < cj.Line
-			}
-			return ci.Col < cj.Col
-		})
-		var cutParts []string
-		for _, e := range docOrder {
-			cm := m
-			cm.cursor = e.cursor
-			cm.sel = e.sel
-			if text, ok := cm.cutText(); ok {
-				cutParts = append(cutParts, text)
-			}
-		}
-		if len(cutParts) > 0 {
-			_ = clipboardWriter(strings.Join(cutParts, "\n")) // cut semantics; a failed copy must not block the delete
+		if parts := cursorTextsInDocumentOrder(m, false); len(parts) > 0 {
+			_ = clipboardWriter(strings.Join(parts, "\n")) // cut semantics; a failed copy must not block the delete
+			m.multiYank = parts                            // see Model.multiYank: lets a later paste distribute these
 		}
 	}
 
@@ -405,7 +522,7 @@ func deleteAllCursorSelections(m Model, copyToClipboard bool) (Model, tea.Cmd) {
 // positions, processed front-to-back so each insert's column delta is
 // carried forward for subsequent cursors on the same line.
 func applyInsertToAllCursors(m Model, text string) (Model, tea.Cmd) {
-	return applyInsertTextToAllCursors(m, func(int, int) string { return text })
+	return applyInsertTextToAllCursors(m, func(int, int, int) string { return text })
 }
 
 // applyInsertTextToAllCursors is applyInsertToAllCursors generalized to
@@ -415,9 +532,16 @@ func applyInsertToAllCursors(m Model, text string) (Model, tea.Cmd) {
 // buffer's current state at the point that cursor's insert is about to
 // apply (i.e. already reflecting any earlier cursors' inserts on that line),
 // so it sees the same content that cursor's own edit will land next to.
-func applyInsertTextToAllCursors(m Model, textFor func(line, col int) string) (Model, tea.Cmd) {
+func applyInsertTextToAllCursors(m Model, textFor func(idx, line, col int) string) (Model, tea.Cmd) {
+	// Coincident cursors insert once. Two carets at one position are one
+	// caret on screen, so inserting per cursor doubles what the user typed —
+	// reachable whenever a remote delete spans two cursors, which collapses
+	// both onto the deletion's start (document.ShiftPos). Before the
+	// single-cursor check below, so a pair that collapses to one takes the
+	// simple path.
+	m.dedupeCursors(dedupeByPosition)
 	if len(m.extraCursors) == 0 {
-		text := textFor(m.cursor.Line, m.cursor.Col)
+		text := textFor(0, m.cursor.Line, m.cursor.Col)
 		op := document.Op{
 			ClientID:   m.rpc.ClientID(),
 			Type:       document.OpInsert,
@@ -431,49 +555,48 @@ func applyInsertTextToAllCursors(m Model, textFor func(line, col int) string) (M
 
 	snapBefore := m.cursorSnap()
 	type entry struct {
-		origLine, origCol int
-		isPrimary         bool
-		extraIdx          int
+		pos       document.Pos
+		isPrimary bool
+		extraIdx  int
 	}
 
-	entries := []entry{{m.cursor.Line, m.cursor.Col, true, -1}}
+	entries := []entry{{m.cursor, true, -1}}
 	for i, ec := range m.extraCursors {
-		entries = append(entries, entry{ec.pos.Line, ec.pos.Col, false, i})
+		entries = append(entries, entry{ec.pos, false, i})
 	}
 	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].origLine != entries[j].origLine {
-			return entries[i].origLine < entries[j].origLine
+		if entries[i].pos.Line != entries[j].pos.Line {
+			return entries[i].pos.Line < entries[j].pos.Line
 		}
-		return entries[i].origCol < entries[j].origCol
+		return entries[i].pos.Col < entries[j].pos.Col
 	})
 
 	var cmds []tea.Cmd
-	colAdj := map[int]int{} // origLine → cumulative column delta
-	lineAdj := 0
+	final := make([]document.Pos, len(entries))
 
-	type newPos struct{ line, col int }
-	newPositions := make([]newPos, len(entries))
-
-	for i, e := range entries {
-		adjLine := e.origLine + lineAdj
-		adjCol := e.origCol + colAdj[e.origLine]
-
-		text := textFor(adjLine, adjCol)
-		textRunes := []rune(text)
-		isNewline := text == "\n"
+	// Positions still to come are carried forward through document.ShiftPos
+	// rather than through per-line column/line deltas tracked by hand.
+	// ShiftPos is the operational transform's own arithmetic, so it is right
+	// for any insert — the hand-rolled version only knew how to move a
+	// position past a bare "\n" and placed every cursor after it wrongly for
+	// text that spanned lines in any other shape, which is exactly what
+	// pasting at several cursors produces.
+	for i := range entries {
+		pos := entries[i].pos
+		text := textFor(i, pos.Line, pos.Col)
 
 		op := document.Op{
 			ClientID:   m.rpc.ClientID(),
 			Type:       document.OpInsert,
-			InsertLine: adjLine,
-			InsertCol:  adjCol,
+			InsertLine: pos.Line,
+			InsertCol:  pos.Col,
 			InsertText: text,
 		}
 		al, d := opLineDelta(op)
-		// Shift immediately, one op at a time, in the same adjusted
-		// coordinate space each op is applied in — a single combined
-		// shift (min atLine, summed delta) would over-shift an overlay
-		// line sitting between two edit points on different lines.
+		// Shift immediately, one op at a time, in the same coordinate space
+		// each op is applied in — a single combined shift (min atLine, summed
+		// delta) would over-shift an overlay line sitting between two edit
+		// points on different lines.
 		m = m.shiftLSPOverlayLines(al, d)
 		inv := inverseOp(m, op)
 		if m.currentGroup != nil {
@@ -487,24 +610,26 @@ func applyInsertTextToAllCursors(m Model, textFor func(line, col int) string) (M
 		m, sendCmd = m.sendToServer(op)
 		cmds = append(cmds, sendCmd)
 
-		if isNewline {
-			newPositions[i] = newPos{adjLine + 1, 0}
-			lineAdj++
-			// Clear column adjustment for this line since it was split.
-			delete(colAdj, e.origLine)
+		// This cursor lands at the far end of its own inserted text.
+		if nl := strings.Count(text, "\n"); nl > 0 {
+			lastLine := text[strings.LastIndex(text, "\n")+1:]
+			final[i] = document.Pos{Line: pos.Line + nl, Col: len([]rune(lastLine))}
 		} else {
-			newPositions[i] = newPos{adjLine, adjCol + len(textRunes)}
-			colAdj[e.origLine] += len(textRunes)
+			final[i] = document.Pos{Line: pos.Line, Col: pos.Col + len([]rune(text))}
+		}
+		// Everything not yet processed sits after this insert and moves with
+		// it. Already-placed cursors sit before it and do not.
+		for j := i + 1; j < len(entries); j++ {
+			entries[j].pos = document.ShiftPos(entries[j].pos, op)
 		}
 	}
 
 	m.sel = nil
 	for i, e := range entries {
-		np := newPositions[i]
 		if e.isPrimary {
-			m.cursor = document.Pos{Line: np.line, Col: np.col}
+			m.cursor = final[i]
 		} else {
-			m.extraCursors[e.extraIdx].pos = document.Pos{Line: np.line, Col: np.col}
+			m.extraCursors[e.extraIdx].pos = final[i]
 			m.extraCursors[e.extraIdx].sel = nil
 		}
 	}
@@ -625,6 +750,98 @@ func (m *Model) applyToAllCursors(fn func(*Model)) {
 		m.goalCol = savedGoalCol
 	}
 	m.extraCursors = saved
+}
+
+// cursorDedupeMode picks what "the same place" means to dedupeCursors, and the
+// two callers genuinely need different answers.
+//
+// A selection command compares ranges: two cursors covering the same text are
+// duplicates even with anchor and head swapped, which position alone would
+// miss. An insertion compares positions: it inserts at the cursor and ignores
+// selections entirely, so two cursors at one position must insert once however
+// their selections differ.
+type cursorDedupeMode int
+
+const (
+	// dedupeBySelection keys on the selected range, falling back to position
+	// for a cursor with no selection. For selection commands.
+	dedupeBySelection cursorDedupeMode = iota
+	// dedupeByPosition keys on position alone, ignoring selections. For
+	// anything that edits at the cursor.
+	dedupeByPosition
+)
+
+// dedupeCursors drops extra cursors that ended up in the same place as the
+// primary cursor or an earlier extra — the same selected range when they have
+// a selection, the same position when they do not. The primary cursor is
+// always kept.
+//
+// The mi/ma text objects need this and the word/whitespace ones always did.
+// Several cursors inside one function all resolve to that same function, and N
+// identical selections are not N selections: a following `d` would delete the
+// range once and then delete whatever slid into those coordinates N-1 times
+// more. Collapsing to one cursor is both what the user means and what VS Code
+// does with overlapping multi-cursor selections.
+func (m *Model) dedupeCursors(mode cursorDedupeMode) {
+	if len(m.extraCursors) == 0 {
+		return
+	}
+	type key struct {
+		pos        document.Pos
+		start, end document.Pos
+		hasSel     bool
+	}
+	// A selection is keyed by its range alone: two cursors covering the same
+	// range necessarily share a head, so the position adds nothing, and
+	// keying on it as well would keep both if one had been flipped.
+	keyFor := func(pos document.Pos, sel *Selection) key {
+		if sel == nil || mode == dedupeByPosition {
+			return key{pos: pos}
+		}
+		s, e := sel.ordered()
+		return key{start: s, end: e, hasSel: true}
+	}
+
+	seen := map[key]bool{keyFor(m.cursor, m.sel): true}
+	kept := make([]ExtraCursor, 0, len(m.extraCursors))
+	for _, ec := range m.extraCursors {
+		k := keyFor(ec.pos, ec.sel)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		kept = append(kept, ec)
+	}
+	m.extraCursors = kept
+}
+
+// perCursor turns a selection command written for a single cursor into one
+// that runs at every cursor and then collapses duplicates.
+//
+// It runs fn against a copy of the model positioned at each cursor and takes
+// back only the cursor and selection, which is all a selection command
+// changes. A command that needs to change anything else — the buffer, the
+// mode, the viewport beyond scrollToCursor — must not be wrapped this way;
+// use applyToAllCursors directly and handle its own state.
+//
+// Commands that already call applyToAllCursors internally must not be wrapped
+// either: applyToAllCursors invokes fn for the primary cursor with
+// extraCursors still populated, so nesting would apply the inner command to
+// every cursor again for each outer one.
+func perCursor(fn func(Model) (tea.Model, tea.Cmd)) func(Model) (tea.Model, tea.Cmd) {
+	return func(m Model) (tea.Model, tea.Cmd) {
+		var cmds []tea.Cmd
+		m.applyToAllCursors(func(mp *Model) {
+			out, cmd := fn(*mp)
+			r := out.(Model)
+			mp.cursor, mp.sel = r.cursor, r.sel
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		})
+		m.dedupeCursors(dedupeBySelection)
+		return m, tea.Batch(cmds...)
+	}
 }
 
 // buildExtraCursorOverlays returns per-screen-row overlays for extra cursors

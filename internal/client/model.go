@@ -993,6 +993,19 @@ type Model struct {
 
 	// Multi-cursor state
 	extraCursors []ExtraCursor
+	// multiYank is the per-cursor pieces the last multi-cursor yank or cut
+	// put on the clipboard, in document order. A later paste distributes them
+	// one per cursor when the cursor count still matches and the clipboard
+	// still holds exactly what we wrote — VS Code's rule, where a
+	// multi-cursor copy is remembered as several selections rather than as
+	// one newline-joined string.
+	//
+	// The content check is what stands in for VS Code's clipboard metadata:
+	// the OS clipboard carries none, so copying something else in another
+	// application in between would otherwise have an unrelated string split
+	// across the cursors. Per-window, so a yank in one window does not
+	// distribute in another — sharing it would mean putting it on the server.
+	multiYank []string
 
 	// Save-as dialog: non-nil while the "Save As" popup is visible.
 	saveAsInput     *string // current text typed in the dialog

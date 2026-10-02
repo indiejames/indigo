@@ -14,6 +14,12 @@ import (
 // mutates the developer's real clipboard.
 var clipboardWriter = writeClipboard
 
+// clipboardReader is the read-side counterpart of clipboardWriter: the seam
+// production code reads the system clipboard through, so tests can drive paste
+// without shelling out to pbpaste and without depending on whatever the
+// developer happens to have copied.
+var clipboardReader = readClipboard
+
 // readClipboard returns the current system clipboard contents.
 func readClipboard() (string, error) {
 	var cmd *exec.Cmd

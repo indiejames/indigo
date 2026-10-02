@@ -94,7 +94,7 @@ func TestDedupeCursorsTreatsAFlippedSelectionAsDuplicate(t *testing.T) {
 		sel: &Selection{Anchor: document.Pos{Line: 0, Col: 4}, Head: document.Pos{Line: 0, Col: 1}},
 	}}
 
-	m.dedupeCursors()
+	m.dedupeCursors(dedupeBySelection)
 
 	if len(m.extraCursors) != 0 {
 		t.Error("a selection over the same range with anchor/head swapped was kept as distinct")
@@ -110,7 +110,7 @@ func TestDedupeCursorsCollapsesCoincidentBareCursors(t *testing.T) {
 		{pos: document.Pos{Line: 0, Col: 0}}, // distinct
 	}
 
-	m.dedupeCursors()
+	m.dedupeCursors(dedupeBySelection)
 
 	if len(m.extraCursors) != 1 || m.extraCursors[0].pos.Line != 0 {
 		t.Errorf("extraCursors = %+v, want only the distinct one at line 0", m.extraCursors)

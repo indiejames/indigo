@@ -71,7 +71,7 @@ func executeSelectInsideWord(m Model) (tea.Model, tea.Cmd) {
 		}
 		m.cursor = document.Pos{Line: m.cursor.Line, Col: end}
 	})
-	m.dedupeCursors() // two cursors in one word resolve to the same range
+	m.dedupeCursors(dedupeBySelection) // two cursors in one word resolve to the same range
 	return m, nil
 }
 
@@ -103,7 +103,7 @@ func executeSelectInsideWhitespace(m Model) (tea.Model, tea.Cmd) {
 		}
 		m.cursor = document.Pos{Line: m.cursor.Line, Col: end}
 	})
-	m.dedupeCursors() // two cursors in one run resolve to the same range
+	m.dedupeCursors(dedupeBySelection) // two cursors in one run resolve to the same range
 	return m, nil
 }
 

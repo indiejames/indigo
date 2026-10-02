@@ -418,6 +418,13 @@ func (m Model) distributableYank(clipboard string) []string {
 // deliberately left alone here so `p` means one thing whatever the cursor
 // count.
 func pasteAtAllCursors(m Model, text string) (Model, tea.Cmd) {
+	// Before the count check below, not after: cursors can coincide — a
+	// remote delete spanning two of them collapses both onto the deletion's
+	// start — and they are then one caret on screen. Deduping afterwards
+	// would leave distributableYank comparing N pieces against N cursors,
+	// agree to distribute, and then hand the pieces to M < N cursors with
+	// the tail silently dropped.
+	m.dedupeCursors(dedupeByPosition)
 	if parts := m.distributableYank(text); parts != nil {
 		return applyInsertTextToAllCursors(m, func(idx, _, _ int) string { return parts[idx] })
 	}
@@ -526,6 +533,13 @@ func applyInsertToAllCursors(m Model, text string) (Model, tea.Cmd) {
 // apply (i.e. already reflecting any earlier cursors' inserts on that line),
 // so it sees the same content that cursor's own edit will land next to.
 func applyInsertTextToAllCursors(m Model, textFor func(idx, line, col int) string) (Model, tea.Cmd) {
+	// Coincident cursors insert once. Two carets at one position are one
+	// caret on screen, so inserting per cursor doubles what the user typed —
+	// reachable whenever a remote delete spans two cursors, which collapses
+	// both onto the deletion's start (document.ShiftPos). Before the
+	// single-cursor check below, so a pair that collapses to one takes the
+	// simple path.
+	m.dedupeCursors(dedupeByPosition)
 	if len(m.extraCursors) == 0 {
 		text := textFor(0, m.cursor.Line, m.cursor.Col)
 		op := document.Op{
@@ -738,6 +752,25 @@ func (m *Model) applyToAllCursors(fn func(*Model)) {
 	m.extraCursors = saved
 }
 
+// cursorDedupeMode picks what "the same place" means to dedupeCursors, and the
+// two callers genuinely need different answers.
+//
+// A selection command compares ranges: two cursors covering the same text are
+// duplicates even with anchor and head swapped, which position alone would
+// miss. An insertion compares positions: it inserts at the cursor and ignores
+// selections entirely, so two cursors at one position must insert once however
+// their selections differ.
+type cursorDedupeMode int
+
+const (
+	// dedupeBySelection keys on the selected range, falling back to position
+	// for a cursor with no selection. For selection commands.
+	dedupeBySelection cursorDedupeMode = iota
+	// dedupeByPosition keys on position alone, ignoring selections. For
+	// anything that edits at the cursor.
+	dedupeByPosition
+)
+
 // dedupeCursors drops extra cursors that ended up in the same place as the
 // primary cursor or an earlier extra — the same selected range when they have
 // a selection, the same position when they do not. The primary cursor is
@@ -749,7 +782,7 @@ func (m *Model) applyToAllCursors(fn func(*Model)) {
 // range once and then delete whatever slid into those coordinates N-1 times
 // more. Collapsing to one cursor is both what the user means and what VS Code
 // does with overlapping multi-cursor selections.
-func (m *Model) dedupeCursors() {
+func (m *Model) dedupeCursors(mode cursorDedupeMode) {
 	if len(m.extraCursors) == 0 {
 		return
 	}
@@ -762,7 +795,7 @@ func (m *Model) dedupeCursors() {
 	// range necessarily share a head, so the position adds nothing, and
 	// keying on it as well would keep both if one had been flipped.
 	keyFor := func(pos document.Pos, sel *Selection) key {
-		if sel == nil {
+		if sel == nil || mode == dedupeByPosition {
 			return key{pos: pos}
 		}
 		s, e := sel.ordered()
@@ -806,7 +839,7 @@ func perCursor(fn func(Model) (tea.Model, tea.Cmd)) func(Model) (tea.Model, tea.
 				cmds = append(cmds, cmd)
 			}
 		})
-		m.dedupeCursors()
+		m.dedupeCursors(dedupeBySelection)
 		return m, tea.Batch(cmds...)
 	}
 }

@@ -78,8 +78,8 @@ func parseMarkdownList(line string) (markdownList, bool) {
 		return markdownList{}, false
 	}
 
-	switch {
-	case rest[0] == '-' || rest[0] == '*' || rest[0] == '+':
+	switch rest[0] {
+	case '-', '*', '+':
 		l.bullet = string(rest[0])
 		rest = rest[1:]
 	default:

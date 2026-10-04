@@ -155,3 +155,47 @@ func TestMarkdownEnterMidItemDoesNotContinue(t *testing.T) {
 		t.Errorf("line 1 = %q, want %q (no marker added mid-item)", got.buf.Line(1), " world")
 	}
 }
+
+// The end-of-line guard compares a rune column against the line's length, so
+// that length has to be in runes too. With a byte length, any non-ASCII
+// character earlier in the item makes the cursor look mid-item and the list
+// stops continuing — one accented word is enough.
+func TestMarkdownListContinuesWithNonASCIIContent(t *testing.T) {
+	for _, tc := range []struct{ name, line, wantNext string }{
+		{"accented word", "- café", "- "},
+		{"ordered with diaeresis", "1. naïve", "2. "},
+		{"multibyte beyond latin1", "- 日本語", "- "},
+		{"emoji", "* done ✅", "* "},
+		{"task item", "- [ ] café", "- [ ] "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := pressEnter(t, mdModel(t, tc.line+"\n", 0))
+			if got.buf.Line(0) != tc.line {
+				t.Errorf("line 0 = %q, want it untouched (%q)", got.buf.Line(0), tc.line)
+			}
+			if got.buf.Line(1) != tc.wantNext {
+				t.Errorf("line 1 = %q, want %q", got.buf.Line(1), tc.wantNext)
+			}
+			if got.cursor.Line != 1 || got.cursor.Col != len([]rune(tc.wantNext)) {
+				t.Errorf("cursor = %d:%d, want 1:%d", got.cursor.Line, got.cursor.Col, len([]rune(tc.wantNext)))
+			}
+		})
+	}
+}
+
+// The guard must still hold for a non-ASCII item: Enter before the end splits
+// without inventing a marker. Pinned so the fix above cannot be "drop the
+// guard".
+func TestMarkdownNonASCIIMidItemDoesNotContinue(t *testing.T) {
+	m := mdModel(t, "- café au lait\n", 0)
+	m.cursor = document.Pos{Line: 0, Col: 6} // right after "café", mid-item
+
+	got := pressEnter(t, m)
+
+	if got.buf.Line(0) != "- café" {
+		t.Errorf("line 0 = %q, want %q", got.buf.Line(0), "- café")
+	}
+	if got.buf.Line(1) != " au lait" {
+		t.Errorf("line 1 = %q, want %q (no marker mid-item)", got.buf.Line(1), " au lait")
+	}
+}

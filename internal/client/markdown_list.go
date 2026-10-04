@@ -149,7 +149,14 @@ func (m Model) tryContinueMarkdownList() (Model, tea.Cmd, bool) {
 	}
 	line := m.buf.Line(m.cursor.Line)
 	runes := []rune(line)
-	if m.cursor.Col < len(strings.TrimRight(line, " \t")) {
+	// Rune length, not len() on the string: Pos.Col is a rune offset, and a
+	// byte length is larger the moment the item contains anything non-ASCII —
+	// so "- café" read as mid-item and the list quietly stopped continuing.
+	trimmed := len(runes)
+	for trimmed > 0 && (runes[trimmed-1] == ' ' || runes[trimmed-1] == '\t') {
+		trimmed--
+	}
+	if m.cursor.Col < trimmed {
 		return m, nil, false // mid-item: not ours
 	}
 	l, ok := parseMarkdownList(line)

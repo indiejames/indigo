@@ -193,6 +193,9 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 	if m2, cmd, ok := m.tryExpandJSDoc(); ok {
 		return m2, cmd
 	}
+	if m2, cmd, ok := m.tryContinueMarkdownList(); ok {
+		return m2, cmd
+	}
 
 	indent := m.contextIndent(m.buf.Line(m.cursor.Line), m.cursor.Line, m.cursor.Col)
 

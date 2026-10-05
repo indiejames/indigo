@@ -153,22 +153,34 @@ and inside a container). You don't normally invoke them by hand.
 
 ### Editing model
 
-indigo follows the **select → operate** model from Kakoune and Helix, rather than the operator → motion model of Vim. You always select text first, then act on it:
+indigo follows the **select → operate** model from Kakoune and Helix, rather than the operator → motion model of Vim. You select text first, then act on it:
 
 ```
-w        select the word under the cursor
+E        select from the cursor to the end of the word
 d        delete it
 
 x        select the current line
 c        delete it and enter insert mode
 
-w w      advance the selection to the next word
-W        extend the selection head forward to the next word end
+E E      extend the selection over the next word too
 y        copy it to the clipboard
 
-x x x    select three lines (repeat extends to the next line)
+x x x    select three lines (each x extends to the next one)
 X        extend the selection backward to include the previous line
 ```
+
+The case split that matters: **lowercase keys move, uppercase keys extend.** `w`, `b` and `e` are plain
+motions that clear any selection; `W`, `B` and `E` move the *selection head* instead, starting a
+selection at the cursor if there isn't one. So `w` jumps to the next word and `E` selects up to the end
+of one.
+
+A selection is **inclusive at both ends** — the cursor sits on its last selected character, not just
+past it. That is why `E` with the cursor on the `a` of `alpha` selects exactly `alpha`, and why `W`,
+which extends to the *start* of the next word, includes that first character (`alpha b`).
+
+To select a word you are already inside, rather than from the cursor onward, use the text-object
+menu: `mi w` selects the word under the cursor wherever in it you are. `Ctrl+D` also selects the word
+under the cursor, and each further press adds the next occurrence as another cursor.
 
 If you're coming from Vim, the main adjustment is that `d` and `c` act on whatever is currently selected, not on a following motion. If nothing is selected, `d` deletes the character under the cursor, and `c` modifies the character under the cursor.
 
@@ -193,12 +205,13 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 | Key                 | Action                                          |
 |---------------------|-------------------------------------------------|
 | Arrow keys          | Move left / down / up / right                   |
+| `w`                 | Move to next word start (crosses lines)         |
 | `b`                 | Move to previous word start (crosses lines)     |
-| `e`                 | Move to end of current/next word (crosses lines)|
+| `e`                 | Move to end of the current word, or the next word's end if already there (crosses lines) |
 | `0` `$`             | Start / end of line                             |
 | `^`                 | First non-blank character on line               |
 | `gg`                | Top of file                                     |
-| `G`                 | End of file                                     |
+| `G` `ge`            | End of file                                     |
 | `Ctrl+f` / `Ctrl+b` | Page down / up                                  |
 | `gh`                | Go to line start                                |
 | `gl`                | Go to line end                                  |
@@ -206,19 +219,21 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 | `gS`                | Go to symbol in project                         |
 | `gd`                | Go to definition (LSP)                          |
 
-**Selection** — create or extend a selection; the cursor is always at the head.
+**Selection** — each of these moves the selection head, starting a selection at the cursor if there isn't one. The cursor is always on the selection's last included character.
 
 | Key      | Action                                                           |
 |----------|------------------------------------------------------------------|
-| `w`      | Select word at cursor; repeat to advance to the next word        |
-| `W`      | Extend selection head forward to end of next word                |
-| `E`      | Extend selection head forward to end of current/next word        |
-| `B`      | Extend selection head backward to start of previous word         |
-| `x`      | Select current line; repeat to extend selection to the next line |
-| `X`      | Extend line selection backward to include the previous line      |
+| `E`      | Extend to the end of the current word, or the next word's end if already there |
+| `W`      | Extend to the *start* of the next word — which, being inclusive, includes that character |
+| `B`      | Extend backward to the start of the previous word                |
+| `Shift+→` / `Shift+←` | Extend one character; shrinking past the anchor flips direction |
+| `Shift+Home` / `Shift+End` | Extend to the start / end of the line                |
+| `x`      | Select the current line (including its newline); repeat to extend to the next line |
+| `X`      | Extend a line selection to include the previous line; with no line selection, selects the current line first |
 | `%`      | Select the entire file                                           |
 | `;`      | Collapse selection to cursor (keeps cursor, clears selection)    |
 | `Alt+;`  | Flip selection: swap anchor and head                             |
+| `mi w`   | Select the word under the cursor (see `m` for the full text-object menu)        |
 
 **Operators** — act on the current selection; clears search highlights.
 

@@ -205,9 +205,15 @@ type editorService struct {
 	pluginMgr    *plugin.Manager
 	cfg          *config.Config
 
-	watcher     *fsnotify.Watcher
-	watchMu     sync.Mutex
-	dirWatches  map[string]int // containing dir -> number of watched paths inside it
+	watcher    *fsnotify.Watcher
+	watchMu    sync.Mutex
+	dirWatches map[string]int // containing dir -> number of watched paths inside it
+	// dirWatched holds the dirs whose watcher.Add actually succeeded. It is
+	// separate from dirWatches because a path can be wanted before its
+	// directory exists (a new file in a new directory), and that watch has to
+	// be retried once the directory is created rather than counted as done.
+	// Allocated lazily under watchMu.
+	dirWatched  map[string]bool
 	savingMu    sync.Mutex
 	savingPaths map[string]time.Time // paths currently being saved by indigo
 
@@ -418,10 +424,40 @@ func (s *editorService) addPathWatch(path string) {
 	dir := filepath.Dir(path)
 	s.watchMu.Lock()
 	defer s.watchMu.Unlock()
-	if s.dirWatches[dir] == 0 {
-		s.watcher.Add(dir) //nolint:errcheck
-	}
 	s.dirWatches[dir]++
+	s.ensureDirWatchLocked(dir)
+}
+
+// retryPathWatch registers the directory watch for an already-added path if
+// the earlier attempt failed — typically because the directory did not exist
+// yet and a save has just created it. A no-op when the watch is active or
+// nothing wants it.
+func (s *editorService) retryPathWatch(path string) {
+	if s.watcher == nil || path == "" {
+		return
+	}
+	dir := filepath.Dir(path)
+	s.watchMu.Lock()
+	defer s.watchMu.Unlock()
+	if s.dirWatches[dir] > 0 {
+		s.ensureDirWatchLocked(dir)
+	}
+}
+
+// ensureDirWatchLocked adds the watch on dir unless it is already active,
+// recording it only when the add succeeds. Caller holds watchMu.
+func (s *editorService) ensureDirWatchLocked(dir string) {
+	if s.dirWatched[dir] {
+		return
+	}
+	if err := s.watcher.Add(dir); err != nil {
+		serverLog("watch %s: %v (retried after the next save)", dir, err)
+		return
+	}
+	if s.dirWatched == nil {
+		s.dirWatched = make(map[string]bool)
+	}
+	s.dirWatched[dir] = true
 }
 
 // removePathWatch undoes a prior addPathWatch, dropping the directory watch
@@ -439,7 +475,10 @@ func (s *editorService) removePathWatch(path string) {
 	s.dirWatches[dir]--
 	if s.dirWatches[dir] == 0 {
 		delete(s.dirWatches, dir)
-		s.watcher.Remove(dir) //nolint:errcheck
+		if s.dirWatched[dir] {
+			delete(s.dirWatched, dir)
+			s.watcher.Remove(dir) //nolint:errcheck
+		}
 	}
 }
 

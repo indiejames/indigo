@@ -120,7 +120,8 @@ After that:
 
 ```sh
 io                  # new, untitled buffer
-io file.go          # open a file (creating it, and any missing parent directories, if absent)
+io file.go          # open a file — a name that doesn't exist yet opens as an empty buffer,
+                    #   and nothing is written until you save
 io .                # open a directory — shows the file picker
 io +42 file.go      # open a file at line 42
 ```

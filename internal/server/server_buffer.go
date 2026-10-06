@@ -22,7 +22,15 @@ func atomicWriteFile(path string, data []byte, defaultMode os.FileMode) error {
 	if fi, err := os.Stat(path); err == nil {
 		mode = fi.Mode().Perm()
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".indigo-save-*")
+	// The directory may not exist: opening a path that does not exist no
+	// longer creates anything (see cmd/indigo.resolveTarget), so saving a new
+	// file is where "indigo a/b/new.txt" gets its directories. A no-op stat
+	// when they are already there, which is the usual case.
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".indigo-save-*")
 	if err != nil {
 		return err
 	}

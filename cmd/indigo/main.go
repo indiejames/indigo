@@ -89,23 +89,10 @@ func main() {
 		fatalf("resolve path: %v", err)
 	}
 
-	info, err := os.Stat(absTarget)
+	absTarget, isDir, err := resolveTarget(absTarget)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			fatalf("stat %s: %v", absTarget, err)
-		}
-		// File doesn't exist — create it along with any missing parent directories.
-		if mkErr := os.MkdirAll(filepath.Dir(absTarget), 0o755); mkErr != nil {
-			fatalf("create directory for %s: %v", absTarget, mkErr)
-		}
-		if mkErr := os.WriteFile(absTarget, nil, 0o644); mkErr != nil {
-			fatalf("create %s: %v", absTarget, mkErr)
-		}
-		if info, err = os.Stat(absTarget); err != nil {
-			fatalf("stat %s: %v", absTarget, err)
-		}
+		fatalf("%v", err)
 	}
-	absTarget = resolvePath(absTarget)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -115,7 +102,7 @@ func main() {
 
 	// Determine workspace root, as this machine names it.
 	var workDir string
-	if info.IsDir() {
+	if isDir {
 		workDir = absTarget
 	} else {
 		workDir = gitRoot(absTarget)
@@ -144,7 +131,7 @@ func main() {
 	warnIfServerStale(rpc)
 
 	var a *app.App
-	if info.IsDir() {
+	if isDir {
 		// Start with the file picker open.
 		a = app.NewWithPicker(rpc, cfg, absTarget)
 	} else {
@@ -268,6 +255,47 @@ func resolvePath(path string) string {
 		return resolved
 	}
 	return path
+}
+
+// resolveTarget inspects the path indigo was asked to open and returns it
+// symlink-resolved, plus whether it is a directory.
+//
+// A path that does not exist is not an error and — importantly — is not
+// created: it opens as an empty buffer carrying that name, and nothing is
+// written until the user saves. indigo used to create the file and any
+// missing parent directories here, which meant opening a mistyped name and
+// quitting straight back out left an empty file, and sometimes empty
+// directories, behind. Save creates what it needs instead
+// (server.atomicWriteFile).
+//
+// Symlinks are still resolved, because the workspace root is derived from
+// this path and a linter or formatter spawned with that root as its cwd has
+// it symlink-resolved by the OS regardless — an unresolved root disagrees
+// with the cwd the child reports. EvalSymlinks fails outright on a path that
+// does not exist, so for a new file the longest existing prefix is resolved
+// and the rest rejoined.
+func resolveTarget(absTarget string) (resolved string, isDir bool, err error) {
+	switch info, statErr := os.Stat(absTarget); {
+	case statErr == nil:
+		return resolvePath(absTarget), info.IsDir(), nil
+	case os.IsNotExist(statErr):
+		return resolveExistingPrefix(absTarget), false, nil
+	default:
+		return "", false, fmt.Errorf("stat %s: %w", absTarget, statErr)
+	}
+}
+
+// resolveExistingPrefix resolves symlinks in the longest existing prefix of
+// path and rejoins the components that do not exist yet.
+func resolveExistingPrefix(path string) string {
+	if resolved, evalErr := filepath.EvalSymlinks(path); evalErr == nil {
+		return resolved
+	}
+	dir := filepath.Dir(path)
+	if dir == path {
+		return path // the root itself; nothing left to strip
+	}
+	return filepath.Join(resolveExistingPrefix(dir), filepath.Base(path))
 }
 
 func gitRoot(path string) string {

@@ -84,3 +84,27 @@ func TestResolveTargetResolvesSymlinksForAMissingFile(t *testing.T) {
 		t.Errorf("resolved = %q, want %q (symlinked prefix resolved, missing tail kept)", resolved, want)
 	}
 }
+
+// With no git root, the workspace is the new file's directory — which may not
+// exist yet, since opening no longer creates it. The server and the tools it
+// spawns run with the workspace as their cwd, so it must fall back to the
+// nearest directory that does.
+func TestNearestExistingDirWalksUpToAnExistingDirectory(t *testing.T) {
+	base := t.TempDir()
+
+	if got := nearestExistingDir(filepath.Join(base, "a", "b")); got != base {
+		t.Errorf("missing dirs: got %q, want %q", got, base)
+	}
+	if got := nearestExistingDir(base); got != base {
+		t.Errorf("existing dir: got %q, want it unchanged (%q)", got, base)
+	}
+
+	// A file is not a directory; a path under it falls back past it.
+	file := filepath.Join(base, "f.txt")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := nearestExistingDir(filepath.Join(file, "x")); got != base {
+		t.Errorf("path under a file: got %q, want %q", got, base)
+	}
+}

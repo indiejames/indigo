@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 // Saving is now where a new file comes into existence, since opening a
@@ -78,5 +81,71 @@ func TestLoadContentDoesNotCreateAMissingFile(t *testing.T) {
 	}
 	if entries, readErr := os.ReadDir(dir); readErr == nil && len(entries) != 0 {
 		t.Errorf("directory is not empty after opening a missing file: %v", entries)
+	}
+}
+
+// A new file in a directory that does not exist yet cannot have its directory
+// watched at open time. That failed watch used to be counted as registered,
+// so it was never retried and external changes to the file, once saved, went
+// unnoticed for the life of the buffer. It must stay unregistered until the
+// save creates the directory, and be live afterwards.
+func TestPathWatchForMissingDirectoryIsRetriedAfterSave(t *testing.T) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { watcher.Close() }) //nolint:errcheck
+	s := &editorService{watcher: watcher, dirWatches: make(map[string]int)}
+
+	dir := filepath.Join(t.TempDir(), "a", "b")
+	path := filepath.Join(dir, "new.txt")
+
+	s.addPathWatch(path)
+	if s.dirWatched[dir] {
+		t.Fatal("watch on a directory that does not exist was recorded as registered")
+	}
+
+	if err := atomicWriteFile(path, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("atomicWriteFile: %v", err)
+	}
+	s.retryPathWatch(path)
+	if !s.dirWatched[dir] {
+		t.Fatal("watch was not registered after the save created the directory")
+	}
+
+	// And it is a real watch: an external write to the file is seen.
+	drain(watcher)
+	if err := os.WriteFile(path, []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(3 * time.Second)
+wait:
+	for {
+		select {
+		case ev := <-watcher.Events:
+			if filepath.Clean(ev.Name) == path {
+				break wait
+			}
+		case err := <-watcher.Errors:
+			t.Fatalf("watcher error: %v", err)
+		case <-deadline:
+			t.Fatal("no fsnotify event for an external write after the retried watch")
+		}
+	}
+
+	// Dropping the last path removes the watch and its bookkeeping.
+	s.removePathWatch(path)
+	if s.dirWatched[dir] || s.dirWatches[dir] != 0 {
+		t.Errorf("after removePathWatch: dirWatched=%v dirWatches=%d, want both cleared", s.dirWatched[dir], s.dirWatches[dir])
+	}
+}
+
+func drain(w *fsnotify.Watcher) {
+	for {
+		select {
+		case <-w.Events:
+		default:
+			return
+		}
 	}
 }

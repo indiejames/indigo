@@ -913,6 +913,10 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 		return err
 	}
 	s.unmarkSaving(path)
+	// OpenFile's watch on a new file in a directory that did not exist yet
+	// could not register; atomicWriteFile has just created the directory, so
+	// external changes to this file are only noticed from here on.
+	s.retryPathWatch(path)
 
 	recoveryPath := recoveryFilePath(s.recDir, path)
 	s.mu.Lock()

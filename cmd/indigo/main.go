@@ -107,7 +107,7 @@ func main() {
 	} else {
 		workDir = gitRoot(absTarget)
 		if workDir == "" {
-			workDir = filepath.Dir(absTarget)
+			workDir = nearestExistingDir(filepath.Dir(absTarget))
 		}
 	}
 	// Attached to a container, everything past this point is in the
@@ -296,6 +296,23 @@ func resolveExistingPrefix(path string) string {
 		return path // the root itself; nothing left to strip
 	}
 	return filepath.Join(resolveExistingPrefix(dir), filepath.Base(path))
+}
+
+// nearestExistingDir walks up from dir to the first directory that exists.
+// A new file's parent may not exist yet (resolveTarget no longer creates it),
+// and the workspace root has to: the server and every linter and formatter it
+// spawns use it as their working directory.
+func nearestExistingDir(dir string) string {
+	for {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return dir
+		}
+		dir = parent
+	}
 }
 
 func gitRoot(path string) string {

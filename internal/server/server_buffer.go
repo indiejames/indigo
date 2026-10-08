@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,15 @@ import (
 	proto "github.com/indiejames/indigo/internal/proto"
 	"github.com/indiejames/indigo/internal/syncevent"
 )
+
+// contentTag identifies content in a log line without including it: a short
+// sha256 prefix plus the byte length. The shared log is pasted into bug
+// reports, so it carries a hash, never buffer text — the same rule
+// get_sync_state follows.
+func contentTag(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return fmt.Sprintf("%x/%dB", sum[:6], len(content))
+}
 
 // atomicWriteFile writes data to path via a temp file in the same directory
 // followed by a rename, so a crash mid-write can never leave a truncated
@@ -827,8 +837,13 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 	// ApplyOp stays silent on success deliberately: it is one op per
 	// keystroke, and logging it would bury everything else in the shared log.
 	// A batch is a tool call or a replace-all, which is rare enough to afford.
-	serverLog("ApplyOps: buffer %d (%q) client %d sent %d op(s), applied %d, version %d",
-		bufID, path, clientID, len(ops), len(applied), newVersion)
+	//
+	// The content tag pairs with the ones Save logs. Counts alone could not
+	// explain the 2026-10-05 recurrence: "applied 2" was logged, and the save
+	// that followed still wrote the original text. Matching tags across these
+	// lines says which step lost an edit.
+	serverLog("ApplyOps: buffer %d (%q) client %d sent %d op(s), applied %d, version %d, content %s",
+		bufID, path, clientID, len(ops), len(applied), newVersion, contentTag(content))
 
 	res, err := call.AllocResults()
 	if err != nil {
@@ -864,9 +879,12 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 	content := baseBuf.Content()
 	crlf := entry.crlf
 	s.mu.Unlock()
+	serverLog("Save: buffer %d (%q) version %d, content %s", bufID, path, baseVersion, contentTag(content))
 
 	if s.cfg.FormatOnSave {
-		if formatted, changed, err := s.fmtMgr.Format(path, content); err == nil && changed {
+		formatted, changed, err := s.fmtMgr.Format(path, content)
+		serverLog("Save: buffer %d format changed=%v err=%v, output %s", bufID, changed, err, contentTag(formatted))
+		if err == nil && changed {
 			// A formatter may emit "\r\n" (prettier's endOfLine, say); the
 			// buffer must not hold it. If it did, the file is CRLF now.
 			formatted, fmtCRLF := document.NormalizeCRLF(formatted)
@@ -907,6 +925,7 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 		}
 	}
 
+	serverLog("Save: buffer %d writing content %s", bufID, contentTag(content))
 	s.markSaving(path)
 	if err := atomicWriteFile(path, []byte(document.RestoreCRLF(content, crlf)), 0644); err != nil {
 		s.unmarkSaving(path)

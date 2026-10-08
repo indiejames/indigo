@@ -76,3 +76,48 @@ func TestVerifySavedAcceptsRestoredCRLF(t *testing.T) {
 		t.Error("a genuine mismatch with a CRLF file was not reported")
 	}
 }
+
+// TestVerifyEditLandedReportsALostEdit covers the 2026-10-05 recurrence, which
+// verifySaved passed: the edit was lost before the save, so the buffer and the
+// file agreed — both on the original text. Comparing the file with what the
+// tool read before editing is what exposes it.
+func TestVerifyEditLandedReportsALostEdit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.go")
+	before := "package f\n\nvar x = 1\n"
+
+	t.Run("file unchanged is reported", func(t *testing.T) {
+		if err := os.WriteFile(path, []byte(before), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := verifyEditLanded(before, path)
+		if !strings.Contains(got, "did NOT land") {
+			t.Errorf("unchanged file not reported; got %q", got)
+		}
+	})
+
+	t.Run("CRLF copy of the original is still unchanged", func(t *testing.T) {
+		crlf := strings.ReplaceAll(before, "\n", "\r\n")
+		if err := os.WriteFile(path, []byte(crlf), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := verifyEditLanded(before, path); !strings.Contains(got, "did NOT land") {
+			t.Errorf("CRLF rewrite of the original not reported; got %q", got)
+		}
+	})
+
+	t.Run("changed file is silent", func(t *testing.T) {
+		if err := os.WriteFile(path, []byte("package f\n\nvar y = 2\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := verifyEditLanded(before, path); got != "" {
+			t.Errorf("landed edit reported as lost: %q", got)
+		}
+	})
+
+	t.Run("unreadable file is reported", func(t *testing.T) {
+		if got := verifyEditLanded(before, filepath.Join(dir, "missing.go")); got == "" {
+			t.Error("missing file not reported")
+		}
+	})
+}

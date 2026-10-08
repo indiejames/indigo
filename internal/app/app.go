@@ -17,6 +17,7 @@ import (
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/debuglog"
 	"github.com/indiejames/indigo/internal/hangdetect"
+	"github.com/indiejames/indigo/internal/staleprompt"
 )
 
 func appLog(format string, args ...any) {
@@ -136,6 +137,12 @@ type App struct {
 	fileChangedIdx int
 	fileChangedSel int
 
+	// staleServer is non-nil while the "server is running an older build"
+	// prompt is showing (internal/staleprompt). Set at construction from what
+	// the server said at connect time, so it is the first thing the window
+	// shows.
+	staleServer *staleprompt.Prompt
+
 	configPath    string    // path to config.toml; empty means watch is disabled
 	configModTime time.Time // mtime of last observed config file
 
@@ -232,6 +239,7 @@ func New(rpc *client.RPC, bufID uint32, content string, version uint64,
 		workDir:        workDir,
 		buffers:        []client.Model{m},
 		fileChangedIdx: -1,
+		staleServer:    newStalePrompt(rpc),
 		jumpIdx:        -1,
 		configPath:     cfgPath,
 		configModTime:  cfgMod,
@@ -273,6 +281,7 @@ func NewWithPicker(rpc *client.RPC, cfg *config.Config, workDir string) *App {
 		cfg:            cfg,
 		workDir:        workDir,
 		fileChangedIdx: -1,
+		staleServer:    newStalePrompt(rpc),
 		jumpIdx:        -1,
 		configPath:     cfgPath,
 		configModTime:  cfgMod,
@@ -1125,6 +1134,14 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Each picker intercepts key input only. Non-key messages (tickMsg, diagnosticsMsg,
 	// decorationsMsg, etc.) fall through to the active buffer so the tick chain and
 	// async fetch loops keep running while any picker is open.
+	// Stale-server prompt: intercept ALL keys while it is visible. It is
+	// shown at startup, before anything else could have opened.
+	if a.staleServer != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleStaleServerKey(km)
+		}
+	}
+
 	// File-changed overlay: intercept ALL keys while the prompt is visible.
 	if a.fileChangedIdx >= 0 {
 		if km, ok := msg.(tea.KeyMsg); ok {

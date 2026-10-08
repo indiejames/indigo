@@ -124,11 +124,12 @@ func main() {
 	hangdetect.Start()
 	defer hangdetect.Stop()
 
+	// A stale server is reported by the App itself, as a prompt over the
+	// first frame — see App.staleServer.
 	rpc, err := connect(workDir)
 	if err != nil {
 		fatalf("%v", err)
 	}
-	warnIfServerStale(rpc)
 
 	var a *app.App
 	if isDir {
@@ -218,28 +219,6 @@ func waitForServer(sockPath string, timeout time.Duration) error {
 		time.Sleep(5 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for %s", sockPath)
-}
-
-// warnIfServerStale prints a warning when the server we just connected to is
-// running code that has since been replaced on disk.
-//
-// Not fatal: the running server still works, it is just older than what is
-// installed, and someone may be mid-edit in it. Said on stderr before the TUI
-// takes the screen, because the alternative is silently missing whatever was
-// just built — a failure mode that cost three separate rounds of misdiagnosis
-// before it was recognised (see internal/server/staleness.go).
-//
-// Every path that dials the server must call this. It is a helper rather than
-// inline code precisely because it was inline once and openUntitled did not
-// have it, so `indigo` with no argument silently skipped the check.
-func warnIfServerStale(rpc *client.RPC) {
-	if !rpc.ServerStale() {
-		return
-	}
-	fmt.Fprintf(os.Stderr,
-		"indigo: warning — the running server for this workspace started from an older "+
-			"build. Close every indigo window on it (or kill the `indigo --server` process) "+
-			"to pick up the current one.\n")
 }
 
 // resolvePath returns path with any symlinks resolved, falling back to path
@@ -355,11 +334,10 @@ func openUntitled(startLine int) {
 	hangdetect.Start()
 	defer hangdetect.Stop()
 
-	rpc, err := connect(workDir)
+	rpc, err := connect(workDir) // a stale server is reported by the App
 	if err != nil {
 		fatalf("%v", err)
 	}
-	warnIfServerStale(rpc)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	bufID, content, version, _, generation, err := rpc.OpenFile(ctx, "")
@@ -399,11 +377,10 @@ func runDebugWindow() {
 	hangdetect.Start()
 	defer hangdetect.Stop()
 
-	rpc, err := connect(workDir)
+	rpc, err := connect(workDir) // a stale server is reported by the window
 	if err != nil {
 		fatalf("%v", err)
 	}
-	warnIfServerStale(rpc)
 
 	p := tea.NewProgram(debugwin.New(rpc), tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)

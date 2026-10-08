@@ -57,6 +57,17 @@ func (a App) View() tea.View {
 // its own text input drawing its own cursor, so leaving the buffer's real
 // cursor visible would strand it behind the dialog.
 func (a App) renderFrame() (string, *tea.Cursor) {
+	// Over everything, including the full-screen pickers a directory start
+	// opens with — it is shown before any other dialog could have opened.
+	if a.staleServer != nil {
+		base, _ := a.renderBaseFrame()
+		return overlayCenter(base, a.staleServer.Render(a.width), a.width, a.height), nil
+	}
+	return a.renderBaseFrame()
+}
+
+// renderBaseFrame is renderFrame without the stale-server prompt.
+func (a App) renderBaseFrame() (string, *tea.Cursor) {
 	if a.picker != nil {
 		return a.picker.View(), nil
 	}

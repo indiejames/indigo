@@ -694,6 +694,9 @@ func execApplyEdits(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDi
 			return fmt.Sprintf("edited %s (save failed: %v)", in.Path, serr), false
 		}
 		warn := verifySaved(ctx, rpc, bufID, abs)
+		if warn == "" && in.OldText != in.NewText {
+			warn = verifyEditLanded(content, abs)
+		}
 		rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
 		return fmt.Sprintf("edited and saved %s%s", abs, warn), warn != ""
 	}
@@ -763,7 +766,10 @@ func execInsertAtLine(ctx context.Context, rpc *rpcclient.RPC, ap Approver, work
 		// than trusting Save's return: reporting a write that did not reach
 		// disk as success is the specific failure this project has already
 		// been burned by (see CLAUDE.md's "Known tooling issue").
-		warn := verifySaved(ctx, rpc, bufID, absPath(workDir, in.Path))
+		warn := verifySaved(ctx, rpc, bufID, abs)
+		if warn == "" && in.Text != "" {
+			warn = verifyEditLanded(content, abs)
+		}
 		rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
 		return fmt.Sprintf("inserted at line %d and saved %s%s", in.Line, in.Path, warn), warn != ""
 	}
@@ -917,6 +923,33 @@ func verifySavedAgainst(want string, snapErr error, abs string) string {
 		return fmt.Sprintf(" — WARNING: %s on disk does not match the buffer after saving. "+
 			"The edit is applied in the editor but the file has NOT changed on disk; "+
 			"disk-based builds, tests and greps will not see it.", abs)
+	}
+	return ""
+}
+
+// verifyEditLanded catches the failure verifySaved cannot: an edit that was
+// accepted and then lost before the save, so that the buffer and the file
+// agree with each other and both still hold the original text. That happened
+// on 2026-10-05 (CLAUDE.md, "Known tooling issue"): the server logged the ops
+// as applied, the save wrote the pre-edit content, verifySaved compared two
+// copies of that and reported success.
+//
+// before is the content the tool read when it opened the buffer, before
+// editing. Callers only ask when the edit cannot be a no-op, so a file still
+// identical to before means the edit is not on disk. The one innocent cause is
+// a format-on-save that undoes a pure-formatting edit, which the message names
+// so it is not mistaken for the bug.
+func verifyEditLanded(before, abs string) string {
+	got, err := os.ReadFile(abs)
+	if err != nil {
+		return fmt.Sprintf(" — WARNING: the file could not be read back after saving (%v); "+
+			"do not assume the change is on disk", err)
+	}
+	if disk, _ := document.NormalizeCRLF(string(got)); disk == before {
+		return fmt.Sprintf(" — WARNING: the edit did NOT land: %s is identical to its content "+
+			"before the edit, although the save reported success. Re-read the file and retry, "+
+			"or use another editing tool. (If the edit only changed formatting, format-on-save "+
+			"may have reverted it.)", abs)
 	}
 	return ""
 }
@@ -1644,12 +1677,7 @@ func resolveSymbol(ctx context.Context, rpc *rpcclient.RPC, workDir, symbol, hin
 		}
 	}
 
-	var exact []rpcclient.ClientSymbol
-	for _, s := range syms {
-		if s.Name == symbol {
-			exact = append(exact, s)
-		}
-	}
+	exact := matchSymbolName(syms, symbol)
 	if len(exact) == 0 {
 		if len(syms) == 0 {
 			return sym, nil, fmt.Errorf("no symbol named %q found in this workspace", symbol)
@@ -1658,4 +1686,31 @@ func resolveSymbol(ctx context.Context, rpc *rpcclient.RPC, workDir, symbol, hin
 		return sym, syms, fmt.Errorf("no symbol is named exactly %q", symbol)
 	}
 	return exact[0], exact[1:], nil
+}
+
+// matchSymbolName picks the symbols a bare name refers to. An exact name match
+// wins. Failing that, a symbol whose name is qualified by its container —
+// gopls reports a method as "editorService.markSaving" (or "(*T).m") — matches
+// on the part after the last dot, so "markSaving" finds the method. Without
+// this every Go method lookup by name failed with "no symbol is named
+// exactly", and an agent fell back to grep for exactly the question these
+// tools exist to answer.
+//
+// The qualified form is only a fallback so a top-level function keeps
+// precedence over same-named methods; a query that is itself qualified
+// ("T.m") still has to match exactly.
+func matchSymbolName(syms []rpcclient.ClientSymbol, symbol string) []rpcclient.ClientSymbol {
+	var exact, qualified []rpcclient.ClientSymbol
+	for _, s := range syms {
+		switch {
+		case s.Name == symbol:
+			exact = append(exact, s)
+		case !strings.Contains(symbol, ".") && strings.HasSuffix(s.Name, "."+symbol):
+			qualified = append(qualified, s)
+		}
+	}
+	if len(exact) > 0 {
+		return exact
+	}
+	return qualified
 }

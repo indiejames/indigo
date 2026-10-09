@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/indiejames/indigo/internal/rpcclient"
+	"github.com/indiejames/indigo/internal/staleprompt"
 )
 
 // Backend is the part of the server connection the window uses —
@@ -38,6 +39,11 @@ type Backend interface {
 	DebugControl(ctx context.Context, action rpcclient.DebugAction) error
 	DebugRestart(ctx context.Context, fallback rpcclient.DebugConfig) (rpcclient.DebugConfig, error)
 	RequestOpenFile(ctx context.Context, path string, line uint32) error
+	// ServerStale is what the server said at connect time about its own
+	// build; true shows the stale-server prompt over the first frame. Part of
+	// the interface rather than a setter so a window cannot be built without
+	// the check — openUntitled once silently skipped the stderr version.
+	ServerStale() bool
 }
 
 // section is one of the window's panels.
@@ -105,11 +111,19 @@ type Model struct {
 	input   string
 	status  string
 	quitNow bool
+
+	// stale is non-nil while the "server is running an older build" prompt
+	// is showing; see internal/staleprompt.
+	stale *staleprompt.Prompt
 }
 
 // New returns the window, reading from be.
 func New(be Backend) Model {
-	return Model{be: be, expanded: map[string]bool{}, outFollow: true}
+	m := Model{be: be, expanded: map[string]bool{}, outFollow: true}
+	if be.ServerStale() {
+		m.stale = &staleprompt.Prompt{}
+	}
+	return m
 }
 
 // ---- messages ----
@@ -301,7 +315,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
+		if m.stale != nil {
+			return m.onStaleKey(msg)
+		}
 		return m.onKey(msg)
+	}
+	return m, nil
+}
+
+// onStaleKey answers the stale-server prompt. Every key goes to it while it is
+// up, so none reaches the panels behind it.
+func (m Model) onStaleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	p, outcome := m.stale.Key(msg.String())
+	m.stale = &p
+	switch outcome {
+	case staleprompt.Dismissed:
+		m.stale = nil
+	case staleprompt.QuitRequested:
+		m.stale = nil
+		m.quitNow = true
+		return m, tea.Quit
 	}
 	return m, nil
 }
@@ -666,6 +699,11 @@ func (m Model) View() tea.View {
 func (m Model) render() string {
 	if m.width <= 0 || m.height <= 0 {
 		return "indigo debug"
+	}
+	if m.stale != nil {
+		// In place of the panels rather than over them: it is up only at
+		// startup, before they hold anything worth seeing around it.
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.stale.Render(m.width))
 	}
 	lines := []string{m.header()}
 	heights := m.sectionHeights(m.height - 2) // header and footer

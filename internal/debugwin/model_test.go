@@ -27,6 +27,7 @@ type fakeBackend struct {
 	restarts  int
 	opened    []string
 	varsCalls int
+	stale     bool
 }
 
 func newFake() *fakeBackend {
@@ -105,6 +106,8 @@ func (f *fakeBackend) RequestOpenFile(_ context.Context, path string, line uint3
 	f.mu.Unlock()
 	return nil
 }
+
+func (f *fakeBackend) ServerStale() bool { return f.stale }
 
 // drive runs cmd and feeds its messages back into m, following batches.
 func drive(m Model, cmd tea.Cmd) Model {

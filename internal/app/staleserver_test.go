@@ -134,3 +134,27 @@ func TestStaleServerPromptQuitKeepsRecoveredWork(t *testing.T) {
 		t.Errorf("no unsaved-files refusal shown:\n%s", frame)
 	}
 }
+
+// A paste is its own message type in Bubble Tea v2, so the key interception
+// does not catch it. It must not reach the picker a directory start opens
+// with, or the buffer, while the prompt covers them.
+func TestStaleServerPromptDropsPaste(t *testing.T) {
+	a := staleApp(false)
+	a.buffers = nil
+	a.picker = newFilePicker("/tmp", "/tmp", 80, 24, true)
+	got, cmd := a.Update(tea.PasteMsg{Content: "main.go"})
+	a = got.(App)
+	if q := a.picker.query; q != "" {
+		t.Errorf("paste reached the picker behind the prompt: query = %q", q)
+	}
+	if a.staleServer == nil || cmd != nil {
+		t.Errorf("paste changed the prompt: staleServer=%v cmd=%v", a.staleServer != nil, cmd != nil)
+	}
+
+	b := staleApp(false)
+	before := b.buffers[0].View().Content
+	got, _ = b.Update(tea.PasteMsg{Content: "pasted"})
+	if got.(App).buffers[0].View().Content != before {
+		t.Error("paste reached the buffer behind the prompt")
+	}
+}

@@ -1135,10 +1135,15 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// decorationsMsg, etc.) fall through to the active buffer so the tick chain and
 	// async fetch loops keep running while any picker is open.
 	// Stale-server prompt: intercept ALL keys while it is visible. It is
-	// shown at startup, before anything else could have opened.
+	// shown at startup, before anything else could have opened. A paste is
+	// dropped too: it is its own message type in v2, so it would otherwise
+	// reach handlePaste below and land in the picker or buffer behind it.
 	if a.staleServer != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handleStaleServerKey(km)
+		}
+		if _, ok := msg.(tea.PasteMsg); ok {
+			return a, nil
 		}
 	}
 

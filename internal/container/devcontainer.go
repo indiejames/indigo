@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // CLI is the `devcontainer` reference implementation of the dev container
@@ -129,6 +130,9 @@ func (c CLI) Up(ctx context.Context, workspaceFolder string) (UpResult, error) {
 		// found off-PATH has to be handed over explicitly.
 		args = append(args, "--docker-path", runtimePath)
 	}
+	if err := checkDaemon(ctx, runtimePath, offPath); err != nil {
+		return UpResult{}, err
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, c.bin(), args...)
@@ -152,6 +156,51 @@ func (c CLI) Up(ctx context.Context, workspaceFolder string) (UpResult, error) {
 		return res, errors.New("devcontainer up reported success with no container id")
 	}
 	return res, nil
+}
+
+// daemonCheckTimeout bounds checkDaemon. A daemon that is starting, or wedged,
+// can leave `docker ps` waiting far longer than anyone will watch a blank
+// terminal.
+var daemonCheckTimeout = 20 * time.Second
+
+// checkDaemon runs `<runtime> ps -q` and, if it fails, returns an error carrying
+// the runtime's own stderr.
+//
+// The runtime being installed is not the same as it being usable: Docker
+// Desktop not started, a docker context pointing at a stopped Colima or
+// OrbStack VM, or a socket this user cannot open all get past RuntimePath.
+// The CLI's first act is a `docker ps`, and when that fails its JSON result
+// says only
+//
+//	Command failed: docker ps -q -a --filter label=... An error occurred
+//	setting up the container.
+//
+// with docker's actual complaint ("Cannot connect to the Docker daemon at
+// ...", "permission denied") buried in a stderr log that is otherwise Node
+// stack traces, which Up deliberately keeps out of the message. Asking docker
+// directly first gets that one useful line, at the cost of one quick call.
+func checkDaemon(ctx context.Context, runtimePath string, offPath bool) error {
+	ctx, cancel := context.WithTimeout(ctx, daemonCheckTimeout)
+	defer cancel()
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, runtimePath, "ps", "-q")
+	cmd.Env = childEnv(runtimePath, offPath)
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return nil
+	}
+	name := filepath.Base(runtimePath)
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("%s is not answering (`%s ps` timed out after %s); is its daemon or VM running?",
+			name, name, daemonCheckTimeout)
+	}
+	msg := tail(stderr.String())
+	if msg == "" {
+		msg = err.Error()
+	}
+	return fmt.Errorf("%s cannot reach its daemon — is Docker Desktop (or Colima/OrbStack) running? `%s ps` said: %s",
+		name, name, msg)
 }
 
 // Configuration is the part of a resolved devcontainer.json indigo reads.

@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -470,5 +471,27 @@ func TestUpReportsAHungDaemon(t *testing.T) {
 	_, err := cli.Up(context.Background(), "/w")
 	if err == nil || !strings.Contains(err.Error(), "not answering") {
 		t.Errorf("error = %v, want a timeout naming the runtime", err)
+	}
+}
+
+// The caller ending its own context during the check is the caller's
+// cancellation, not a daemon fault: it must come back as that context's error.
+func TestCheckDaemonReturnsTheCallersContextError(t *testing.T) {
+	dir := t.TempDir()
+	hung := filepath.Join(dir, "docker")
+	if err := os.WriteFile(hung, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := checkDaemon(ctx, hung, true); !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "not answering") {
+		t.Errorf("caller deadline: err = %v, want the caller's context.DeadlineExceeded", err)
+	}
+
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	time.AfterFunc(200*time.Millisecond, cancel2)
+	if err := checkDaemon(ctx2, hung, true); !errors.Is(err, context.Canceled) {
+		t.Errorf("caller cancel: err = %v, want context.Canceled", err)
 	}
 }

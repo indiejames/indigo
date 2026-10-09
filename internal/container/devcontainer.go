@@ -179,8 +179,8 @@ var daemonCheckTimeout = 20 * time.Second
 // ...", "permission denied") buried in a stderr log that is otherwise Node
 // stack traces, which Up deliberately keeps out of the message. Asking docker
 // directly first gets that one useful line, at the cost of one quick call.
-func checkDaemon(ctx context.Context, runtimePath string, offPath bool) error {
-	ctx, cancel := context.WithTimeout(ctx, daemonCheckTimeout)
+func checkDaemon(parent context.Context, runtimePath string, offPath bool) error {
+	ctx, cancel := context.WithTimeout(parent, daemonCheckTimeout)
 	defer cancel()
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, runtimePath, "ps", "-q")
@@ -189,6 +189,12 @@ func checkDaemon(ctx context.Context, runtimePath string, offPath bool) error {
 	err := cmd.Run()
 	if err == nil {
 		return nil
+	}
+	// The caller giving up (Ctrl+C, or its own deadline) also ends ctx, and
+	// must not be reported as the daemon failing to answer or as docker being
+	// killed for no visible reason.
+	if perr := parent.Err(); perr != nil {
+		return perr
 	}
 	name := filepath.Base(runtimePath)
 	if ctx.Err() == context.DeadlineExceeded {

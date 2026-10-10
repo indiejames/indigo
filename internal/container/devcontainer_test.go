@@ -2,11 +2,13 @@ package container
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeCLI writes the given stdout/stderr and exits with the given code, so the
@@ -427,5 +429,69 @@ func TestReadConfigurationReadsAFileWithNoIndigoBlock(t *testing.T) {
 	}
 	if cfg.ShutdownAction != "none" {
 		t.Errorf("ShutdownAction = %q, want none", cfg.ShutdownAction)
+	}
+}
+
+// A runtime that is installed but cannot reach its daemon — Docker Desktop not
+// started, a context pointing at a stopped VM — used to surface only as the
+// CLI's "Command failed: docker ps ... An error occurred setting up the
+// container", with docker's own explanation dropped. Up now asks docker first
+// and reports what it said, without running the CLI at all.
+func TestUpReportsAnUnreachableDaemonInDockersOwnWords(t *testing.T) {
+	cli := fakeCLI(t, `{"outcome":"success","containerId":"abc"}`, "", 0)
+	dir := t.TempDir()
+	broken := filepath.Join(dir, "docker")
+	script := "#!/bin/sh\necho 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?' >&2\nexit 1\n"
+	if err := os.WriteFile(broken, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("INDIGO_DOCKER", broken)
+
+	_, err := cli.Up(context.Background(), "/w")
+	if err == nil {
+		t.Fatal("Up succeeded with a runtime that cannot reach its daemon")
+	}
+	if !strings.Contains(err.Error(), "Cannot connect to the Docker daemon") {
+		t.Errorf("error = %q, want docker's own explanation", err)
+	}
+}
+
+func TestUpReportsAHungDaemon(t *testing.T) {
+	cli := fakeCLI(t, `{"outcome":"success","containerId":"abc"}`, "", 0)
+	dir := t.TempDir()
+	hung := filepath.Join(dir, "docker")
+	if err := os.WriteFile(hung, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("INDIGO_DOCKER", hung)
+	old := daemonCheckTimeout
+	daemonCheckTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { daemonCheckTimeout = old })
+
+	_, err := cli.Up(context.Background(), "/w")
+	if err == nil || !strings.Contains(err.Error(), "not answering") {
+		t.Errorf("error = %v, want a timeout naming the runtime", err)
+	}
+}
+
+// The caller ending its own context during the check is the caller's
+// cancellation, not a daemon fault: it must come back as that context's error.
+func TestCheckDaemonReturnsTheCallersContextError(t *testing.T) {
+	dir := t.TempDir()
+	hung := filepath.Join(dir, "docker")
+	if err := os.WriteFile(hung, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := checkDaemon(ctx, hung, true); !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "not answering") {
+		t.Errorf("caller deadline: err = %v, want the caller's context.DeadlineExceeded", err)
+	}
+
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	time.AfterFunc(200*time.Millisecond, cancel2)
+	if err := checkDaemon(ctx2, hung, true); !errors.Is(err, context.Canceled) {
+		t.Errorf("caller cancel: err = %v, want context.Canceled", err)
 	}
 }

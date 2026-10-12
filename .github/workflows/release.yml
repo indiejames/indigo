@@ -184,7 +184,9 @@ jobs:
       - name: Test the installer against the packaged archives
         run: |
           mkdir -p dl && ln -s "$PWD/dist/release" "dl/$VERSION"
-          HOME="$RUNNER_TEMP/home" INDIGO_RELEASE_BASE="file://$PWD/dl" \
+          # The runner sets XDG_CONFIG_HOME, which install.sh honours (as indigo
+          # does), so unset it or the plugins land outside the temporary HOME.
+          env -u XDG_CONFIG_HOME HOME="$RUNNER_TEMP/home" INDIGO_RELEASE_BASE="file://$PWD/dl" \
             sh install.sh --version "$VERSION" --plugins
           "$RUNNER_TEMP/home/.local/bin/indigo" --version | grep -F "$VERSION"
           test -x "$RUNNER_TEMP/home/.indigo/indigo-server-linux-arm64"

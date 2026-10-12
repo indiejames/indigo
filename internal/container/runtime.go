@@ -284,12 +284,7 @@ func LocateServerBinary(goarch string) (string, error) {
 		candidates = append(candidates, override)
 	}
 	if exe, err := os.Executable(); err == nil {
-		dir := filepath.Dir(exe)
-		candidates = append(candidates,
-			filepath.Join(dir, name),
-			filepath.Join(dir, "dist", name),
-			filepath.Join(dir, "..", "dist", name),
-		)
+		candidates = append(candidates, serverCandidatesNear(exe, name)...)
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates, filepath.Join(home, ".indigo", name))
@@ -299,8 +294,33 @@ func LocateServerBinary(goarch string) (string, error) {
 			return c, nil
 		}
 	}
-	return "", fmt.Errorf("no %s found (looked in %s) — build one with `make build-container-server`",
+	return "", fmt.Errorf("no %s found (looked in %s) — reinstall indigo from a release, or build one with `make build-container-server`",
 		name, strings.Join(candidates, ", "))
+}
+
+// serverCandidatesNear lists where a server named name may sit relative to the
+// client executable exe: beside it (a release tarball), in ../libexec (the
+// Homebrew formula, which keeps the servers off PATH), or in a dist/ directory
+// (a source checkout).
+//
+// A package manager usually puts a symlink on PATH (Homebrew's bin/indigo →
+// Cellar/indigo/<v>/bin/indigo), and os.Executable may return the link rather
+// than its target, so the target's directory is searched as well.
+func serverCandidatesNear(exe, name string) []string {
+	dirs := []string{filepath.Dir(exe)}
+	if real, err := filepath.EvalSymlinks(exe); err == nil && filepath.Dir(real) != dirs[0] {
+		dirs = append(dirs, filepath.Dir(real))
+	}
+	var out []string
+	for _, dir := range dirs {
+		out = append(out,
+			filepath.Join(dir, name),
+			filepath.Join(dir, "..", "libexec", name),
+			filepath.Join(dir, "dist", name),
+			filepath.Join(dir, "..", "dist", name),
+		)
+	}
+	return out
 }
 
 // ServerRunning reports whether a server daemon for workspaceDir is still

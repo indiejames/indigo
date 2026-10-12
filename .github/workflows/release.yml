@@ -1,0 +1,251 @@
+name: Release
+
+# Pushing a tag v* builds every platform, publishes a GitHub release with the
+# archives and checksums, and updates the Homebrew tap. Running the workflow by
+# hand (Actions → Release → Run workflow) does the same builds as a dry run:
+# the archives are kept as a workflow artifact and nothing is published.
+#
+# A tag with a hyphen (v0.4.0-rc.1) is published as a prerelease and does not
+# touch the Homebrew tap.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      publish: ${{ steps.v.outputs.publish }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - id: v
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            v="${GITHUB_REF_NAME}"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            v="v0.0.0-dev.${GITHUB_SHA::7}"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+          case "$v" in *-*) pre=true ;; *) pre=false ;; esac
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$pre" >> "$GITHUB_OUTPUT"
+          echo "Building $v (prerelease=$pre)"
+
+  # Both macOS architectures from one Apple-silicon runner: clang targets
+  # either with -arch (see scripts/release/build-client.sh). The macOS plugins
+  # are built here too rather than in the portable job, so every Mach-O in the
+  # release is signed and notarized together. See docs/releasing.md for the
+  # secrets this needs; a real release fails without them, a dry run warns.
+  darwin:
+    name: Client (macOS)
+    needs: version
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - run: scripts/release/build-client.sh darwin arm64 dist/bin/indigo-darwin-arm64
+      - run: scripts/release/build-client.sh darwin amd64 dist/bin/indigo-darwin-amd64
+      - name: Build macOS plugins
+        run: scripts/release/build-portable.sh dist/bin
+        env:
+          BUILD_SERVERS: "0"
+          PLUGIN_PLATFORMS: darwin/amd64 darwin/arm64
+      - name: Sign and notarize
+        env:
+          REQUIRE_SIGNING: ${{ needs.version.outputs.publish == 'true' && '1' || '0' }}
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+        run: scripts/release/sign-macos.sh dist/bin/indigo-darwin-* dist/bin/plugins/*/*-darwin-*
+      - name: Smoke test
+        run: |
+          dist/bin/indigo-darwin-arm64 --version | grep -F "$VERSION"
+          file dist/bin/indigo-darwin-amd64 | grep -q x86_64
+          codesign -dvv dist/bin/indigo-darwin-arm64 2>&1 | grep -E 'Authority|TeamIdentifier|flags' || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-darwin
+          path: dist/bin/
+          if-no-files-found: error
+
+  # Each Linux architecture on its own native runner, inside Alpine so the
+  # result links statically against musl and runs on any distribution.
+  # `docker run` rather than a job `container:`, because JavaScript actions
+  # (checkout, upload-artifact) are not supported inside Alpine containers on
+  # arm64 runners.
+  linux:
+    name: Client (Linux ${{ matrix.arch }})
+    needs: version
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/alpine-go
+          key: alpine-go-${{ matrix.arch }}-${{ env.GO_VERSION }}-${{ hashFiles('go.sum') }}
+          restore-keys: alpine-go-${{ matrix.arch }}-${{ env.GO_VERSION }}-
+      - name: Build in Alpine
+        run: |
+          mkdir -p ~/alpine-go/mod ~/alpine-go/build
+          docker run --rm \
+            -v "$PWD:/src" -w /src \
+            -v "$HOME/alpine-go/mod:/go/pkg/mod" \
+            -v "$HOME/alpine-go/build:/root/.cache/go-build" \
+            -e VERSION \
+            "golang:${GO_VERSION}-alpine" \
+            sh -c 'apk add --no-cache build-base file git >/dev/null &&
+                   git config --global --add safe.directory /src &&
+                   scripts/release/build-client.sh linux ${{ matrix.arch }} dist/bin/indigo-linux-${{ matrix.arch }}'
+          # The container ran as root; hand the outputs back to the runner user
+          # so the cache and artifact steps can read and clean them up.
+          sudo chown -R "$(id -u):$(id -g)" dist ~/alpine-go
+      - name: Smoke test
+        run: dist/bin/indigo-linux-${{ matrix.arch }} --version | grep -F "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-linux-${{ matrix.arch }}
+          path: dist/bin/
+          if-no-files-found: error
+
+  # Container servers and Linux plugins: no cgo, so all from one runner.
+  portable:
+    name: Servers and plugins
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - run: scripts/release/build-portable.sh dist/bin
+        env:
+          PLUGIN_PLATFORMS: linux/amd64 linux/arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-portable
+          path: dist/bin/
+          if-no-files-found: error
+
+  release:
+    name: Package and publish
+    needs: [version, darwin, linux, portable]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: dist/bin
+          merge-multiple: true
+      - run: scripts/release/package.sh dist/bin dist/release
+      - name: Check every platform was packaged
+        run: |
+          for p in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do
+            test -f "dist/release/indigo-$VERSION-$p.tar.gz" || { echo "missing $p"; exit 1; }
+          done
+          test -f "dist/release/indigo-plugins-$VERSION.tar.gz"
+          for p in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do
+            test -f "dist/bin/plugins/indigo-git/indigo-git-$p" || { echo "missing indigo-git-$p"; exit 1; }
+          done
+      - name: Test the installer against the packaged archives
+        run: |
+          mkdir -p dl && ln -s "$PWD/dist/release" "dl/$VERSION"
+          HOME="$RUNNER_TEMP/home" INDIGO_RELEASE_BASE="file://$PWD/dl" \
+            sh install.sh --version "$VERSION" --plugins
+          "$RUNNER_TEMP/home/.local/bin/indigo" --version | grep -F "$VERSION"
+          test -x "$RUNNER_TEMP/home/.indigo/indigo-server-linux-arm64"
+          test -x "$RUNNER_TEMP/home/.config/indigo/plugins/indigo-git/indigo-git-linux-amd64"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: dist/release/
+      - name: Publish GitHub release
+        if: needs.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=""
+          if [ "${{ needs.version.outputs.prerelease }}" = true ]; then flags="--prerelease"; fi
+          gh release create "$VERSION" dist/release/* \
+            --verify-tag --generate-notes --title "indigo $VERSION" $flags
+
+  # Pushes Formula/indigo.rb to indiejames/homebrew-tap. Needs a secret
+  # HOMEBREW_TAP_TOKEN: a fine-grained token with Contents read/write on that
+  # repository only. Skipped, with a warning, when the secret is not set.
+  homebrew:
+    name: Update Homebrew tap
+    needs: [version, release]
+    if: needs.version.outputs.publish == 'true' && needs.version.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - name: Check for the tap token
+        id: token
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set; the Homebrew tap was not updated."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.ok == 'true'
+      - uses: actions/download-artifact@v4
+        if: steps.token.outputs.ok == 'true'
+        with:
+          name: release
+          path: dist/release
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.ok == 'true'
+        with:
+          repository: ${{ github.repository_owner }}/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      - name: Commit the formula
+        if: steps.token.outputs.ok == 'true'
+        run: |
+          mkdir -p tap/Formula
+          scripts/release/homebrew-formula.sh "$VERSION" dist/release/checksums.txt > tap/Formula/indigo.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/indigo.rb
+          git diff --cached --quiet && { echo "formula unchanged"; exit 0; }
+          git commit -m "indigo $VERSION"
+          git push

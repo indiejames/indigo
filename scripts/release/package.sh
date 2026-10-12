@@ -22,6 +22,10 @@ bindir=${1:?usage: package.sh <bindir> <outdir>}
 outdir=${2:?usage: package.sh <bindir> <outdir>}
 version=${VERSION:?set VERSION, e.g. VERSION=v1.2.3}
 
+# The docs shipped in each archive, found relative to this script so packaging
+# works from any directory.
+root=$(cd "$(dirname "$0")/../.." && pwd)
+
 # Keep macOS tar from adding ._ AppleDouble files when run locally.
 export COPYFILE_DISABLE=1
 
@@ -45,7 +49,7 @@ for client in "$bindir"/indigo-darwin-* "$bindir"/indigo-linux-*; do
 	chmod 755 "$dir/indigo"   # CI artifacts lose the executable bit in transit
 	cp "$bindir/indigo-server-linux-amd64" "$bindir/indigo-server-linux-arm64" "$dir/"
 	chmod 755 "$dir"/indigo-server-linux-*
-	cp LICENSE THIRD_PARTY_NOTICES.md README.md "$dir/"
+	cp "$root/LICENSE" "$root/THIRD_PARTY_NOTICES.md" "$root/README.md" "$dir/"
 	tar -C "$stage" -czf "$outdir/$name.tar.gz" "$name"
 	echo "packaged $name.tar.gz"
 	found=$((found + 1))

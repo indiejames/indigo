@@ -19,6 +19,11 @@
 #                                                  (or $XDG_CONFIG_HOME/indigo/plugins)
 set -eu
 
+# Everything runs inside main, called on the last line. Piped from curl, sh
+# executes the script as it arrives, so a download cut off partway would
+# otherwise run whatever had arrived; a truncated copy never reaches the call.
+main() {
+
 repo="indiejames/indigo"
 # Overridable so the script can be tested against a local directory
 # (INDIGO_RELEASE_BASE=file:///path/to/dist).
@@ -203,3 +208,7 @@ if [ "$want_client" = 1 ]; then
 	say ""
 	say "If indigo was already running, close its windows to pick up the new version."
 fi
+
+}
+
+main "$@"

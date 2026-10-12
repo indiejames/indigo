@@ -40,6 +40,7 @@ Also, I wanted to build something real in Go, and to use some of the great proje
 | [Plugin Architecture](docs/plugin-architecture.md) | How the out-of-process plugin system works, and why |
 | [Writing a Plugin](docs/plugin-development.md) | Step-by-step guide to building one with the Go SDK |
 | [Security Model](docs/security.md) | Threat model for the sockets and the plugin loader |
+| [Releasing](docs/releasing.md) | How releases are built and published, and the one-time Homebrew tap setup |
 | [Performance](PERFORMANCE.md) | Startup-path investigations and the optimizations that came out of them |
 
 ## Install
@@ -48,7 +49,43 @@ Indigo is developed and tested on **macOS**, and is regularly exercised on **Lin
 (natively and inside [dev containers](docs/dev-containers.md)). Windows is not supported —
 the client/server transport is Unix domain sockets and process handling is POSIX-only.
 
-> **Note:** Binary releases are not yet available. For now, build from source.
+### Quick install
+
+Prebuilt binaries are published for macOS and Linux, on both amd64 and arm64. The Linux
+build is statically linked, so it runs on any distribution, glibc or musl.
+
+**Homebrew** (macOS or Linux):
+
+```sh
+brew install indiejames/tap/indigo
+```
+
+**Install script** — downloads the latest release, verifies its checksum, and installs
+`indigo` into `~/.local/bin`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/indiejames/indigo/main/install.sh | sh
+```
+
+Add `-s -- --plugins` to also install the [bundled plugins](#plugins), or run it with
+`-s -- --plugins-only` after a Homebrew install to add just the plugins. Other options:
+`--version v1.2.3` for a specific release and `--dir <path>` for a different install
+directory. Run it again to upgrade.
+
+**Manually** — download the archive for your platform from the
+[releases page](https://github.com/indiejames/indigo/releases), check it against
+`checksums.txt`, unpack it, and put `indigo` somewhere on your `PATH`. Keep the two
+`indigo-server-linux-*` files beside it (or in `~/.indigo/`); they are what indigo copies
+into a [dev container](docs/dev-containers.md).
+
+`indigo --version` reports the installed version. After an upgrade, a server started by
+the previous version keeps running until its last window closes, and indigo warns you
+when it connects to one.
+
+Either way you will still want a language server, formatter and linter for the languages
+you use — see [Language Support](docs/language-support.md).
+
+## Building from source
 
 ### Requirements
 
@@ -147,6 +184,7 @@ this is the list.
 | `--devcontainer` | Build and start the container described by `.devcontainer/devcontainer.json`, and edit inside it. See [Dev Containers](docs/dev-containers.md) |
 | `--container <name\|id>` | Edit inside a container you are already running |
 | `--container-dir <path>` | Where the workspace lives inside the container, when it isn't the default. Only meaningful with one of the two flags above |
+| `--version` | Print the version and exit |
 | `--warm` | Exit immediately, touching nothing. Used by `make install` so macOS's one-time code-signature check happens during install rather than at first launch |
 
 `--server` and `--server-stdio` exist so indigo can start its own backing server (locally,

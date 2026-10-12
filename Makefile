@@ -3,13 +3,18 @@ CMD     := ./cmd/indigo
 OUT     := $(BINARY)
 GOBIN   := $(shell go env GOPATH)/bin
 
+# What `indigo --version` reports. The release workflow passes the tag;
+# locally it is whatever git describes, e.g. v0.3.0-4-gabc1234-dirty.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION_LDFLAGS := -X main.version=$(VERSION)
+
 # Default: all languages included.
 build:
-	go build -tags lang_all -o $(OUT) $(CMD)
+	go build -tags lang_all -ldflags="$(VERSION_LDFLAGS)" -o $(OUT) $(CMD)
 
 # Strip debug info for a smaller binary.
 build-release:
-	go build -tags lang_all -ldflags="-s -w" -o $(OUT) $(CMD)
+	go build -tags lang_all -ldflags="-s -w $(VERSION_LDFLAGS)" -o $(OUT) $(CMD)
 
 # No language grammars — smallest possible binary (no syntax highlighting).
 build-minimal:
@@ -44,6 +49,17 @@ install: build-release build-container-server
 	# feature from an installed binary for the first time.
 	mkdir -p $(HOME)/.indigo
 	cp dist/indigo-server-linux-arm64 dist/indigo-server-linux-amd64 $(HOME)/.indigo/
+
+# A local dry run of a release: this machine's client plus every platform's
+# container servers and plugins, packaged exactly as .github/workflows/release.yml
+# does, into dist/release. Real releases are built by that workflow when a v*
+# tag is pushed. On Linux this must run on Alpine (the client links statically
+# against musl); see scripts/release/build-client.sh.
+dist:
+	rm -rf dist/bin dist/release
+	VERSION=$(VERSION) scripts/release/build-client.sh $(GOOS) $(GOARCH) dist/bin/indigo-$(GOOS)-$(GOARCH)
+	VERSION=$(VERSION) scripts/release/build-portable.sh dist/bin
+	VERSION=$(VERSION) scripts/release/package.sh dist/bin dist/release
 
 test:
 	go test -tags lang_all ./...
@@ -168,7 +184,7 @@ uninstall-npm-versions:
 
 build-plugins: build-hello build-jumpy build-spell build-git build-bookmarks build-npm-versions
 
-.PHONY: build build-release build-minimal build-no-heavy build-custom install test vet lint clean \
+.PHONY: dist build build-release build-minimal build-no-heavy build-custom install test vet lint clean \
         build-jumpy install-jumpy uninstall-jumpy \
         build-spell install-spell uninstall-spell \
         build-git install-git uninstall-git \

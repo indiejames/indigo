@@ -327,6 +327,40 @@ func TestLocateServerBinaryPrefersAnExplicitOverride(t *testing.T) {
 	}
 }
 
+// The Homebrew layout: bin/indigo on PATH is a symlink into the Cellar, and the
+// servers sit in the Cellar's libexec. Only following the link finds them.
+func TestServerCandidatesFollowASymlinkedExecutableToLibexec(t *testing.T) {
+	root := t.TempDir()
+	cellar := filepath.Join(root, "Cellar", "indigo", "1.0.0")
+	for _, d := range []string{filepath.Join(cellar, "bin"), filepath.Join(cellar, "libexec"), filepath.Join(root, "bin")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	realExe := filepath.Join(cellar, "bin", "indigo")
+	server := filepath.Join(cellar, "libexec", "indigo-server-linux-arm64")
+	for _, p := range []string{realExe, server} {
+		if err := os.WriteFile(p, []byte("x"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(root, "bin", "indigo")
+	if err := os.Symlink(realExe, link); err != nil {
+		t.Fatal(err)
+	}
+
+	wantReal, err := filepath.EvalSymlinks(server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range serverCandidatesNear(link, "indigo-server-linux-arm64") {
+		if got, err := filepath.EvalSymlinks(c); err == nil && got == wantReal {
+			return
+		}
+	}
+	t.Errorf("no candidate for %s reaches %s", link, server)
+}
+
 func TestServerPathDistinguishesArchitectureAndBuild(t *testing.T) {
 	if ServerPath("arm64", "abc") == ServerPath("amd64", "abc") {
 		t.Error("both architectures share a path; a container reused across hosts would run the wrong binary")

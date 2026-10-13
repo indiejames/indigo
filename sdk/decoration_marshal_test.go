@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/indiejames/indigo/internal/proto/pluginproto"
+	"github.com/indiejames/indigo/sdk/pluginproto"
 )
 
 // TestDecorationMarshalRoundTrip is a regression test for a field that was

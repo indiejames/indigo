@@ -63,6 +63,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/client9/gospell v0.9.2
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/indiejames/indigo/sdk v0.1.0
 	github.com/mattn/go-runewidth v0.0.27
 	github.com/sahilm/fuzzy v0.1.3
 	golang.org/x/sys v0.47.0
@@ -96,3 +97,5 @@ require (
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 )
+
+replace github.com/indiejames/indigo/sdk => ./sdk

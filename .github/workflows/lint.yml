@@ -48,3 +48,8 @@ jobs:
 
       - name: Run golangci-lint
         run: golangci-lint run --build-tags lang_all ./...
+
+      # sdk/ is a separate Go module; ./... above stops at its boundary.
+      - name: Run golangci-lint on the SDK
+        working-directory: sdk
+        run: golangci-lint run ./...

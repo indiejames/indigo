@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/indiejames/indigo/internal/proto/pluginproto"
+	"github.com/indiejames/indigo/sdk/pluginproto"
 )
 
 // fakePublishWorkspaceDiagnosticsApi mirrors fakeEditorApi

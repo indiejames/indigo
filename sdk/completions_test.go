@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/indiejames/indigo/internal/proto/pluginproto"
+	"github.com/indiejames/indigo/sdk/pluginproto"
 )
 
 // captureCompletionProvider wires a fake RegisterCompletionProvider that

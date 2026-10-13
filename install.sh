@@ -107,8 +107,9 @@ if [ -z "$version" ]; then
 	# redirect avoids the GitHub API and its unauthenticated rate limit.
 	version=$(latest_url) || die "could not determine the latest release"
 	version=${version##*/}
+	# Calendar-version tags (2026.10.0); v* for releases before the switch.
 	case "$version" in
-	v*) ;;
+	[0-9][0-9][0-9][0-9].*|v*) ;;
 	*) die "could not determine the latest release (got '$version')" ;;
 	esac
 fi

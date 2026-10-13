@@ -23,14 +23,14 @@ to live inside the indigo repo.
 ```
 mkdir todo-plugin && cd todo-plugin
 go mod init example.com/todo-plugin
-go get github.com/indiejames/indigo
+go get github.com/indiejames/indigo/sdk
 ```
 
-`github.com/indiejames/indigo` is the whole editor's module — the SDK is a subpackage of it
-(`github.com/indiejames/indigo/sdk`), not a separately versioned module. `go get` pulls the
-module's dependency graph, but only what `sdk` actually imports (Cap'n Proto and the
-generated plugin protocol code) gets compiled into your plugin — none of the editor's own
-heavy dependencies (tree-sitter grammars, the TUI framework, etc.).
+The SDK is its own Go module, `github.com/indiejames/indigo/sdk`, versioned with semver
+independently of the editor and tagged `sdk/vX.Y.Z` in the indigo repo. Its only dependency
+is Cap'n Proto, so none of the editor's own heavy dependencies (tree-sitter grammars, the
+TUI framework, etc.) enter your plugin's module graph. The SDK version is what tells you
+whether your plugin still compiles; while it is `0.x`, a minor bump may break the API.
 
 ## 2. The minimal plugin
 
@@ -189,6 +189,7 @@ occasional keypress but wasteful to call from a decoration provider.
 ```toml
 name        = "todo"
 version     = "0.1.0"
+sdk_version = "0.1.0"
 description = "Jump to and highlight TODO/FIXME comments"
 
 [binaries]
@@ -202,6 +203,14 @@ label   = "Jump to next TODO"
 command = "todo.jump"
 key     = "t"
 ```
+
+`sdk_version` is the SDK version your plugin was built against: the version of
+`github.com/indiejames/indigo/sdk` in your `go.mod`, also available as `sdk.Version`. indigo
+checks it before starting the plugin and refuses one it can't run, logging why. The major
+versions must match, and while the SDK is `0.x` the minor versions must match too. From 1.0
+on, indigo runs plugins built against its own minor version or any older one. Patch versions
+never matter. A manifest without `sdk_version` still loads, with a warning in the log, but
+the field is how a mismatch shows up as a clear message instead of a mysterious failure.
 
 `[binaries]` maps `GOOS/GOARCH` to a binary filename in the same directory — the plugin
 manager picks the right one for the machine it's running on at startup. You only need to

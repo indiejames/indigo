@@ -41,7 +41,7 @@ Communication uses **Cap'n Proto RPC** over a per-plugin Unix domain socket. Thi
 - Native two-directional RPC (both sides can call into the other)
 - Promise pipelining (async by default at the protocol level)
 
-Plugin authors never touch Cap'n Proto directly. The **indigo plugin SDK** (package `github.com/indiejames/indigo/sdk`, in this repo) wraps everything behind a clean Go interface.
+Plugin authors never touch Cap'n Proto directly. The **indigo plugin SDK** (module `github.com/indiejames/indigo/sdk`, in this repo's `sdk/` directory and versioned separately from the editor) wraps everything behind a clean Go interface.
 
 ### Why not stdio / JSON?
 

@@ -1,7 +1,7 @@
 using Go = import "/go.capnp";
 @0xa3f8c1e2d4b07659;
 $Go.package("pluginproto");
-$Go.import("github.com/indiejames/indigo/internal/proto/pluginproto");
+$Go.import("github.com/indiejames/indigo/sdk/pluginproto");
 
 # Plugin is the interface a plugin process must implement.
 # The server calls initialize once at startup; the plugin registers

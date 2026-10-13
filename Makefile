@@ -4,8 +4,10 @@ OUT     := $(BINARY)
 GOBIN   := $(shell go env GOPATH)/bin
 
 # What `indigo --version` reports. The release workflow passes the tag;
-# locally it is whatever git describes, e.g. v0.3.0-4-gabc1234-dirty.
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# locally it is whatever git describes, e.g. 2026.10.0-4-gabc1234-dirty.
+# --match keeps the SDK's sdk/v* tags out of it; v[0-9]* covers the releases
+# from before the move to calendar versions.
+VERSION ?= $(shell git describe --tags --always --dirty --match '[0-9]*' --match 'v[0-9]*' 2>/dev/null || echo dev)
 VERSION_LDFLAGS := -X main.version=$(VERSION)
 
 # Default: all languages included.
@@ -52,7 +54,7 @@ install: build-release build-container-server
 
 # A local dry run of a release: this machine's client plus every platform's
 # container servers and plugins, packaged exactly as .github/workflows/release.yml
-# does, into dist/release. Real releases are built by that workflow when a v*
+# does, into dist/release. Real releases are built by that workflow when a calendar-version
 # tag is pushed. On Linux this must run on Alpine (the client links statically
 # against musl); see scripts/release/build-client.sh.
 dist:
@@ -61,8 +63,12 @@ dist:
 	VERSION=$(VERSION) scripts/release/build-portable.sh dist/bin
 	VERSION=$(VERSION) scripts/release/package.sh dist/bin dist/release
 
+# sdk/ is its own Go module (versioned separately, tagged sdk/vX.Y.Z), and
+# `./...` stops at a nested module's boundary — so every target that should
+# cover the SDK runs a second time inside it.
 test:
 	go test -tags lang_all ./...
+	cd sdk && go test ./...
 
 # The fault-injection hooks (internal/faultinject) are compiled out unless this
 # tag is set, so a release binary cannot be made to corrupt a buffer. That also
@@ -73,9 +79,11 @@ test-faults:
 
 vet:
 	go vet -tags lang_all ./...
+	cd sdk && go vet ./...
 
 lint:
 	golangci-lint run --build-tags lang_all ./...
+	cd sdk && golangci-lint run ./...
 
 clean:
 	rm -f $(BINARY)

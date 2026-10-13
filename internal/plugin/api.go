@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/indiejames/indigo/internal/proto/pluginproto"
+	"github.com/indiejames/indigo/sdk/pluginproto"
 )
 
 // editorApiServer is the server-side implementation of pluginproto.EditorApi.

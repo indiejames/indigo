@@ -1,16 +1,20 @@
 name: Release
 
-# Pushing a tag v* builds every platform, publishes a GitHub release with the
-# archives and checksums, and updates the Homebrew tap. Running the workflow by
-# hand (Actions → Release → Run workflow) does the same builds as a dry run:
-# the archives are kept as a workflow artifact and nothing is published.
+# Pushing a calendar-version tag (YYYY.M.N, no leading "v" — e.g. 2026.10.0)
+# builds every platform, publishes a GitHub release with the archives and
+# checksums, and updates the Homebrew tap. Running the workflow by hand
+# (Actions → Release → Run workflow) does the same builds as a dry run: the
+# archives are kept as a workflow artifact and nothing is published.
 #
-# A tag with a hyphen (v0.4.0-rc.1) is published as a prerelease and does not
-# touch the Homebrew tap.
+# A tag with a hyphen (2026.10.0-rc.1) is published as a prerelease and does
+# not touch the Homebrew tap. The plugin SDK's sdk/vX.Y.Z tags match neither
+# pattern below and build nothing; see docs/releasing.md.
 
 on:
   push:
-    tags: ["v*"]
+    # GitHub's filter is a glob, so this only narrows; the version job below
+    # enforces the exact format.
+    tags: ["[0-9][0-9][0-9][0-9].[0-9]*"]
   workflow_dispatch:
 
 permissions:
@@ -32,9 +36,15 @@ jobs:
         run: |
           if [ "${GITHUB_REF_TYPE}" = tag ]; then
             v="${GITHUB_REF_NAME}"
+            # YYYY.M.N with no leading zeros, optionally -prerelease. A stray
+            # tag that merely passes the trigger glob must not publish.
+            if ! printf '%s\n' "$v" | grep -Eq '^[0-9]{4}\.([1-9]|1[0-2])\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'; then
+              echo "::error::tag '$v' is not a calendar version (YYYY.M.N, e.g. 2026.10.0)"
+              exit 1
+            fi
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
-            v="v0.0.0-dev.${GITHUB_SHA::7}"
+            v="0.0.0-dev.${GITHUB_SHA::7}"
             echo "publish=false" >> "$GITHUB_OUTPUT"
           fi
           case "$v" in *-*) pre=true ;; *) pre=false ;; esac

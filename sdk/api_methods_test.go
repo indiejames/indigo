@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/indiejames/indigo/internal/proto/pluginproto"
+	"github.com/indiejames/indigo/sdk/pluginproto"
 )
 
 // fakeFullEditorApi extends the RefreshDecorations-only fake with the

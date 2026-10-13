@@ -68,9 +68,32 @@ curl -fsSL https://raw.githubusercontent.com/indiejames/indigo/main/install.sh |
 ```
 
 Add `-s -- --plugins` to also install the [bundled plugins](#plugins), or run it with
-`-s -- --plugins-only` after a Homebrew install to add just the plugins. Other options:
-`--version 2026.10.0` for a specific release and `--dir <path>` for a different install
-directory. Run it again to upgrade.
+`-s -- --plugins-only` after a Homebrew install to add just the plugins (see below). Other
+options: `--version 2026.10.0` for a specific release and `--dir <path>` for a different
+install directory. Run it again to upgrade.
+
+**Plugins with Homebrew** — the Homebrew formula installs only the editor, not the
+[bundled plugins](#plugins). To add them, run the install script with `--plugins-only`,
+which downloads the plugins from the same GitHub release and installs them into
+`~/.config/indigo/plugins/` (or `$XDG_CONFIG_HOME/indigo/plugins/`) without touching the
+Homebrew-managed `indigo` binary:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/indiejames/indigo/main/install.sh | sh -s -- --plugins-only
+```
+
+With no `--version`, this installs the plugins from the latest release. If your Homebrew
+`indigo` is older than that, pin the plugins to the version you have, as reported by
+`indigo --version` (e.g. `indigo 2026.10.0`):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/indiejames/indigo/main/install.sh | sh -s -- --plugins-only --version 2026.10.0
+```
+
+Rerun it after each `brew upgrade indigo` to keep the plugins in step with the editor.
+Plugins load the next time an indigo server starts, so close every indigo window for a
+workspace and reopen it to pick them up. To remove a plugin, delete its directory
+under `~/.config/indigo/plugins/`.
 
 **Manually** — download the archive for your platform from the
 [releases page](https://github.com/indiejames/indigo/releases), check it against

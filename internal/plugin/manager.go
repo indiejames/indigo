@@ -20,7 +20,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/indiejames/indigo/internal/debuglog"
-	"github.com/indiejames/indigo/internal/proto/pluginproto"
+	"github.com/indiejames/indigo/sdk"
+	"github.com/indiejames/indigo/sdk/pluginproto"
 )
 
 // ServerBridge is implemented by the server and injected into each EditorApi.
@@ -164,7 +165,7 @@ type PluginDiagnostic struct {
 type PluginToml struct {
 	Name        string            `toml:"name"`
 	Version     string            `toml:"version"`
-	SdkVersion  string            `toml:"sdk_version"` // stored but not validated yet
+	SdkVersion  string            `toml:"sdk_version"` // checked against sdk.Version by checkSDKVersion
 	Description string            `toml:"description"`
 	Binaries    map[string]string `toml:"binaries"`
 	// Hashes maps the same os/arch keys as Binaries to expected SHA-256 hashes
@@ -338,6 +339,16 @@ func (m *Manager) Start(ctx context.Context) error {
 			if err != nil {
 				pluginLog("plugin %s: manifest error: %v", name, err)
 				return
+			}
+			// Before the binary is even looked at: an incompatible plugin
+			// would otherwise start and fail later as an opaque capnp error.
+			warning, err := checkSDKVersion(manifest.SdkVersion, sdk.Version)
+			if err != nil {
+				pluginLog("plugin %s: not started, incompatible SDK: %v", manifest.Name, err)
+				return
+			}
+			if warning != "" {
+				pluginLog("plugin %s: %s", manifest.Name, warning)
 			}
 			binaryPath, err := selectBinary(pluginDir, manifest)
 			if err != nil {

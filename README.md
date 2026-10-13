@@ -69,7 +69,7 @@ curl -fsSL https://raw.githubusercontent.com/indiejames/indigo/main/install.sh |
 
 Add `-s -- --plugins` to also install the [bundled plugins](#plugins), or run it with
 `-s -- --plugins-only` after a Homebrew install to add just the plugins. Other options:
-`--version v1.2.3` for a specific release and `--dir <path>` for a different install
+`--version 2026.10.0` for a specific release and `--dir <path>` for a different install
 directory. Run it again to upgrade.
 
 **Manually** — download the archive for your platform from the

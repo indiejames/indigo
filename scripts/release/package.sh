@@ -1,7 +1,7 @@
 #!/bin/sh
 # Assemble release archives from built binaries.
 #
-#   VERSION=v1.2.3 scripts/release/package.sh <bindir> <outdir>
+#   VERSION=2026.10.0 scripts/release/package.sh <bindir> <outdir>
 #
 # <bindir> holds what build-client.sh and build-portable.sh produced:
 #   indigo-<os>-<arch>             one per client platform built
@@ -20,7 +20,7 @@ set -eu
 
 bindir=${1:?usage: package.sh <bindir> <outdir>}
 outdir=${2:?usage: package.sh <bindir> <outdir>}
-version=${VERSION:?set VERSION, e.g. VERSION=v1.2.3}
+version=${VERSION:?set VERSION, e.g. VERSION=2026.10.0}
 
 # The docs shipped in each archive, found relative to this script so packaging
 # works from any directory.

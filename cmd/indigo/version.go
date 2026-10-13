@@ -3,7 +3,7 @@ package main
 import "runtime/debug"
 
 // version is stamped into release builds with
-// -ldflags "-X main.version=v1.2.3" (see the Makefile's VERSION).
+// -ldflags "-X main.version=2026.10.0" (see the Makefile's VERSION).
 var version = ""
 
 // versionString reports what `indigo --version` prints. A release build

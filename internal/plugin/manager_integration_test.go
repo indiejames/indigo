@@ -31,6 +31,13 @@ func buildMiniPlugin(t *testing.T, dir string) string {
 // and points the manager's plugin discovery at it via t.Setenv.
 func setUpMiniPluginInstall(t *testing.T) {
 	t.Helper()
+	installMiniPlugin(t, "")
+}
+
+// installMiniPlugin is setUpMiniPluginInstall with extra top-level manifest
+// lines (each ending in a newline), inserted before the [binaries] table.
+func installMiniPlugin(t *testing.T, extraManifest string) {
+	t.Helper()
 	configHome := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configHome)
 
@@ -42,7 +49,7 @@ func setUpMiniPluginInstall(t *testing.T) {
 	binPath := buildMiniPlugin(t, pluginDir)
 	binName := filepath.Base(binPath)
 
-	manifest := "name = \"miniplugin\"\nversion = \"0.0.1\"\n\n[binaries]\n\"" +
+	manifest := "name = \"miniplugin\"\nversion = \"0.0.1\"\n" + extraManifest + "\n[binaries]\n\"" +
 		runtime.GOOS + "/" + runtime.GOARCH + "\" = \"" + binName + "\"\n"
 	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.toml"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)

@@ -3,9 +3,21 @@
 Releases are built by `.github/workflows/release.yml`. Push a tag and it does the rest:
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag 2026.10.0
+git push origin 2026.10.0
 ```
+
+Editor releases use **calendar versions**: `YYYY.M.N`, the year, the month without a leading
+zero, and a counter that starts at 0 each month (`2026.10.0`, `2026.10.1`, then `2026.11.0`).
+There is **no leading `v`**. Go reads a `v`-prefixed tag as semver, where `v2026` would be a
+major version that needs a `/v2026` module-path suffix, and it would collide with the SDK's
+`sdk/vX.Y.Z` tags. A tag without the `v` is invisible to Go's module tooling. The workflow
+refuses a tag that isn't exactly this shape, so a stray tag cannot publish a release. The
+first release, `v0.1.0`, predates the scheme; calendar versions sort after it, so Homebrew and
+`install.sh` treat the first calendar release as an upgrade.
+
+The editor's version says *when* it was released, not what it is compatible with. Plugin
+compatibility is the SDK's semver; see [Releasing the plugin SDK](#releasing-the-plugin-sdk).
 
 The workflow:
 
@@ -20,9 +32,23 @@ The workflow:
 4. Regenerates `Formula/indigo.rb` (`scripts/release/homebrew-formula.sh`) and pushes it to
    [`indiejames/homebrew-tap`](https://github.com/indiejames/homebrew-tap).
 
-A tag containing a hyphen (`v0.2.0-rc.1`) is published as a **prerelease** and leaves the
+A tag containing a hyphen (`2026.10.0-rc.1`) is published as a **prerelease** and leaves the
 Homebrew tap alone. `install.sh` also ignores it unless asked for with `--version`, since it
 follows GitHub's "latest release", which excludes prereleases.
+
+## Releasing the plugin SDK
+
+The SDK (`sdk/`) is a separate Go module with its own semver, published by tagging
+`sdk/vX.Y.Z`. That tag does not match the calendar-version trigger above, so it builds nothing — Go's
+module proxy picks it up directly. When the SDK's public API (or `sdk/pluginproto/plugin.capnp`)
+changes:
+
+1. Bump `Version` in `sdk/version.go`. The editor checks every plugin's `sdk_version` against
+   this constant, so it must match the tag exactly. While it is `0.x`, a minor bump means
+   every plugin built against the previous minor is refused.
+2. Bump `sdk_version` in the bundled plugins' `plugin.toml` files to match, or they are
+   refused by the editor built in the same release.
+3. Tag the same commit: `git tag sdk/v0.2.0 && git push origin sdk/v0.2.0`.
 
 ## What a release contains
 
@@ -38,14 +64,14 @@ server runs the Linux build of each plugin from the host's plugin directory.
 ## Dry runs
 
 - **In CI:** Actions → Release → *Run workflow*. Everything is built and packaged as
-  `v0.0.0-dev.<sha>` and kept as the `release` workflow artifact; nothing is published.
+  `0.0.0-dev.<sha>` and kept as the `release` workflow artifact; nothing is published.
 - **Locally:** `make dist` builds this machine's client plus every platform's servers and
   plugins into `dist/release`. To try the installer against it:
 
   ```sh
-  mkdir -p /tmp/dl && ln -sfn "$PWD/dist/release" "/tmp/dl/$(git describe --tags --always --dirty)"
+  mkdir -p /tmp/dl && ln -sfn "$PWD/dist/release" "/tmp/dl/$(git describe --tags --always --dirty --match '[0-9]*' --match 'v[0-9]*')"
   INDIGO_RELEASE_BASE=file:///tmp/dl HOME=/tmp/indigo-home \
-    sh install.sh --version "$(git describe --tags --always --dirty)" --plugins
+    sh install.sh --version "$(git describe --tags --always --dirty --match '[0-9]*' --match 'v[0-9]*')" --plugins
   ```
 
 ## One-time setup for Homebrew

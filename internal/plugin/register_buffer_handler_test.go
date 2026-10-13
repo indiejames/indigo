@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/indiejames/indigo/internal/proto/pluginproto"
+	"github.com/indiejames/indigo/sdk/pluginproto"
 )
 
 // blockingBufferHandler is a BufferEventHandler whose OnOpen never answers on

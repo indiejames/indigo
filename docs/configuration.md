@@ -39,6 +39,7 @@ Everything here is optional. A workspace can also carry its own `.indigo/debug.t
 | `cursor_column_style` | string | `"view"` | Status bar column number: `"view"` shows the on-screen visual column (tabs count for their visual width, VS Code-style); `"buffer"` shows the raw rune offset (a tab counts as one column, Helix-style) |
 | `cursor_shape` | string | `"block"` | How the buffer cursor is drawn: `"block"`, `"underline"`, or `"bar"`. Any other value is treated as `"block"` |
 | `cursor_blink` | bool | `false` | Whether the cursor blinks |
+| `devcontainer_auto_join` | bool | `false` | When a workspace's dev container already has an indigo session running, join it without asking instead of starting a separate server on this machine — see [Dev containers](dev-containers.md#multiple-windows) |
 
 ### Cursor shape and blink
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
@@ -31,14 +30,13 @@ func newOTTestService(t *testing.T, content string, clientIDs ...uint64) (*edito
 		sinceByClient: since,
 	}
 	s := &editorService{
-		cfg:         &config.Config{},
-		buffers:     map[uint32]*bufferEntry{1: entry},
-		clientMap:   map[uint64]*clientEntry{},
-		lspMgr:      lsp.NewManager(dir, nil),
-		lintMgr:     &lint.Manager{},
-		pluginMgr:   &plugin.Manager{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		cfg:        &config.Config{},
+		buffers:    map[uint32]*bufferEntry{1: entry},
+		clientMap:  map[uint64]*clientEntry{},
+		lspMgr:     lsp.NewManager(dir, nil),
+		lintMgr:    &lint.Manager{},
+		pluginMgr:  &plugin.Manager{},
+		dirWatches: make(map[string]int),
 	}
 	cl := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 	t.Cleanup(cl.Release)
@@ -211,7 +209,7 @@ func TestGetUpdatesServesAndRetiresTheQueue(t *testing.T) {
 func TestPluginApplyEditReachesClientQueues(t *testing.T) {
 	s, entry, _ := newOTTestService(t, "hello\n", 7)
 
-	if err := s.PluginApplyEdit(1, []plugin.TextEdit{{
+	if err := s.PluginApplyEdit(1, 0, false, []plugin.TextEdit{{
 		FromLine: 0, FromCol: 0, ToLine: 0, ToCol: 0, NewText: "P",
 	}}); err != nil {
 		t.Fatalf("PluginApplyEdit: %v", err)

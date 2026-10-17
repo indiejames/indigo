@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -118,8 +119,9 @@ type bufferEntry struct {
 	// lines. Runs under s.mu.
 	onApplied func(canonPath string, ops []document.Op)
 	// generation increments every time buf is replaced with a new
-	// *document.Buffer object (format-on-save, SaveAs, DiscardRecovery,
-	// explicit Format) rather than edited via buf.Apply. See the
+	// *document.Buffer object (SaveAs, DiscardRecovery, ReloadBuffer)
+	// rather than edited via buf.Apply. Formatting applies ops and does not
+	// count. See the
 	// generation doc comment on openFile/getUpdates in editor.capnp.
 	generation uint64
 	// sinceByClient records, per connected clientID, the last buffer
@@ -195,6 +197,20 @@ type editorService struct {
 	clientMap map[uint64]*clientEntry
 	nextClt   uint64
 	recDir    string
+	// recMu serializes every write and removal of a recovery file. See
+	// refreshRecoveryFile.
+	recMu sync.Mutex
+	// recoveryWriteHook, when set, runs just before refreshRecoveryFile
+	// writes. Tests only.
+	recoveryWriteHook func()
+
+	// pathLocks serializes opening a file with editing it on disk; see
+	// lockPath. Allocated lazily under pathLocksMu.
+	pathLocksMu sync.Mutex
+	pathLocks   map[string]*pathLock
+	// diskEditHook, when set, runs between an on-disk edit's read and its
+	// write. Tests only.
+	diskEditHook func()
 	// workspaceDir is the root the workspace-filesystem RPCs enumerate and
 	// search. The server is the process that can see it — which is the whole
 	// point once it runs inside a container and the client does not.
@@ -205,6 +221,12 @@ type editorService struct {
 	pluginMgr    *plugin.Manager
 	cfg          *config.Config
 
+	// lspQ orders document-sync notifications per path; see notifyLSP.
+	lspQ lspQueue
+	// lspSendHook, when set, receives those notifications instead of lspMgr.
+	// Tests only.
+	lspSendHook func(kind lspEventKind, path, content string)
+
 	watcher    *fsnotify.Watcher
 	watchMu    sync.Mutex
 	dirWatches map[string]int // containing dir -> number of watched paths inside it
@@ -213,9 +235,12 @@ type editorService struct {
 	// directory exists (a new file in a new directory), and that watch has to
 	// be retried once the directory is created rather than counted as done.
 	// Allocated lazily under watchMu.
-	dirWatched  map[string]bool
-	savingMu    sync.Mutex
-	savingPaths map[string]time.Time // paths currently being saved by indigo
+	dirWatched map[string]bool
+	savingMu   sync.Mutex
+	// selfWrites holds, per path, the sha256 of the last few things indigo
+	// wrote there, newest last. See noteSelfWrite. Allocated lazily under
+	// savingMu.
+	selfWrites map[string][][32]byte
 
 	// Plugin-driven popup state. Stored while a popup is visible on clients.
 	popupOnSelect func(data string)
@@ -291,7 +316,6 @@ func newEditorService(recDir, workspaceDir string, cfg *config.Config, shutdown 
 		lspMgr:               lspMgr,
 		watcher:              watcher,
 		dirWatches:           make(map[string]int),
-		savingPaths:          make(map[string]time.Time),
 		fmtMgr:               format.NewManager(lspMgr, cfg, workspaceDir),
 		lintMgr:              lint.NewManager(cfg, workspaceDir),
 		cfg:                  cfg,
@@ -351,11 +375,8 @@ func (s *editorService) handleExternalWrite(path string) {
 	serverLog("handleExternalWrite: path=%q", path)
 
 	// Ignore writes we caused ourselves (Save/SaveAs).
-	s.savingMu.Lock()
-	savedAt, isSaving := s.savingPaths[path]
-	s.savingMu.Unlock()
-	if isSaving && time.Since(savedAt) < 2*time.Second {
-		serverLog("handleExternalWrite: skipping (self-save at %v)", savedAt)
+	if s.isSelfWrite(path) {
+		serverLog("handleExternalWrite: skipping (self-save)")
 		return
 	}
 
@@ -482,23 +503,171 @@ func (s *editorService) removePathWatch(path string) {
 	}
 }
 
-// markSaving records that we are about to write path ourselves so the watcher
-// can ignore the resulting event.
-func (s *editorService) markSaving(path string) {
+// pathLock is one path's entry in editorService.pathLocks.
+type pathLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+// lockPath takes the lock for canonPath and returns its release. Callers take
+// it before s.mu, never while holding it.
+//
+// It covers a file that is not open. An edit to a file nobody has open is
+// made on disk — read, change, write — and an OpenFile reads the file and then
+// adds its buffer. Unserialized, an open could read the file before the edit
+// wrote it, or the edit could find no buffer and then write after the open
+// read: either way the buffer is missing the edit, the echo of indigo's own
+// write is ignored, and the next save writes the edit away. Held across both,
+// the open sees the edited file or the edit sees the buffer.
+func (s *editorService) lockPath(canonPath string) (unlock func()) {
+	s.pathLocksMu.Lock()
+	if s.pathLocks == nil {
+		s.pathLocks = make(map[string]*pathLock)
+	}
+	l := s.pathLocks[canonPath]
+	if l == nil {
+		l = &pathLock{}
+		s.pathLocks[canonPath] = l
+	}
+	l.refs++
+	s.pathLocksMu.Unlock()
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		s.pathLocksMu.Lock()
+		if l.refs--; l.refs == 0 {
+			delete(s.pathLocks, canonPath)
+		}
+		s.pathLocksMu.Unlock()
+	}
+}
+
+// selfWritesKept is how many of indigo's own writes to one path are
+// remembered. More than one, because events are handled after the fact: the
+// event for one save can be read after the next save is recorded and before
+// its rename lands, when the file still holds the first.
+const selfWritesKept = 4
+
+// noteSelfWrite records that indigo is about to write data to path, so the
+// watcher can tell the event that write causes from someone else's. Call it
+// before writing.
+//
+// The record is what was written, not when. A time window — the previous
+// approach, ignoring every event for a path for up to two seconds after a save
+// — also ignored a real external write landing inside it, which the next save
+// then overwrote; and two saves of one path cleared each other's window early.
+// Comparing content has neither problem: the event is ours when the file
+// holds something we wrote.
+func (s *editorService) noteSelfWrite(path string, data []byte) {
+	sum := sha256.Sum256(data)
 	s.savingMu.Lock()
-	s.savingPaths[path] = time.Now()
+	defer s.savingMu.Unlock()
+	if s.selfWrites == nil {
+		s.selfWrites = make(map[string][][32]byte)
+	}
+	sums := append(s.selfWrites[path], sum)
+	if len(sums) > selfWritesKept {
+		sums = sums[len(sums)-selfWritesKept:]
+	}
+	s.selfWrites[path] = sums
+}
+
+// forgetSelfWrites drops path's record, for when indigo adopts what is on disk
+// (an open, a reload, discarding recovered content). From then on the file
+// holding something indigo once wrote is news: someone put it back.
+func (s *editorService) forgetSelfWrites(path string) {
+	s.savingMu.Lock()
+	delete(s.selfWrites, path)
 	s.savingMu.Unlock()
 }
 
-// unmarkSaving clears the saving flag for path after a short delay to absorb
-// any late fsnotify events that arrive after the write completes.
-func (s *editorService) unmarkSaving(path string) {
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		s.savingMu.Lock()
-		delete(s.savingPaths, path)
-		s.savingMu.Unlock()
-	}()
+// isSelfWrite reports whether path holds something indigo wrote to it, in
+// which case an event for it is the echo of that write. The file is read only
+// for a path indigo has written, so events for everything else in a watched
+// directory cost a map lookup.
+func (s *editorService) isSelfWrite(path string) bool {
+	s.savingMu.Lock()
+	sums := s.selfWrites[path]
+	s.savingMu.Unlock()
+	if len(sums) == 0 {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	got := sha256.Sum256(data)
+	for _, sum := range sums {
+		if sum == got {
+			return true
+		}
+	}
+	return false
+}
+
+// refreshRecoveryFile makes bufID's recovery file match its buffer: the
+// unsaved content when the buffer is dirty and within recovery_max_bytes, no
+// file otherwise. Nothing happens for a buffer no longer open; whatever closed
+// it decided its file.
+//
+// Every write and removal of a recovery file goes through recMu, and this one
+// decides what to do while holding it, from the buffer as it is then. The
+// periodic flush used to decide from a buffer snapshotted before its writes,
+// so it could rewrite a file Save had just removed — the content was saved,
+// the file said otherwise, and the next open restored it as "recovered". After
+// a SaveAs it could do the same under the old path, where nothing would ever
+// remove it again.
+func (s *editorService) refreshRecoveryFile(bufID uint32) {
+	s.recMu.Lock()
+	defer s.recMu.Unlock()
+	s.mu.Lock()
+	entry, ok := s.buffers[bufID]
+	var buf *document.Buffer
+	if ok {
+		buf = entry.buf
+	}
+	s.mu.Unlock()
+	if !ok || buf.Path() == "" || s.recDir == "" {
+		return // untitled buffers have no file to recover to
+	}
+	rp := recoveryFilePath(s.recDir, buf.Path())
+	if !buf.Dirty() || int64(buf.ByteLen()) > s.cfg.RecoveryMaxBytes {
+		os.Remove(rp) //nolint:errcheck
+		return
+	}
+	content := buf.Content()
+	if sha256.Sum256([]byte(content)) == buf.SavedHash() {
+		// Content is back to saved state (e.g. after undo) — no recovery needed.
+		os.Remove(rp) //nolint:errcheck
+		return
+	}
+	if s.recoveryWriteHook != nil {
+		s.recoveryWriteHook()
+	}
+	if err := os.WriteFile(rp, []byte(content), 0600); err != nil {
+		serverLog("recovery: writing %q for buffer %d: %v", rp, bufID, err)
+	}
+}
+
+// removeRecoveryFile removes path's recovery file, under recMu so a flush
+// already deciding from older state cannot write it back afterwards.
+func (s *editorService) removeRecoveryFile(path string) {
+	if s.recDir == "" {
+		return // no recovery directory: nothing was written
+	}
+	s.recMu.Lock()
+	defer s.recMu.Unlock()
+	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
+}
+
+// writeRecoveryFile writes content as path's recovery file, under recMu.
+func (s *editorService) writeRecoveryFile(path, content string) error {
+	if s.recDir == "" {
+		return errors.New("no recovery directory")
+	}
+	s.recMu.Lock()
+	defer s.recMu.Unlock()
+	return os.WriteFile(recoveryFilePath(s.recDir, path), []byte(content), 0600)
 }
 
 // recoveryFilePath returns the path for the recovery file for a given source file.
@@ -672,6 +841,7 @@ func (s *editorService) dropClients(ids []uint64) (remaining int) {
 			}
 			orphans = append(orphans, o)
 			delete(s.buffers, bufID)
+			s.notifyLSP(lspClose, o.path)
 		}
 	}
 	remaining = len(s.clientMap)
@@ -688,7 +858,6 @@ func (s *editorService) dropClients(ids []uint64) (remaining int) {
 		// Writing it here rather than leaving it to the next flushDirtyBuffers
 		// tick matters because the buffer is being freed right now: whatever the
 		// last periodic flush missed would otherwise be gone.
-		rp := recoveryFilePath(s.recDir, o.path)
 		switch {
 		case o.dirty && !o.tooBig:
 			// The buffer is gone from s.buffers by now, so this file is the only
@@ -698,19 +867,18 @@ func (s *editorService) dropClients(ids []uint64) (remaining int) {
 			// error — there is no caller left to report it to (dropClients runs
 			// from a dead connection's teardown) and nothing useful to retry
 			// against.
-			if err := os.WriteFile(rp, []byte(o.content), 0600); err != nil {
-				serverLog("dropClients: FAILED to write recovery file %q for buffer %d (%q): %v — "+
-					"unsaved content is lost", rp, o.bufID, o.path, err)
+			if err := s.writeRecoveryFile(o.path, o.content); err != nil {
+				serverLog("dropClients: FAILED to write recovery file for buffer %d (%q): %v — "+
+					"unsaved content is lost", o.bufID, o.path, err)
 			}
 		case o.dirty && o.tooBig:
 			serverLog("dropClients: buffer %d (%q) is dirty but over recovery_max_bytes; "+
 				"unsaved content is not recoverable", o.bufID, o.path)
-			os.Remove(rp) //nolint:errcheck
+			s.removeRecoveryFile(o.path)
 		default:
-			os.Remove(rp) //nolint:errcheck
+			s.removeRecoveryFile(o.path)
 		}
 		s.removePathWatch(o.path)
-		go s.lspMgr.DidClose(o.path)
 		s.lintMgr.Forget(o.path)
 		go s.pluginMgr.DispatchBufferClose(context.Background(), o.bufID, o.path)
 	}
@@ -852,18 +1020,18 @@ func build(dir string, ln net.Listener, sockPath string) (*Server, error) {
 	}()
 
 	interval := time.Duration(cfg.RecoveryIntervalSecs) * time.Second
-	srv.startFlushLoop(interval, cfg.RecoveryMaxBytes)
+	srv.startFlushLoop(interval)
 	return srv, nil
 }
 
-func (s *Server) startFlushLoop(interval time.Duration, maxBytes int64) {
+func (s *Server) startFlushLoop(interval time.Duration) {
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
 			select {
 			case <-t.C:
-				s.flushDirtyBuffers(maxBytes)
+				s.flushDirtyBuffers()
 			case <-s.done:
 				return
 			}
@@ -871,35 +1039,16 @@ func (s *Server) startFlushLoop(interval time.Duration, maxBytes int64) {
 	}()
 }
 
-func (s *Server) flushDirtyBuffers(maxBytes int64) {
-	// Snapshot buffer references while holding the lock, then do all I/O outside it.
+// flushDirtyBuffers brings every open buffer's recovery file up to date.
+func (s *Server) flushDirtyBuffers() {
 	s.svc.mu.Lock()
-	bufs := make([]*document.Buffer, 0, len(s.svc.buffers))
-	for _, e := range s.svc.buffers {
-		bufs = append(bufs, e.buf)
+	ids := make([]uint32, 0, len(s.svc.buffers))
+	for id := range s.svc.buffers {
+		ids = append(ids, id)
 	}
 	s.svc.mu.Unlock()
-
-	for _, buf := range bufs {
-		if buf.Path() == "" {
-			continue // untitled buffers have no file to recover to
-		}
-		rp := recoveryFilePath(s.svc.recDir, buf.Path())
-		if !buf.Dirty() {
-			os.Remove(rp) //nolint:errcheck
-			continue
-		}
-		if buf.ByteLen() > int(maxBytes) {
-			os.Remove(rp) //nolint:errcheck
-			continue
-		}
-		content := buf.Content()
-		if sha256.Sum256([]byte(content)) == buf.SavedHash() {
-			// Content is back to saved state (e.g. after undo) — no recovery needed.
-			os.Remove(rp) //nolint:errcheck
-		} else {
-			os.WriteFile(rp, []byte(content), 0600) //nolint:errcheck
-		}
+	for _, id := range ids {
+		s.svc.refreshRecoveryFile(id)
 	}
 }
 
@@ -1039,7 +1188,7 @@ func (s *Server) deleteAllRecoveryFiles() {
 	}
 	s.svc.mu.Unlock()
 	for _, p := range paths {
-		os.Remove(recoveryFilePath(s.svc.recDir, p)) //nolint:errcheck
+		s.svc.removeRecoveryFile(p)
 	}
 }
 

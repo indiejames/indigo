@@ -72,11 +72,10 @@ func TestCompleteMergesPluginAndLSPItems(t *testing.T) {
 		buffers: map[uint32]*bufferEntry{
 			1: {buf: document.New(path, "package main\n"), canonPath: canonicalPath(path)},
 		},
-		lspMgr:      lsp.NewManager(dir, nil),
-		lintMgr:     &lint.Manager{},
-		pluginMgr:   pluginMgr,
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		lspMgr:     lsp.NewManager(dir, nil),
+		lintMgr:    &lint.Manager{},
+		pluginMgr:  pluginMgr,
+		dirWatches: make(map[string]int),
 	}
 	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 

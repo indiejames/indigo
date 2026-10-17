@@ -84,6 +84,12 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	}
 	s.mu.Unlock()
 
+	// Held until the buffer is in the table, so an edit made on disk to this
+	// file either lands before the read or finds the buffer; see lockPath.
+	if path != "" {
+		defer s.lockPath(canonicalPath(path))()
+	}
+
 	// Read outside the lock — a slow or hung filesystem must not block every
 	// other RPC on this connection.
 	content, fromRecovery, crlf, err := s.loadContent(path)
@@ -117,13 +123,13 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 		sinceByClient: map[uint64]uint64{clientID: buf.Version()},
 	}
 	ver := buf.Version()
+	s.notifyLSP(lspOpen, path)
 	s.mu.Unlock()
 
 	if err := setOpenFileResults(call, bufID, content, ver, 0, fromRecovery); err != nil {
 		return err
 	}
 	if path != "" {
-		go s.lspMgr.DidOpen(path, content)
 		go s.pluginMgr.DispatchBufferOpen(context.Background(), bufID, path)
 		s.addPathWatch(path)
 	}
@@ -138,8 +144,8 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 //
 // Content is read here, under the lock, rather than after unlocking as the
 // previous inline version did: it costs nothing and closes the window where
-// a concurrent wholesale swap of entry.buf (Save's format-on-save branch,
-// SaveAs, DiscardRecovery, Format) could be observed mid-swap.
+// a concurrent wholesale swap of entry.buf (SaveAs, DiscardRecovery,
+// ReloadBuffer) could be observed mid-swap.
 func (s *editorService) attachToOpenBufferLocked(path string, clientID uint64) (
 	bufID uint32, content string, ver, gen uint64, ok bool,
 ) {
@@ -153,16 +159,13 @@ func (s *editorService) attachToOpenBufferLocked(path string, clientID uint64) (
 		}
 		e.clients[clientID] = struct{}{}
 		ver = e.buf.Version()
-		if e.sinceByClient == nil {
-			e.sinceByClient = make(map[uint64]uint64)
-		}
-		e.sinceByClient[clientID] = ver
 		// A client attaching gets the buffer's full current content, so it
-		// starts caught up and its queue starts empty. Clearing rather than
-		// assuming absence matters for a client that closed this buffer and
-		// reopened it: a leftover queue would replay ops against content that
-		// already contains them.
-		delete(e.outgoing, clientID)
+		// starts caught up with an empty queue and its op numbering restarts.
+		// Clearing rather than assuming absence matters for a client that
+		// closed this buffer and reopened it: a leftover queue would replay
+		// ops against content that already contains them, and a leftover
+		// applied count would retire its new ops before the server has them.
+		resetClientOT(e, clientID, ver)
 		return id, e.buf.Content(), ver, e.generation, true
 	}
 	return 0, "", 0, 0, false
@@ -201,6 +204,9 @@ func (s *editorService) RequestOpenFile(_ context.Context, call proto.EditorServ
 }
 
 func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorService_discardRecovery) error {
+	// It reads the file; call.Go() so a slow read doesn't hold up every other
+	// call on this connection, as ReloadBuffer does.
+	call.Go()
 	args := call.Args()
 	bufID := args.BufferId()
 
@@ -215,11 +221,22 @@ func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorServ
 	baseVersion := baseBuf.Version()
 	s.mu.Unlock()
 
-	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
-
+	// Only a file that does not exist reads as empty: the recovered buffer was
+	// for a file never saved, or since deleted, and discarding it leaves
+	// nothing. Any other failure is reported and changes nothing. Read as ""
+	// it swapped in an empty buffer marked clean, so the recovered content was
+	// gone and nothing prompted to save — and a save would have blanked a file
+	// that was only momentarily unreadable. The recovery file stays until the
+	// read succeeds, for the same reason.
 	content, crlf := "", false
-	if data, err := os.ReadFile(path); err == nil {
+	s.forgetSelfWrites(path)
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
 		content, crlf = document.NormalizeCRLF(string(data))
+	case !os.IsNotExist(err):
+		serverLog("DiscardRecovery: reading %q failed: %v", path, err)
+		return fmt.Errorf("read %s: %w", path, err)
 	}
 
 	s.mu.Lock()
@@ -243,7 +260,13 @@ func (s *editorService) DiscardRecovery(_ context.Context, call proto.EditorServ
 	// new one; clients learn of the swap from the generation bump and resync.
 	resetOutgoing(entry)
 	generation := entry.generation
+	// The language server still holds the recovered content it was opened
+	// with; it has to be told the buffer is back to what is on disk.
+	s.notifyLSP(lspChange, path)
 	s.mu.Unlock()
+	// After the swap, so a flush cannot write the recovered content back:
+	// it finds the buffer clean.
+	s.removeRecoveryFile(path)
 
 	res, err := call.AllocResults()
 	if err != nil {
@@ -288,6 +311,7 @@ func (s *editorService) ReloadBuffer(_ context.Context, call proto.EditorService
 	// whole job is to replace live content, so treating an unreadable file as
 	// "" would blank the user's buffer on a transient error — during someone
 	// else's atomic save, say — which is far worse than declining to reload.
+	s.forgetSelfWrites(path)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		serverLog("ReloadBuffer: reading %q failed: %v", path, err)
@@ -322,13 +346,13 @@ func (s *editorService) ReloadBuffer(_ context.Context, call proto.EditorService
 	// The reload deliberately discards whatever was in memory, so a recovery
 	// file still holding it must go too — otherwise the next open would offer
 	// to restore the very content the user just chose to throw away.
-	os.Remove(recoveryFilePath(s.recDir, path)) //nolint:errcheck
+	s.removeRecoveryFile(path)
 
 	// DidChange/DispatchBufferChange rather than the close+open pair the old
 	// client-side flow produced: the document is the same one, its content
 	// just changed wholesale, which is exactly what a full-sync didChange
 	// says. No watch churn either, since the path never changed.
-	go s.lspMgr.DidChange(path, content)
+	s.notifyLSP(lspChange, path)
 	s.lintMgr.RunOnEdit(path, content)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 
@@ -355,6 +379,7 @@ func (s *editorService) loadContent(path string) (content string, fromRecovery, 
 	if path == "" {
 		return "", false, false, nil // untitled buffer: no content, no recovery
 	}
+	s.forgetSelfWrites(path)
 	var origModTime time.Time
 	if info, statErr := os.Stat(path); statErr == nil {
 		origModTime = info.ModTime()
@@ -546,8 +571,15 @@ func (s *editorService) recordClientProgress(entry *bufferEntry, clientID, ver u
 // still finds the right buffer even if the client's own remembered path is
 // stale (e.g. a different client renamed it via SaveAs since this one last
 // synced).
+//
+// A non-zero resyncClientId means that client is adopting this snapshot and
+// restarting its op numbering, so its OT state is reset under the same lock
+// that reads the content (see resetClientOT). A resync without a buffer swap
+// used to leave the old applied count in place, which silently diverged the
+// window on the next concurrent edit.
 func (s *editorService) GetBufferSnapshot(_ context.Context, call proto.EditorService_getBufferSnapshot) error {
 	bufID := call.Args().BufferId()
+	resyncClientID := call.Args().ResyncClientId()
 
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
@@ -557,6 +589,9 @@ func (s *editorService) GetBufferSnapshot(_ context.Context, call proto.EditorSe
 	}
 	content := entry.buf.Content()
 	version := entry.buf.Version()
+	if resyncClientID != 0 {
+		resetClientOT(entry, resyncClientID, version)
+	}
 	generation := entry.generation
 	path := entry.buf.Path()
 	s.mu.Unlock()
@@ -661,7 +696,6 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	buf := entry.buf
 	applied, newVersion, rebaseErr := applyRebased(entry, buf, clientID, baseVersion, []document.Op{op})
 	path := buf.Path()
-	content := buf.Content()
 	// Under s.mu, like applyServerOriginated's: breakpoint shifts depend on
 	// order, and two applies' shifts run after unlocking could land in the
 	// opposite order to their ops. (Safe to call here — the debug push it
@@ -684,7 +718,7 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	}
 	res.SetVersion(newVersion)
 
-	go s.lspMgr.DidChange(path, content)
+	s.notifyLSP(lspChange, path)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 	s.dispatchLineDeltas(bufID, path, applied)
 	return nil
@@ -710,6 +744,13 @@ func applyRebased(entry *bufferEntry, buf *document.Buffer, clientID, baseVersio
 	if err := verifyExpectedText(buf, ops, rebased); err != nil {
 		// Counted only once the batch is actually going to be applied, same as
 		// the rebase rejection above: a refused batch never reaches the buffer.
+		return nil, buf.Version(), err
+	}
+	// Apply clamps a position that does not exist, so without this an op
+	// computed against text the server does not hold would land somewhere
+	// else without a word. Refused, the client resyncs. Checked after
+	// rebasing, for the same reason as the expectation above.
+	if err := buf.CheckOps(rebased); err != nil {
 		return nil, buf.Version(), err
 	}
 	recordAppliedFrom(entry, clientID, len(ops))
@@ -851,7 +892,7 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 	}
 	res.SetVersion(newVersion)
 
-	go s.lspMgr.DidChange(path, content)
+	s.notifyLSP(lspChange, path)
 	s.lintMgr.RunOnEdit(path, content)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 	s.dispatchLineDeltas(bufID, path, applied)
@@ -882,91 +923,50 @@ func (s *editorService) Save(_ context.Context, call proto.EditorService_save) e
 	serverLog("Save: buffer %d (%q) version %d, content %s", bufID, path, baseVersion, contentTag(content))
 
 	if s.cfg.FormatOnSave {
-		formatted, changed, err := s.fmtMgr.Format(path, content)
-		serverLog("Save: buffer %d format changed=%v err=%v, output %s", bufID, changed, err, contentTag(formatted))
-		if err == nil && changed {
-			// A formatter may emit "\r\n" (prettier's endOfLine, say); the
-			// buffer must not hold it. If it did, the file is CRLF now.
-			formatted, fmtCRLF := document.NormalizeCRLF(formatted)
-			crlf = crlf || fmtCRLF
+		// A formatter failure is logged by formatBuffer and otherwise ignored:
+		// the save goes ahead unformatted rather than not at all.
+		if _, _, err := s.formatBuffer(bufID); err == nil {
+			// Save whatever the buffer holds now, formatted or not, and its
+			// line endings: formatting can change them, and the buffer may
+			// have been swapped (a reload) since they were read.
 			s.mu.Lock()
 			entry, ok = s.buffers[bufID]
-			// Same compare-and-swap Format() uses: only apply the formatted
-			// result if the buffer is still the exact object/version we
-			// formatted. Otherwise a concurrent edit landed while the
-			// formatter (an external process, up to 10s) was running.
-			if ok && entry.buf == baseBuf && entry.buf.Version() == baseVersion {
-				newBuf := document.New(path, formatted)
-				newBuf.MarkDirty()
-				entry.buf = newBuf
-				entry.crlf = crlf
-				entry.generation++
-				resetOutgoing(entry)
-				baseBuf = newBuf
-				baseVersion = newBuf.Version()
-				content = formatted
-				s.mu.Unlock()
-				go s.lspMgr.DidChange(path, formatted)
-			} else if ok {
-				// Discard the stale formatted result rather than clobbering
-				// the newer edit — save the buffer's actual current state.
-				baseBuf = entry.buf
-				baseVersion = baseBuf.Version()
-				content = baseBuf.Content()
-				// And its line endings: the buffer may have been swapped
-				// (a reload) since crlf was read, and the formatter's
-				// CRLF-ness belongs to the discarded result, not this one.
-				crlf = entry.crlf
-				s.mu.Unlock()
-			} else {
+			if !ok {
 				s.mu.Unlock()
 				return fmt.Errorf("unknown buffer %d", bufID)
 			}
+			baseBuf = entry.buf
+			baseVersion = baseBuf.Version()
+			content = baseBuf.Content()
+			crlf = entry.crlf
+			s.mu.Unlock()
 		}
 	}
 
 	serverLog("Save: buffer %d writing content %s", bufID, contentTag(content))
-	s.markSaving(path)
-	if err := atomicWriteFile(path, []byte(document.RestoreCRLF(content, crlf)), 0644); err != nil {
-		s.unmarkSaving(path)
+	data := []byte(document.RestoreCRLF(content, crlf))
+	s.noteSelfWrite(path, data)
+	if err := atomicWriteFile(path, data, 0644); err != nil {
 		return err
 	}
-	s.unmarkSaving(path)
 	// OpenFile's watch on a new file in a directory that did not exist yet
 	// could not register; atomicWriteFile has just created the directory, so
 	// external changes to this file are only noticed from here on.
 	s.retryPathWatch(path)
 
-	recoveryPath := recoveryFilePath(s.recDir, path)
 	s.mu.Lock()
 	entry, ok = s.buffers[bufID]
-	switch {
-	case ok && entry.buf == baseBuf && entry.buf.Version() == baseVersion:
-		// What's on disk matches the buffer's content — safe to mark clean
-		// and drop the recovery file.
+	if ok && entry.buf == baseBuf && entry.buf.Version() == baseVersion {
+		// What's on disk matches the buffer's content — safe to mark clean.
 		entry.buf.SetClean()
-		s.mu.Unlock()
-		os.Remove(recoveryPath) //nolint:errcheck
-	case ok:
-		// The buffer changed again during the disk write (or a concurrent
-		// format-on-save race) — leave it dirty, since what's on disk no
-		// longer matches its current content, and refresh the recovery
-		// file immediately with the current content rather than leaving a
-		// stale-or-absent one until the next periodic flushDirtyBuffers
-		// tick, so a crash right now doesn't lose the newer edit.
-		current := entry.buf.Content()
-		within := int64(entry.buf.ByteLen()) <= s.cfg.RecoveryMaxBytes
-		s.mu.Unlock()
-		if within {
-			os.WriteFile(recoveryPath, []byte(current), 0600) //nolint:errcheck
-		} else {
-			os.Remove(recoveryPath) //nolint:errcheck
-		}
-	default:
-		// Buffer was closed entirely during the write.
-		s.mu.Unlock()
-		os.Remove(recoveryPath) //nolint:errcheck
 	}
+	s.mu.Unlock()
+	// Clean, the recovery file goes. Changed again during the write, it is
+	// left dirty — disk no longer matches it — and its recovery file is
+	// rewritten now with the newer content rather than at the next flush, so
+	// a crash in between loses nothing. Closed during the write, whatever
+	// closed it has already decided its recovery file.
+	s.refreshRecoveryFile(bufID)
 
 	go s.lspMgr.DidSave(path)
 	s.lintMgr.RunAsync(path, content)
@@ -1003,12 +1003,11 @@ func (s *editorService) SaveAs(_ context.Context, call proto.EditorService_saveA
 	crlf := entry.crlf
 	s.mu.Unlock()
 
-	s.markSaving(newPath)
-	if err := atomicWriteFile(newPath, []byte(document.RestoreCRLF(content, crlf)), 0o644); err != nil {
-		s.unmarkSaving(newPath)
+	data := []byte(document.RestoreCRLF(content, crlf))
+	s.noteSelfWrite(newPath, data)
+	if err := atomicWriteFile(newPath, data, 0o644); err != nil {
 		return err
 	}
-	s.unmarkSaving(newPath)
 
 	s.mu.Lock()
 	entry, ok = s.buffers[bufID]
@@ -1035,12 +1034,19 @@ func (s *editorService) SaveAs(_ context.Context, call proto.EditorService_saveA
 	entry.buf.SetClean()
 	entry.canonPath = canonicalPath(newPath)
 	entry.generation++
+	// The language server knew this document by its old path, and keeps it
+	// open under that path until told otherwise.
+	if oldPath != newPath {
+		s.notifyLSP(lspClose, oldPath)
+		s.notifyLSP(lspOpen, newPath)
+	} else {
+		s.notifyLSP(lspChange, newPath)
+	}
 	s.mu.Unlock()
 
 	if oldPath != "" {
-		os.Remove(recoveryFilePath(s.recDir, oldPath)) //nolint:errcheck
+		s.removeRecoveryFile(oldPath)
 	}
-	go s.lspMgr.DidOpen(newPath, content)
 	go s.pluginMgr.DispatchBufferOpen(context.Background(), bufID, newPath)
 
 	_, err = call.AllocResults()
@@ -1074,21 +1080,20 @@ func (s *editorService) CloseBuffer(_ context.Context, call proto.EditorService_
 	s.mu.Lock()
 	if entry, ok := s.buffers[bufID]; ok {
 		delete(entry.clients, clientID)
-		delete(entry.sinceByClient, clientID)
-		delete(entry.outgoing, clientID)
+		resetClientOT(entry, clientID, 0)
 		if len(entry.clients) == 0 {
 			removedPath = entry.buf.Path()
 			delete(s.buffers, bufID)
+			s.notifyLSP(lspClose, removedPath)
 		}
 	}
 	s.mu.Unlock()
 
 	// Always clean up the recovery file; for untitled buffers this removes the
 	// sha256("") recovery entry so it isn't replayed on the next invocation.
-	os.Remove(recoveryFilePath(s.recDir, removedPath)) //nolint:errcheck
+	s.removeRecoveryFile(removedPath)
 	if removedPath != "" {
 		s.removePathWatch(removedPath)
-		go s.lspMgr.DidClose(removedPath)
 		s.lintMgr.Forget(removedPath)
 		go s.pluginMgr.DispatchBufferClose(context.Background(), bufID, removedPath)
 	}

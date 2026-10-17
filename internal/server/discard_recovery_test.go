@@ -77,3 +77,56 @@ func TestDiscardRecoveryUnknownBufferErrors(t *testing.T) {
 		t.Error("expected an error for an unknown buffer, got nil")
 	}
 }
+
+// TestDiscardRecoveryKeepsTheBufferWhenTheFileCannotBeRead: any read error
+// used to count as an empty file, so the recovered content was replaced by an
+// empty buffer marked clean — gone, with nothing prompting a save, and a save
+// would have blanked the file. Only a file that does not exist reads as empty.
+func TestDiscardRecoveryKeepsTheBufferWhenTheFileCannotBeRead(t *testing.T) {
+	path := t.TempDir() // a directory: it exists, and reading it fails
+	recDir := t.TempDir()
+	recPath := recoveryFilePath(recDir, path)
+	if err := os.WriteFile(recPath, []byte("recovered\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	buf := document.New(path, "recovered\n")
+	buf.MarkDirty()
+	s := &editorService{recDir: recDir, buffers: map[uint32]*bufferEntry{1: {buf: buf}}}
+	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
+
+	fut, rel := client.DiscardRecovery(context.Background(), func(p proto.EditorService_discardRecovery_Params) error {
+		p.SetBufferId(1)
+		return nil
+	})
+	_, err := fut.Struct()
+	rel()
+	if err == nil {
+		t.Fatal("DiscardRecovery succeeded although the file could not be read")
+	}
+	if got := s.buffers[1].buf; got != buf || got.Content() != "recovered\n" || !got.Dirty() {
+		t.Fatalf("buffer = %q (dirty %v), want the recovered content kept and dirty", got.Content(), got.Dirty())
+	}
+	if _, err := os.Stat(recPath); err != nil {
+		t.Errorf("the recovery file was removed although nothing replaced it: %v", err)
+	}
+}
+
+// TestDiscardRecoveryOfAFileThatNoLongerExists: a recovered buffer for a file
+// never saved, or deleted since, discards to an empty buffer.
+func TestDiscardRecoveryOfAFileThatNoLongerExists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gone.go")
+	s := &editorService{recDir: t.TempDir(), buffers: map[uint32]*bufferEntry{1: {buf: document.New(path, "recovered\n")}}}
+	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
+	fut, rel := client.DiscardRecovery(context.Background(), func(p proto.EditorService_discardRecovery_Params) error {
+		p.SetBufferId(1)
+		return nil
+	})
+	_, err := fut.Struct()
+	rel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.buffers[1].buf.Content(); got != "" {
+		t.Fatalf("buffer = %q, want empty", got)
+	}
+}

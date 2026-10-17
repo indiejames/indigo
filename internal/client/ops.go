@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -184,10 +185,20 @@ func (m Model) resyncFromServer(failureCause string) tea.Cmd {
 	// renamed the buffer, but a possibly-stale path beats none.
 	knownPath := m.filePath
 	syncevent.Record("client", syncevent.ResyncStarted, bufID, knownPath, failureCause)
+	// Synchronously, in Update: from here no edit is sent until the snapshot
+	// is adopted. One sent in between could be applied after the snapshot was
+	// taken, leaving the server with text this window never shows.
+	q := m.sendQ
+	q.pauseForResync()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), resyncTimeout)
 		defer cancel()
-		content, version, generation, path, err := m.rpc.GetBufferSnapshot(ctx, bufID)
+		// An op popped before the pause is still being sent. The snapshot
+		// must come after the server has finished with it, so that it is
+		// either in the content adopted or was never applied at all. A
+		// timeout here is left to the snapshot call below to report.
+		_ = q.waitQuiet(ctx)
+		content, version, generation, path, err := m.rpc.ResyncBuffer(ctx, bufID)
 		if err != nil {
 			// The failure that actually reaches the user as "buffer may be out
 			// of sync with the server". Recorded for the same reason as above:
@@ -524,7 +535,11 @@ func (m Model) doSaveNow() tea.Cmd {
 	// is, not the version that was actually sent to the server. Capturing it
 	// here is what makes the handler's later comparison meaningful.
 	startVersion := m.buf.Version()
+	sent := m.sendQ.barrier()
 	return func() tea.Msg {
+		if err := awaitSent(sent); err != nil {
+			return saveFailedMsg{bufID: m.bufID, err: err}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := m.rpc.Save(ctx, m.bufID); err != nil {
@@ -534,10 +549,41 @@ func (m Model) doSaveNow() tea.Cmd {
 	}
 }
 
+// sendBarrierTimeout bounds how long a save or format waits for earlier edits
+// to reach the server. Each queued op has its own applyOpTimeout, so this only
+// matters when several are queued behind a slow server.
+const sendBarrierTimeout = 15 * time.Second
+
+// errEditsNotSent is returned when edits queued before a save or format were
+// discarded instead of sent — a failed send or a resync. Going ahead would
+// write or format content without them.
+var errEditsNotSent = errors.New("recent edits did not reach the server and the buffer is being resynced; nothing was done, try again")
+
+// awaitSent waits on a sendQueue barrier taken in Update. Called inside a
+// command, never in Update itself: the drain it waits for reports back
+// through Update, so blocking there would deadlock.
+func awaitSent(sent <-chan bool) error {
+	t := time.NewTimer(sendBarrierTimeout)
+	defer t.Stop()
+	select {
+	case ok := <-sent:
+		if !ok {
+			return errEditsNotSent
+		}
+		return nil
+	case <-t.C:
+		return errors.New("timed out waiting for recent edits to reach the server; nothing was done")
+	}
+}
+
 // doSaveAsNow writes the buffer to newPath via the server.
 func (m Model) doSaveAsNow(newPath string, thenClose bool) tea.Cmd {
 	startVersion := m.buf.Version() // see doSaveNow's comment on capturing this synchronously
+	sent := m.sendQ.barrier()
 	return func() tea.Msg {
+		if err := awaitSent(sent); err != nil {
+			return saveFailedMsg{bufID: m.bufID, err: err}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := m.rpc.SaveAs(ctx, m.bufID, newPath); err != nil {
@@ -594,7 +640,15 @@ func (m Model) doSaveAndClose() tea.Cmd {
 	if m.filePath == "" {
 		return func() tea.Msg { return saveAsPromptMsg{thenClose: true} }
 	}
+	sent := m.sendQ.barrier()
 	return func() tea.Msg {
+		// Most important here of all the barrier's callers: CloseBuffer frees
+		// the server's buffer and deletes its recovery file, so an edit that
+		// arrived after the save would not merely miss the file, it would be
+		// gone. On failure nothing is closed and the buffer stays open.
+		if err := awaitSent(sent); err != nil {
+			return errorMsg{err}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := m.rpc.Save(ctx, m.bufID); err != nil {

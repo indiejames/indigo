@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
@@ -32,11 +31,10 @@ func newApplyOpsTestService(t *testing.T, content string, gen uint64) (*editorSe
 				sinceByClient: map[uint64]uint64{},
 			},
 		},
-		lspMgr:      lsp.NewManager(dir, nil),
-		lintMgr:     &lint.Manager{},
-		pluginMgr:   &plugin.Manager{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		lspMgr:     lsp.NewManager(dir, nil),
+		lintMgr:    &lint.Manager{},
+		pluginMgr:  &plugin.Manager{},
+		dirWatches: make(map[string]int),
 	}
 	cl := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 	t.Cleanup(cl.Release)

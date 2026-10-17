@@ -1,9 +1,12 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 
 	"github.com/indiejames/indigo/internal/document"
+	"github.com/indiejames/indigo/internal/format"
 )
 
 // This file holds the server half of indigo's operational transform, in the
@@ -128,8 +131,8 @@ func broadcast(entry *bufferEntry, fromClientID uint64, ops []document.Op) {
 }
 
 // resetOutgoing clears every client's queue and per-client watermarks, for when
-// the buffer object is replaced wholesale (format-on-save, SaveAs,
-// DiscardRecovery, Format, reload). Callers must hold s.mu.
+// the buffer object is replaced wholesale (SaveAs, DiscardRecovery, reload).
+// Callers must hold s.mu.
 //
 // The queues go because their ops describe the old buffer and cannot be rebased
 // onto the new one; clients learn of the swap from the generation bump and
@@ -155,6 +158,36 @@ func resetOutgoing(entry *bufferEntry) {
 	// reads as 0, which blocks trimming until every client reports progress
 	// against the new buffer.
 	entry.sinceByClient = nil
+}
+
+// resetClientOT forgets everything the server tracks about one client's
+// position in entry's op stream, for when that client starts over from the
+// buffer's current content: it attached (a fresh open, or a reopen after
+// closing), or it adopted a snapshot to resync. Callers must hold s.mu.
+//
+// appliedFromClient is the dangerous one to leave behind. The client numbers
+// its outbound ops from 1 again after starting over, and retires pending ops
+// whose number is at or below the count the server reports. A stale count
+// therefore retires ops the server has never received, incoming ops stop being
+// rebased past them, and the window diverges permanently with no error.
+// prunedThrough and outgoing are in the same position: they describe a stream
+// the client has abandoned.
+//
+// sinceByClient is set rather than deleted when the client is still attached,
+// since it holds history back for clients that have not polled yet; the
+// client starts caught up to ver.
+func resetClientOT(entry *bufferEntry, clientID, ver uint64) {
+	delete(entry.outgoing, clientID)
+	delete(entry.appliedFromClient, clientID)
+	delete(entry.prunedThrough, clientID)
+	if _, attached := entry.clients[clientID]; !attached {
+		delete(entry.sinceByClient, clientID)
+		return
+	}
+	if entry.sinceByClient == nil {
+		entry.sinceByClient = make(map[uint64]uint64)
+	}
+	entry.sinceByClient[clientID] = ver
 }
 
 // verifyExpectedText checks that a batch carrying expectations still means what
@@ -311,4 +344,130 @@ func applyServerOriginated(entry *bufferEntry, excludeClientID uint64, ops ...do
 		entry.onApplied(entry.canonPath, applied)
 	}
 	return version
+}
+
+// applyFormatted applies a formatter's output to entry as ordinary ops and
+// returns them. base and baseVersion identify the buffer and version the
+// formatter read, and baseContent is what it read. Callers must hold s.mu.
+//
+// raced reports that the output was not applied because something else the
+// server did on its own account — most likely another format of the same text
+// — landed while the formatter ran. Two formats of one text produce the same
+// edits, and rebasing one past the other applies them twice: a line gofmt
+// indents once comes out indented twice. The caller formats again instead,
+// against text that now already is formatted.
+//
+// Format and format-on-save used to swap in a new buffer holding the output.
+// A swap bumps the generation, so every op computed against the old buffer —
+// a keystroke typed while the formatter ran, in this window or any other — was
+// refused and lost, and every window resynced. As ops the output is rebased
+// past whatever clients sent meanwhile, those edits are rebased past it in
+// turn, and every window's cursor moves with the text. It reaches the
+// requesting window too, through its next poll.
+func applyFormatted(entry *bufferEntry, base *document.Buffer, baseVersion uint64, baseContent, formatted string) (applied []document.Op, raced bool) {
+	if entry.buf != base {
+		// Replaced wholesale (a reload, a SaveAs) since the formatter read it:
+		// the output describes a buffer that no longer exists.
+		return nil, true
+	}
+	ops := document.DiffOps(baseContent, formatted)
+	if len(ops) == 0 {
+		return nil, false
+	}
+	since, ok := entry.buf.OpsAfter(baseVersion)
+	if !ok {
+		return nil, true // the ops needed to rebase it have been trimmed
+	}
+	for _, op := range since {
+		if op.ClientID == pluginClientID {
+			return nil, true
+		}
+	}
+	if len(since) > 0 {
+		// The formatter's ops arrive after everything already applied, so
+		// they lose ties, exactly as an op arriving from a client does.
+		ops, _ = document.TransformSeq(ops, since, incomingOpLosesTies)
+	}
+	if len(ops) == 0 {
+		return nil, false
+	}
+	for i := range ops {
+		ops[i].ClientID = pluginClientID
+	}
+	applyServerOriginated(entry, pluginClientID, ops...)
+	return ops, false
+}
+
+// formatAttempts bounds how often formatBuffer starts over after a race. Two
+// formats racing settle on the second attempt, since the loser then formats
+// text that is already formatted.
+const formatAttempts = 3
+
+// formatBuffer runs the formatter over bufID's current content and applies the
+// output as ops, starting over if another server-side edit raced it (see
+// applyFormatted). It returns the ops applied, none when the text was already
+// formatted.
+func (s *editorService) formatBuffer(bufID uint32) (applied []document.Op, noFormatter bool, err error) {
+	for attempt := 1; ; attempt++ {
+		s.mu.Lock()
+		entry, ok := s.buffers[bufID]
+		if !ok {
+			s.mu.Unlock()
+			return nil, false, fmt.Errorf("unknown buffer %d", bufID)
+		}
+		base := entry.buf
+		path := base.Path()
+		baseVersion := base.Version()
+		content := base.Content()
+		s.mu.Unlock()
+
+		formatted, changed, fmtErr := s.fmtMgr.Format(path, content)
+		serverLog("format: buffer %d attempt %d changed=%v err=%v, output %s",
+			bufID, attempt, changed, fmtErr, contentTag(formatted))
+		if errors.Is(fmtErr, format.ErrNoFormatter) {
+			return nil, true, nil
+		}
+		if fmtErr != nil {
+			return nil, false, fmtErr
+		}
+		if !changed {
+			return nil, false, nil
+		}
+		// The buffer holds "\n" only; a formatter emitting "\r\n" means the
+		// file is CRLF from here on.
+		formatted, fmtCRLF := document.NormalizeCRLF(formatted)
+
+		s.mu.Lock()
+		entry, ok = s.buffers[bufID]
+		if !ok {
+			s.mu.Unlock()
+			return nil, false, fmt.Errorf("unknown buffer %d", bufID)
+		}
+		applied, raced := applyFormatted(entry, base, baseVersion, content, formatted)
+		if len(applied) > 0 {
+			entry.crlf = entry.crlf || fmtCRLF
+			s.notifyLSP(lspChange, path)
+		}
+		s.mu.Unlock()
+		if raced {
+			if attempt < formatAttempts {
+				continue
+			}
+			serverLog("format: buffer %d gave up after %d attempts racing other edits", bufID, attempt)
+			return nil, false, nil
+		}
+		if len(applied) > 0 {
+			s.afterServerEdit(bufID, path, applied)
+		}
+		return applied, false, nil
+	}
+}
+
+// afterServerEdit tells plugins and line-delta listeners about ops the server
+// applied on its own account (a format), as ApplyOp does for a client's.
+func (s *editorService) afterServerEdit(bufID uint32, path string, applied []document.Op) {
+	if s.pluginMgr != nil {
+		go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
+	}
+	s.dispatchLineDeltas(bufID, path, applied)
 }

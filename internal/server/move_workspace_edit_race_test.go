@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/lsp"
@@ -45,9 +44,8 @@ func TestMoveTextToFileNoRaceAgainstConcurrentBufferSwap(t *testing.T) {
 		buffers: map[uint32]*bufferEntry{
 			1: {buf: document.New(srcPath, content), canonPath: canonicalPath(srcPath)},
 		},
-		lspMgr:      &lsp.Manager{},
-		pluginMgr:   &plugin.Manager{},
-		savingPaths: make(map[string]time.Time),
+		lspMgr:    &lsp.Manager{},
+		pluginMgr: &plugin.Manager{},
 	}
 	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 
@@ -98,9 +96,8 @@ func TestApplyWorkspaceEditsNoRaceAgainstConcurrentBufferSwap(t *testing.T) {
 		buffers: map[uint32]*bufferEntry{
 			1: {buf: document.New(path, content), canonPath: canonicalPath(path)},
 		},
-		lspMgr:      &lsp.Manager{},
-		pluginMgr:   &plugin.Manager{},
-		savingPaths: make(map[string]time.Time),
+		lspMgr:    &lsp.Manager{},
+		pluginMgr: &plugin.Manager{},
 	}
 	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 

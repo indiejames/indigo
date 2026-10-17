@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
@@ -46,8 +45,7 @@ func TestGetSyncStateReportsBookkeeping(t *testing.T) {
 			1: {connID: 11},
 			2: {connID: 22},
 		},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		dirWatches: make(map[string]int),
 	}
 	// Advance buffer A so client 1 can be caught up and client 2 behind.
 	bufA.Apply(document.Op{ClientID: 1, Type: document.OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "x"})
@@ -131,9 +129,8 @@ func TestGetSyncStateFiltersByBufferID(t *testing.T) {
 			1: {buf: document.New(filepath.Join(dir, "a.go"), "a\n"), clients: map[uint64]struct{}{}},
 			2: {buf: document.New(filepath.Join(dir, "b.go"), "b\n"), clients: map[uint64]struct{}{}},
 		},
-		clientMap:   map[uint64]*clientEntry{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		clientMap:  map[uint64]*clientEntry{},
+		dirWatches: make(map[string]int),
 	}
 	cl := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 	defer cl.Release()

@@ -161,37 +161,3 @@ func TestInsertPastedTextIntoDeeplyNestedContext(t *testing.T) {
 		}
 	}
 }
-
-// TestDetectedIndentChangesAfterFormat documents a real source of the
-// "indentation feels inconsistent mid-session" behavior: detectedIndent is
-// re-sniffed from scratch every time a formatResultMsg lands (see
-// model.go's formatResultMsg handler), so a save/format that goes through
-// an external formatter or LSP formatter with a different width than what
-// indigo had been assuming silently changes the indent unit used by every
-// subsequent Enter, brace-expansion, and paste -- with no explicit user
-// action to explain the shift. Typing "{" right after opening a file gets
-// one width; typing it again after the buffer has gone through a format
-// pass can silently get another.
-func TestDetectedIndentChangesAfterFormat(t *testing.T) {
-	m := newAutoPairTSTestModel(t, "function foo() ")
-	m.cursor.Col = len([]rune("function foo() "))
-	m2, _ := m.handleInsert(fakeKey("{"))
-	before := m2.(Model)
-
-	beforeUnit := before.indentUnit()
-
-	// Simulate a formatter rewriting the buffer with a different indent
-	// width than indigo's own ts default (2 spaces).
-	reformatted := "function foo() {\n    x = 1;\n}\n"
-	m3, _ := before.Update(formatResultMsg{content: reformatted, changed: true})
-	after := m3.(Model)
-
-	afterUnit := after.indentUnit()
-
-	if beforeUnit == afterUnit {
-		t.Fatalf("expected indentUnit to change after a format with a different width (got %q both times) -- if this now fails, the inconsistency this documents may have been fixed", beforeUnit)
-	}
-	if afterUnit != "    " {
-		t.Errorf("indentUnit after format = %q, want %q (sniffed from the reformatted content)", afterUnit, "    ")
-	}
-}

@@ -51,8 +51,8 @@ interface EditorService {
   connect         @0 (callback :ClientCallback)                                -> (clientId :UInt64, serverStale :Bool);
   disconnect      @1 (clientId :UInt64)                                        -> ();
   # generation increments every time the server replaces this buffer's
-  # underlying object wholesale (format-on-save, SaveAs, DiscardRecovery,
-  # explicit Format) rather than applying an incremental Op — version alone
+  # underlying object wholesale (SaveAs, DiscardRecovery, reloadBuffer)
+  # rather than applying an incremental Op — version alone
   # can't signal this, since a fresh buffer object always starts at 0.
   openFile        @2 (clientId :UInt64, path :Text)                            -> (bufferId :UInt32, content :Text, version :UInt64, fromRecovery :Bool, generation :UInt64);
   # savedHash is the sha256 of the buffer content at its last save; clients
@@ -82,7 +82,16 @@ interface EditorService {
   # synced, which would make openFile spuriously create a second buffer
   # for the (possibly now-nonexistent) old path instead of finding the
   # existing one.
-  getBufferSnapshot @49 (bufferId :UInt32) -> (content :Text, version :UInt64, generation :UInt64, path :Text);
+  #
+  # resyncClientId, when non-zero, names a client that is adopting this
+  # snapshot as its new starting point. The server resets that client's
+  # per-buffer OT state (outgoing queue, acknowledged watermark, and the
+  # appliedFromCaller count) in the same critical section that reads the
+  # content, because the client restarts its own op numbering at zero when it
+  # adopts a snapshot. Left set, the old count makes the client retire ops the
+  # server has never seen, so incoming ops stop being rebased past them and
+  # the window silently diverges. Zero is a read-only peek (agent tools).
+  getBufferSnapshot @49 (bufferId :UInt32, resyncClientId :UInt64) -> (content :Text, version :UInt64, generation :UInt64, path :Text);
   # reloadBuffer re-reads bufferId's file from disk and replaces the buffer's
   # content with it, bumping generation (it is one of the wholesale-swap sites
   # — see openFile's doc comment).
@@ -220,13 +229,12 @@ interface EditorService {
   signatureHelp   @11 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :SignatureHelp);
   complete        @12 (bufId :UInt32, line :UInt32, col :UInt32)               -> (items :List(CompletionItem));
   definition      @13 (bufId :UInt32, line :UInt32, col :UInt32)               -> (result :DefinitionResult);
-  # generation: see openFile's doc comment — Format is one of the sites
-  # that wholesale-swaps the buffer object when it makes a change, so a
-  # caller must adopt this into its own remembered generation the same way
-  # it would after openFile/getUpdates/getBufferSnapshot, or its very next
-  # getUpdates poll will (correctly, but confusingly for this specific
-  # case — it was this same client's own edit) see a mismatch and trigger
-  # an unnecessary resync. Only meaningful when changed is true.
+  # The formatter's output is applied as ordinary ops, rebased past any edit
+  # that landed while it ran, and reaches every client — the caller too —
+  # through getUpdates. The buffer is not replaced and its generation does
+  # not change, so edits typed meanwhile survive. content is always empty
+  # and generation is the buffer's current one; both are kept only so the
+  # wire format stays the same.
   format          @14 (bufId :UInt32)                                           -> (content :Text, changed :Bool, noFormatter :Bool, generation :UInt64);
   handlePluginKey      @15 (clientId :UInt64, bufId :UInt32, key :Text, mode :Text, cursorLine :UInt32, cursorCol :UInt32) -> (result :PluginKeyResult);
   updateViewport       @16 (clientId :UInt64, topLine :UInt32, height :UInt32)      -> ();

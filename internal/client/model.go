@@ -133,6 +133,12 @@ type discardRecoveryFailedMsg struct {
 // RouteBufID implements RoutableMsg.
 func (m discardRecoveryFailedMsg) RouteBufID() uint32 { return m.bufID }
 
+// RouteBufID implements RoutableMsg. Routed rather than delivered to whichever
+// buffer is active: a resync pauses its buffer's send queue until this arrives,
+// so one dropped as stale after a tab switch would leave that buffer's edits
+// held forever, never sent.
+func (m bufferResyncMsg) RouteBufID() uint32 { return m.bufID }
+
 // bufferResyncMsg carries the result of re-fetching a buffer's authoritative
 // content from the server after applyOpFailedMsg, to recover from the
 // divergence rather than leaving it permanent and silent.
@@ -148,8 +154,8 @@ type bufferResyncMsg struct {
 	// is reported and whether the reason survives to be read.
 	//
 	// A generation change is routine and explained: the server replaced this
-	// buffer wholesale because someone asked it to — format-on-save (including
-	// an agent's save_file), SaveAs, or an explicit Format. Nothing went wrong,
+	// buffer wholesale because someone asked it to — SaveAs, a reload, or
+	// discarding recovered content. Nothing went wrong,
 	// and announcing it as an error trains the user to dismiss a modal during
 	// ordinary work.
 	//
@@ -417,18 +423,10 @@ type OpenRefPickerMsg struct {
 // The App decides whether to remove it from the list or quit entirely.
 type formatResultMsg struct {
 	bufID       uint32
-	content     string
 	changed     bool
 	thenSave    bool
 	noFormatter bool
-	// generation is only meaningful when changed is true — see RPC.Format's
-	// doc comment. The formatResultMsg handler must adopt it into
-	// m.generation on that path, or the next updatesMsg poll spuriously
-	// treats this client's own format-on-save as a foreign buffer swap and
-	// triggers an unnecessary resync (with its user-facing severe-error
-	// modal).
-	generation uint64
-	err        error // non-nil on an RPC failure; every other field is zero when set
+	err         error // non-nil on an RPC failure; every other field is zero when set
 }
 
 type CloseBufferMsg struct{}
@@ -1453,8 +1451,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.generationKnown && msg.generation != m.generation {
 			// The server replaced this buffer's object wholesale since our
-			// last known generation (format-on-save, SaveAs, DiscardRecovery,
-			// explicit Format) — msg.ops describe changes to that different
+			// last known generation (SaveAs, DiscardRecovery, ReloadBuffer)
+			// — msg.ops describe changes to that different
 			// object and can't be safely applied against our current one.
 			// Recorded because the status message above is the only other sign
 			// and it is overwritten within seconds. This is the single most
@@ -1644,6 +1642,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m = m.pushSevereError("ERR: resync failed, buffer may be out of sync with the server: " + msg.err.Error())
+			// No snapshot to adopt, so the edits held while it was attempted
+			// are sent after all rather than kept back forever.
+			if needsDrain, epoch := m.sendQ.resume(); needsDrain {
+				return m, m.drainCmd(epoch)
+			}
 			return m, nil
 		}
 		if msg.path != "" && msg.path != m.filePath {
@@ -1662,10 +1665,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// would rebase future incoming ops past edits that no longer exist.
 		m.sendQ.discard()
 		m.pending = nil
-		// Reset alongside pending: the server clears its count of ops applied
-		// from this client when the buffer is replaced, and that count is what
-		// retires pending entries. Leaving seq numbering where it was would
-		// have every later entry look unacknowledged forever.
+		// Reset alongside pending: that count is what retires pending
+		// entries, and the server zeroed its count of ops applied from this
+		// client when it served the snapshot (ResyncBuffer), whether or not
+		// the buffer was swapped. The two must restart together — a server
+		// count left ahead of this one retires ops it has never seen.
 		m.nextSeq = 0
 		m.buf.MarkDirty() // server's content may itself be unsaved-to-disk; err toward "unsaved" rather than a false-clean marker
 		m.version = msg.version
@@ -2026,59 +2030,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var refreshCmd tea.Cmd
 		if msg.changed {
-			m.buf = document.New(m.filePath, msg.content)
-			// document.New always starts a fresh buffer at version 0 (the
-			// server's swapped-in buffer is the same fresh object — see
-			// editor.capnp's generation doc comment), matching
-			// discardRecoveryMsg's handler just above. Leaving m.version at
-			// its pre-format value would let a later GetUpdates poll's
-			// sinceVersion race ahead of the server's actual reset
-			// version, so a real op from another client landing in that
-			// window would look already-seen and never be delivered.
-			m.version = 0
-			m.generation = msg.generation
-			m.generationKnown = true
-			m.undoStack = nil
-			m.redoStack = nil
-			m.currentGroup = nil
-			// The server marks its swapped-in buffer dirty (Format's
-			// newBuf.MarkDirty(), server_lsp.go), so mirror that here or the
-			// two disagree about whether there is anything to save. A fresh
-			// document.New is clean, and leaving it that way meant ":format"
-			// then ":q" exited with no unsaved-changes prompt and threw the
-			// formatting away. Unconditional rather than gated on
-			// !msg.thenSave: with thenSave the buffer really is dirty at this
-			// instant too, and the save that follows immediately cleans it
-			// again (doSaveNow captures version 0, which still matches by the
-			// time savedMsg's check runs, so SetClean is reached).
-			m.sendQ.discard()
-			m.pending = nil
-			m.nextSeq = 0
-			m.buf.MarkDirty()
-			// -1, not 0: savedUndoDepth is compared against len(undoStack) to
-			// re-clear dirty when the user undoes back to the last saved
-			// state, and 0 against a just-emptied stack would wrongly call
-			// the formatted-but-unsaved buffer "saved" as soon as the user
-			// typed once and undid it. Same idiom and reason as
-			// bufferResyncMsg's handler above.
-			m.savedUndoDepth = -1
-			m.cursor = document.Pos{
-				Line: min(m.cursor.Line, m.buf.LineCount()-1),
+			// The formatted text is not here: the server applied it as
+			// ordinary edits, and they arrive through the next poll like any
+			// other window's, rebased past whatever was typed meanwhile. That
+			// is what keeps those keystrokes — the old wholesale replacement
+			// threw away anything typed while the formatter ran, here and in
+			// every other window. Poll now rather than on the next tick so
+			// the result shows at once; polling is only safe with nothing
+			// waiting to be sent (see sendQueue.idle).
+			if m.sendQ.idle() {
+				refreshCmd = m.fetchUpdates()
 			}
-			m.scrollToCursor()
 			if !msg.thenSave {
 				m = m.pushStatus("Formatted")
 			}
-			// The formatter can move code arbitrarily, so the pre-format
-			// tree-sitter spans and semantic-token/inlay-hint caches no
-			// longer line up with anything — reparse now rather than
-			// leaving stale highlighting on screen until an unrelated edit
-			// happens to trigger a reparse.
-			m.semanticSpans = nil
-			m.inlayHints = nil
-			m.detectedIndent = config.DetectIndentSettings(msg.content)
-			m, refreshCmd = m.scheduleLSPOverlayRefresh()
-			refreshCmd = tea.Batch(m.reparseHighlight(), refreshCmd)
 		} else {
 			if msg.noFormatter {
 				m = m.pushStatus("No formatter available")

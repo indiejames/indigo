@@ -234,14 +234,21 @@ func (m Model) fetchDocSymbols() tea.Cmd {
 
 func (m Model) fetchFormat(thenSave bool) tea.Cmd {
 	bufID := m.bufID
+	// The server formats its own copy, so edits still queued here would not
+	// be formatted. Edits typed after this point are fine: the formatter's
+	// output is rebased past them on the server.
+	sent := m.sendQ.barrier()
 	return func() tea.Msg {
+		if err := awaitSent(sent); err != nil {
+			return formatResultMsg{bufID: bufID, thenSave: thenSave, err: err}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		content, changed, noFormatter, generation, err := m.rpc.Format(ctx, bufID)
+		changed, noFormatter, err := m.rpc.Format(ctx, bufID)
 		if err != nil {
 			return formatResultMsg{bufID: bufID, thenSave: thenSave, err: err}
 		}
-		return formatResultMsg{bufID: bufID, content: content, changed: changed, thenSave: thenSave, noFormatter: noFormatter, generation: generation}
+		return formatResultMsg{bufID: bufID, changed: changed, thenSave: thenSave, noFormatter: noFormatter}
 	}
 }
 

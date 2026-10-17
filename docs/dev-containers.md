@@ -151,6 +151,34 @@ last.
 to a socket inside the container. That is why no ports are published and nothing
 needs configuring.
 
+Every window has to be started with `--devcontainer` for this to hold. A window
+opened with plain `indigo .` looks for a server on your machine, not in the
+container, and starts its own. The two servers then keep separate copies of the
+same files: edits in one never reach the other, and the last save wins. So when
+indigo finds an indigo session already running in the workspace's dev container,
+it warns and asks whether to join it (Enter joins). To always join without being
+asked, set this in `~/.config/indigo/config.toml`:
+
+```toml
+devcontainer_auto_join = true
+```
+
+This works from anywhere in the repository. Open a window on a subdirectory
+while a session is running for the repository root, and it joins the root's
+session, with the file picker on the subdirectory you asked for. Starting a
+server of its own for the subdirectory would mean a second copy of the same
+files. The same applies to `indigo --devcontainer` run in a subdirectory: indigo
+finds the nearest `devcontainer.json` above it and starts the container from
+that folder.
+
+Joining needs the devcontainer CLI, because it runs `devcontainer up` to learn
+which user the container's server runs as. Without the CLI you get the warning
+only. A running dev container with no indigo session in it (one VS Code opened,
+say) is left alone.
+
+When a window closes, indigo stops the container only if no other indigo
+window is attached to it, whichever folder that window has open.
+
 ## An agent inside the container
 
 If the container runs Claude Code (or another MCP client), point it at the

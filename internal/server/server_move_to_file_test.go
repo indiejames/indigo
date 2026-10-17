@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/indiejames/indigo/internal/document"
 )
@@ -118,7 +117,7 @@ func TestAppendTextToFileOnDiskExisting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := &editorService{savingPaths: make(map[string]time.Time)}
+	s := &editorService{}
 	if err := s.appendTextToFile(1, path, "func g() {}"); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +136,7 @@ func TestAppendTextToFileOnDiskNewFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "new.go")
 
-	s := &editorService{savingPaths: make(map[string]time.Time)}
+	s := &editorService{}
 	if err := s.appendTextToFile(1, path, "func g() {}"); err != nil {
 		t.Fatal(err)
 	}

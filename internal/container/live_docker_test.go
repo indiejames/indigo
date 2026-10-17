@@ -798,7 +798,7 @@ func TestLiveOtherWindowsAttachedIsInstantAndCorrect(t *testing.T) {
 	}
 
 	// One window: it sees nobody else, so it would stop the container.
-	others, err := OtherWindowsAttached(ctx, d, name, "/workspace", "tokenA")
+	others, err := OtherWindowsAttached(ctx, d, name, "tokenA")
 	if err != nil {
 		t.Fatalf("OtherWindowsAttached: %v", err)
 	}
@@ -817,7 +817,7 @@ func TestLiveOtherWindowsAttachedIsInstantAndCorrect(t *testing.T) {
 	// Each window sees exactly the other, and neither counts itself.
 	start := time.Now()
 	for token, want := range map[string]int{"tokenA": 1, "tokenB": 1} {
-		got, err := OtherWindowsAttached(ctx, d, name, "/workspace", token)
+		got, err := OtherWindowsAttached(ctx, d, name, token)
 		if err != nil {
 			t.Fatalf("OtherWindowsAttached(%s): %v", token, err)
 		}
@@ -834,7 +834,7 @@ func TestLiveOtherWindowsAttachedIsInstantAndCorrect(t *testing.T) {
 	second.Close() //nolint:errcheck
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		got, err := OtherWindowsAttached(ctx, d, name, "/workspace", "tokenA")
+		got, err := OtherWindowsAttached(ctx, d, name, "tokenA")
 		if err != nil {
 			t.Fatalf("OtherWindowsAttached: %v", err)
 		}

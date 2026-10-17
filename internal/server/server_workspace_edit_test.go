@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/indiejames/indigo/internal/document"
 )
@@ -64,7 +63,7 @@ func TestApplyWorkspaceEditsOnDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := &editorService{savingPaths: make(map[string]time.Time)}
+	s := &editorService{}
 	items := []workspaceEditItem{
 		{origIdx: 0, line: 0, col: 0, oldText: "hello", newText: "goodbye"},
 		{origIdx: 1, line: 1, col: 0, oldText: "hello", newText: "goodbye"},
@@ -99,7 +98,7 @@ func TestApplyWorkspaceEditsOnDiskAllSkippedLeavesFileUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := &editorService{savingPaths: make(map[string]time.Time)}
+	s := &editorService{}
 	items := []workspaceEditItem{
 		{origIdx: 0, line: 0, col: 0, oldText: "stale", newText: "new"},
 	}

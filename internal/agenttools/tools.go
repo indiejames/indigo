@@ -292,6 +292,9 @@ type gotoFileInput struct {
 // ExecTool runs one tool by name against a live indigo server. It returns
 // the text result and whether that result is an error.
 func ExecTool(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDir, name string, rawInput json.RawMessage) (string, bool) {
+	if err := checkRelativePath(workDir, name, rawInput); err != nil {
+		return err.Error(), true
+	}
 	switch name {
 	case "read_file":
 		var in readFileInput

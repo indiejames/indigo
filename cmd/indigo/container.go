@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/indiejames/indigo/internal/app"
@@ -68,7 +70,7 @@ func resolveWorkspace(hostWorkDir, hostTarget string) (workDir, target string) {
 		return hostWorkDir, hostTarget
 	}
 	if useDevcontainer {
-		bringUpDevcontainer(hostWorkDir)
+		hostWorkDir = bringUpDevcontainer(hostWorkDir)
 	}
 	inContainer := containerDir
 	if inContainer == "" {
@@ -149,22 +151,41 @@ func parseContainerFlags(args []string) []string {
 }
 
 // bringUpDevcontainer builds and starts the container described by
-// devcontainer.json, and records what it reports.
+// devcontainer.json, records what it reports, and returns the workspace the
+// window should use.
 //
 // The CLI owns lifecycle and configuration; the four facts it returns are
 // everything needed to connect, and read-configuration resolves the variable
 // substitution and feature merging that are the hard parts of the spec. What
 // the CLI does *not* get is the data channel — see container.CLI.
-func bringUpDevcontainer(hostWorkDir string) {
+//
+// hostWorkDir can be a subdirectory of the folder holding devcontainer.json.
+// The CLI is given that folder, since it looks for the configuration nowhere
+// else and labels the container with it. When a session is already running
+// for a folder above hostWorkDir, the window joins it and that folder becomes
+// its workspace, for the reason joinRunningDevcontainer gives.
+func bringUpDevcontainer(hostWorkDir string) string {
 	cli := container.CLI{}
 	if !cli.Available() {
 		fatalf("%v", container.ErrCLIMissing)
 	}
-	fmt.Fprintf(os.Stderr, "indigo: starting dev container for %s (this can take a while the first time)\n", hostWorkDir)
+	root, ok := container.FindDevcontainerRoot(hostWorkDir)
+	if !ok {
+		// The CLI says what is missing better than a second message would.
+		root = hostWorkDir
+	}
+	probe := probeDevcontainer(root, hostWorkDir)
+	sessionDir := ""
+	if probe.state == devcontainerSession && containerDir == "" {
+		// Not with --container-dir: that names where hostWorkDir itself is
+		// mounted, and moving the workspace would make it wrong.
+		hostWorkDir, sessionDir = probe.session.HostWorkspaceDir, probe.session.WorkspaceDir
+	}
+	fmt.Fprintf(os.Stderr, "indigo: %s\n", devcontainerStartMessage(hostWorkDir, probe.state))
 
 	ctx, cancel := context.WithTimeout(context.Background(), devcontainerUpTimeout)
 	defer cancel()
-	res, err := cli.Up(ctx, hostWorkDir)
+	res, err := cli.Up(ctx, root)
 	if err != nil {
 		fatalf("%v", err)
 	}
@@ -173,7 +194,7 @@ func bringUpDevcontainer(hostWorkDir string) {
 	if containerDir == "" {
 		// The CLI knows where it mounted the workspace, so there is nothing to
 		// guess and --container-dir is only an override.
-		containerDir = res.RemoteWorkspaceFolder
+		containerDir = workspaceInContainer(res.RemoteWorkspaceFolder, root, hostWorkDir, sessionDir)
 	}
 
 	// Optional, and deliberately not fatal: no customizations block is the
@@ -185,12 +206,28 @@ func bringUpDevcontainer(hostWorkDir string) {
 	// the specification's default is to stop, and a container left running
 	// because an *optional* settings read failed is the surprising direction.
 	stopOnExit = true
-	if cfg, err := cli.ReadConfiguration(cfgCtx, hostWorkDir); err == nil {
+	if cfg, err := cli.ReadConfiguration(cfgCtx, root); err == nil {
 		projectServerPath = cfg.Customizations.Indigo.ServerPath
 		stopOnExit = cfg.ShouldStopOnExit()
 		composeProject = cfg.IsCompose()
 		remoteEnv = cfg.RemoteEnv
 	}
+	return hostWorkDir
+}
+
+// workspaceInContainer is where hostWorkDir is inside the container, given
+// that root — the folder `devcontainer up` was run on — is at remoteFolder.
+// A running session's own workspace wins when there is one, because that is
+// the exact path its server was started on and the bridge must name it.
+func workspaceInContainer(remoteFolder, root, hostWorkDir, sessionDir string) string {
+	if sessionDir != "" {
+		return sessionDir
+	}
+	rel, err := filepath.Rel(root, hostWorkDir)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return remoteFolder
+	}
+	return path.Join(remoteFolder, filepath.ToSlash(rel))
 }
 
 // connect returns an RPC to the server that owns workDir, starting or
@@ -288,11 +325,7 @@ func shutdownContainer() {
 	defer cancel()
 
 	rt := container.Docker{User: remoteUser}
-	// pathMap.ContainerRoot, not containerDir: that is the cleaned path the
-	// server was actually started on and therefore what the bridges carry. The
-	// raw value can differ by a trailing slash or a "." segment, and a probe
-	// that matches nothing reads as "nobody else is here".
-	others, err := container.OtherWindowsAttached(ctx, rt, containerName, pathMap.ContainerRoot, clientToken)
+	others, err := container.OtherWindowsAttached(ctx, rt, containerName, clientToken)
 	if err != nil {
 		// Cannot tell — leave it alone. A container left running is a
 		// nuisance; one stopped out from under another window is data loss.

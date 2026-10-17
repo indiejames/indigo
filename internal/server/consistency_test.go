@@ -92,8 +92,7 @@ func TestCheckBufferConsistencyCollectsClientAnswers(t *testing.T) {
 			2: {callback: cbDiffering, connID: 22},
 			3: {callback: cbWedged, connID: 33},
 		},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		dirWatches: make(map[string]int),
 	}
 	cl := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 	defer cl.Release()
@@ -182,8 +181,7 @@ func TestCheckBufferConsistencyOneWedgedClientDoesNotStallOthers(t *testing.T) {
 			2: {callback: cb1},
 			3: {callback: cb2},
 		},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		dirWatches: make(map[string]int),
 	}
 	cl := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 	defer cl.Release()
@@ -253,8 +251,7 @@ func TestCheckBufferConsistencyBoundsAStoppedClient(t *testing.T) {
 			1: {callback: cbS},
 			2: {callback: cbR},
 		},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		dirWatches: make(map[string]int),
 	}
 	cl := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 	defer cl.Release()

@@ -72,11 +72,14 @@ func applyWorkspaceEditsToBuffer(entry *bufferEntry, clientID uint64, items []wo
 // indices of any that were skipped because their oldText no longer matched.
 func (s *editorService) applyItemsToPath(clientID uint64, path string, items []workspaceEditItem) (applied int, skippedIdx []int, err error) {
 	canonPath := canonicalPath(path)
+	// Held across the lookup and, when nothing has the file open, the edit on
+	// disk, so an OpenFile cannot read the file in between; see lockPath.
+	defer s.lockPath(canonPath)()
 	// Find and apply under one continuous lock hold, same reasoning as
 	// MoveTextToFile/appendTextToFile (server_move_to_file.go):
 	// applyWorkspaceEditsToBuffer is pure in-memory work, so unlocking between
 	// the find and the apply only invites a concurrent wholesale swap of
-	// entry.buf (Save/SaveAs/Format/DiscardRecovery all reassign it under
+	// entry.buf (SaveAs/DiscardRecovery/ReloadBuffer all reassign it under
 	// s.mu.Lock()) to land before the edits are applied, corrupting the
 	// buffer at stale offsets.
 	s.mu.Lock()
@@ -90,9 +93,8 @@ func (s *editorService) applyItemsToPath(clientID uint64, path string, items []w
 	}
 	if entry != nil {
 		applied, skippedIdx = applyWorkspaceEditsToBuffer(entry, clientID, items)
-		content := entry.buf.Content()
 		s.mu.Unlock()
-		go s.lspMgr.DidChange(path, content)
+		s.notifyLSP(lspChange, path)
 		go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 		return applied, skippedIdx, nil
 	}
@@ -185,7 +187,7 @@ func (s *editorService) ApplyWorkspaceEdits(_ context.Context, call proto.Editor
 // applyWorkspaceEditsOnDisk reads path fresh from disk, applies items via a
 // throwaway document.Buffer (reusing the same verify-then-apply logic as the
 // live-buffer path), and atomically writes the result back — using the same
-// markSaving bookkeeping as a normal save so indigo's own write doesn't
+// noteSelfWrite bookkeeping as a normal save so indigo's own write doesn't
 // re-trigger the fsnotify watcher.
 func (s *editorService) applyWorkspaceEditsOnDisk(path string, clientID uint64, items []workspaceEditItem) (applied int, skippedIdx []int, err error) {
 	data, err := os.ReadFile(path)
@@ -206,10 +208,13 @@ func (s *editorService) applyWorkspaceEditsOnDisk(path string, clientID uint64, 
 	if applied == 0 {
 		return applied, skippedIdx, nil
 	}
+	if s.diskEditHook != nil {
+		s.diskEditHook()
+	}
 
-	s.markSaving(path)
-	defer s.unmarkSaving(path)
-	if err := atomicWriteFile(path, []byte(document.RestoreCRLF(buf.Content(), crlf)), 0644); err != nil {
+	data = []byte(document.RestoreCRLF(buf.Content(), crlf))
+	s.noteSelfWrite(path, data)
+	if err := atomicWriteFile(path, data, 0644); err != nil {
 		return 0, nil, err
 	}
 	s.addPathWatch(path)

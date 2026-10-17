@@ -46,7 +46,15 @@ interface EditorApi {
   showInputPrompt    @19 (title :Text, placeholder :Text, handler :InputPromptHandler)         -> ();
 
   # -- Editor effects --
-  applyEdit    @5 (bufId :UInt32, edits :List(TextEdit))                  -> ();
+  # applyEdit applies edits in order, each against the buffer as the ones
+  # before it left it. baseVersion is the buffer version the first edit's
+  # coordinates were computed against (readBuffer returns it alongside the
+  # content); edits made since are allowed for, so typing that lands while the
+  # plugin works does not move where its edit goes. It is read only when
+  # hasBaseVersion is set (0 is a real version); without it the edits are
+  # applied at their coordinates as given. Either way an edit naming a
+  # position the buffer does not have is refused rather than clamped.
+  applyEdit    @5 (bufId :UInt32, edits :List(TextEdit), baseVersion :UInt64, hasBaseVersion :Bool) -> ();
   moveCursor   @6 (bufId :UInt32, pos :PluginPosition)                    -> ();
   openFile     @7 (path :Text, line :UInt32)                              -> ();
   # clientId 0 broadcasts to all clients; non-zero targets one client.
@@ -54,7 +62,7 @@ interface EditorApi {
   runProcess   @9 (cmd :Text, args :List(Text))                           -> (stdout :Text, stderr :Text, exitCode :Int32);
 
   # -- Document model queries --
-  readBuffer   @10 (bufId :UInt32)                                        -> (content :Text);
+  readBuffer   @10 (bufId :UInt32)                                        -> (content :Text, version :UInt64);
   readLines    @11 (bufId :UInt32, startLine :UInt32, endLine :UInt32)    -> (lines :List(Text));
   readRange    @12 (bufId :UInt32, from :PluginPosition, to :PluginPosition) -> (text :Text);
   wordAt       @13 (bufId :UInt32, pos :PluginPosition)                   -> (start :PluginPosition, end :PluginPosition, found :Bool);

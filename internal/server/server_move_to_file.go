@@ -29,9 +29,9 @@ func (s *editorService) MoveTextToFile(_ context.Context, call proto.EditorServi
 	}
 
 	// Find, extract, and apply the delete in one continuous lock hold: entry.buf
-	// is a plain field that Save/SaveAs/Format/DiscardRecovery all wholesale-swap
-	// under s.mu.Lock() (e.g. a format-on-save landing between a find-then-unlock
-	// and a later Apply call). Extracting the range and deleting it must happen
+	// is a plain field that SaveAs/DiscardRecovery/ReloadBuffer all wholesale-swap
+	// under s.mu.Lock() (e.g. a reload landing between a find-then-unlock and a
+	// later Apply call). Extracting the range and deleting it must happen
 	// against the exact same buf object, or the delete's coordinates — computed
 	// from content that may no longer be entry.buf's content — get applied at
 	// the wrong position in whatever buf now is. extractRange/Apply are both
@@ -60,10 +60,9 @@ func (s *editorService) MoveTextToFile(_ context.Context, call proto.EditorServi
 		FromLine: fromLine, FromCol: fromCol,
 		ToLine: toLine, ToCol: toCol,
 	})
-	content := entry.buf.Content()
 	s.mu.Unlock()
 
-	go s.lspMgr.DidChange(srcPath, content)
+	s.notifyLSP(lspChange, srcPath)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, srcPath)
 
 	if err := s.appendTextToFile(clientID, destPath, text); err != nil {
@@ -153,6 +152,9 @@ func (s *editorService) appendTextToFile(clientID uint64, path, text string) err
 	// back from RestoreCRLF.
 	text = document.NormalizeNewlines(text)
 	canonPath := canonicalPath(path)
+	// Held across the lookup and, when nothing has the file open, the edit on
+	// disk, so an OpenFile cannot read the file in between; see lockPath.
+	defer s.lockPath(canonPath)()
 	// Find and apply under one continuous lock hold — same reasoning as
 	// MoveTextToFile above: appendOpsForBuffer/Apply are pure in-memory work,
 	// so there's no reason to unlock in between and risk a concurrent
@@ -172,9 +174,8 @@ func (s *editorService) appendTextToFile(clientID uint64, path, text string) err
 		// including the one that asked, which may well have the destination
 		// file open in another tab.
 		applyServerOriginated(entry, pluginClientID, appendOpsForBuffer(entry.buf, clientID, text)...)
-		content := entry.buf.Content()
 		s.mu.Unlock()
-		go s.lspMgr.DidChange(path, content)
+		s.notifyLSP(lspChange, path)
 		go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 		return nil
 	}
@@ -189,10 +190,9 @@ func (s *editorService) appendTextToFile(clientID uint64, path, text string) err
 		return err
 	}
 
-	s.markSaving(path)
-	defer s.unmarkSaving(path)
-	appended := appendedContent(existing, text)
-	if err := atomicWriteFile(path, []byte(document.RestoreCRLF(appended, crlf)), 0644); err != nil {
+	data := []byte(document.RestoreCRLF(appendedContent(existing, text), crlf))
+	s.noteSelfWrite(path, data)
+	if err := atomicWriteFile(path, data, 0644); err != nil {
 		return err
 	}
 	s.addPathWatch(path)

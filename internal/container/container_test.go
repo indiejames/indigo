@@ -525,10 +525,10 @@ func TestServerRunningAsksAboutThisWorkspace(t *testing.T) {
 func TestOtherWindowsAttachedExcludesThisOne(t *testing.T) {
 	// Two bridges in the container, one of them ours.
 	rt := &fakeRuntime{processCounts: map[string]int{
-		"/workspaces/proj --client ": 2,
-		"--client mytoken":           1,
+		" --client ":       2,
+		"--client mytoken": 1,
 	}}
-	others, err := OtherWindowsAttached(context.Background(), rt, "c1", "/workspaces/proj", "mytoken")
+	others, err := OtherWindowsAttached(context.Background(), rt, "c1", "mytoken")
 	if err != nil {
 		t.Fatalf("OtherWindowsAttached: %v", err)
 	}
@@ -538,22 +538,40 @@ func TestOtherWindowsAttachedExcludesThisOne(t *testing.T) {
 
 	// Only ours: nobody else, so the container can be stopped.
 	rt = &fakeRuntime{processCounts: map[string]int{
-		"/workspaces/proj --client ": 1,
-		"--client mytoken":           1,
+		" --client ":       1,
+		"--client mytoken": 1,
 	}}
-	others, err = OtherWindowsAttached(context.Background(), rt, "c1", "/workspaces/proj", "mytoken")
+	others, err = OtherWindowsAttached(context.Background(), rt, "c1", "mytoken")
 	if err != nil || others != 0 {
 		t.Errorf("others = (%d, %v), want (0, nil)", others, err)
 	}
 
 	// Ours already gone, another still there.
 	rt = &fakeRuntime{processCounts: map[string]int{
-		"/workspaces/proj --client ": 1,
-		"--client mytoken":           0,
+		" --client ":       1,
+		"--client mytoken": 0,
 	}}
-	others, err = OtherWindowsAttached(context.Background(), rt, "c1", "/workspaces/proj", "mytoken")
+	others, err = OtherWindowsAttached(context.Background(), rt, "c1", "mytoken")
 	if err != nil || others != 1 {
 		t.Errorf("others = (%d, %v), want (1, nil)", others, err)
+	}
+}
+
+// TestOtherWindowsAttachedCountsWindowsOnOtherFolders: one container can
+// serve several folders of a repository, each with its own server — a window
+// on the root and another on a subdirectory. Stopping the container is about
+// every window in it, so the window on the other folder must hold it up. The
+// probe used to count only bridges carrying this window's workspace path, and
+// reported nobody else here.
+func TestOtherWindowsAttachedCountsWindowsOnOtherFolders(t *testing.T) {
+	rt := &fakeRuntime{processCounts: map[string]int{
+		" --client ":                 2, // ours, and one on /workspaces/proj/web
+		"/workspaces/proj --client ": 1, // ours alone
+		"--client mytoken":           1,
+	}}
+	others, err := OtherWindowsAttached(context.Background(), rt, "c1", "mytoken")
+	if err != nil || others != 1 {
+		t.Errorf("others = (%d, %v), want (1, nil): a window on another folder is still attached", others, err)
 	}
 }
 
@@ -562,7 +580,7 @@ func TestOtherWindowsAttachedExcludesThisOne(t *testing.T) {
 // container left running or one stopped under a live window.
 func TestOtherWindowsAttachedRefusesWithoutAToken(t *testing.T) {
 	rt := &fakeRuntime{}
-	if _, err := OtherWindowsAttached(context.Background(), rt, "c1", "/w", ""); err == nil {
+	if _, err := OtherWindowsAttached(context.Background(), rt, "c1", ""); err == nil {
 		t.Error("expected an error with no client token")
 	}
 }

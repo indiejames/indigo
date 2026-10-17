@@ -3,14 +3,12 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 
 	"github.com/indiejames/indigo/internal/document"
-	"github.com/indiejames/indigo/internal/format"
 	"github.com/indiejames/indigo/internal/lsp"
 	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
@@ -911,7 +909,7 @@ func (s *editorService) References(_ context.Context, call proto.EditorService_r
 	// just above can run for a while (that's the whole point of call.Go()
 	// not blocking other RPCs on it), during which the last client could
 	// disconnect and CloseBuffer could delete this bufID's entry entirely,
-	// or a wholesale buffer-swap (Format/SaveAs/DiscardRecovery) could
+	// or a wholesale buffer-swap (SaveAs/DiscardRecovery/ReloadBuffer) could
 	// replace entry.buf with a newer object — either way, indexing
 	// s.buffers[bufID] unconditionally would risk a nil-pointer dereference
 	// on a deleted entry. buf stays nil (previews skipped below) if the
@@ -1037,74 +1035,25 @@ func (s *editorService) Format(_ context.Context, call proto.EditorService_forma
 	call.Go()
 
 	bufID := call.Args().BufId()
+	applied, noFormatter, err := s.formatBuffer(bufID)
+	if err != nil {
+		return err
+	}
+	changed := len(applied) > 0
 
 	s.mu.Lock()
-	entry, ok := s.buffers[bufID]
-	if !ok {
-		s.mu.Unlock()
-		return fmt.Errorf("unknown buffer %d", bufID)
-	}
-	path := entry.buf.Path()
-	content := entry.buf.Content()
-	baseBuf := entry.buf
-	baseVersion := baseBuf.Version()
-	s.mu.Unlock()
-
-	formatted, changed, fmtErr := s.fmtMgr.Format(path, content)
-	// The buffer holds "\n" only; a formatter emitting "\r\n" means the file
-	// is CRLF from here on. See Save for the same handling.
-	formatted, fmtCRLF := document.NormalizeCRLF(formatted)
-
-	noFormatter := errors.Is(fmtErr, format.ErrNoFormatter)
-	if fmtErr != nil && !noFormatter {
-		return fmtErr
-	}
-
 	var generation uint64
-	if changed {
-		s.mu.Lock()
-		entry, ok = s.buffers[bufID]
-		// Both checks matter: version alone isn't enough because
-		// document.New() always starts a fresh buffer at version 0, so a
-		// buffer swapped in by something else (e.g. a second concurrent
-		// Format call finishing first) could coincidentally match
-		// baseVersion despite being a different buffer entirely.
-		if ok && entry.buf == baseBuf && entry.buf.Version() == baseVersion {
-			newBuf := document.New(path, formatted)
-			newBuf.MarkDirty()
-			entry.buf = newBuf
-			entry.crlf = entry.crlf || fmtCRLF
-			entry.generation++
-			resetOutgoing(entry)
-			generation = entry.generation
-			s.buffers[bufID] = entry
-			s.mu.Unlock()
-			go s.lspMgr.DidChange(path, formatted)
-		} else {
-			// The buffer changed while formatting ran outside the lock
-			// (e.g. a keystroke's ApplyOp landed during format-on-save) —
-			// "formatted" no longer reflects the buffer's current content.
-			// Discard it rather than clobbering the newer edit; the next
-			// Format call will format the buffer's actual current state.
-			s.mu.Unlock()
-			changed = false
-		}
+	if entry, ok := s.buffers[bufID]; ok {
+		generation = entry.generation
 	}
+	s.mu.Unlock()
 
 	res, err := call.AllocResults()
 	if err != nil {
 		return err
 	}
-	if changed {
-		if err := res.SetContent(formatted); err != nil {
-			return err
-		}
-	}
 	res.SetChanged(changed)
 	res.SetNoFormatter(noFormatter)
-	// Only meaningful when changed is true (see the capnp doc comment) —
-	// left at its zero value otherwise, which callers must ignore exactly
-	// as they ignore Content in that case.
 	res.SetGeneration(generation)
 	return nil
 }

@@ -41,9 +41,25 @@ type sendQueue struct {
 	// edits. A drain compares the epoch it started in before every step and
 	// stops as soon as it is stale.
 	epoch uint64
+	// inflight is set from the moment a drain pops an op until its ApplyOp
+	// returns, and quiet is closed when it clears. A resync waits on it: an op
+	// popped before the resync began is still sent, and the snapshot has to be
+	// taken after the server has dealt with it, not before.
+	inflight bool
+	quiet    chan struct{}
+	// paused holds new edits in the queue without sending them, between a
+	// resync starting and its snapshot being adopted. An edit sent in that
+	// window could reach the server after the snapshot was taken, and the
+	// client would never see it: the server does not echo a sender's own ops,
+	// and the snapshot the client adopts predates it.
+	paused bool
 }
 
 type queuedSend struct {
+	// barrier, when set, makes this entry a marker rather than an op: it is
+	// sent true once every op queued ahead of it has reached the server, or
+	// false if they were discarded instead. See barrier().
+	barrier     chan bool
 	seq         uint64
 	bufID       uint32
 	op          document.Op
@@ -58,7 +74,7 @@ func (q *sendQueue) enqueue(s queuedSend) (needsDrain bool, epoch uint64) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.queued = append(q.queued, s)
-	if q.draining {
+	if q.draining || q.paused {
 		return false, q.epoch
 	}
 	q.draining = true
@@ -77,13 +93,32 @@ func (q *sendQueue) next(epoch uint64) (queuedSend, bool) {
 	if epoch != q.epoch {
 		return queuedSend{}, false
 	}
+	// Barriers at the head are released here, under the lock: reaching one
+	// means every op ahead of it has completed, because next is only called
+	// again after the previous op's ApplyOp returned successfully.
+	for len(q.queued) > 0 && q.queued[0].barrier != nil {
+		q.queued[0].barrier <- true
+		q.queued = q.queued[1:]
+	}
 	if len(q.queued) == 0 {
 		q.draining = false
 		return queuedSend{}, false
 	}
 	s := q.queued[0]
 	q.queued = q.queued[1:]
+	q.inflight = true
+	q.quiet = make(chan struct{})
 	return s, true
+}
+
+// sent marks the op the drain popped last as finished, successfully or not.
+func (q *sendQueue) sent() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.inflight {
+		q.inflight = false
+		close(q.quiet)
+	}
 }
 
 // idle reports that nothing is queued and no drain is running.
@@ -98,16 +133,20 @@ func (q *sendQueue) next(epoch uint64) (queuedSend, bool) {
 func (q *sendQueue) idle() bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return len(q.queued) == 0 && !q.draining
+	return len(q.queued) == 0 && !q.draining && !q.paused
 }
 
 // discard drops everything queued and stops the drain, for when the ops are no
 // longer meaningful — a failed send that forces a resync, or a wholesale buffer
 // swap. Their coordinates describe content the client is about to throw away.
+//
+// It also ends a pause (see pauseForResync): whatever was held is dropped with
+// everything else, and sending resumes for edits made from here on.
 func (q *sendQueue) discard() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.queued = nil
+	q.dropQueuedLocked()
+	q.paused = false
 	q.draining = false
 	// Retires any drain still running. It cannot be stopped directly — it is
 	// probably parked in ApplyOp — so it is made to recognise itself as stale
@@ -134,10 +173,99 @@ func (q *sendQueue) retire(epoch uint64) bool {
 	if epoch != q.epoch {
 		return false
 	}
-	q.queued = nil
+	q.dropQueuedLocked()
 	q.draining = false
 	q.epoch++
 	return true
+}
+
+// dropQueuedLocked empties the queue, telling any barrier in it that the ops
+// it was waiting for will never be sent. q.mu must be held.
+func (q *sendQueue) dropQueuedLocked() {
+	for _, s := range q.queued {
+		if s.barrier != nil {
+			s.barrier <- false
+		}
+	}
+	q.queued = nil
+}
+
+// barrier returns a channel that receives true once every op queued so far
+// has reached the server, or false if they are discarded first (a failed send,
+// a resync, a buffer swap). Ops queued after the call do not hold it up.
+//
+// Save, SaveAs and Format go through this. Each is its own command, so without
+// it the request could overtake edits still waiting in the queue: a save would
+// write the file without the last keystrokes, and :wq would then close the
+// buffer and lose them outright.
+func (q *sendQueue) barrier() <-chan bool {
+	ch := make(chan bool, 1)
+	if q == nil {
+		ch <- true
+		return ch
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.queued) == 0 && !q.draining && !q.paused {
+		ch <- true
+		return ch
+	}
+	// Either a drain is running and will reach this entry, or the queue is
+	// paused for a resync whose discard will release it with false.
+	q.queued = append(q.queued, queuedSend{barrier: ch})
+	return ch
+}
+
+// pauseForResync discards everything queued, retires the running drain, and
+// holds edits made from now on until the resync's snapshot has been adopted
+// (bufferResyncMsg, which calls discard). Called synchronously from Update, so
+// no edit typed after the resync was decided on can be sent ahead of it.
+func (q *sendQueue) pauseForResync() {
+	if q == nil {
+		return
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.dropQueuedLocked()
+	q.draining = false
+	q.paused = true
+	q.epoch++
+}
+
+// resume ends a pause without discarding what it held, and reports whether a
+// drain must be started for it. For a resync that failed: there is no snapshot
+// to adopt, so the held edits are sent as they would have been.
+func (q *sendQueue) resume() (needsDrain bool, epoch uint64) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.paused = false
+	if q.draining || len(q.queued) == 0 {
+		return false, q.epoch
+	}
+	q.draining = true
+	return true, q.epoch
+}
+
+// waitQuiet blocks until no op is in flight, or ctx ends. After
+// pauseForResync nothing new can be popped, so once this returns the server
+// has finished with every op this client will send before the snapshot.
+func (q *sendQueue) waitQuiet(ctx context.Context) error {
+	if q == nil {
+		return nil
+	}
+	q.mu.Lock()
+	if !q.inflight {
+		q.mu.Unlock()
+		return nil
+	}
+	ch := q.quiet
+	q.mu.Unlock()
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // drainCmd sends queued ops in order, one round trip at a time.
@@ -166,6 +294,7 @@ func (m Model) drainCmd(epoch uint64) tea.Cmd {
 			ctx, cancel := context.WithTimeout(context.Background(), applyOpTimeout)
 			_, err := rpc.ApplyOp(ctx, s.bufID, s.op, s.generation, s.baseVersion)
 			cancel()
+			q.sent()
 			if err != nil {
 				clientLog("ApplyOp FAILED buf=%d gen=%d base=%d op=%s: %v",
 					s.bufID, s.generation, s.baseVersion, describeOp(s.op), err)

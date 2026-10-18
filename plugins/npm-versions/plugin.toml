@@ -1,6 +1,6 @@
 name        = "npm-versions"
 version     = "0.1.0"
-sdk_version = "0.1.0"
+sdk_version = "0.1.1"
 description = "Autocomplete npm package versions in package.json dependency blocks"
 
 [binaries]

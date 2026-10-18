@@ -8,4 +8,4 @@ package sdk
 // version it was built against (sdk_version in plugin.toml) and the editor
 // compares the two before starting it. While the major version is 0, a minor
 // bump is a breaking change; from 1.0 on, only a major bump is.
-const Version = "0.1.0"
+const Version = "0.1.1"

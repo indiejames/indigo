@@ -195,6 +195,7 @@ func (s *editorService) appendTextToFile(clientID uint64, path, text string) err
 	if err := atomicWriteFile(path, data, 0644); err != nil {
 		return err
 	}
-	s.addPathWatch(path)
+	// No addPathWatch: nothing has this file open, so there is no buffer for
+	// an external write to update, and nothing would ever remove the watch.
 	return nil
 }

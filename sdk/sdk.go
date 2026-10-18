@@ -610,26 +610,37 @@ func (a *Api) CompletionsFull(h CompletionHandlers) error {
 // [Api.ApplyEditAt] with the version from [Api.ReadBufferVersioned], which
 // allows for it.
 func (a *Api) ApplyEdit(bufID uint32, edits []TextEdit) error {
-	return a.applyEdit(bufID, 0, false, edits)
+	return a.applyEdit(bufID, BufferVersion{}, false, edits)
 }
 
-// ApplyEditAt is [Api.ApplyEdit] for edits computed against version
-// baseVersion of the buffer, as returned by [Api.ReadBufferVersioned]. The
+// BufferVersion identifies one state of a buffer's text, as returned by
+// [Api.ReadBufferVersioned]. Pass it back unchanged to [Api.ApplyEditAt].
+//
+// It is more than a counter: a buffer the editor replaces wholesale (reloaded
+// from disk, or saved under a new name) restarts its count, and the editor
+// tells the two apart by a generation carried alongside.
+type BufferVersion struct {
+	version, generation uint64
+}
+
+// ApplyEditAt is [Api.ApplyEdit] for edits computed against version at of
+// the buffer, as returned by [Api.ReadBufferVersioned]. The
 // editor moves the edits past whatever changed the buffer since, the way it
 // does for an edit from another window, so they land on the text they were
 // computed against. It is refused if the buffer no longer has the history to
-// do that (it was reloaded, or the version is too old): read it again.
+// do that (it was replaced since, or the version is too old): read it again.
 //
 // An edit naming a position the buffer does not have is refused with an
 // error rather than clamped, either way.
-func (a *Api) ApplyEditAt(bufID uint32, baseVersion uint64, edits []TextEdit) error {
-	return a.applyEdit(bufID, baseVersion, true, edits)
+func (a *Api) ApplyEditAt(bufID uint32, at BufferVersion, edits []TextEdit) error {
+	return a.applyEdit(bufID, at, true, edits)
 }
 
-func (a *Api) applyEdit(bufID uint32, baseVersion uint64, rebase bool, edits []TextEdit) error {
+func (a *Api) applyEdit(bufID uint32, at BufferVersion, rebase bool, edits []TextEdit) error {
 	fut, rel := a.api.ApplyEdit(context.Background(), func(p pluginproto.EditorApi_applyEdit_Params) error {
 		p.SetBufId(bufID)
-		p.SetBaseVersion(baseVersion)
+		p.SetBaseVersion(at.version)
+		p.SetBaseGeneration(at.generation)
 		p.SetHasBaseVersion(rebase)
 		list, err := p.NewEdits(int32(len(edits)))
 		if err != nil {
@@ -758,7 +769,7 @@ func (a *Api) ReadBuffer(bufID uint32) (string, error) {
 // ReadBufferVersioned returns the full text content of bufID and the buffer
 // version it is the content of, read together. Pass the version to
 // [Api.ApplyEditAt] with edits computed from the content.
-func (a *Api) ReadBufferVersioned(bufID uint32) (content string, version uint64, err error) {
+func (a *Api) ReadBufferVersioned(bufID uint32) (content string, version BufferVersion, err error) {
 	fut, rel := a.api.ReadBuffer(context.Background(), func(p pluginproto.EditorApi_readBuffer_Params) error {
 		p.SetBufId(bufID)
 		return nil
@@ -766,10 +777,10 @@ func (a *Api) ReadBufferVersioned(bufID uint32) (content string, version uint64,
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return "", 0, err
+		return "", BufferVersion{}, err
 	}
 	content, err = res.Content()
-	return content, res.Version(), err
+	return content, BufferVersion{version: res.Version(), generation: res.Generation()}, err
 }
 
 // ReadLines returns lines [startLine, endLine) of bufID (0-based, exclusive end).

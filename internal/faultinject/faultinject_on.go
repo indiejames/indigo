@@ -24,6 +24,7 @@ var (
 	failApplyOps   int
 	bumpGeneration int
 	dropPolls      int
+	swallowApplies int
 )
 
 func init() {
@@ -51,6 +52,8 @@ func init() {
 			bumpGeneration = n
 		case "drop_poll":
 			dropPolls = n
+		case "swallow_apply":
+			swallowApplies = n
 		}
 	}
 }
@@ -105,10 +108,26 @@ func ShouldDropPoll() bool {
 	return true
 }
 
+func SwallowNextApplyOps(n int) {
+	mu.Lock()
+	defer mu.Unlock()
+	swallowApplies = n
+}
+
+func ShouldSwallowApplyOps() bool {
+	mu.Lock()
+	defer mu.Unlock()
+	if swallowApplies <= 0 {
+		return false
+	}
+	swallowApplies--
+	return true
+}
+
 func Reset() {
 	mu.Lock()
 	defer mu.Unlock()
-	failApplyOps, bumpGeneration, dropPolls = 0, 0, 0
+	failApplyOps, bumpGeneration, dropPolls, swallowApplies = 0, 0, 0, 0
 }
 
 func Armed() map[string]int {
@@ -123,6 +142,9 @@ func Armed() map[string]int {
 	}
 	if dropPolls > 0 {
 		out["drop_poll"] = dropPolls
+	}
+	if swallowApplies > 0 {
+		out["swallow_apply"] = swallowApplies
 	}
 	return out
 }

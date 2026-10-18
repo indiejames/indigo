@@ -129,7 +129,7 @@ func TestPluginEditNotifiesLSP(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.go")
 	s, _ := lspTestService(t, path, "hello\n")
 	r := recordLSP(s)
-	if err := s.PluginApplyEdit(1, 0, false, []plugin.TextEdit{{FromLine: 0, FromCol: 5, ToLine: 0, ToCol: 5, NewText: "!"}}); err != nil {
+	if err := s.PluginApplyEdit(1, 0, 0, false, []plugin.TextEdit{{FromLine: 0, FromCol: 5, ToLine: 0, ToCol: 5, NewText: "!"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := r.wait(t, 1)[0]; got.kind != lspChange || got.content != "hello!\n" {

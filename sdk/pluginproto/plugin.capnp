@@ -54,7 +54,11 @@ interface EditorApi {
   # hasBaseVersion is set (0 is a real version); without it the edits are
   # applied at their coordinates as given. Either way an edit naming a
   # position the buffer does not have is refused rather than clamped.
-  applyEdit    @5 (bufId :UInt32, edits :List(TextEdit), baseVersion :UInt64, hasBaseVersion :Bool) -> ();
+  # baseGeneration is the generation readBuffer returned with that version:
+  # a buffer replaced wholesale (a reload, a SaveAs) restarts its versions, so
+  # a version alone could name a point in the new buffer's history that has
+  # nothing to do with the text the plugin read. A mismatch is refused.
+  applyEdit    @5 (bufId :UInt32, edits :List(TextEdit), baseVersion :UInt64, hasBaseVersion :Bool, baseGeneration :UInt64) -> ();
   moveCursor   @6 (bufId :UInt32, pos :PluginPosition)                    -> ();
   openFile     @7 (path :Text, line :UInt32)                              -> ();
   # clientId 0 broadcasts to all clients; non-zero targets one client.
@@ -62,7 +66,7 @@ interface EditorApi {
   runProcess   @9 (cmd :Text, args :List(Text))                           -> (stdout :Text, stderr :Text, exitCode :Int32);
 
   # -- Document model queries --
-  readBuffer   @10 (bufId :UInt32)                                        -> (content :Text, version :UInt64);
+  readBuffer   @10 (bufId :UInt32)                                        -> (content :Text, version :UInt64, generation :UInt64);
   readLines    @11 (bufId :UInt32, startLine :UInt32, endLine :UInt32)    -> (lines :List(Text));
   readRange    @12 (bufId :UInt32, from :PluginPosition, to :PluginPosition) -> (text :Text);
   wordAt       @13 (bufId :UInt32, pos :PluginPosition)                   -> (start :PluginPosition, end :PluginPosition, found :Bool);

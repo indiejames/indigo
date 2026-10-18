@@ -28,7 +28,7 @@ import (
 // Plugins call EditorApi methods which delegate here for buffer access and effects.
 type ServerBridge interface {
 	// Document queries
-	PluginReadBuffer(bufID uint32) (content string, version uint64, err error)
+	PluginReadBuffer(bufID uint32) (content string, version, generation uint64, err error)
 	PluginReadLines(bufID uint32, start, end uint32) ([]string, error)
 	PluginReadRange(bufID uint32, fromLine, fromCol, toLine, toCol uint32) (string, error)
 	PluginWordAt(bufID uint32, line, col uint32) (startLine, startCol, endLine, endCol uint32, found bool, err error)
@@ -38,8 +38,9 @@ type ServerBridge interface {
 	// Editor effects
 	// PluginApplyEdit applies edits computed against baseVersion of the
 	// buffer, rebased past what changed since when rebase is set, and at
-	// their coordinates as given otherwise.
-	PluginApplyEdit(bufID uint32, baseVersion uint64, rebase bool, edits []TextEdit) error
+	// their coordinates as given otherwise. baseGeneration is the generation
+	// read with baseVersion; when rebasing, a buffer replaced since refuses.
+	PluginApplyEdit(bufID uint32, baseVersion, baseGeneration uint64, rebase bool, edits []TextEdit) error
 	PluginMoveCursor(bufID uint32, line, col uint32) error
 	PluginOpenFile(path string, line uint32) error
 	// PluginShowMessage shows text in the status bar of one client, or of

@@ -23,18 +23,19 @@ func serverLog(format string, args ...any) {
 // pluginClientID is the client ID used for edits applied by plugins.
 const pluginClientID uint64 = 0
 
-// PluginReadBuffer implements plugin.ServerBridge. The content and version
-// are read under s.mu, which every apply holds, so they describe the same
-// moment: a plugin passes the version back with edits computed from the
-// content, and a version off by one op would rebase them wrongly.
-func (s *editorService) PluginReadBuffer(bufID uint32) (string, uint64, error) {
+// PluginReadBuffer implements plugin.ServerBridge. The content, version and
+// generation are read under s.mu, which every apply and every swap holds, so
+// they describe the same moment: a plugin passes the version back with edits
+// computed from the content, and a version off by one op would rebase them
+// wrongly.
+func (s *editorService) PluginReadBuffer(bufID uint32) (string, uint64, uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.buffers[bufID]
 	if !ok {
-		return "", 0, fmt.Errorf("unknown buffer %d", bufID)
+		return "", 0, 0, fmt.Errorf("unknown buffer %d", bufID)
 	}
-	return entry.buf.Content(), entry.buf.Version(), nil
+	return entry.buf.Content(), entry.buf.Version(), entry.generation, nil
 }
 
 // PluginReadLines implements plugin.ServerBridge.
@@ -363,7 +364,7 @@ func (s *editorService) PluginDecorationsChanged(bufID uint32) {
 // PluginApplyEdit implements plugin.ServerBridge.
 // Applies a sequence of text edits to a buffer. Edits are applied as ops with
 // a reserved plugin client ID.
-func (s *editorService) PluginApplyEdit(bufID uint32, baseVersion uint64, rebase bool, edits []plugin.TextEdit) error {
+func (s *editorService) PluginApplyEdit(bufID uint32, baseVersion, baseGeneration uint64, rebase bool, edits []plugin.TextEdit) error {
 	// The lock is held across the whole application, not just the lookup.
 	//
 	// Two reasons. It has to be, now that applying also queues the ops for
@@ -411,6 +412,14 @@ func (s *editorService) PluginApplyEdit(bufID uint32, baseVersion uint64, rebase
 	// are, losing ties because they arrive after them. Without one (an older
 	// plugin) they are applied as given, which is how they always were.
 	if rebase {
+		// A wholesale swap restarts the version count, so baseVersion would
+		// name a point in the new buffer's history, and the edits would be
+		// rebased past ops that have nothing to do with the text they were
+		// computed against.
+		if baseGeneration != entry.generation {
+			s.mu.Unlock()
+			return fmt.Errorf("buffer %d was replaced since it was read (reloaded or saved under a new name); read the buffer again", bufID)
+		}
 		since, ok := entry.buf.OpsAfter(baseVersion)
 		if !ok || baseVersion > entry.buf.Version() {
 			s.mu.Unlock()

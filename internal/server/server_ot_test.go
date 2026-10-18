@@ -209,7 +209,7 @@ func TestGetUpdatesServesAndRetiresTheQueue(t *testing.T) {
 func TestPluginApplyEditReachesClientQueues(t *testing.T) {
 	s, entry, _ := newOTTestService(t, "hello\n", 7)
 
-	if err := s.PluginApplyEdit(1, 0, false, []plugin.TextEdit{{
+	if err := s.PluginApplyEdit(1, 0, 0, false, []plugin.TextEdit{{
 		FromLine: 0, FromCol: 0, ToLine: 0, ToCol: 0, NewText: "P",
 	}}); err != nil {
 		t.Fatalf("PluginApplyEdit: %v", err)

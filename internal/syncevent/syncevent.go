@@ -29,6 +29,7 @@
 package syncevent
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strconv"
 	"strings"
@@ -77,6 +78,10 @@ const (
 	ExternalWriteNotified Kind = "external_write_notified"
 	// BufferReloaded: a buffer's content was replaced from disk.
 	BufferReloaded Kind = "buffer_reloaded"
+	// EditLost: an agent edit the server accepted was missing afterwards —
+	// from the buffer read back after applying, or from the file after the
+	// save. The detail names the stage and carries content tags, never text.
+	EditLost Kind = "edit_lost"
 )
 
 // Kinds returns every kind, in a stable order, for validating a caller's filter
@@ -91,7 +96,7 @@ func Kinds() []Kind {
 		ApplyOpRejected, GenerationMismatch, StaleBase,
 		ResyncStarted, ResyncOK, ResyncFailed,
 		DuplicateOpsSkipped, StaleResponseDropped, SendFailed,
-		ExternalWriteNotified, BufferReloaded,
+		ExternalWriteNotified, BufferReloaded, EditLost,
 	}
 }
 
@@ -268,4 +273,13 @@ func CountByKind(events []Event) map[Kind]int {
 		counts[e.Kind]++
 	}
 	return counts
+}
+
+// ContentTag identifies content in a log line without including it: a short
+// sha256 prefix plus the byte length. The shared log is pasted into bug
+// reports, so it carries a hash, never buffer text — the same rule
+// get_sync_state follows.
+func ContentTag(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return fmt.Sprintf("%x/%dB", sum[:6], len(content))
 }

@@ -1019,3 +1019,140 @@ func TestLiveGitWorksInsideTheContainer(t *testing.T) {
 		t.Errorf("safe.directory = %q, want exactly one entry for the workspace", got)
 	}
 }
+
+// TestLiveSubdirectoryWindowJoinsTheRepositorySession is the 2026-10-16
+// subdirectory fix against a real docker and devcontainer CLI, which it was
+// written without:
+//   - `devcontainer up` and read-configuration are given the folder holding
+//     devcontainer.json, not the window's subdirectory;
+//   - ServerWorkspaces' awk script, run inside a real container, lists each
+//     daemon's workspace and not its own command line;
+//   - a window in web/ joins a server for the repository above it and ignores
+//     one for web2/, which the old substring test ("--daemon .../web") matched.
+func TestLiveSubdirectoryWindowJoinsTheRepositorySession(t *testing.T) {
+	d := liveRuntime(t)
+	cli := CLI{}
+	if !cli.Available() {
+		t.Skip("devcontainer CLI not installed")
+	}
+	t.Setenv("INDIGO_LOG_DIR", t.TempDir())
+
+	repo := t.TempDir()
+	for _, dir := range []string{".devcontainer", "web", "web2"} {
+		if err := os.MkdirAll(filepath.Join(repo, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	config := `{"name": "indigo subdir live test", "image": "alpine:latest", "overrideCommand": true}`
+	if err := os.WriteFile(filepath.Join(repo, ".devcontainer", "devcontainer.json"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	window := filepath.Join(repo, "web")
+
+	root, ok := FindDevcontainerRoot(window)
+	if !ok || root != repo {
+		t.Fatalf("FindDevcontainerRoot(%s) = %q, %v; want %s", window, root, ok, repo)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	if _, err := cli.ReadConfiguration(ctx, root); err != nil {
+		t.Fatalf("read-configuration on the config root: %v", err)
+	}
+	res, err := cli.Up(ctx, root)
+	if err != nil {
+		t.Fatalf("devcontainer up on the config root: %v", err)
+	}
+	t.Cleanup(func() {
+		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		exec.CommandContext(c, d.bin(), "rm", "-f", res.ContainerID).Run() //nolint:errcheck
+	})
+	remote := res.RemoteWorkspaceFolder
+
+	// The label the session lookup searches by must be the folder up was given.
+	rt := Docker{Command: d.Command, User: res.RemoteUser}
+	if id, err := rt.RunningDevcontainer(ctx, root); err != nil || id == "" {
+		t.Fatalf("RunningDevcontainer(%s) = %q, %v; want the container up started", root, id, err)
+	}
+
+	goarch, err := rt.Arch(ctx, res.ContainerID)
+	if err != nil {
+		t.Fatalf("Arch: %v", err)
+	}
+	local := buildContainerServer(t, goarch)
+	opts := AttachOptions{Locate: func(string) (string, error) { return local, nil }}
+
+	attach := func(ws string) {
+		t.Helper()
+		stream, err := Attach(ctx, rt, res.ContainerID, ws, opts)
+		if err != nil {
+			t.Fatalf("Attach(%s): %v", ws, err)
+		}
+		t.Cleanup(func() { stream.Close() }) //nolint:errcheck
+		if _, err := client.DialStream(stream); err != nil {
+			t.Fatalf("DialStream(%s): %v", ws, err)
+		}
+	}
+	// waitForServers polls until ServerWorkspaces reports exactly want: a
+	// bridge returns once it can dial, but asserting on the first answer
+	// would still race a daemon's exec.
+	waitForServers := func(want ...string) []string {
+		t.Helper()
+		var got []string
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			got, err = rt.ServerWorkspaces(ctx, res.ContainerID)
+			if err != nil {
+				t.Fatalf("ServerWorkspaces: %v", err)
+			}
+			if sameSet(got, want) || time.Now().After(deadline) {
+				return got
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	// A server for the sibling web2/ only. Its workspace has the window's as a
+	// prefix, and it must not be joined.
+	attach(remote + "/web2")
+	if got := waitForServers(remote + "/web2"); !sameSet(got, []string{remote + "/web2"}) {
+		t.Fatalf("ServerWorkspaces = %q, want only %s/web2", got, remote)
+	}
+	if s, found, err := FindDevcontainerSession(ctx, rt, root, window); err != nil || found {
+		t.Fatalf("FindDevcontainerSession with only a web2 server = %+v, %v, %v; want none", s, found, err)
+	}
+
+	// Now the repository's own server, which holds web/'s files.
+	attach(remote)
+	if got := waitForServers(remote, remote+"/web2"); !sameSet(got, []string{remote, remote + "/web2"}) {
+		t.Fatalf("ServerWorkspaces = %q, want %s and %s/web2", got, remote, remote)
+	}
+	s, found, err := FindDevcontainerSession(ctx, rt, root, window)
+	if err != nil || !found {
+		t.Fatalf("FindDevcontainerSession = %+v, %v, %v; want the repository's server", s, found, err)
+	}
+	// RunningDevcontainer reads `docker ps -q`, which prints the short id; up
+	// reports the full one. Docker accepts either.
+	if s.WorkspaceDir != remote || s.HostWorkspaceDir != repo || s.ContainerID == "" || !strings.HasPrefix(res.ContainerID, s.ContainerID) {
+		t.Errorf("session = %+v, want workspace %s on host %s in %s", s, remote, repo, res.ContainerID)
+	}
+}
+
+func sameSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]int{}
+	for _, x := range a {
+		seen[x]++
+	}
+	for _, x := range b {
+		if seen[x] == 0 {
+			return false
+		}
+		seen[x]--
+	}
+	return true
+}

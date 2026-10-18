@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,14 +14,8 @@ import (
 	"github.com/indiejames/indigo/internal/syncevent"
 )
 
-// contentTag identifies content in a log line without including it: a short
-// sha256 prefix plus the byte length. The shared log is pasted into bug
-// reports, so it carries a hash, never buffer text — the same rule
-// get_sync_state follows.
-func contentTag(content string) string {
-	sum := sha256.Sum256([]byte(content))
-	return fmt.Sprintf("%x/%dB", sum[:6], len(content))
-}
+// contentTag is syncevent.ContentTag; see there.
+func contentTag(content string) string { return syncevent.ContentTag(content) }
 
 // atomicWriteFile writes data to path via a temp file in the same directory
 // followed by a rename, so a crash mid-write can never leave a truncated
@@ -836,6 +829,18 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 		serverLog("ApplyOps REJECTED: buffer %d (%q) fault injection", bufID, path)
 		syncevent.Record("server", syncevent.ApplyOpRejected, bufID, path, "fault injection")
 		return fmt.Errorf("buffer %d: injected failure", bufID)
+	}
+	if faultinject.ShouldSwallowApplyOps() {
+		// The reported apply_edits failure: accepted, and nothing applied.
+		version, path := entry.buf.Version(), entry.buf.Path()
+		s.mu.Unlock()
+		serverLog("ApplyOps: buffer %d (%q) fault injection: accepted %d op(s) and applied none", bufID, path, len(ops))
+		res, err := call.AllocResults()
+		if err != nil {
+			return err
+		}
+		res.SetVersion(version)
+		return nil
 	}
 	if entry.generation != clientGeneration {
 		gen, path := entry.generation, entry.buf.Path()

@@ -232,7 +232,7 @@ func (s *editorApiServer) ApplyEdit(_ context.Context, call pluginproto.EditorAp
 			NewText: text,
 		}
 	}
-	if err := s.bridge.PluginApplyEdit(bufID, args.BaseVersion(), args.HasBaseVersion(), edits); err != nil {
+	if err := s.bridge.PluginApplyEdit(bufID, args.BaseVersion(), args.BaseGeneration(), args.HasBaseVersion(), edits); err != nil {
 		return err
 	}
 	_, err = call.AllocResults()
@@ -333,7 +333,7 @@ func (s *editorApiServer) ReadBuffer(_ context.Context, call pluginproto.EditorA
 	if s.bridge == nil {
 		return fmt.Errorf("no server bridge")
 	}
-	content, version, err := s.bridge.PluginReadBuffer(call.Args().BufId())
+	content, version, generation, err := s.bridge.PluginReadBuffer(call.Args().BufId())
 	if err != nil {
 		return err
 	}
@@ -342,6 +342,7 @@ func (s *editorApiServer) ReadBuffer(_ context.Context, call pluginproto.EditorA
 		return err
 	}
 	res.SetVersion(version)
+	res.SetGeneration(generation)
 	return res.SetContent(content)
 }
 

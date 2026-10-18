@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -12,6 +13,19 @@ import (
 	"github.com/indiejames/indigo/internal/lsp"
 	proto "github.com/indiejames/indigo/internal/proto"
 )
+
+// newHermeticLintManager builds a lint.Manager that runs only lc. NewManager
+// also adopts every default linter it finds on PATH (golangci-lint, cargo, ...),
+// and a workspace scan runs all of them, so on a developer machine these tests
+// were really waiting on the installed golangci-lint, which under a parallel
+// `go test ./...` (or beside a `make lint` or an editor linting on save) could
+// take longer than waitForScan's deadline. PATH is empty while the manager is
+// built and lc's command is absolute.
+func newHermeticLintManager(t *testing.T, lc config.LinterConfig, workDir string) *lint.Manager {
+	t.Helper()
+	t.Setenv("PATH", t.TempDir())
+	return lint.NewManager(&config.Config{Linters: []config.LinterConfig{lc}}, workDir)
+}
 
 // waitForScan polls until mgr's async workspace scan has finished, failing
 // the test after a generous timeout — mirrors internal/lint's own
@@ -30,7 +44,7 @@ func waitForScan(t *testing.T, mgr *lint.Manager) {
 }
 
 // newScannedWorkspaceService builds an editorService whose lintMgr has
-// already completed a real (subprocess-backed, via `sh -c echo`) workspace
+// already completed a real (subprocess-backed, via `/bin/sh -c echo`) workspace
 // scan finding one issue in <workDir>/scanned.go, plus whatever open
 // buffers the caller supplies. Exercises the "unopened file" half of
 // allWorkspaceDiagnostics (and, when a buffer at the same path is also
@@ -41,12 +55,12 @@ func newScannedWorkspaceService(t *testing.T, buffers map[uint32]*document.Buffe
 	scannedPath = filepath.Join(workDir, "scanned.go")
 	lc := config.LinterConfig{
 		Extensions: []string{"go"},
-		Command:    "sh",
+		Command:    "/bin/sh",
 		WorkspaceArgs: []string{"-c",
 			`echo '{"Issues":[{"FromLinter":"x","Text":"scanned issue","Severity":"warning","Pos":{"Filename":"scanned.go","Line":1,"Column":1}}]}'`},
 		Format: "golangci-lint-json",
 	}
-	lintMgr := lint.NewManager(&config.Config{Linters: []config.LinterConfig{lc}}, workDir)
+	lintMgr := newHermeticLintManager(t, lc, workDir)
 	lintMgr.ScanWorkspace()
 	waitForScan(t, lintMgr)
 
@@ -148,12 +162,12 @@ func TestRescanWorkspaceDiagnosticsTriggersScan(t *testing.T) {
 	workDir := t.TempDir()
 	lc := config.LinterConfig{
 		Extensions: []string{"go"},
-		Command:    "sh",
+		Command:    "/bin/sh",
 		WorkspaceArgs: []string{"-c",
 			`echo '{"Issues":[{"FromLinter":"x","Text":"rescanned","Severity":"error","Pos":{"Filename":"r.go","Line":1,"Column":1}}]}'`},
 		Format: "golangci-lint-json",
 	}
-	lintMgr := lint.NewManager(&config.Config{Linters: []config.LinterConfig{lc}}, workDir)
+	lintMgr := newHermeticLintManager(t, lc, workDir)
 	s := &editorService{
 		cfg:     &config.Config{},
 		buffers: map[uint32]*bufferEntry{},
@@ -179,5 +193,32 @@ func TestRescanWorkspaceDiagnosticsTriggersScan(t *testing.T) {
 	snap := lintMgr.WorkspaceScanSnapshot()
 	if len(snap) != 1 {
 		t.Fatalf("len(snap) = %d, want 1 after rescan: %+v", len(snap), snap)
+	}
+}
+
+// TestHermeticLintManagerIgnoresLintersOnPath is the regression test for
+// TestGetWorkspaceDiagnosticsOpenBufferSupersedesScanResult timing out under a
+// full parallel run: its scan also ran whatever default linters the machine had
+// installed. A fake golangci-lint ahead of everything on PATH must not run.
+func TestHermeticLintManagerIgnoresLintersOnPath(t *testing.T) {
+	bin, workDir := t.TempDir(), t.TempDir()
+	marker := filepath.Join(bin, "ran")
+	fake := "#!/bin/sh\ntouch " + marker + "\necho '{\"Issues\":[]}'\n"
+	if err := os.WriteFile(filepath.Join(bin, "golangci-lint"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	lc := config.LinterConfig{
+		Extensions:    []string{"go"},
+		Command:       "/bin/sh",
+		WorkspaceArgs: []string{"-c", `echo '{"Issues":[]}'`},
+		Format:        "golangci-lint-json",
+	}
+	m := newHermeticLintManager(t, lc, workDir)
+	m.ScanWorkspace()
+	waitForScan(t, m)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the workspace scan ran the golangci-lint on PATH; the test's scan must run only its own linter")
 	}
 }

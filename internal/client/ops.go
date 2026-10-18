@@ -228,6 +228,37 @@ func opLineDelta(op document.Op) (atLine, delta int) {
 	return 0, 0
 }
 
+// groupRecordCmd is the EditRecordMsg for an undo group just pushed onto
+// undoStack: one jump destination, where the group began, and one shift per op
+// that changed the line count, in the order they were applied. Every site that
+// opens a group of its own and commits it must send this, because applyOp
+// records nothing while a group is open — the multi-cursor delete and case
+// conversion once did not, and the jump list drifted after each.
+//
+// Per op rather than one shift from a net line count. A jump entry between two
+// of the group's edit points is moved by one and not the other, and a group
+// that adds a line in one place and removes one in another sums to zero. A net
+// count measured from the buffer is wrong in a second way: a remote op arriving
+// mid-session closes an insert group (see the updatesMsg handler), so the
+// buffer's difference also counts another client's line changes.
+//
+// The group holds the inverses, so each delta negates: a forward insert at line
+// L of N newlines is stored as a delete of L..L+N, whose opLineDelta is
+// (L, -N).
+func (m Model) groupRecordCmd(inverses []document.Op, before cursorSnapshot) tea.Cmd {
+	shifts := make([]LineShift, 0, len(inverses))
+	for _, inv := range inverses {
+		if al, d := opLineDelta(inv); d != 0 {
+			shifts = append(shifts, LineShift{AtLine: max(al, 0), Delta: -d})
+		}
+	}
+	fp, line, col := m.filePath, before.cursor.Line, before.cursor.Col
+	depth := len(m.undoStack)
+	return func() tea.Msg {
+		return EditRecordMsg{FilePath: fp, Line: line, Col: col, Shifts: shifts, UndoDepth: depth}
+	}
+}
+
 // applyOp records the inverse of op for undo, then applies op locally and
 // queues an async send to the server.
 //

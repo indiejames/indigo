@@ -136,7 +136,7 @@ func TestJumpyEndToEnd(t *testing.T) {
 	bridge := plugintest.NewBridge()
 	bridge.SetBuffer(1, []string{"skip me", "alpha beta", "gamma"})
 	bridge.SetVisible(7, 1, 2)
-	m := plugintest.Start(t, ".", bridge)
+	m, _ := plugintest.Start(t, ".", bridge)
 	ctx := context.Background()
 
 	var item *plugin.MenuItem

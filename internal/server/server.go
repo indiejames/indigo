@@ -29,6 +29,7 @@ import (
 	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
 	"github.com/indiejames/indigo/internal/rpcwatch"
+	"github.com/indiejames/indigo/internal/serialq"
 	"github.com/indiejames/indigo/internal/syncevent"
 	"github.com/indiejames/indigo/internal/workspacefs"
 )
@@ -112,12 +113,15 @@ type bufferEntry struct {
 	// write of it back to this file goes through document.RestoreCRLF, so a
 	// Windows-edited file is saved the way it was found.
 	crlf bool
+	// id is this entry's key in s.buffers.
+	id uint32
 	// onApplied, when set, is told about every op the server applies to this
 	// buffer on its own behalf (applyServerOriginated): workspace edits,
 	// plugin edits, moving text between files. Edits from windows reach the
 	// same place through ApplyOp/ApplyOps. It keeps breakpoints on their
-	// lines. Runs under s.mu.
-	onApplied func(canonPath string, ops []document.Op)
+	// lines and tells plugins about line changes (afterApplyLocked). Runs
+	// under s.mu.
+	onApplied func(entry *bufferEntry, ops []document.Op)
 	// generation increments every time buf is replaced with a new
 	// *document.Buffer object (SaveAs, DiscardRecovery, ReloadBuffer)
 	// rather than edited via buf.Apply. Formatting applies ops and does not
@@ -219,7 +223,13 @@ type editorService struct {
 	fmtMgr       *format.Manager
 	lintMgr      *lint.Manager
 	pluginMgr    *plugin.Manager
-	cfg          *config.Config
+	// editEvents delivers plugins' edit events in the order their edits were
+	// applied; see afterApplyLocked.
+	editEvents serialq.Queue
+	// editEventSink, when set, receives the queued edit events in place of
+	// the plugin manager. For tests.
+	editEventSink func(bufID uint32, path string, r plugin.EditRange)
+	cfg           *config.Config
 
 	// lspQ orders document-sync notifications per path; see notifyLSP.
 	lspQ lspQueue
@@ -251,14 +261,12 @@ type editorService struct {
 	inputOnConfirm func(text string)
 	inputOnCancel  func()
 
-	// popupDispatchMu serializes PluginShowPopup/PluginShowInputPrompt's
-	// client notification dispatch: each call's fan-out to every client
-	// runs under this lock (clients notified in parallel within one call,
-	// but one call's dispatch fully finishes before the next call's
-	// begins), so a later call's UI push can never reach a client before
-	// an earlier call's and leave it showing stale popup/prompt contents
-	// bound to an already-replaced server-side callback.
-	popupDispatchMu sync.Mutex
+	// popupPushes carries every popup and prompt push to the windows (show
+	// and hide alike), in the order the popup state above changed: they are
+	// queued under mu, by pushToWindowsLocked. A window that received them in
+	// another order would show a popup already closed, or the older of two,
+	// bound to a callback the server has replaced.
+	popupPushes serialq.Queue
 
 	// activeCtx tracks the most recently active client buffer for external tools.
 	activeCtxMu sync.RWMutex
@@ -410,7 +418,7 @@ func (s *editorService) handleExternalWrite(path string) {
 	// external-change detection for *every* file the server watches, not just
 	// its own: no further fsnotify event was processed until it answered.
 	//
-	// No dispatch-ordering lock (unlike the popup path's popupDispatchMu):
+	// No ordered queue (unlike the popup path's popupPushes):
 	// FileChanged carries no server-side state that a later call invalidates.
 	// Two writes to one file mean two reload prompts, and receiving them in
 	// either order is the same outcome.

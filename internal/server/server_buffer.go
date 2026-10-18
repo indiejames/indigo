@@ -10,6 +10,7 @@ import (
 
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/faultinject"
+	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
 	"github.com/indiejames/indigo/internal/syncevent"
 )
@@ -108,11 +109,12 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 		buf.MarkDirty()
 	}
 	s.buffers[bufID] = &bufferEntry{
+		id:            bufID,
 		buf:           buf,
 		clients:       map[uint64]struct{}{clientID: {}},
 		canonPath:     canonicalPath(path),
 		crlf:          crlf,
-		onApplied:     s.shiftBreakpoints,
+		onApplied:     s.afterApplyLocked,
 		sinceByClient: map[uint64]uint64{clientID: buf.Version()},
 	}
 	ver := buf.Version()
@@ -689,11 +691,10 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 	buf := entry.buf
 	applied, newVersion, rebaseErr := applyRebased(entry, buf, clientID, baseVersion, []document.Op{op})
 	path := buf.Path()
-	// Under s.mu, like applyServerOriginated's: breakpoint shifts depend on
-	// order, and two applies' shifts run after unlocking could land in the
-	// opposite order to their ops. (Safe to call here — the debug push it
-	// triggers runs on its own goroutine; see pushDebugChanged.)
-	s.shiftBreakpoints(entry.canonPath, applied)
+	// Under s.mu, like applyServerOriginated's: breakpoint shifts and plugin
+	// edit events depend on order, and two applies' run after unlocking could
+	// land in the opposite order to their ops.
+	s.afterApplyLocked(entry, applied)
 	s.mu.Unlock()
 
 	if rebaseErr != nil {
@@ -713,7 +714,6 @@ func (s *editorService) ApplyOp(_ context.Context, call proto.EditorService_appl
 
 	s.notifyLSP(lspChange, path)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
-	s.dispatchLineDeltas(bufID, path, applied)
 	return nil
 }
 
@@ -762,28 +762,61 @@ func applyRebased(entry *bufferEntry, buf *document.Buffer, clientID, baseVersio
 	return applied, newVersion, nil
 }
 
-// dispatchLineDeltas notifies plugin edit-event handlers for any op that
-// changed the line count.
-func (s *editorService) dispatchLineDeltas(bufID uint32, path string, ops []document.Op) {
+// afterApplyLocked is told about every op applied to entry's buffer, whoever
+// sent it, in the order they were applied. Callers hold s.mu.
+//
+// It moves breakpoints with their lines and queues the plugins' edit events.
+// The queue is what keeps those in order: they used to be sent on a goroutine
+// each, after s.mu was released, so two quick edits could reach a plugin
+// reversed and the positions it tracks (bookmarks) drifted. Edits the server
+// made itself (plugin and workspace edits, moving text between files) sent no
+// event at all. Queued rather than sent here, because the plugin manager takes
+// its own locks, and a plugin starting up holds one of them while calling back
+// into the server.
+func (s *editorService) afterApplyLocked(entry *bufferEntry, ops []document.Op) {
+	// Safe under s.mu: the debug push it triggers runs on its own goroutine;
+	// see pushDebugChanged.
+	s.shiftBreakpoints(entry.canonPath, ops)
+	ranges := editRanges(ops)
+	sink := s.editEventSink
+	if sink == nil && s.pluginMgr != nil {
+		sink = func(bufID uint32, path string, r plugin.EditRange) {
+			s.pluginMgr.DispatchEditEvent(context.Background(), bufID, path, r)
+		}
+	}
+	if len(ranges) == 0 || sink == nil {
+		return
+	}
+	bufID, path := entry.id, entry.buf.Path()
+	s.editEvents.Push(func() {
+		for _, r := range ranges {
+			sink(bufID, path, r)
+		}
+	})
+}
+
+// editRanges describes each op in ops that changed the line count as the range
+// it replaced, in its own coordinates: each op's are from just before it.
+func editRanges(ops []document.Op) []plugin.EditRange {
+	var out []plugin.EditRange
 	for _, op := range ops {
-		var lineDelta int32
-		var atLine uint32
 		switch op.Type {
 		case document.OpInsert:
 			if delta := int32(strings.Count(op.InsertText, "\n")); delta != 0 {
-				lineDelta = delta
-				atLine = uint32(op.InsertLine)
+				line, col := uint32(op.InsertLine), uint32(op.InsertCol)
+				out = append(out, plugin.EditRange{FromLine: line, FromCol: col, ToLine: line, ToCol: col, LineDelta: delta})
 			}
 		case document.OpDelete:
 			if delta := int32(op.FromLine - op.ToLine); delta != 0 { // negative: lines removed
-				lineDelta = delta
-				atLine = uint32(op.FromLine)
+				out = append(out, plugin.EditRange{
+					FromLine: uint32(op.FromLine), FromCol: uint32(op.FromCol),
+					ToLine: uint32(op.ToLine), ToCol: uint32(op.ToCol),
+					LineDelta: delta,
+				})
 			}
 		}
-		if lineDelta != 0 {
-			go s.pluginMgr.DispatchEditEvent(context.Background(), bufID, path, atLine, lineDelta)
-		}
 	}
+	return out
 }
 
 // ApplyOps applies a batch of ops back-to-back. The atomicity guarantee is at
@@ -855,7 +888,7 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 	applied, newVersion, rebaseErr := applyRebased(entry, buf, clientID, baseVersion, ops)
 	path := buf.Path()
 	content := buf.Content()
-	s.shiftBreakpoints(entry.canonPath, applied) // under s.mu: see ApplyOp
+	s.afterApplyLocked(entry, applied) // under s.mu: see ApplyOp
 	s.mu.Unlock()
 
 	if rebaseErr != nil {
@@ -900,7 +933,6 @@ func (s *editorService) ApplyOps(_ context.Context, call proto.EditorService_app
 	s.notifyLSP(lspChange, path)
 	s.lintMgr.RunOnEdit(path, content)
 	go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
-	s.dispatchLineDeltas(bufID, path, applied)
 	return nil
 }
 

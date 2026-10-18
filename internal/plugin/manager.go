@@ -20,6 +20,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/indiejames/indigo/internal/debuglog"
+	"github.com/indiejames/indigo/internal/serialq"
 	"github.com/indiejames/indigo/sdk"
 	"github.com/indiejames/indigo/sdk/pluginproto"
 )
@@ -211,16 +212,20 @@ type registeredPlugin struct {
 	// reaping completing instead of polling for the process to disappear.
 	reapDone <-chan struct{}
 
-	mu                   sync.RWMutex
-	keyBindings          map[string]pluginproto.KeyHandler
-	insertHooks          map[string]pluginproto.KeyHandler
-	commands             map[string]pluginproto.CommandHandler
-	menuActions          map[string]pluginproto.KeyHandler
-	bufHandler           pluginproto.BufferEventHandler
-	decorProvider        pluginproto.DecorationProvider
-	actionProvider       pluginproto.ActionProvider
-	completionProvider   pluginproto.CompletionProvider
-	editHandler          pluginproto.EditEventHandler
+	mu                 sync.RWMutex
+	keyBindings        map[string]pluginproto.KeyHandler
+	insertHooks        map[string]pluginproto.KeyHandler
+	commands           map[string]pluginproto.CommandHandler
+	menuActions        map[string]pluginproto.KeyHandler
+	bufHandler         pluginproto.BufferEventHandler
+	decorProvider      pluginproto.DecorationProvider
+	actionProvider     pluginproto.ActionProvider
+	completionProvider pluginproto.CompletionProvider
+	editHandler        pluginproto.EditEventHandler
+	// editQ delivers edit events to this plugin one at a time, in the order
+	// DispatchEditEvent was called. A goroutine per event let two quick
+	// edits arrive reversed, and the positions a plugin tracks drifted.
+	editQ                serialq.Queue
 	workspaceScanHandler pluginproto.WorkspaceScanHandler
 
 	// menuItems is this plugin's declared Command-menu tree, read once from
@@ -412,13 +417,7 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 		return fmt.Errorf("start plugin %s: %w", name, err)
 	}
 
-	if err := waitForSocket(sockPath, 5*time.Second); err != nil {
-		proc.Kill() //nolint:errcheck
-		proc.Wait() //nolint:errcheck
-		return fmt.Errorf("plugin %s socket: %w", name, err)
-	}
-
-	netConn, err := net.Dial("unix", sockPath)
+	netConn, err := dialSocket(sockPath, 5*time.Second)
 	if err != nil {
 		proc.Kill() //nolint:errcheck
 		proc.Wait() //nolint:errcheck
@@ -1149,9 +1148,18 @@ func writePluginCompletionItem(dst pluginproto.CompletionItem, src PluginComplet
 	return nil
 }
 
+// EditRange is one line-count-changing edit as plugins are told about it: the
+// range it replaced, in coordinates from before it (an insertion is the empty
+// range at its position), and the change in line count.
+type EditRange struct {
+	FromLine, FromCol uint32
+	ToLine, ToCol     uint32
+	LineDelta         int32
+}
+
 // DispatchEditEvent fires linesChanged on all plugins that registered an edit handler.
-// Called after any op that changes the document line count (lineDelta != 0).
-func (m *Manager) DispatchEditEvent(ctx context.Context, bufID uint32, filePath string, atLine uint32, lineDelta int32) {
+// Called after any op that changes the document line count (LineDelta != 0).
+func (m *Manager) DispatchEditEvent(ctx context.Context, bufID uint32, filePath string, r EditRange) {
 	m.mu.Lock()
 	plugins := m.plugins
 	m.mu.Unlock()
@@ -1162,7 +1170,9 @@ func (m *Manager) DispatchEditEvent(ctx context.Context, bufID uint32, filePath 
 		if !h.IsValid() {
 			continue
 		}
-		go func(h pluginproto.EditEventHandler) {
+		h = h.AddRef() // the queued job may run after the plugin re-registers
+		p.editQ.Push(func() {
+			defer h.Release()
 			tctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 			defer cancel()
 			fut, rel := h.LinesChanged(tctx, func(ps pluginproto.EditEventHandler_linesChanged_Params) error {
@@ -1170,13 +1180,17 @@ func (m *Manager) DispatchEditEvent(ctx context.Context, bufID uint32, filePath 
 				if err := ps.SetFilePath(filePath); err != nil {
 					return err
 				}
-				ps.SetAtLine(atLine)
-				ps.SetLineDelta(lineDelta)
+				ps.SetAtLine(r.FromLine)
+				ps.SetLineDelta(r.LineDelta)
+				ps.SetFromCol(r.FromCol)
+				ps.SetToLine(r.ToLine)
+				ps.SetToCol(r.ToCol)
+				ps.SetHasRange(true)
 				return nil
 			})
 			defer rel()
 			fut.Struct() //nolint:errcheck
-		}(h)
+		})
 	}
 }
 
@@ -1583,15 +1597,23 @@ func verifyBinaryHash(path, expected string) error {
 	return nil
 }
 
-func waitForSocket(path string, timeout time.Duration) error {
+// dialSocket connects to a plugin's socket, retrying until timeout. Waiting
+// for the socket file is not enough: it appears when the plugin binds, and
+// net.Listen listens only after that, so a dial in between is refused. Under
+// load a plugin can be descheduled in that gap, and the one dial that followed
+// the file's appearance failed and left the plugin unstarted.
+func dialSocket(path string, timeout time.Duration) (net.Conn, error) {
 	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
-			return nil
+	for {
+		conn, err := net.Dial("unix", path)
+		if err == nil {
+			return conn, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, err
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	return fmt.Errorf("timeout waiting for %s", path)
 }
 
 // BinaryStamps returns the binaries the successfully-started plugins were

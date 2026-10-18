@@ -260,7 +260,11 @@ interface InputPromptHandler {
     cancelled @1 () -> ();
 }
 interface EditEventHandler {
-    linesChanged @0 (bufId: UInt32, filePath: Text, atLine: UInt32, lineDelta: Int32) -> ();
+    # The edit replaced (atLine, fromCol)..(toLine, toCol), in coordinates from
+    # before it; an insertion is the empty range at its position. hasRange is
+    # false from an editor that predates the range fields.
+    linesChanged @0 (bufId: UInt32, filePath: Text, atLine: UInt32, lineDelta: Int32,
+                     fromCol: UInt32, toLine: UInt32, toCol: UInt32, hasRange: Bool) -> ();
 }
 interface WorkspaceScanHandler {
     scan @0 () -> ();

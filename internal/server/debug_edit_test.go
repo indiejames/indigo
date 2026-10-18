@@ -17,7 +17,7 @@ func TestServerOriginatedEditShiftsBreakpoints(t *testing.T) {
 	entry := &bufferEntry{
 		buf:       document.New(path, "a\nb\nc\n"),
 		canonPath: path,
-		onApplied: s.shiftBreakpoints,
+		onApplied: s.afterApplyLocked,
 	}
 	s.dbg.ToggleBreakpoint(path, 2)
 

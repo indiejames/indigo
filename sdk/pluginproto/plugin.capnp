@@ -334,7 +334,17 @@ interface InputPromptHandler {
 interface EditEventHandler {
   # linesChanged is fired after an edit at atLine that shifted the line count
   # by lineDelta (positive = lines inserted, negative = lines deleted).
-  linesChanged @0 (bufId :UInt32, filePath :Text, atLine :UInt32, lineDelta :Int32) -> ();
+  #
+  # When hasRange is set, the edit replaced the range from (atLine, fromCol) to
+  # (toLine, toCol), in coordinates from before the edit: a deletion covers that
+  # range, and an insertion is the empty range at its position. A line number
+  # and a count alone cannot tell joining line L to the next one from deleting
+  # line L, nor a line opened above L from one opened below it, and a plugin
+  # tracking positions needs to. hasRange is a flag rather than implied, because
+  # an editor from before these fields sends zeros, and column 0 is a real
+  # column.
+  linesChanged @0 (bufId :UInt32, filePath :Text, atLine :UInt32, lineDelta :Int32,
+                   fromCol :UInt32, toLine :UInt32, toCol :UInt32, hasRange :Bool) -> ();
 }
 
 # WorkspaceScanHandler is implemented by the plugin and called by the editor

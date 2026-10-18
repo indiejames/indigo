@@ -53,7 +53,10 @@ const (
 
 // bufState holds per-buffer diff and path.
 type bufState struct {
-	path       string
+	path string
+	// root is the repository path is in, or "" when it is in none. Per buffer,
+	// because one workspace can hold several repositories.
+	root       string
 	lines      map[int]lineKind // 1-indexed line number → kind
 	hunkStarts []int            // 1-indexed first line of each hunk, ascending
 
@@ -85,10 +88,14 @@ func isZeroHash(hash string) bool {
 
 // GitPlugin is the plugin state.
 type GitPlugin struct {
-	mu       sync.RWMutex
-	api      *sdk.Api
-	branch   string              // current branch name
-	repoRoot string              // absolute path to the git repo root
+	mu  sync.RWMutex
+	api *sdk.Api
+	// branches maps a repository root to its current branch name. There used
+	// to be one root, the first any buffer opened in, used for every buffer:
+	// in a workspace holding two repositories, the second one's edits and
+	// saves ran git in the first, found the file untracked, and cleared its
+	// markers.
+	branches map[string]string
 	bufs     map[uint32]bufState // bufID → state
 
 	// debounce: cancel pending change timers before replacing them
@@ -99,6 +106,7 @@ type GitPlugin struct {
 func (g *GitPlugin) Init(api *sdk.Api) sdk.Info {
 	g.api = api
 	g.bufs = map[uint32]bufState{}
+	g.branches = map[string]string{}
 	g.timers = map[uint32]*time.Timer{}
 
 	api.HandleBufferEvents(sdk.BufferHandlers{ //nolint:errcheck
@@ -125,10 +133,7 @@ func (g *GitPlugin) onOpen(bufID uint32, path string) {
 	root := findRepoRoot(path)
 	gitLog("onOpen bufID=%d path=%s root=%s", bufID, path, root)
 	g.mu.Lock()
-	if g.repoRoot == "" && root != "" {
-		g.repoRoot = root
-	}
-	g.bufs[bufID] = bufState{path: path, lines: map[int]lineKind{}}
+	g.bufs[bufID] = bufState{path: path, root: root, lines: map[int]lineKind{}}
 	g.mu.Unlock()
 
 	if root != "" {
@@ -146,10 +151,7 @@ func (g *GitPlugin) onChange(bufID uint32, path string) {
 		t.Stop()
 	}
 	g.timers[bufID] = time.AfterFunc(300*time.Millisecond, func() {
-		g.mu.RLock()
-		root := g.repoRoot
-		g.mu.RUnlock()
-		if root != "" {
+		if root := g.rootFor(bufID, path); root != "" {
 			g.updateDiffFromBuffer(bufID, path, root)
 		}
 	})
@@ -165,18 +167,7 @@ func (g *GitPlugin) onSave(bufID uint32, path string) {
 	}
 	g.timerMu.Unlock()
 
-	g.mu.RLock()
-	root := g.repoRoot
-	g.mu.RUnlock()
-	if root == "" {
-		root = findRepoRoot(path)
-		if root != "" {
-			g.mu.Lock()
-			g.repoRoot = root
-			g.mu.Unlock()
-		}
-	}
-	if root != "" {
+	if root := g.rootFor(bufID, path); root != "" {
 		g.updateDiff(bufID, path, root)
 		g.refreshBlameIfEnabled(bufID, path, root)
 	}
@@ -201,47 +192,52 @@ func (g *GitPlugin) pollLoop() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	var lastHead, lastIndex string
+	// Per repository: what HEAD held and when the index last changed, the last
+	// time each was looked at.
+	lastHead, lastIndex := map[string]string{}, map[string]string{}
 
 	for range ticker.C {
 		g.mu.RLock()
-		root := g.repoRoot
-		bufs := make(map[uint32]bufState, len(g.bufs))
+		byRoot := map[string]map[uint32]bufState{}
 		for k, v := range g.bufs {
-			bufs[k] = v
+			if v.root == "" {
+				continue
+			}
+			if byRoot[v.root] == nil {
+				byRoot[v.root] = map[uint32]bufState{}
+			}
+			byRoot[v.root][k] = v
 		}
 		g.mu.RUnlock()
 
-		if root == "" {
-			continue
-		}
-
-		// Check branch change.
-		headPath := filepath.Join(root, ".git", "HEAD")
-		headData, _ := os.ReadFile(headPath)
-		headStr := string(headData)
-		if headStr != lastHead {
-			lastHead = headStr
-			g.updateBranch(root)
-			// Branch changed → re-diff all open buffers.
-			for bufID, bs := range bufs {
-				g.updateDiff(bufID, bs.path, root)
-				g.refreshBlameIfEnabled(bufID, bs.path, root)
+		for root, bufs := range byRoot {
+			dir := gitDir(root)
+			// HEAD and the index are the worktree's own, in its git directory:
+			// for a linked worktree that is not <root>/.git.
+			headData, _ := os.ReadFile(filepath.Join(dir, "HEAD"))
+			var indexStr string
+			if info, err := os.Stat(filepath.Join(dir, "index")); err == nil {
+				indexStr = fmt.Sprintf("%d", info.ModTime().UnixNano())
+			}
+			headChanged := string(headData) != lastHead[root]
+			indexChanged := indexStr != lastIndex[root]
+			lastHead[root], lastIndex[root] = string(headData), indexStr
+			if headChanged {
+				g.updateBranch(root)
+			}
+			// A branch switch, git add, git reset and the like → re-diff.
+			if headChanged || indexChanged {
+				for bufID, bs := range bufs {
+					g.updateDiff(bufID, bs.path, root)
+					g.refreshBlameIfEnabled(bufID, bs.path, root)
+				}
 			}
 		}
-
-		// Check index change (git add, git reset, etc.).
-		indexPath := filepath.Join(root, ".git", "index")
-		indexInfo, err := os.Stat(indexPath)
-		var indexStr string
-		if err == nil {
-			indexStr = fmt.Sprintf("%d", indexInfo.ModTime().UnixNano())
-		}
-		if indexStr != lastIndex {
-			lastIndex = indexStr
-			for bufID, bs := range bufs {
-				g.updateDiff(bufID, bs.path, root)
-				g.refreshBlameIfEnabled(bufID, bs.path, root)
+		// Forget repositories no buffer is in any more.
+		for root := range lastHead {
+			if byRoot[root] == nil {
+				delete(lastHead, root)
+				delete(lastIndex, root)
 			}
 		}
 	}
@@ -262,9 +258,9 @@ func (g *GitPlugin) refreshBlameIfEnabled(bufID uint32, path, root string) {
 	g.api.RefreshDecorations(bufID)
 }
 
-// updateBranch reads .git/HEAD and stores the branch name.
+// updateBranch reads root's HEAD and stores its branch name.
 func (g *GitPlugin) updateBranch(root string) {
-	data, err := os.ReadFile(filepath.Join(root, ".git", "HEAD"))
+	data, err := os.ReadFile(filepath.Join(gitDir(root), "HEAD"))
 	if err != nil {
 		return
 	}
@@ -278,8 +274,20 @@ func (g *GitPlugin) updateBranch(root string) {
 		branch = s
 	}
 	g.mu.Lock()
-	g.branch = branch
+	g.branches[root] = branch
 	g.mu.Unlock()
+}
+
+// rootFor returns the repository bufID's file is in: the one recorded when it
+// opened, or, for a buffer the plugin has not seen open, path's own.
+func (g *GitPlugin) rootFor(bufID uint32, path string) string {
+	g.mu.RLock()
+	bs, ok := g.bufs[bufID]
+	g.mu.RUnlock()
+	if ok && bs.root != "" {
+		return bs.root
+	}
+	return findRepoRoot(path)
 }
 
 // clearLines zeroes the diff state for a buffer (no gutter markers shown).
@@ -437,7 +445,7 @@ func (g *GitPlugin) onToggleBlame(_ string, ctx sdk.KeyContext) sdk.KeyResponse 
 	turningOn := bs.blaming
 	path := bs.path
 	g.bufs[ctx.BufID] = bs
-	root := g.repoRoot
+	root := bs.root
 	g.mu.Unlock()
 	if root == "" {
 		root = findRepoRoot(path)
@@ -481,12 +489,7 @@ func (g *GitPlugin) onBlameDetails(_ string, ctx sdk.KeyContext) sdk.KeyResponse
 	if err != nil || path == "" {
 		return sdk.KeyResponse{Handled: true}
 	}
-	g.mu.RLock()
-	root := g.repoRoot
-	g.mu.RUnlock()
-	if root == "" {
-		root = findRepoRoot(path)
-	}
+	root := g.rootFor(ctx.BufID, path)
 	if root == "" {
 		g.api.ShowMessageTo(ctx.ClientID, "Not a git repository") //nolint:errcheck
 		return sdk.KeyResponse{Handled: true}
@@ -731,8 +734,8 @@ func gitLog(format string, args ...any) {
 // decorations is the pull-only callback invoked by the editor on each render frame.
 func (g *GitPlugin) decorations(bufID uint32, _ uint64, r sdk.Range) []sdk.Decoration {
 	g.mu.RLock()
-	branch := g.branch
 	bs, hasBuf := g.bufs[bufID]
+	branch := g.branches[bs.root]
 	var lineDiff map[int]lineKind
 	var blameData map[int]blameLine
 	var removedData map[int][]removedLine
@@ -1136,6 +1139,28 @@ func findRepoRoot(path string) string {
 		}
 		dir = parent
 	}
+}
+
+// gitDir returns root's git directory, where its HEAD and index live. That is
+// <root>/.git, except in a linked worktree (git worktree add), where .git is a
+// file reading "gitdir: <path>" that names the worktree's own directory under
+// the main repository. Reading <root>/.git/HEAD there found nothing, so a
+// worktree never showed a branch and its staging was never noticed.
+func gitDir(root string) string {
+	dotGit := filepath.Join(root, ".git")
+	data, err := os.ReadFile(dotGit)
+	if err != nil {
+		return dotGit // a directory, or nothing to read
+	}
+	dir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir:")
+	if !ok {
+		return dotGit
+	}
+	dir = strings.TrimSpace(dir)
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(root, dir)
+	}
+	return dir
 }
 
 // runGit runs a git command in the given working directory and returns stdout.

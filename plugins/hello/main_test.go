@@ -13,7 +13,7 @@ import (
 // must register H, announce itself, and answer H in normal mode.
 func TestHelloSaysHelloOnH(t *testing.T) {
 	bridge := plugintest.NewBridge()
-	m := plugintest.Start(t, ".", bridge)
+	m, _ := plugintest.Start(t, ".", bridge)
 
 	if !slices.Contains(bridge.Keys(), "H") {
 		t.Fatalf("registered keys = %q, want H", bridge.Keys())

@@ -341,7 +341,7 @@ func applyServerOriginated(entry *bufferEntry, excludeClientID uint64, ops ...do
 	}
 	broadcast(entry, excludeClientID, applied)
 	if entry.onApplied != nil {
-		entry.onApplied(entry.canonPath, applied)
+		entry.onApplied(entry, applied)
 	}
 	return version
 }
@@ -463,11 +463,11 @@ func (s *editorService) formatBuffer(bufID uint32) (applied []document.Op, noFor
 	}
 }
 
-// afterServerEdit tells plugins and line-delta listeners about ops the server
-// applied on its own account (a format), as ApplyOp does for a client's.
+// afterServerEdit tells plugins about ops the server applied on its own account
+// (a format), as ApplyOp does for a client's. Their line changes were already
+// queued by applyServerOriginated (see afterApplyLocked).
 func (s *editorService) afterServerEdit(bufID uint32, path string, applied []document.Op) {
 	if s.pluginMgr != nil {
 		go s.pluginMgr.DispatchBufferChange(context.Background(), bufID, path)
 	}
-	s.dispatchLineDeltas(bufID, path, applied)
 }

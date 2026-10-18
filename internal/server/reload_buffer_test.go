@@ -36,12 +36,11 @@ func newReloadTestService(t *testing.T, path, bufContent string, clientIDs ...ui
 				sinceByClient: map[uint64]uint64{},
 			},
 		},
-		recDir:      t.TempDir(),
-		lspMgr:      lsp.NewManager(dir, nil),
-		lintMgr:     &lint.Manager{},
-		pluginMgr:   &plugin.Manager{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		recDir:     t.TempDir(),
+		lspMgr:     lsp.NewManager(dir, nil),
+		lintMgr:    &lint.Manager{},
+		pluginMgr:  &plugin.Manager{},
+		dirWatches: make(map[string]int),
 	}
 	cl := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 	t.Cleanup(cl.Release)

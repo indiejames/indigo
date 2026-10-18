@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -184,10 +185,20 @@ func (m Model) resyncFromServer(failureCause string) tea.Cmd {
 	// renamed the buffer, but a possibly-stale path beats none.
 	knownPath := m.filePath
 	syncevent.Record("client", syncevent.ResyncStarted, bufID, knownPath, failureCause)
+	// Synchronously, in Update: from here no edit is sent until the snapshot
+	// is adopted. One sent in between could be applied after the snapshot was
+	// taken, leaving the server with text this window never shows.
+	q := m.sendQ
+	q.pauseForResync()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), resyncTimeout)
 		defer cancel()
-		content, version, generation, path, err := m.rpc.GetBufferSnapshot(ctx, bufID)
+		// An op popped before the pause is still being sent. The snapshot
+		// must come after the server has finished with it, so that it is
+		// either in the content adopted or was never applied at all. A
+		// timeout here is left to the snapshot call below to report.
+		_ = q.waitQuiet(ctx)
+		content, version, generation, path, err := m.rpc.ResyncBuffer(ctx, bufID)
 		if err != nil {
 			// The failure that actually reaches the user as "buffer may be out
 			// of sync with the server". Recorded for the same reason as above:
@@ -215,6 +226,37 @@ func opLineDelta(op document.Op) (atLine, delta int) {
 		return op.FromLine, -(op.ToLine - op.FromLine)
 	}
 	return 0, 0
+}
+
+// groupRecordCmd is the EditRecordMsg for an undo group just pushed onto
+// undoStack: one jump destination, where the group began, and one shift per op
+// that changed the line count, in the order they were applied. Every site that
+// opens a group of its own and commits it must send this, because applyOp
+// records nothing while a group is open — the multi-cursor delete and case
+// conversion once did not, and the jump list drifted after each.
+//
+// Per op rather than one shift from a net line count. A jump entry between two
+// of the group's edit points is moved by one and not the other, and a group
+// that adds a line in one place and removes one in another sums to zero. A net
+// count measured from the buffer is wrong in a second way: a remote op arriving
+// mid-session closes an insert group (see the updatesMsg handler), so the
+// buffer's difference also counts another client's line changes.
+//
+// The group holds the inverses, so each delta negates: a forward insert at line
+// L of N newlines is stored as a delete of L..L+N, whose opLineDelta is
+// (L, -N).
+func (m Model) groupRecordCmd(inverses []document.Op, before cursorSnapshot) tea.Cmd {
+	shifts := make([]LineShift, 0, len(inverses))
+	for _, inv := range inverses {
+		if al, d := opLineDelta(inv); d != 0 {
+			shifts = append(shifts, LineShift{AtLine: max(al, 0), Delta: -d})
+		}
+	}
+	fp, line, col := m.filePath, before.cursor.Line, before.cursor.Col
+	depth := len(m.undoStack)
+	return func() tea.Msg {
+		return EditRecordMsg{FilePath: fp, Line: line, Col: col, Shifts: shifts, UndoDepth: depth}
+	}
 }
 
 // applyOp records the inverse of op for undo, then applies op locally and
@@ -524,7 +566,11 @@ func (m Model) doSaveNow() tea.Cmd {
 	// is, not the version that was actually sent to the server. Capturing it
 	// here is what makes the handler's later comparison meaningful.
 	startVersion := m.buf.Version()
+	sent := m.sendQ.barrier()
 	return func() tea.Msg {
+		if err := awaitSent(sent); err != nil {
+			return saveFailedMsg{bufID: m.bufID, err: err}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := m.rpc.Save(ctx, m.bufID); err != nil {
@@ -534,10 +580,41 @@ func (m Model) doSaveNow() tea.Cmd {
 	}
 }
 
+// sendBarrierTimeout bounds how long a save or format waits for earlier edits
+// to reach the server. Each queued op has its own applyOpTimeout, so this only
+// matters when several are queued behind a slow server.
+const sendBarrierTimeout = 15 * time.Second
+
+// errEditsNotSent is returned when edits queued before a save or format were
+// discarded instead of sent — a failed send or a resync. Going ahead would
+// write or format content without them.
+var errEditsNotSent = errors.New("recent edits did not reach the server and the buffer is being resynced; nothing was done, try again")
+
+// awaitSent waits on a sendQueue barrier taken in Update. Called inside a
+// command, never in Update itself: the drain it waits for reports back
+// through Update, so blocking there would deadlock.
+func awaitSent(sent <-chan bool) error {
+	t := time.NewTimer(sendBarrierTimeout)
+	defer t.Stop()
+	select {
+	case ok := <-sent:
+		if !ok {
+			return errEditsNotSent
+		}
+		return nil
+	case <-t.C:
+		return errors.New("timed out waiting for recent edits to reach the server; nothing was done")
+	}
+}
+
 // doSaveAsNow writes the buffer to newPath via the server.
 func (m Model) doSaveAsNow(newPath string, thenClose bool) tea.Cmd {
 	startVersion := m.buf.Version() // see doSaveNow's comment on capturing this synchronously
+	sent := m.sendQ.barrier()
 	return func() tea.Msg {
+		if err := awaitSent(sent); err != nil {
+			return saveFailedMsg{bufID: m.bufID, err: err}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := m.rpc.SaveAs(ctx, m.bufID, newPath); err != nil {
@@ -594,7 +671,15 @@ func (m Model) doSaveAndClose() tea.Cmd {
 	if m.filePath == "" {
 		return func() tea.Msg { return saveAsPromptMsg{thenClose: true} }
 	}
+	sent := m.sendQ.barrier()
 	return func() tea.Msg {
+		// Most important here of all the barrier's callers: CloseBuffer frees
+		// the server's buffer and deletes its recovery file, so an edit that
+		// arrived after the save would not merely miss the file, it would be
+		// gone. On failure nothing is closed and the buffer stays open.
+		if err := awaitSent(sent); err != nil {
+			return errorMsg{err}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := m.rpc.Save(ctx, m.bufID); err != nil {

@@ -1,6 +1,6 @@
 name        = "indigo-git"
 version     = "0.2.0"
-sdk_version = "0.1.0"
+sdk_version = "0.1.1"
 description = "Git integration: branch/diff status, inline blame (alt+b), hunk nav (alt+n/alt+p), diff view."
 
 [[menu_item]]

@@ -198,7 +198,7 @@ func TestKindsCoversEveryDeclaredKind(t *testing.T) {
 		ApplyOpRejected, GenerationMismatch, StaleBase,
 		ResyncStarted, ResyncOK, ResyncFailed,
 		DuplicateOpsSkipped, StaleResponseDropped, SendFailed,
-		ExternalWriteNotified, BufferReloaded,
+		ExternalWriteNotified, BufferReloaded, EditLost,
 	}
 	if len(declared) != len(Kinds()) {
 		t.Fatalf("Kinds() has %d entries, %d constants are declared — they have drifted",

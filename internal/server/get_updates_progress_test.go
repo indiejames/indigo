@@ -4,7 +4,6 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
@@ -35,13 +34,12 @@ func TestGetUpdatesRecordsProgressOnBothReturnPaths(t *testing.T) {
 		sinceByClient: map[uint64]uint64{},
 	}
 	s := &editorService{
-		cfg:         &config.Config{},
-		buffers:     map[uint32]*bufferEntry{1: entry},
-		lspMgr:      lsp.NewManager(dir, nil),
-		lintMgr:     &lint.Manager{},
-		pluginMgr:   &plugin.Manager{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		cfg:        &config.Config{},
+		buffers:    map[uint32]*bufferEntry{1: entry},
+		lspMgr:     lsp.NewManager(dir, nil),
+		lintMgr:    &lint.Manager{},
+		pluginMgr:  &plugin.Manager{},
+		dirWatches: make(map[string]int),
 	}
 	cl := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 	defer cl.Release()

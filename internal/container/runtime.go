@@ -330,8 +330,8 @@ func ServerRunning(ctx context.Context, rt Runtime, id, workspaceDir string) (bo
 	return n > 0, err
 }
 
-// OtherWindowsAttached counts the windows attached to workspaceDir other than
-// the one identified by myToken.
+// OtherWindowsAttached counts the windows attached to the container other than
+// the one identified by myToken, whatever workspace each one has open.
 //
 // This is what makes quitting fast. The obvious question — "is the daemon still
 // running?" — cannot be answered usefully at the moment a window leaves,
@@ -343,27 +343,33 @@ func ServerRunning(ctx context.Context, rt Runtime, id, workspaceDir string) (bo
 // inside the container per window, each carrying its own token, so a window can
 // exclude itself and see immediately whether anyone else is there. No polling,
 // no grace period, and no guessing.
-func OtherWindowsAttached(ctx context.Context, rt Runtime, id, workspaceDir, myToken string) (int, error) {
+//
+// Every bridge counts, not only those for this window's workspace: the
+// question is whether stopping the *container* strands anybody, and one
+// container can serve several folders of one repository — a window opened on
+// the root and another on a subdirectory with its own server. Counting only
+// this workspace's bridges stopped the container under the other one.
+func OtherWindowsAttached(ctx context.Context, rt Runtime, id, myToken string) (int, error) {
 	if myToken == "" {
 		return 0, errors.New("no client token: cannot tell this window's bridge from another's")
 	}
-	// Bridges carry the workspace path; the daemon carries it too, hence the
-	// exclusion. Counting by token would be neater but a process list is all
-	// there is to go on.
+	// Counting by token would be neater but a process list is all there is to
+	// go on. A daemon's command line never carries the client flag; the
+	// exclusion is belt and braces.
 	n, err := rt.ProcessCount(ctx, id, "--client "+myToken, "")
 	if err != nil {
 		return 0, err
 	}
-	total, err := rt.ProcessCount(ctx, id, bridgeMarker(workspaceDir), "--daemon")
+	total, err := rt.ProcessCount(ctx, id, bridgeMarker, "--daemon")
 	if err != nil {
 		return 0, err
 	}
 	return total - n, nil
 }
 
-// bridgeMarker is what a bridge process's command line contains and a daemon's
-// does not — the workspace path immediately followed by the client flag.
-func bridgeMarker(workspaceDir string) string { return workspaceDir + " --client " }
+// bridgeMarker is what every bridge process's command line contains and a
+// daemon's does not: the workspace path followed by the client flag.
+const bridgeMarker = " --client "
 
 // warn reports a non-fatal problem, and does nothing when the caller did not
 // ask to hear about them.

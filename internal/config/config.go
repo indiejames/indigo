@@ -466,6 +466,12 @@ type Config struct {
 	DebugLaunches []DebugLaunch `toml:"debug"`
 	// DebugAdapters add or replace debuggers for languages other than Go.
 	DebugAdapters []DebugAdapter `toml:"debug_adapter"`
+	// DevcontainerAutoJoin makes a window started without --devcontainer join
+	// the workspace's dev container when an indigo session is already running
+	// inside it, instead of asking. Off by default: joining runs
+	// `devcontainer up` and moves the window's language servers, formatters
+	// and plugins into the container, which should be a choice the first time.
+	DevcontainerAutoJoin bool `toml:"devcontainer_auto_join"`
 }
 
 func defaults() *Config {

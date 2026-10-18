@@ -422,7 +422,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// client.RoutableMsg (updatesMsg, applyOpFailedMsg, savedMsg, savedAsMsg,
-	// discardRecoveryMsg, saveFailedMsg, discardRecoveryFailedMsg,
+	// discardRecoveryMsg, saveFailedMsg, discardRecoveryFailedMsg, bufferResyncMsg,
 	// highlightMsg — see their doc comments) must reach the specific buffer
 	// they're about, even when it isn't the active tab: the generic fallback
 	// below only ever dispatches to a.buffers[a.active], so a result for a

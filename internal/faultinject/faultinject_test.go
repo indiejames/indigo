@@ -21,9 +21,10 @@ func TestFaultInjectionIsCompiledOutByDefault(t *testing.T) {
 	FailNextApplyOps(5)
 	BumpGenerationOnNextApplies(5)
 	DropNextPollResponses(5)
+	SwallowNextApplyOps(5)
 
 	if !Enabled() {
-		if ShouldFailApplyOp() || ShouldBumpGeneration() || ShouldDropPoll() {
+		if ShouldFailApplyOp() || ShouldBumpGeneration() || ShouldDropPoll() || ShouldSwallowApplyOps() {
 			t.Fatal("faults fired in a build without -tags indigo_debug: a release " +
 				"binary can be made to corrupt a buffer")
 		}
@@ -43,6 +44,9 @@ func TestFaultInjectionIsCompiledOutByDefault(t *testing.T) {
 	}
 	if !ShouldDropPoll() {
 		t.Error("armed drop_poll did not fire under -tags indigo_debug")
+	}
+	if !ShouldSwallowApplyOps() {
+		t.Error("armed swallow_apply did not fire under -tags indigo_debug")
 	}
 }
 

@@ -55,6 +55,13 @@ func DropNextPollResponses(int) {}
 // ShouldDropPoll consumes one armed dropped poll.
 func ShouldDropPoll() bool { return false }
 
+// SwallowNextApplyOps makes the next n ApplyOps calls report success and
+// apply nothing — the shape of the apply_edits false-success reports.
+func SwallowNextApplyOps(int) {}
+
+// ShouldSwallowApplyOps consumes one armed swallowed batch.
+func ShouldSwallowApplyOps() bool { return false }
+
 // Reset disarms everything. Tests defer it so one case cannot arm another.
 func Reset() {}
 

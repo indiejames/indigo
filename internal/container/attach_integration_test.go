@@ -9,8 +9,11 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/document"
@@ -149,6 +152,53 @@ func (l localRuntime) ExecEnv(ctx context.Context, _ string, env, argv []string)
 	return &procStream{cmd: cmd, in: stdin, out: stdout, cancel: procCancel}, nil
 }
 
+// isolateSession keeps a test's session off the developer's own setup and makes
+// sure it has ended before the test's directories are removed.
+//
+// The binary Attach starts is only a bridge: it launches the real server as a
+// separate --daemon in its own session (Setsid, see cmd/indigo-server), out of
+// the process group that closing the stream kills. That daemon notices its last
+// client leave, shuts down and logs while doing so, and it used to be still
+// doing that while TempDir's cleanup removed INDIGO_LOG_DIR. debuglog reopens
+// the file for every line, so a late line recreated it mid-RemoveAll and the
+// test failed with "directory not empty". It also loaded the user's real
+// plugins, which made that shutdown slower under load. So: no plugins, and a
+// cleanup, registered after the log directory so it runs before that directory
+// is removed, that waits for the daemon serving workDir to exit. That wait is an
+// assertion as well: a daemon that outlives its last window is a leak.
+func isolateSession(t *testing.T, workDir string) {
+	t.Helper()
+	t.Setenv("INDIGO_PLUGINS_DIR", t.TempDir())
+	// The daemon's argv carries workDir, possibly as /private/var rather than
+	// /var, so match on its last two components, which TempDir makes unique.
+	tail := filepath.Join(filepath.Base(filepath.Dir(workDir)), filepath.Base(workDir))
+	t.Cleanup(func() {
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			out, err := exec.Command("ps", "-eo", "args").Output()
+			if err != nil {
+				t.Errorf("ps: %v", err)
+				return
+			}
+			running := false
+			for _, line := range strings.Split(string(out), "\n") {
+				if strings.Contains(line, "--daemon") && strings.Contains(line, tail) {
+					running = true
+					break
+				}
+			}
+			if !running {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Errorf("the server daemon for %s was still running 30s after its last client left", workDir)
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	})
+}
+
 // buildServer compiles cmd/indigo-server for this machine, the way
 // internal/plugin's integration test compiles its fixture plugin.
 func buildServer(t *testing.T) string {
@@ -172,6 +222,7 @@ func TestAttachServesARealClientOverASpawnedServer(t *testing.T) {
 	built := buildServer(t)
 
 	workDir := t.TempDir()
+	isolateSession(t, workDir)
 	path := filepath.Join(workDir, "a.txt")
 	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -202,6 +253,23 @@ func TestAttachServesARealClientOverASpawnedServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DialStream onto a spawned server: %v", err)
 	}
+	// The connection's teardown runs on its own goroutine in this process and
+	// logs as it goes, so it must finish before INDIGO_LOG_DIR is removed too.
+	// ServerDisconnectedMsg is dispatched after its last log line.
+	disconnected := make(chan struct{})
+	var once sync.Once
+	r.SetPushSender(func(msg tea.Msg) {
+		if _, ok := msg.(client.ServerDisconnectedMsg); ok {
+			once.Do(func() { close(disconnected) })
+		}
+	})
+	t.Cleanup(func() {
+		select {
+		case <-disconnected:
+		case <-time.After(10 * time.Second):
+			t.Error("the client connection did not notice the server go away")
+		}
+	})
 
 	bufID, content, version, _, generation, err := r.OpenFile(ctx, path)
 	if err != nil {
@@ -244,6 +312,7 @@ func TestAttachSkipsTheCopyAgainstRealFiles(t *testing.T) {
 	built := buildServer(t)
 	rt := localRuntime{root: t.TempDir()}
 	workDir := t.TempDir()
+	isolateSession(t, workDir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

@@ -60,7 +60,7 @@ func (b *Bookmarks) Init(api *sdk.Api) sdk.Info {
 
 	api.OnKey("alt+m", b.onAltM)                 //nolint:errcheck
 	api.OnMenuAction("bookmarks.open", b.onAltB) //nolint:errcheck
-	api.OnEditEvent(b.onEditEvent)               //nolint:errcheck
+	api.OnEdit(b.onEdit)                         //nolint:errcheck
 	api.Decorations(b.getDecorations)            //nolint:errcheck
 
 	return sdk.Info{Name: "bookmarks", Version: "0.2.0"}
@@ -84,7 +84,7 @@ func (b *Bookmarks) persistWorker() {
 //
 // This exists because a snapshot copy alone (see snapshotBookmarks) only
 // fixes the *data race* on b.bookmarks — it does nothing to order the actual
-// disk writes. onAltM's add/remove paths and onEditEvent's line-shift each
+// disk writes. onAltM's add/remove paths and onEdit's line-shift each
 // call persistBookmarks from their own goroutine (directly, or via `go`);
 // those file writes have no ordering guarantee relative to each other even
 // though their snapshots were taken in the correct mutation order under
@@ -98,7 +98,7 @@ func (b *Bookmarks) persistWorker() {
 // worker's own writes under exactly the high-contention conditions this
 // exists to guard against — deterministic ordering only holds if *every*
 // write goes through the single FIFO worker, no exceptions. Blocking here is
-// safe: onAltM/onEditEvent already run on their own dispatched goroutine
+// safe: onAltM/onEdit already run on their own dispatched goroutine
 // (the plugin manager calls HandleKey/DispatchEditEvent independently per
 // invocation), and persistWorker never does anything but drain this channel,
 // so it always eventually catches up.
@@ -181,37 +181,89 @@ func (b *Bookmarks) onAltB(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
 	return sdk.KeyResponse{Handled: true}
 }
 
-// onEditEvent adjusts bookmark line numbers when lines are inserted or deleted.
-func (b *Bookmarks) onEditEvent(bufID uint32, filePath string, atLine uint32, lineDelta int32) {
-	if lineDelta == 0 || filePath == "" {
+// onEdit adjusts bookmark line numbers when lines are inserted or deleted.
+func (b *Bookmarks) onEdit(e sdk.EditEvent) {
+	if e.LineDelta == 0 || e.FilePath == "" {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if shiftBookmarks(b.bookmarks, e) {
+		b.enqueuePersist(b.bookmarks)
+	}
+}
+
+// shiftBookmarks moves or suspends the active bookmarks in bmarks on e's file
+// to follow e, and reports whether any changed. A bookmark follows its line's
+// text, using the rules sdk.EditEvent documents:
+//   - An insertion moves its line's text from FromCol on down, so a bookmark on
+//     FromLine moves with it only when FromCol is 0: opening a line above a
+//     bookmarked line keeps the bookmark on that line's text, while pressing
+//     Enter at its end leaves it.
+//   - A deletion joins FromLine's head to ToLine's tail. Lines strictly between
+//     are gone, and FromLine is too when FromCol is 0. ToLine's bookmark moves
+//     up to the joined line, unless FromLine kept its own there: joining two
+//     lines (J, or backspace at the start of a line) keeps the first line's
+//     bookmark rather than suspending it, as the line-only event used to.
+//
+// Without a range (an editor older than these fields), FromLine and LineDelta
+// are all there is, and the old line-only rule applies.
+func shiftBookmarks(bmarks []bookmark, e sdk.EditEvent) bool {
 	changed := false
-	for i := range b.bookmarks {
-		bm := &b.bookmarks[i]
-		if bm.filePath != filePath || !bm.active {
-			continue
-		}
-		if lineDelta < 0 {
-			deletedTo := atLine + uint32(-lineDelta)
-			if bm.line >= deletedTo {
-				bm.line = uint32(int32(bm.line) + lineDelta)
-				changed = true
-			} else if bm.line >= atLine {
-				bm.active = false
-				changed = true
-			}
-		} else {
-			if bm.line > atLine {
-				bm.line += uint32(lineDelta)
-				changed = true
+	keptFromLine := false
+	if e.LineDelta < 0 && e.HasRange && e.FromCol > 0 {
+		for _, bm := range bmarks {
+			if bm.active && bm.filePath == e.FilePath && bm.line == e.FromLine {
+				keptFromLine = true
 			}
 		}
 	}
-	if changed {
-		b.enqueuePersist(b.bookmarks)
+	for i := range bmarks {
+		bm := &bmarks[i]
+		if bm.filePath != e.FilePath || !bm.active {
+			continue
+		}
+		before := *bm
+		switch {
+		case !e.HasRange:
+			shiftLineOnly(bm, e.FromLine, e.LineDelta)
+		case e.LineDelta > 0:
+			if bm.line > e.FromLine || (bm.line == e.FromLine && e.FromCol == 0) {
+				bm.line += uint32(e.LineDelta)
+			}
+		default:
+			switch {
+			case bm.line > e.ToLine:
+				bm.line = uint32(int32(bm.line) + e.LineDelta)
+			case bm.line == e.ToLine:
+				if keptFromLine {
+					bm.active = false
+				} else {
+					bm.line = e.FromLine
+				}
+			case bm.line > e.FromLine || (bm.line == e.FromLine && e.FromCol == 0):
+				bm.active = false
+			}
+		}
+		if *bm != before {
+			changed = true
+		}
+	}
+	return changed
+}
+
+// shiftLineOnly is the rule for an event with no range: lines from atLine on
+// are taken to be deleted, and insertions to come after atLine.
+func shiftLineOnly(bm *bookmark, atLine uint32, lineDelta int32) {
+	if lineDelta < 0 {
+		deletedTo := atLine + uint32(-lineDelta)
+		if bm.line >= deletedTo {
+			bm.line = uint32(int32(bm.line) + lineDelta)
+		} else if bm.line >= atLine {
+			bm.active = false
+		}
+	} else if bm.line > atLine {
+		bm.line += uint32(lineDelta)
 	}
 }
 
@@ -240,7 +292,7 @@ func (b *Bookmarks) getDecorations(bufID uint32, _ uint64, _ sdk.Range) []sdk.De
 
 // snapshotBookmarks returns an independent copy of bmarks. Caller must hold
 // b.mu. persistBookmarks does file I/O and must never be called on b.bookmarks
-// directly outside the lock: onEditEvent can run concurrently with onAltM
+// directly outside the lock: onEdit can run concurrently with onAltM
 // (the plugin manager dispatches HandleKey and DispatchEditEvent as
 // independent goroutines) and mutates bookmark elements in place via pointer,
 // so an unlocked persistBookmarks call ranging over the live slice would read
@@ -254,7 +306,7 @@ func snapshotBookmarks(bmarks []bookmark) []bookmark {
 // removeBookmarkAt removes the active bookmark at (filePath, line), if any, and
 // reports whether it did. The lookup and the removal share one critical
 // section: onAltM used to find the index, unlock, then lock again and remove by
-// that index, so a concurrent onEditEvent shift or another removal in between
+// that index, so a concurrent onEdit shift or another removal in between
 // could make it delete a different bookmark or slice out of range.
 func (b *Bookmarks) removeBookmarkAt(filePath string, line uint32) bool {
 	b.mu.Lock()

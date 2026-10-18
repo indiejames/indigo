@@ -9,8 +9,8 @@ import (
 
 // OpenFile asks the server to open path and returns (bufferID, content,
 // version, fromRecovery, generation). generation increments every time the
-// server replaces this buffer's object wholesale (format-on-save, SaveAs,
-// DiscardRecovery, explicit Format) — see GetUpdates.
+// server replaces this buffer's object wholesale (SaveAs, DiscardRecovery,
+// ReloadBuffer) — see GetUpdates.
 func (r *RPC) OpenFile(ctx context.Context, path string) (uint32, string, uint64, bool, uint64, error) {
 	fut, rel := r.svc.OpenFile(ctx, func(p proto.EditorService_openFile_Params) error {
 		p.SetClientId(r.clientID)
@@ -360,9 +360,27 @@ func (r *RPC) GetSyncState(ctx context.Context, bufID uint32) ([]BufferSyncState
 // generation, and path directly by ID. Used to resync after a failed
 // ApplyOp or a detected generation mismatch — unlike OpenFile, this doesn't
 // depend on the caller's own (possibly stale) remembered path.
+//
+// This is a read-only peek: it leaves the server's record of this client's
+// position in the op stream alone. A window adopting the result as its new
+// content must use ResyncBuffer instead.
 func (r *RPC) GetBufferSnapshot(ctx context.Context, bufID uint32) (content string, version, generation uint64, path string, err error) {
+	return r.bufferSnapshot(ctx, bufID, 0)
+}
+
+// ResyncBuffer is GetBufferSnapshot for a client that is replacing its copy of
+// bufID with the result and restarting its op numbering. The server resets its
+// per-client OT state for this client atomically with reading the content;
+// without that, its count of ops applied from this client stays at the old
+// value and the client retires new ops the server has never seen.
+func (r *RPC) ResyncBuffer(ctx context.Context, bufID uint32) (content string, version, generation uint64, path string, err error) {
+	return r.bufferSnapshot(ctx, bufID, r.clientID)
+}
+
+func (r *RPC) bufferSnapshot(ctx context.Context, bufID uint32, resyncClientID uint64) (content string, version, generation uint64, path string, err error) {
 	fut, rel := r.svc.GetBufferSnapshot(ctx, func(p proto.EditorService_getBufferSnapshot_Params) error {
 		p.SetBufferId(bufID)
+		p.SetResyncClientId(resyncClientID)
 		return nil
 	})
 	defer rel()

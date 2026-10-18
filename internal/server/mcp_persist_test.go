@@ -31,15 +31,14 @@ func TestMCPEditSequencePersistsToDisk(t *testing.T) {
 	}
 
 	s := &editorService{
-		cfg:         &config.Config{},
-		buffers:     map[uint32]*bufferEntry{},
-		fmtMgr:      format.NewManager(nil, &config.Config{}, dir),
-		lspMgr:      lsp.NewManager(dir, nil),
-		lintMgr:     &lint.Manager{},
-		pluginMgr:   &plugin.Manager{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
-		recDir:      t.TempDir(),
+		cfg:        &config.Config{},
+		buffers:    map[uint32]*bufferEntry{},
+		fmtMgr:     format.NewManager(nil, &config.Config{}, dir),
+		lspMgr:     lsp.NewManager(dir, nil),
+		lintMgr:    &lint.Manager{},
+		pluginMgr:  &plugin.Manager{},
+		dirWatches: make(map[string]int),
+		recDir:     t.TempDir(),
 	}
 	cl := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 	defer cl.Release()

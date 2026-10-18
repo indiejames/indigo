@@ -432,6 +432,21 @@ func (b *Buffer) OpsSinceAndVersion(sinceVersion uint64) ([]Op, uint64) {
 	return b.history[sinceVersion-b.historyBase:], b.version
 }
 
+// OpsAfter returns every op applied after version v, and false when some of
+// them have already been trimmed. Unlike OpsSince it never clamps: a caller
+// rebasing something computed at v needs all of them or none.
+func (b *Buffer) OpsAfter(v uint64) ([]Op, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if v >= b.version {
+		return nil, true
+	}
+	if v < b.historyBase {
+		return nil, false
+	}
+	return append([]Op(nil), b.history[v-b.historyBase:]...), true
+}
+
 // HistoryLen reports how many ops are currently retained (post-trim).
 func (b *Buffer) HistoryLen() int {
 	b.mu.RLock()

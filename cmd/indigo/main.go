@@ -115,6 +115,10 @@ func main() {
 			workDir = nearestExistingDir(filepath.Dir(absTarget))
 		}
 	}
+	// Before resolveWorkspace, since joining a running dev container session
+	// is decided by setting the same flag --devcontainer sets. Joining from a
+	// subdirectory moves the workspace up to the session's.
+	workDir = joinRunningDevcontainer(cfg, workDir)
 	// Attached to a container, everything past this point is in the
 	// container's names for things. See resolveWorkspace.
 	workDir, absTarget = resolveWorkspace(workDir, absTarget)

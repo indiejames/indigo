@@ -3,15 +3,17 @@ package main
 import (
 	"sync"
 	"testing"
+
+	"github.com/indiejames/indigo/sdk"
 )
 
 // TestBookmarksNoRaceBetweenEditEventAndPersist is a regression test for a
-// data race: onEditEvent mutates bookmark elements in place (bm.line,
+// data race: onEdit mutates bookmark elements in place (bm.line,
 // bm.active) while holding b.mu, but persistBookmarks used to be called on
 // the live b.bookmarks slice *after* releasing the lock (both from onAltM's
-// add/remove paths and from onEditEvent's own `go persistBookmarks(...)`).
+// add/remove paths and from onEdit's own `go persistBookmarks(...)`).
 // The plugin manager dispatches HandleKey (which drives onAltM) and
-// DispatchEditEvent (which drives onEditEvent) as independent goroutines, so
+// DispatchEditEvent (which drives onEdit) as independent goroutines, so
 // this is a genuine concurrent unsynchronized read/write, not theoretical:
 // rapid line inserts/deletes racing an alt+m toggle could read a torn
 // bookmark struct or race append's slice-header write, corrupting the
@@ -21,7 +23,7 @@ import (
 // lock and persists *that*, so persistBookmarks never touches memory a
 // concurrent mutation can still reach. Run with `go test -race`.
 //
-// Many bookmarks are seeded (rather than just one or two) so onEditEvent's
+// Many bookmarks are seeded (rather than just one or two) so onEdit's
 // mutation loop and persistBookmarks' read loop each run long enough to give
 // the race detector a realistic chance to observe two goroutines touching
 // the same element concurrently — a tiny dataset lets both loops finish
@@ -34,7 +36,7 @@ func TestBookmarksNoRaceBetweenEditEventAndPersist(t *testing.T) {
 	for i := range initial {
 		initial[i] = bookmark{filePath: "/tmp/a.go", line: uint32(i), active: true}
 	}
-	// persistCh/persistWorker must be set up — onEditEvent's changed path
+	// persistCh/persistWorker must be set up — onEdit's changed path
 	// calls enqueuePersist internally, which sends on persistCh; a nil
 	// channel send blocks forever, hanging the test.
 	b := &Bookmarks{bookmarks: initial, persistCh: make(chan []bookmark, 64)}
@@ -60,15 +62,15 @@ func TestBookmarksNoRaceBetweenEditEventAndPersist(t *testing.T) {
 	wg.Add(2)
 
 	// Simulates a burst of edits to the bookmarked file — the real
-	// onEditEvent, exercised exactly as DispatchEditEvent calls it. Alternates
+	// onEdit, exercised exactly as DispatchEditEvent calls it. Alternates
 	// insert/delete so bm.line and bm.active both get mutated repeatedly.
 	go func() {
 		defer wg.Done()
 		for i := 0; i < n; i++ {
 			if i%2 == 0 {
-				b.onEditEvent(1, "/tmp/a.go", 0, 1)
+				b.onEdit(sdk.EditEvent{BufID: 1, FilePath: "/tmp/a.go", LineDelta: 1, HasRange: true})
 			} else {
-				b.onEditEvent(1, "/tmp/a.go", 0, -1)
+				b.onEdit(sdk.EditEvent{BufID: 1, FilePath: "/tmp/a.go", ToLine: 1, LineDelta: -1, HasRange: true})
 			}
 		}
 	}()

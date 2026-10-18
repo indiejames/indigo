@@ -732,9 +732,9 @@ func (m Model) handleFixPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		idx := m.fixIdx
-		// LSP-edit fixes apply synchronously through the undo-aware batch
-		// path (they must mutate the model's undo stack and buffer);
-		// plugin fixes/replacements go through the async command as before.
+		// Fixes that are edits apply synchronously through the undo-aware
+		// batch path, since they must change this window's buffer and undo
+		// stack; only plugin callbacks go through the async command.
 		if idx >= 0 && idx < len(m.fixItems) && len(m.fixItems[idx].LspEdits) > 0 {
 			item := m.fixItems[idx]
 			m.fixItems = nil
@@ -747,6 +747,12 @@ func (m Model) handleFixPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return startExtractRenamePrompt(m, item.LspEdits, item.LspKind)
 			}
 			return applyLspEdits(m, item.LspEdits)
+		}
+		if idx >= 0 && idx < len(m.fixItems) && m.fixItems[idx].Replace != "" {
+			item := m.fixItems[idx]
+			m.fixItems = nil
+			m.fixDecor = nil
+			return applyBatch(m, replacementFixOps(item, m.clientID()))
 		}
 		cmd := m.applyFixCmd(idx)
 		m.fixItems = nil

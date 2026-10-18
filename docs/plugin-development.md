@@ -189,7 +189,7 @@ occasional keypress but wasteful to call from a decoration provider.
 ```toml
 name        = "todo"
 version     = "0.1.0"
-sdk_version = "0.1.0"
+sdk_version = "0.1.1"
 description = "Jump to and highlight TODO/FIXME comments"
 
 [binaries]

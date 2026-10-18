@@ -224,6 +224,13 @@ func (m *Manager) ensureOpened(c *Client, path string) {
 
 // DidChange notifies the appropriate language server of a content change.
 func (m *Manager) DidChange(path, content string) {
+	// Kept current for ensureOpened: a server that starts after edits were
+	// made must be opened with the text as it is, not as it was first read.
+	m.mu.Lock()
+	if _, ok := m.fileContent[path]; ok {
+		m.fileContent[path] = content
+	}
+	m.mu.Unlock()
 	if c := m.clientForPath(path); c != nil {
 		c.DidChange(path, content) //nolint:errcheck
 	}

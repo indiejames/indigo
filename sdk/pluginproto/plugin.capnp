@@ -46,7 +46,19 @@ interface EditorApi {
   showInputPrompt    @19 (title :Text, placeholder :Text, handler :InputPromptHandler)         -> ();
 
   # -- Editor effects --
-  applyEdit    @5 (bufId :UInt32, edits :List(TextEdit))                  -> ();
+  # applyEdit applies edits in order, each against the buffer as the ones
+  # before it left it. baseVersion is the buffer version the first edit's
+  # coordinates were computed against (readBuffer returns it alongside the
+  # content); edits made since are allowed for, so typing that lands while the
+  # plugin works does not move where its edit goes. It is read only when
+  # hasBaseVersion is set (0 is a real version); without it the edits are
+  # applied at their coordinates as given. Either way an edit naming a
+  # position the buffer does not have is refused rather than clamped.
+  # baseGeneration is the generation readBuffer returned with that version:
+  # a buffer replaced wholesale (a reload, a SaveAs) restarts its versions, so
+  # a version alone could name a point in the new buffer's history that has
+  # nothing to do with the text the plugin read. A mismatch is refused.
+  applyEdit    @5 (bufId :UInt32, edits :List(TextEdit), baseVersion :UInt64, hasBaseVersion :Bool, baseGeneration :UInt64) -> ();
   moveCursor   @6 (bufId :UInt32, pos :PluginPosition)                    -> ();
   openFile     @7 (path :Text, line :UInt32)                              -> ();
   # clientId 0 broadcasts to all clients; non-zero targets one client.
@@ -54,7 +66,7 @@ interface EditorApi {
   runProcess   @9 (cmd :Text, args :List(Text))                           -> (stdout :Text, stderr :Text, exitCode :Int32);
 
   # -- Document model queries --
-  readBuffer   @10 (bufId :UInt32)                                        -> (content :Text);
+  readBuffer   @10 (bufId :UInt32)                                        -> (content :Text, version :UInt64, generation :UInt64);
   readLines    @11 (bufId :UInt32, startLine :UInt32, endLine :UInt32)    -> (lines :List(Text));
   readRange    @12 (bufId :UInt32, from :PluginPosition, to :PluginPosition) -> (text :Text);
   wordAt       @13 (bufId :UInt32, pos :PluginPosition)                   -> (start :PluginPosition, end :PluginPosition, found :Bool);
@@ -322,7 +334,17 @@ interface InputPromptHandler {
 interface EditEventHandler {
   # linesChanged is fired after an edit at atLine that shifted the line count
   # by lineDelta (positive = lines inserted, negative = lines deleted).
-  linesChanged @0 (bufId :UInt32, filePath :Text, atLine :UInt32, lineDelta :Int32) -> ();
+  #
+  # When hasRange is set, the edit replaced the range from (atLine, fromCol) to
+  # (toLine, toCol), in coordinates from before the edit: a deletion covers that
+  # range, and an insertion is the empty range at its position. A line number
+  # and a count alone cannot tell joining line L to the next one from deleting
+  # line L, nor a line opened above L from one opened below it, and a plugin
+  # tracking positions needs to. hasRange is a flag rather than implied, because
+  # an editor from before these fields sends zeros, and column 0 is a real
+  # column.
+  linesChanged @0 (bufId :UInt32, filePath :Text, atLine :UInt32, lineDelta :Int32,
+                   fromCol :UInt32, toLine :UInt32, toCol :UInt32, hasRange :Bool) -> ();
 }
 
 # WorkspaceScanHandler is implemented by the plugin and called by the editor

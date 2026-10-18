@@ -26,11 +26,11 @@
 //   - [Api.HandleBufferEvents] — react to buffer open/change/save/close
 //   - [Api.Decorations] / [Api.DecorationsFull] — provide gutter/overlay/status-bar decorations
 //   - [Api.RegisterActionProvider] — contribute items to the F-key action popup
-//   - [Api.OnEditEvent] — track line-count-changing edits for position maintenance
+//   - [Api.OnEdit] — track line-count-changing edits for position maintenance ([Api.OnEditEvent] is the older, line-only form)
 //   - [Api.OnWorkspaceScan] — contribute diagnostics for files across the whole project, not just open buffers
 //
 // Editor effects (may be called at any time, including from callbacks):
-//   - [Api.ApplyEdit] — apply text edits to a buffer
+//   - [Api.ApplyEdit] / [Api.ApplyEditAt] — apply text edits to a buffer
 //   - [Api.MoveCursor] — move the cursor
 //   - [Api.OpenFile] — tell the editor to open a file
 //   - [Api.ShowMessageTo] / [Api.BroadcastMessage] — display text in the status bar
@@ -39,7 +39,7 @@
 //   - [Api.ShowInputPrompt] — show a modal text-input dialog and receive the text
 //
 // Document queries (safe to call from any goroutine):
-//   - [Api.ReadBuffer], [Api.ReadLines], [Api.ReadRange]
+//   - [Api.ReadBuffer], [Api.ReadBufferVersioned], [Api.ReadLines], [Api.ReadRange]
 //   - [Api.WordAt], [Api.BufferInfo], [Api.VisibleRange]
 //
 // # Decorations
@@ -67,15 +67,16 @@
 // Both callbacks run on the server after the popup is hidden. They may safely
 // call other Api methods (e.g. OpenFile, ShowPopup, ShowMessage).
 //
-// # Line tracking with OnEditEvent
+// # Line tracking with OnEdit
 //
-// [Api.OnEditEvent] registers a handler called after every edit that changes
-// a buffer's line count. This lets plugins adjust saved line numbers (e.g.
-// bookmark positions) as the buffer is edited without polling.
+// [Api.OnEdit] registers a handler called after every edit that changes a
+// buffer's line count, with the range the edit replaced. This lets plugins
+// adjust saved line numbers (e.g. bookmark positions) as the buffer is edited
+// without polling. See [EditEvent] for which lines survive an edit.
 //
-//	api.OnEditEvent(func(bufID uint32, filePath string, atLine uint32, lineDelta int32) {
-//	    // lineDelta > 0: lines were inserted after atLine
-//	    // lineDelta < 0: lines were deleted starting at atLine
+//	api.OnEdit(func(e sdk.EditEvent) {
+//	    // e.LineDelta > 0: an insertion at (e.FromLine, e.FromCol)
+//	    // e.LineDelta < 0: a deletion of (e.FromLine, e.FromCol)..(e.ToLine, e.ToCol)
 //	})
 package sdk
 
@@ -602,10 +603,46 @@ func (a *Api) CompletionsFull(h CompletionHandlers) error {
 
 // -- Editor effects --
 
-// ApplyEdit applies a sequence of text edits to a buffer.
+// ApplyEdit applies a sequence of text edits to a buffer, each against the
+// buffer as the edits before it left it.
+//
+// The coordinates are used as given, so text typed between the plugin reading
+// the buffer and this call arriving shifts where the edit lands. Prefer
+// [Api.ApplyEditAt] with the version from [Api.ReadBufferVersioned], which
+// allows for it.
 func (a *Api) ApplyEdit(bufID uint32, edits []TextEdit) error {
+	return a.applyEdit(bufID, BufferVersion{}, false, edits)
+}
+
+// BufferVersion identifies one state of a buffer's text, as returned by
+// [Api.ReadBufferVersioned]. Pass it back unchanged to [Api.ApplyEditAt].
+//
+// It is more than a counter: a buffer the editor replaces wholesale (reloaded
+// from disk, or saved under a new name) restarts its count, and the editor
+// tells the two apart by a generation carried alongside.
+type BufferVersion struct {
+	version, generation uint64
+}
+
+// ApplyEditAt is [Api.ApplyEdit] for edits computed against version at of
+// the buffer, as returned by [Api.ReadBufferVersioned]. The
+// editor moves the edits past whatever changed the buffer since, the way it
+// does for an edit from another window, so they land on the text they were
+// computed against. It is refused if the buffer no longer has the history to
+// do that (it was replaced since, or the version is too old): read it again.
+//
+// An edit naming a position the buffer does not have is refused with an
+// error rather than clamped, either way.
+func (a *Api) ApplyEditAt(bufID uint32, at BufferVersion, edits []TextEdit) error {
+	return a.applyEdit(bufID, at, true, edits)
+}
+
+func (a *Api) applyEdit(bufID uint32, at BufferVersion, rebase bool, edits []TextEdit) error {
 	fut, rel := a.api.ApplyEdit(context.Background(), func(p pluginproto.EditorApi_applyEdit_Params) error {
 		p.SetBufId(bufID)
+		p.SetBaseVersion(at.version)
+		p.SetBaseGeneration(at.generation)
+		p.SetHasBaseVersion(rebase)
 		list, err := p.NewEdits(int32(len(edits)))
 		if err != nil {
 			return err
@@ -728,6 +765,23 @@ func (a *Api) ReadBuffer(bufID uint32) (string, error) {
 		return "", err
 	}
 	return res.Content()
+}
+
+// ReadBufferVersioned returns the full text content of bufID and the buffer
+// version it is the content of, read together. Pass the version to
+// [Api.ApplyEditAt] with edits computed from the content.
+func (a *Api) ReadBufferVersioned(bufID uint32) (content string, version BufferVersion, err error) {
+	fut, rel := a.api.ReadBuffer(context.Background(), func(p pluginproto.EditorApi_readBuffer_Params) error {
+		p.SetBufId(bufID)
+		return nil
+	})
+	defer rel()
+	res, err := fut.Struct()
+	if err != nil {
+		return "", BufferVersion{}, err
+	}
+	content, err = res.Content()
+	return content, BufferVersion{version: res.Version(), generation: res.Generation()}, err
 }
 
 // ReadLines returns lines [startLine, endLine) of bufID (0-based, exclusive end).
@@ -1400,7 +1454,45 @@ func (a *Api) ShowInputPrompt(title, placeholder string, onConfirm func(text str
 //   - filePath: absolute path of the buffer's file
 //   - atLine: the first line that was affected (0-based)
 //   - lineDelta: positive = lines were inserted, negative = lines were deleted
+//
+// It cannot tell joining line atLine to the next one from deleting it, nor a
+// line opened above atLine from one opened below it. A plugin tracking
+// positions should use [Api.OnEdit], which also reports the columns.
 func (a *Api) OnEditEvent(handler func(bufID uint32, filePath string, atLine uint32, lineDelta int32)) error {
+	return a.OnEdit(func(e EditEvent) {
+		handler(e.BufID, e.FilePath, e.FromLine, e.LineDelta)
+	})
+}
+
+// EditEvent describes one edit that changed a buffer's line count.
+//
+// The edit replaced the range (FromLine, FromCol) to (ToLine, ToCol), in
+// coordinates from before it: a deletion covers that range, and an insertion
+// is the empty range at its position. LineDelta is the change in line count,
+// positive for lines inserted. Columns count runes.
+//
+// A deletion leaves one line made of FromLine's text before FromCol and
+// ToLine's text after ToCol. So line FromLine keeps its identity when FromCol
+// is above 0, the lines strictly between are gone, and ToLine's remainder moves
+// up to FromLine. An insertion moves line FromLine's text from FromCol onward
+// down LineDelta lines: the whole line when FromCol is 0.
+//
+// HasRange is false when the editor predates these fields. Then only FromLine
+// and LineDelta are meaningful, and the columns and ToLine are zero.
+type EditEvent struct {
+	BufID    uint32
+	FilePath string
+
+	FromLine, FromCol uint32
+	ToLine, ToCol     uint32
+	LineDelta         int32
+	HasRange          bool
+}
+
+// OnEdit registers handler to be called after every edit that changes the line
+// count of a buffer, with the edit's range. See [EditEvent] for what the range
+// says about which lines survive.
+func (a *Api) OnEdit(handler func(EditEvent)) error {
 	srv := pluginproto.EditEventHandler_ServerToClient(&editEventHandlerServer{fn: handler})
 	fut, rel := a.api.RegisterEditHandler(context.Background(), func(p pluginproto.EditorApi_registerEditHandler_Params) error {
 		return p.SetHandler(srv)
@@ -1457,14 +1549,21 @@ func (s *inputPromptHandlerServer) Cancelled(_ context.Context, call pluginproto
 }
 
 type editEventHandlerServer struct {
-	fn func(bufID uint32, filePath string, atLine uint32, lineDelta int32)
+	fn func(EditEvent)
 }
 
 func (s *editEventHandlerServer) LinesChanged(_ context.Context, call pluginproto.EditEventHandler_linesChanged) error {
 	args := call.Args()
 	filePath, _ := args.FilePath()
 	if s.fn != nil {
-		s.fn(args.BufId(), filePath, args.AtLine(), args.LineDelta())
+		e := EditEvent{
+			BufID: args.BufId(), FilePath: filePath,
+			FromLine: args.AtLine(), LineDelta: args.LineDelta(),
+		}
+		if args.HasRange() {
+			e.FromCol, e.ToLine, e.ToCol, e.HasRange = args.FromCol(), args.ToLine(), args.ToCol(), true
+		}
+		s.fn(e)
 	}
 	_, err := call.AllocResults()
 	return err

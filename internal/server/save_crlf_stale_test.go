@@ -16,11 +16,12 @@ import (
 	proto "github.com/indiejames/indigo/internal/proto"
 )
 
-// TestSaveUsesTheSwappedBuffersLineEndings covers FormatOnSave's stale branch:
-// when the buffer is replaced while the formatter runs, Save discards the
-// formatted result and writes the buffer's current content — and must write it
-// with the *current* buffer's line endings, not the ones it read before
-// formatting. Here a reload swaps an LF buffer for a CRLF one mid-format.
+// TestSaveUsesTheSwappedBuffersLineEndings covers FormatOnSave when the buffer
+// is replaced while the formatter runs: the output describes a buffer that is
+// gone, so it is dropped and the swapped-in buffer formatted instead — and
+// Save must write it with the *current* buffer's line endings, not the ones
+// it read before formatting. Here a reload swaps an LF buffer for a CRLF one
+// mid-format.
 func TestSaveUsesTheSwappedBuffersLineEndings(t *testing.T) {
 	dir := t.TempDir()
 	startedPath := filepath.Join(dir, "started")
@@ -32,14 +33,13 @@ func TestSaveUsesTheSwappedBuffersLineEndings(t *testing.T) {
 		},
 	}
 	s := &editorService{
-		cfg:         cfg,
-		buffers:     map[uint32]*bufferEntry{1: {buf: document.New(filePath, "hello\n")}},
-		fmtMgr:      format.NewManager(nil, cfg, dir),
-		lspMgr:      &lsp.Manager{},
-		lintMgr:     &lint.Manager{},
-		pluginMgr:   &plugin.Manager{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		cfg:        cfg,
+		buffers:    map[uint32]*bufferEntry{1: {buf: document.New(filePath, "hello\n")}},
+		fmtMgr:     format.NewManager(nil, cfg, dir),
+		lspMgr:     &lsp.Manager{},
+		lintMgr:    &lint.Manager{},
+		pluginMgr:  &plugin.Manager{},
+		dirWatches: make(map[string]int),
 	}
 	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 
@@ -81,7 +81,7 @@ func TestSaveUsesTheSwappedBuffersLineEndings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "hi\r\n"; string(got) != want {
+	if want := "HI\r\n"; string(got) != want {
 		t.Errorf("saved %q, want %q — the swapped-in buffer's CRLF endings were not used", got, want)
 	}
 }

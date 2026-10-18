@@ -156,6 +156,40 @@ func (d Docker) ProcessCount(ctx context.Context, id, contains, excluding string
 	return n, nil
 }
 
+// ServerWorkspaces lists the workspace of every indigo server daemon running
+// in the container — the path after `--daemon` on its command line, which is
+// the whole of the rest of it.
+//
+// A list rather than a ProcessCount per candidate, because a count can only
+// test for a substring: "--daemon /workspaces/api" also matches the server
+// for /workspaces/api2 and for /workspaces/api/web. The marker travels in the
+// environment for the reason ProcessCount gives: in the command line, the
+// probe would find itself.
+func (d Docker) ServerWorkspaces(ctx context.Context, id string) ([]string, error) {
+	const script = `ps -eo args 2>/dev/null | awk '` +
+		`{ p = index($0, ENVIRON["INDIGO_MATCH"]); ` +
+		`if (p) print substr($0, p + length(ENVIRON["INDIGO_MATCH"])) }'`
+	env := []string{"INDIGO_MATCH=" + daemonMarker}
+	out, err := d.output(ctx, execArgs(id, d.User, env, []string{"/bin/sh", "-c", script})...)
+	if err != nil {
+		return nil, err
+	}
+	return parseServerWorkspaces(out), nil
+}
+
+// daemonMarker precedes the workspace on a server daemon's command line.
+const daemonMarker = "--daemon "
+
+func parseServerWorkspaces(out string) []string {
+	var dirs []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			dirs = append(dirs, line)
+		}
+	}
+	return dirs
+}
+
 // env gives a spawned docker its own directory on PATH, so it can find the
 // credential helpers that sit beside it. See container.childEnv.
 func (d Docker) env() []string {

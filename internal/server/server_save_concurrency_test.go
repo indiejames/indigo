@@ -38,12 +38,11 @@ func TestSaveDoesNotBlockApplyOp(t *testing.T) {
 		buffers: map[uint32]*bufferEntry{
 			1: {buf: document.New(filePath, "hello\n")},
 		},
-		fmtMgr:      fmtMgr,
-		lspMgr:      &lsp.Manager{},
-		lintMgr:     &lint.Manager{},
-		pluginMgr:   &plugin.Manager{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		fmtMgr:     fmtMgr,
+		lspMgr:     &lsp.Manager{},
+		lintMgr:    &lint.Manager{},
+		pluginMgr:  &plugin.Manager{},
+		dirWatches: make(map[string]int),
 	}
 	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 
@@ -99,13 +98,11 @@ func TestSaveDoesNotBlockApplyOp(t *testing.T) {
 	}
 }
 
-// TestSaveDiscardsStaleFormatResultOnConcurrentEdit is Save's counterpart to
-// TestFormatDiscardsStaleResultOnConcurrentEdit: format-on-save formats the
-// buffer outside the lock, which can take a while. Without a staleness
-// check on the result (and without re-reading the buffer's current content
-// before writing to disk), a keystroke's ApplyOp landing while formatting
-// is in flight gets silently clobbered both in memory and on disk.
-func TestSaveDiscardsStaleFormatResultOnConcurrentEdit(t *testing.T) {
+// TestSaveKeepsConcurrentEditWhileFormatting is Save's counterpart to
+// TestFormatKeepsConcurrentEdit: format-on-save formats the buffer outside
+// the lock, which can take a while. A keystroke's ApplyOp landing meanwhile
+// must survive in memory and on disk, and the formatting must too.
+func TestSaveKeepsConcurrentEditWhileFormatting(t *testing.T) {
 	dir := t.TempDir()
 	startedPath := filepath.Join(dir, "started")
 	filePath := filepath.Join(dir, "x.slow")
@@ -124,12 +121,11 @@ func TestSaveDiscardsStaleFormatResultOnConcurrentEdit(t *testing.T) {
 		buffers: map[uint32]*bufferEntry{
 			1: {buf: document.New(filePath, "hello\n")},
 		},
-		fmtMgr:      fmtMgr,
-		lspMgr:      &lsp.Manager{},
-		lintMgr:     &lint.Manager{},
-		pluginMgr:   &plugin.Manager{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		fmtMgr:     fmtMgr,
+		lspMgr:     &lsp.Manager{},
+		lintMgr:    &lint.Manager{},
+		pluginMgr:  &plugin.Manager{},
+		dirWatches: make(map[string]int),
 	}
 	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 
@@ -180,16 +176,16 @@ func TestSaveDiscardsStaleFormatResultOnConcurrentEdit(t *testing.T) {
 		t.Fatalf("Save errored: %v", err)
 	}
 
-	const want = "hello world\n"
+	const want = "HELLO world\n"
 	if got := s.buffers[1].buf.Content(); got != want {
-		t.Fatalf("buffer content = %q, want %q — the concurrent insert must survive Save's stale (pre-edit) format result", got, want)
+		t.Fatalf("buffer content = %q, want %q — both the concurrent insert and the formatting must survive", got, want)
 	}
 	diskContent, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("reading saved file: %v", err)
 	}
 	if string(diskContent) != want {
-		t.Fatalf("disk content = %q, want %q — Save must write the buffer's current content, not the stale formatted result", string(diskContent), want)
+		t.Fatalf("disk content = %q, want %q — Save must write the buffer's current content", string(diskContent), want)
 	}
 	if s.buffers[1].buf.Dirty() {
 		t.Error("buffer should be marked clean: what's on disk matches the buffer's content at the time SetClean ran")
@@ -211,11 +207,10 @@ func TestSaveAsHappyPath(t *testing.T) {
 		buffers: map[uint32]*bufferEntry{
 			1: {buf: document.New(oldPath, "package main\n"), canonPath: canonicalPath(oldPath)},
 		},
-		lspMgr:      lsp.NewManager(dir, nil),
-		lintMgr:     &lint.Manager{},
-		pluginMgr:   &plugin.Manager{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		lspMgr:     lsp.NewManager(dir, nil),
+		lintMgr:    &lint.Manager{},
+		pluginMgr:  &plugin.Manager{},
+		dirWatches: make(map[string]int),
 	}
 	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/lint"
@@ -60,11 +59,10 @@ func TestLspEditsForURINilEditOrNoMatch(t *testing.T) {
 // no corresponding buffer, matching every other bufId-keyed handler.
 func TestLspOrganizeImportsUnknownBuffer(t *testing.T) {
 	s := &editorService{
-		buffers:     map[uint32]*bufferEntry{},
-		lspMgr:      lsp.NewManager(t.TempDir(), nil),
-		lintMgr:     &lint.Manager{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		buffers:    map[uint32]*bufferEntry{},
+		lspMgr:     lsp.NewManager(t.TempDir(), nil),
+		lintMgr:    &lint.Manager{},
+		dirWatches: make(map[string]int),
 	}
 	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 
@@ -89,10 +87,9 @@ func TestLspOrganizeImportsNoLanguageServerReturnsEmpty(t *testing.T) {
 		buffers: map[uint32]*bufferEntry{
 			1: {buf: document.New(path, "package main\n"), canonPath: canonicalPath(path)},
 		},
-		lspMgr:      lsp.NewManager(dir, nil),
-		lintMgr:     &lint.Manager{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		lspMgr:     lsp.NewManager(dir, nil),
+		lintMgr:    &lint.Manager{},
+		dirWatches: make(map[string]int),
 	}
 	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 

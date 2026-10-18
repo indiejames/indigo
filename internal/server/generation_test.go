@@ -4,7 +4,6 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
@@ -31,11 +30,10 @@ func TestSaveAsBumpsGenerationAndGetUpdatesReflectsIt(t *testing.T) {
 		buffers: map[uint32]*bufferEntry{
 			1: {buf: document.New(oldPath, "package main\n"), canonPath: canonicalPath(oldPath)},
 		},
-		lspMgr:      lsp.NewManager(dir, nil),
-		lintMgr:     &lint.Manager{},
-		pluginMgr:   &plugin.Manager{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		lspMgr:     lsp.NewManager(dir, nil),
+		lintMgr:    &lint.Manager{},
+		pluginMgr:  &plugin.Manager{},
+		dirWatches: make(map[string]int),
 	}
 	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 
@@ -122,18 +120,13 @@ func TestGetBufferSnapshotUnknownBufferErrors(t *testing.T) {
 	}
 }
 
-// TestFormatBumpsGenerationAndReturnsIt is a regression test: Format is one
-// of the four sites that wholesale-swaps entry.buf (alongside SaveAs,
-// DiscardRecovery, and Save's format-on-save branch — see this file's
-// other tests), but unlike those, its capnp result carried no generation
-// field at all until this fix. A client that formats its own buffer and
-// applies the returned content locally had no way to update its remembered
-// generation, so its very next GetUpdates poll would see the server's
-// bumped value, mistake its own change for a foreign swap, and trigger an
-// unnecessary resync (surfaced to the user as a "Buffer resynced from
-// server" severe-error modal). Format must report the post-swap
-// generation, matching SaveAs/DiscardRecovery/GetUpdates/GetBufferSnapshot.
-func TestFormatBumpsGenerationAndReturnsIt(t *testing.T) {
+// TestFormatAppliesOpsWithoutASwap: Format used to replace the buffer with
+// the formatter's output and bump the generation, which made every client
+// resync and refused every op computed against the old buffer — edits typed
+// while the formatter ran were lost. It now applies the output as ops: the
+// generation stays put, the version advances, and the edits reach clients
+// through their queues like any other server-side edit.
+func TestFormatAppliesOpsWithoutASwap(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.go")
 
@@ -147,12 +140,11 @@ func TestFormatBumpsGenerationAndReturnsIt(t *testing.T) {
 		buffers: map[uint32]*bufferEntry{
 			1: {buf: document.New(path, "hello\n")},
 		},
-		fmtMgr:      format.NewManager(nil, cfg, dir),
-		lspMgr:      lsp.NewManager(dir, nil),
-		lintMgr:     &lint.Manager{},
-		pluginMgr:   &plugin.Manager{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		fmtMgr:     format.NewManager(nil, cfg, dir),
+		lspMgr:     lsp.NewManager(dir, nil),
+		lintMgr:    &lint.Manager{},
+		pluginMgr:  &plugin.Manager{},
+		dirWatches: make(map[string]int),
 	}
 	client := proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1})
 
@@ -172,11 +164,14 @@ func TestFormatBumpsGenerationAndReturnsIt(t *testing.T) {
 	if !res.Changed() {
 		t.Fatal("test setup: expected a change (tr a-z A-Z uppercases \"hello\\n\") — check the fake formatter command")
 	}
-	if s.buffers[1].generation != 1 {
-		t.Fatalf("entry.generation = %d, want 1 after Format's buffer swap", s.buffers[1].generation)
+	if g := s.buffers[1].generation; g != 0 || res.Generation() != 0 {
+		t.Fatalf("generation = %d (response %d), want 0: Format must not swap the buffer", g, res.Generation())
 	}
-	if res.Generation() != 1 {
-		t.Errorf("Format response generation = %d, want 1 (matching entry.generation)", res.Generation())
+	if got := s.buffers[1].buf.Content(); got != "HELLO\n" {
+		t.Fatalf("buffer = %q, want the formatted text", got)
+	}
+	if s.buffers[1].buf.Version() == 0 {
+		t.Fatal("version did not advance: the output was not applied as ops")
 	}
 }
 

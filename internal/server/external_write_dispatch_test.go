@@ -65,8 +65,7 @@ func TestHandleExternalWriteDoesNotBlockOnOneWedgedClient(t *testing.T) {
 			1: {callback: wedged},
 			2: {callback: responsive},
 		},
-		savingPaths: make(map[string]time.Time),
-		dirWatches:  make(map[string]int),
+		dirWatches: make(map[string]int),
 	}
 
 	done := make(chan time.Duration, 1)

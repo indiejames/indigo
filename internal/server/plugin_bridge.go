@@ -23,15 +23,19 @@ func serverLog(format string, args ...any) {
 // pluginClientID is the client ID used for edits applied by plugins.
 const pluginClientID uint64 = 0
 
-// PluginReadBuffer implements plugin.ServerBridge.
-func (s *editorService) PluginReadBuffer(bufID uint32) (string, error) {
+// PluginReadBuffer implements plugin.ServerBridge. The content, version and
+// generation are read under s.mu, which every apply and every swap holds, so
+// they describe the same moment: a plugin passes the version back with edits
+// computed from the content, and a version off by one op would rebase them
+// wrongly.
+func (s *editorService) PluginReadBuffer(bufID uint32) (string, uint64, uint64, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	entry, ok := s.buffers[bufID]
-	s.mu.Unlock()
 	if !ok {
-		return "", fmt.Errorf("unknown buffer %d", bufID)
+		return "", 0, 0, fmt.Errorf("unknown buffer %d", bufID)
 	}
-	return entry.buf.Content(), nil
+	return entry.buf.Content(), entry.buf.Version(), entry.generation, nil
 }
 
 // PluginReadLines implements plugin.ServerBridge.
@@ -48,6 +52,10 @@ func (s *editorService) PluginReadLines(bufID uint32, start, end uint32) ([]stri
 	}
 	if end > count {
 		end = count
+	}
+	// Unsigned: a reversed range would make end-start wrap to ~4 billion.
+	if end <= start {
+		return nil, nil
 	}
 	lines := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
@@ -360,14 +368,14 @@ func (s *editorService) PluginDecorationsChanged(bufID uint32) {
 // PluginApplyEdit implements plugin.ServerBridge.
 // Applies a sequence of text edits to a buffer. Edits are applied as ops with
 // a reserved plugin client ID.
-func (s *editorService) PluginApplyEdit(bufID uint32, edits []plugin.TextEdit) error {
+func (s *editorService) PluginApplyEdit(bufID uint32, baseVersion, baseGeneration uint64, rebase bool, edits []plugin.TextEdit) error {
 	// The lock is held across the whole application, not just the lookup.
 	//
 	// Two reasons. It has to be, now that applying also queues the ops for
 	// delivery — broadcast writes entry.outgoing, which is guarded by s.mu. And
 	// it fixes the older problem this function was already an instance of: it
 	// read entry.buf after unlocking, so a concurrent wholesale swap (a
-	// format-on-save, a SaveAs) could have it apply a plugin's coordinates to a
+	// reload, a SaveAs) could have it apply a plugin's coordinates to a
 	// different buffer object than the one it looked up.
 	s.mu.Lock()
 	entry, ok := s.buffers[bufID]
@@ -402,8 +410,39 @@ func (s *editorService) PluginApplyEdit(bufID uint32, edits []plugin.TextEdit) e
 			})
 		}
 	}
+	// A plugin reads the buffer and edits it in separate calls, and whatever
+	// was typed in between moved the text its coordinates describe. Given the
+	// version it read, its edits are rebased past those ops the way a window's
+	// are, losing ties because they arrive after them. Without one (an older
+	// plugin) they are applied as given, which is how they always were.
+	if rebase {
+		// A wholesale swap restarts the version count, so baseVersion would
+		// name a point in the new buffer's history, and the edits would be
+		// rebased past ops that have nothing to do with the text they were
+		// computed against.
+		if baseGeneration != entry.generation {
+			s.mu.Unlock()
+			return fmt.Errorf("buffer %d was replaced since it was read (reloaded or saved under a new name); read the buffer again", bufID)
+		}
+		since, ok := entry.buf.OpsAfter(baseVersion)
+		if !ok || baseVersion > entry.buf.Version() {
+			s.mu.Unlock()
+			return fmt.Errorf("buffer %d: version %d is no longer available to rebase from; read the buffer again", bufID, baseVersion)
+		}
+		ops, _ = document.TransformSeq(ops, since, incomingOpLosesTies)
+	}
+	// Apply clamps a position that does not exist. A plugin's edit naming one
+	// was computed against other text, and is refused rather than put
+	// somewhere it did not ask for.
+	if err := entry.buf.CheckOps(ops); err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("buffer %d: %w", bufID, err)
+	}
 	// pluginClientID is never a real client id, so every client is delivered to.
 	applyServerOriginated(entry, pluginClientID, ops...)
+	// The language server is told like it is for any other edit; without
+	// this it kept the pre-edit text until the next keystroke.
+	s.notifyLSP(lspChange, entry.buf.Path())
 	s.mu.Unlock()
 	return nil
 }
@@ -524,7 +563,32 @@ func (s *editorService) PluginShowPopup(title string, items []plugin.PluginPopup
 	s.popupOnSelect = onSelect
 	s.popupOnCancel = onCancel
 	s.popupItems = items
-	callbacks := s.allCallbacks()
+	s.pushToWindowsLocked(func(ctx context.Context, cb proto.ClientCallback) {
+		fut, rel := cb.ShowPluginPopup(ctx, func(p proto.ClientCallback_showPluginPopup_Params) error {
+			if err := p.SetTitle(title); err != nil {
+				return err
+			}
+			list, err := p.NewItems(int32(len(items)))
+			if err != nil {
+				return err
+			}
+			for i, item := range items {
+				pi := list.At(i)
+				if err := pi.SetLabel(item.Label); err != nil {
+					return err
+				}
+				if err := pi.SetSublabel(item.Sublabel); err != nil {
+					return err
+				}
+				if err := pi.SetData(item.Data); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		defer rel()
+		fut.Struct() //nolint:errcheck
+	})
 	s.mu.Unlock()
 
 	if prevCancel != nil {
@@ -533,51 +597,29 @@ func (s *editorService) PluginShowPopup(title string, items []plugin.PluginPopup
 		// being replaced with no cleanup.
 		go prevCancel()
 	}
+}
 
-	// Fan out to all clients concurrently within this call (each with its
-	// own timeout, matching PluginDecorationsChanged so one slow/hung
-	// client can't block this call or the plugin's own ShowPopup RPC), but
-	// serialize the dispatch *across* calls via popupDispatchMu — see its
-	// doc comment — so an older popup's UI push can never land after a
-	// newer one's.
-	go func() {
-		s.popupDispatchMu.Lock()
-		defer s.popupDispatchMu.Unlock()
+// pushToWindowsLocked queues send to every window, behind every popup and
+// prompt push queued before it (see popupPushes). s.mu must be held, which is
+// what puts the pushes in the order the popup state changed; Push never
+// blocks, so holding it costs nothing. The windows are told in parallel, each
+// with its own deadline, so a wedged one delays only its own push and the
+// next push waits at most that long.
+func (s *editorService) pushToWindowsLocked(send func(ctx context.Context, cb proto.ClientCallback)) {
+	callbacks := s.allCallbacks()
+	s.popupPushes.Push(func() {
 		var wg sync.WaitGroup
 		for _, cb := range callbacks {
 			wg.Add(1)
-			go func(cb proto.ClientCallback) {
+			go func() {
 				defer wg.Done()
 				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 				defer cancel()
-				fut, rel := cb.ShowPluginPopup(ctx, func(p proto.ClientCallback_showPluginPopup_Params) error {
-					if err := p.SetTitle(title); err != nil {
-						return err
-					}
-					list, err := p.NewItems(int32(len(items)))
-					if err != nil {
-						return err
-					}
-					for i, item := range items {
-						pi := list.At(i)
-						if err := pi.SetLabel(item.Label); err != nil {
-							return err
-						}
-						if err := pi.SetSublabel(item.Sublabel); err != nil {
-							return err
-						}
-						if err := pi.SetData(item.Data); err != nil {
-							return err
-						}
-					}
-					return nil
-				})
-				defer rel()
-				fut.Struct() //nolint:errcheck
-			}(cb)
+				send(ctx, cb)
+			}()
 		}
 		wg.Wait()
-	}()
+	})
 }
 
 // PluginShowInputPrompt implements plugin.ServerBridge.
@@ -587,7 +629,16 @@ func (s *editorService) PluginShowInputPrompt(title, placeholder string, onConfi
 	prevCancel := s.inputOnCancel
 	s.inputOnConfirm = onConfirm
 	s.inputOnCancel = onCancel
-	callbacks := s.allCallbacks()
+	s.pushToWindowsLocked(func(ctx context.Context, cb proto.ClientCallback) {
+		fut, rel := cb.ShowInputPrompt(ctx, func(p proto.ClientCallback_showInputPrompt_Params) error {
+			if err := p.SetTitle(title); err != nil {
+				return err
+			}
+			return p.SetPlaceholder(placeholder)
+		})
+		defer rel()
+		fut.Struct() //nolint:errcheck
+	})
 	s.mu.Unlock()
 
 	if prevCancel != nil {
@@ -596,32 +647,6 @@ func (s *editorService) PluginShowInputPrompt(title, placeholder string, onConfi
 		// being replaced with no cleanup.
 		go prevCancel()
 	}
-
-	// Fan out to all clients concurrently within this call, serialized
-	// across calls via the same popupDispatchMu PluginShowPopup uses — see
-	// its doc comment.
-	go func() {
-		s.popupDispatchMu.Lock()
-		defer s.popupDispatchMu.Unlock()
-		var wg sync.WaitGroup
-		for _, cb := range callbacks {
-			wg.Add(1)
-			go func(cb proto.ClientCallback) {
-				defer wg.Done()
-				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-				defer cancel()
-				fut, rel := cb.ShowInputPrompt(ctx, func(p proto.ClientCallback_showInputPrompt_Params) error {
-					if err := p.SetTitle(title); err != nil {
-						return err
-					}
-					return p.SetPlaceholder(placeholder)
-				})
-				defer rel()
-				fut.Struct() //nolint:errcheck
-			}(cb)
-		}
-		wg.Wait()
-	}()
 }
 
 // PluginRunProcess implements plugin.ServerBridge.

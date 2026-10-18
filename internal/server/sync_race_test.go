@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
@@ -43,11 +42,10 @@ func newRaceTestService(t *testing.T, path string) (*editorService, proto.Editor
 				sinceByClient: map[uint64]uint64{},
 			},
 		},
-		lspMgr:      lsp.NewManager(filepath.Dir(path), nil),
-		lintMgr:     &lint.Manager{},
-		pluginMgr:   &plugin.Manager{},
-		dirWatches:  make(map[string]int),
-		savingPaths: make(map[string]time.Time),
+		lspMgr:     lsp.NewManager(filepath.Dir(path), nil),
+		lintMgr:    &lint.Manager{},
+		pluginMgr:  &plugin.Manager{},
+		dirWatches: make(map[string]int),
 	}
 	return s,
 		proto.EditorService_ServerToClient(&connSvc{editorService: s, connID: 1}),

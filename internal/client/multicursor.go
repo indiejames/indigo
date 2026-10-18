@@ -501,6 +501,7 @@ func deleteAllCursorSelections(m Model, copyToClipboard bool) (Model, tea.Cmd) {
 
 	if openedGroup && len(m.currentGroup) > 0 {
 		m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: snapBefore})
+		cmds = append(cmds, m.groupRecordCmd(m.currentGroup, snapBefore))
 		m.currentGroup = nil
 	}
 

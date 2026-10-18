@@ -15,6 +15,7 @@ import (
 	"github.com/indiejames/indigo/internal/config"
 	"github.com/indiejames/indigo/internal/document"
 	"github.com/indiejames/indigo/internal/rpcclient"
+	"github.com/indiejames/indigo/internal/syncevent"
 )
 
 // AllTools returns every tool definition.
@@ -292,6 +293,9 @@ type gotoFileInput struct {
 // ExecTool runs one tool by name against a live indigo server. It returns
 // the text result and whether that result is an error.
 func ExecTool(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDir, name string, rawInput json.RawMessage) (string, bool) {
+	if err := checkRelativePath(workDir, name, rawInput); err != nil {
+		return err.Error(), true
+	}
 	switch name {
 	case "read_file":
 		var in readFileInput
@@ -619,6 +623,59 @@ func execApplyEdits(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDi
 		return "edit rejected by user", true
 	}
 
+	res := applyEditOnce(ctx, rpc, abs, in)
+	if res.lost == "" {
+		return res.msg, res.isErr
+	}
+	if res.lost == "file" && sameExceptWhitespace(res.before, res.want) {
+		// Format-on-save undoing a whitespace-only edit looks exactly like a
+		// lost save, and is not one. The warning already says so.
+		return res.msg, res.isErr
+	}
+	// The server accepted the edit and it is not there. The cause is not known
+	// (see the known-tooling-issue notes in CLAUDE.md), so this records it where
+	// get_sync_events finds it — the prose log is pruned after a day — and
+	// tries once more from a fresh read. That cannot apply the edit twice:
+	// old_text has to be found again, and it would not be if the first attempt
+	// had landed after all.
+	syncevent.Recordf("agenttools", syncevent.EditLost, res.bufID, abs,
+		"apply_edits: edit missing from the %s; read %s, expected %s, found %s; retrying once",
+		res.lost, syncevent.ContentTag(res.before), syncevent.ContentTag(res.want), syncevent.ContentTag(res.got))
+	retry := applyEditOnce(ctx, rpc, abs, in)
+	if retry.lost != "" {
+		syncevent.Recordf("agenttools", syncevent.EditLost, retry.bufID, abs,
+			"apply_edits: retry lost too, from the %s; read %s, expected %s, found %s",
+			retry.lost, syncevent.ContentTag(retry.before), syncevent.ContentTag(retry.want), syncevent.ContentTag(retry.got))
+		return retry.msg, true
+	}
+	if retry.isErr {
+		return fmt.Sprintf("%s\n(The first attempt was accepted by the server but missing from the %s afterwards; "+
+			"this retry did not apply either. Re-read the file before trying again.)", retry.msg, res.lost), true
+	}
+	return fmt.Sprintf("%s\n(Applied on a retry: the first attempt was accepted but missing from the %s afterwards. "+
+		"Recorded as an edit_lost sync event — please report it.)", retry.msg, res.lost), false
+}
+
+// sameExceptWhitespace reports whether a and b hold the same text once runs of
+// whitespace are ignored.
+func sameExceptWhitespace(a, b string) bool {
+	return strings.Join(strings.Fields(a), "") == strings.Join(strings.Fields(b), "")
+}
+
+// editAttempt is one try at an apply_edits edit. lost is set when the server
+// accepted the edit and it was then missing — "buffer" when the buffer read
+// back right after applying did not hold it, "file" when the saved file did
+// not — and before/want/got are the content read, the content the edit
+// should have produced, and what was found instead.
+type editAttempt struct {
+	msg               string
+	isErr             bool
+	bufID             uint32
+	lost              string
+	before, want, got string
+}
+
+func applyEditOnce(ctx context.Context, rpc *rpcclient.RPC, abs string, in applyEditsInput) editAttempt {
 	// Open the buffer (idempotent if already open). generation pins the batch
 	// below to the buffer object this content came from: an agent computing
 	// offsets from `content` here while a format-on-save or SaveAs swaps the
@@ -627,7 +684,7 @@ func execApplyEdits(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDi
 	// takes its time between reading and writing.
 	bufID, content, version, _, generation, err := rpc.OpenFile(ctx, abs)
 	if err != nil {
-		return fmt.Sprintf("cannot open %s: %v", in.Path, err), true
+		return editAttempt{msg: fmt.Sprintf("cannot open %s: %v", in.Path, err), isErr: true}
 	}
 	count, _ := rpc.BufferClientCount(ctx, bufID)
 	weOpened := count == 1
@@ -644,7 +701,7 @@ func execApplyEdits(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDi
 		if weOpened {
 			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
 		}
-		return fmt.Sprintf("old_text not found in %s", in.Path), true
+		return editAttempt{msg: fmt.Sprintf("old_text not found in %s", in.Path), isErr: true, bufID: bufID}
 	}
 
 	startLine, startCol := offsetToLineCol(content, idx)
@@ -682,25 +739,49 @@ func execApplyEdits(ctx context.Context, rpc *rpcclient.RPC, ap Approver, workDi
 		if strings.Contains(err.Error(), "has changed since it was read") {
 			// Worth distinguishing from a transport failure: this one is
 			// recoverable, and says how.
-			return fmt.Sprintf("edit not applied — %s changed while this edit was being prepared: %v\n"+
-				"Re-read the file and recompute old_text before retrying.", in.Path, err), true
+			return editAttempt{msg: fmt.Sprintf("edit not applied — %s changed while this edit was being prepared: %v\n"+
+				"Re-read the file and recompute old_text before retrying.", in.Path, err), isErr: true, bufID: bufID}
 		}
-		return fmt.Sprintf("edit ops failed: %v", err), true
+		return editAttempt{msg: fmt.Sprintf("edit ops failed: %v", err), isErr: true, bufID: bufID}
+	}
+
+	// Read straight back. A buffer still holding exactly what was read means
+	// the edit never reached it, which is a different failure from a save that
+	// loses it, and naming the stage is most of diagnosing it.
+	want := content[:idx] + in.NewText + content[idx+len(in.OldText):]
+	if in.OldText != in.NewText {
+		if after, _, _, _, serr := rpc.GetBufferSnapshot(ctx, bufID); serr == nil && after == content {
+			if weOpened {
+				rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
+			}
+			return editAttempt{
+				msg: fmt.Sprintf("edit did NOT land: the server accepted it, but %s's buffer still holds its "+
+					"content from before the edit. Nothing was saved. Re-read the file and retry.", abs),
+				isErr: true, bufID: bufID, lost: "buffer", before: content, want: want, got: after,
+			}
+		}
 	}
 
 	if weOpened {
 		if serr := rpc.Save(ctx, bufID); serr != nil {
 			rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
-			return fmt.Sprintf("edited %s (save failed: %v)", in.Path, serr), false
+			return editAttempt{msg: fmt.Sprintf("edited %s (save failed: %v)", in.Path, serr), bufID: bufID}
 		}
 		warn := verifySaved(ctx, rpc, bufID, abs)
+		lost := ""
 		if warn == "" && in.OldText != in.NewText {
-			warn = verifyEditLanded(content, abs)
+			if warn = verifyEditLanded(content, abs); warn != "" {
+				lost = "file"
+			}
 		}
 		rpc.CloseBuffer(ctx, bufID) //nolint:errcheck
-		return fmt.Sprintf("edited and saved %s%s", abs, warn), warn != ""
+		res := editAttempt{msg: fmt.Sprintf("edited and saved %s%s", abs, warn), isErr: warn != "", bufID: bufID}
+		if lost != "" {
+			res.lost, res.before, res.want, res.got = lost, content, want, content
+		}
+		return res
 	}
-	return fmt.Sprintf("edited %s — applied to the live buffer (approved by the user). Not yet on disk: call save_file before disk-based builds/tests.", in.Path), false
+	return editAttempt{msg: fmt.Sprintf("edited %s — applied to the live buffer (approved by the user). Not yet on disk: call save_file before disk-based builds/tests.", in.Path), bufID: bufID}
 }
 
 // ─── insert_at_line ───────────────────────────────────────────────────────────

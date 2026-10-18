@@ -234,14 +234,21 @@ func (m Model) fetchDocSymbols() tea.Cmd {
 
 func (m Model) fetchFormat(thenSave bool) tea.Cmd {
 	bufID := m.bufID
+	// The server formats its own copy, so edits still queued here would not
+	// be formatted. Edits typed after this point are fine: the formatter's
+	// output is rebased past them on the server.
+	sent := m.sendQ.barrier()
 	return func() tea.Msg {
+		if err := awaitSent(sent); err != nil {
+			return formatResultMsg{bufID: bufID, thenSave: thenSave, err: err}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		content, changed, noFormatter, generation, err := m.rpc.Format(ctx, bufID)
+		changed, noFormatter, err := m.rpc.Format(ctx, bufID)
 		if err != nil {
 			return formatResultMsg{bufID: bufID, thenSave: thenSave, err: err}
 		}
-		return formatResultMsg{bufID: bufID, content: content, changed: changed, thenSave: thenSave, noFormatter: noFormatter, generation: generation}
+		return formatResultMsg{bufID: bufID, changed: changed, thenSave: thenSave, noFormatter: noFormatter}
 	}
 }
 
@@ -509,62 +516,46 @@ func (m Model) doApplyExtractAndRename(edits []ClientLspEdit, kind, newName stri
 	return m2, tea.Sequence(applyCmd, m2.doRenameSymbol(newName))
 }
 
-// applyFixCmd applies the selected fix: either a direct text replacement or a
-// plugin callback. LSP-edit items are handled synchronously by applyLspEdits
-// in handleFixPopup instead, since they must update the model's undo stack.
+// replacementFixOps is a direct-replacement fix (a spelling suggestion, say) as
+// the ops that make it: delete the range, then insert the replacement at its
+// start, which the delete does not move.
+//
+// They are applied with applyBatch, like any other local edit, and not sent to
+// the server directly. Sent directly they never reached this window's buffer:
+// the server does not send a client its own ops back, so the window that
+// applied the fix went on showing the old text while every other window and the
+// server showed the new, and diverged for good. Through applyBatch the fix is
+// applied here at once, queued and rebased with this window's other edits, and
+// undoable.
+func replacementFixOps(item ClientFixItem, clientID uint64) []document.Op {
+	var ops []document.Op
+	if item.FromLine != item.ToLine || item.FromCol != item.ToCol {
+		ops = append(ops, document.Op{
+			Type:     document.OpDelete,
+			FromLine: item.FromLine,
+			FromCol:  item.FromCol,
+			ToLine:   item.ToLine,
+			ToCol:    item.ToCol,
+			ClientID: clientID,
+		})
+	}
+	return append(ops, document.Op{
+		Type:       document.OpInsert,
+		InsertLine: item.FromLine,
+		InsertCol:  item.FromCol,
+		InsertText: item.Replace,
+		ClientID:   clientID,
+	})
+}
+
+// applyFixCmd applies a fix that is a plugin callback. Fixes that are edits
+// are applied synchronously by handleFixPopup instead: LSP edits through
+// applyLspEdits, and a direct replacement through replacementFixOps.
 func (m Model) applyFixCmd(idx int) tea.Cmd {
 	if idx < 0 || idx >= len(m.fixItems) {
 		return nil
 	}
 	item := m.fixItems[idx]
-	if item.Replace != "" {
-		return func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			// Both ops carry the same baseVersion, and it does not advance
-			// between them.
-			//
-			// baseVersion is not "the document these coordinates follow on
-			// from" — it is "the version this client has seen", which is what
-			// the server uses to decide which queued ops the incoming one must
-			// still be rebased past. ApplyOp returns the buffer version after
-			// applying, which counts other clients' ops too; adopting it here
-			// would claim we had seen a concurrent edit we have not, and the
-			// server would drop it from the rebase set and land the insert at a
-			// position that does not account for it.
-			//
-			// Nothing is lost by not advancing it. The server rebases an
-			// incoming op past other clients' queued ops but never past the
-			// sender's own, so the insert is not rebased past our delete under
-			// either value — and it does not need to be: it is positioned at
-			// the delete's start, which the delete does not move.
-			baseVersion := m.version
-			if item.FromLine != item.ToLine || item.FromCol != item.ToCol {
-				delOp := document.Op{
-					Type:     document.OpDelete,
-					FromLine: item.FromLine,
-					FromCol:  item.FromCol,
-					ToLine:   item.ToLine,
-					ToCol:    item.ToCol,
-					ClientID: m.rpc.ClientID(),
-				}
-				if _, err := m.rpc.ApplyOp(ctx, m.bufID, delOp, m.generation, baseVersion); err != nil {
-					return errorMsg{err}
-				}
-			}
-			insOp := document.Op{
-				Type:       document.OpInsert,
-				InsertLine: item.FromLine,
-				InsertCol:  item.FromCol,
-				InsertText: item.Replace,
-				ClientID:   m.rpc.ClientID(),
-			}
-			if _, err := m.rpc.ApplyOp(ctx, m.bufID, insOp, m.generation, baseVersion); err != nil {
-				return errorMsg{err}
-			}
-			return nil
-		}
-	}
 	if item.IsAction {
 		bufID := m.bufID
 		line := uint32(m.cursor.Line)

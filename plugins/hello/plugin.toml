@@ -1,6 +1,6 @@
 name        = "hello"
 version     = "0.1.0"
-sdk_version = "0.1.0"
+sdk_version = "0.1.1"
 description = "Sample plugin that prints 'hello' in the status bar"
 trigger_key     = "H"
 key_description = "Say hello"

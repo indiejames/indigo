@@ -228,17 +228,11 @@ func (s *editorService) PluginPopupSelected(_ context.Context, call proto.Editor
 	s.popupOnSelect = nil
 	s.popupOnCancel = nil
 	s.popupItems = nil
-	callbacks := s.allCallbacks()
+	s.hidePopupLocked()
 	s.mu.Unlock()
 
 	if fn != nil && int(index) < len(items) {
 		go fn(items[index].Data)
-	}
-	ctx := context.Background()
-	for _, cb := range callbacks {
-		fut, rel := cb.HidePluginPopup(ctx, nil)
-		fut.Struct() //nolint:errcheck
-		rel()
 	}
 	_, err := call.AllocResults()
 	return err
@@ -251,17 +245,11 @@ func (s *editorService) PluginPopupCancelled(_ context.Context, call proto.Edito
 	s.popupOnSelect = nil
 	s.popupOnCancel = nil
 	s.popupItems = nil
-	callbacks := s.allCallbacks()
+	s.hidePopupLocked()
 	s.mu.Unlock()
 
 	if fn != nil {
 		go fn()
-	}
-	ctx := context.Background()
-	for _, cb := range callbacks {
-		fut, rel := cb.HidePluginPopup(ctx, nil)
-		fut.Struct() //nolint:errcheck
-		rel()
 	}
 	_, err := call.AllocResults()
 	return err
@@ -277,17 +265,11 @@ func (s *editorService) PluginInputConfirmed(_ context.Context, call proto.Edito
 	fn := s.inputOnConfirm
 	s.inputOnConfirm = nil
 	s.inputOnCancel = nil
-	callbacks := s.allCallbacks()
+	s.hidePromptLocked()
 	s.mu.Unlock()
 
 	if fn != nil {
 		go fn(text)
-	}
-	ctx := context.Background()
-	for _, cb := range callbacks {
-		fut, rel := cb.HideInputPrompt(ctx, nil)
-		fut.Struct() //nolint:errcheck
-		rel()
 	}
 	_, err = call.AllocResults()
 	return err
@@ -299,17 +281,11 @@ func (s *editorService) PluginInputCancelled(_ context.Context, call proto.Edito
 	fn := s.inputOnCancel
 	s.inputOnConfirm = nil
 	s.inputOnCancel = nil
-	callbacks := s.allCallbacks()
+	s.hidePromptLocked()
 	s.mu.Unlock()
 
 	if fn != nil {
 		go fn()
-	}
-	ctx := context.Background()
-	for _, cb := range callbacks {
-		fut, rel := cb.HideInputPrompt(ctx, nil)
-		fut.Struct() //nolint:errcheck
-		rel()
 	}
 	_, err := call.AllocResults()
 	return err
@@ -483,4 +459,25 @@ func (s *editorService) GetPluginInsertChars(_ context.Context, call proto.Edito
 		}
 	}
 	return nil
+}
+
+// hidePopupLocked queues the push closing the plugin popup in every window. It
+// is not waited for: the window that answered the popup is the caller, and a
+// wedged window would otherwise hold its call and every call behind it. s.mu
+// must be held, so the push stays behind the show it closes.
+func (s *editorService) hidePopupLocked() {
+	s.pushToWindowsLocked(func(ctx context.Context, cb proto.ClientCallback) {
+		fut, rel := cb.HidePluginPopup(ctx, nil)
+		defer rel()
+		fut.Struct() //nolint:errcheck
+	})
+}
+
+// hidePromptLocked is hidePopupLocked for the input prompt.
+func (s *editorService) hidePromptLocked() {
+	s.pushToWindowsLocked(func(ctx context.Context, cb proto.ClientCallback) {
+		fut, rel := cb.HideInputPrompt(ctx, nil)
+		defer rel()
+		fut.Struct() //nolint:errcheck
+	})
 }

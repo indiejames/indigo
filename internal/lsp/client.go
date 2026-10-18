@@ -29,6 +29,18 @@ type Client struct {
 
 	mu          sync.Mutex
 	docVersions map[string]int // uri → version
+
+	// syncMu orders what the server is told about a document against the
+	// requests that depend on it: a didChange and a request that must see
+	// exactly that content (formatting, a rename) are sent under one hold, so
+	// no other didChange can land between them. It is held across a request's
+	// round trip, so it is deliberately not mu: the publishDiagnostics handler
+	// takes mu on the read loop, and if that waited on a round trip the
+	// response it is waiting for could never be read.
+	syncMu sync.Mutex
+	// docText is the content the server was last told for each open
+	// document. Guarded by syncMu.
+	docText     map[string]string
 	initialized bool
 	caps        ServerCapabilities
 	rootURI     string
@@ -226,6 +238,13 @@ func (c *Client) Initialize() error {
 // DidOpen notifies the server that a file has been opened.
 // Idempotent: if the file is already tracked, returns without sending a second notification.
 func (c *Client) DidOpen(path, content string) error {
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	return c.didOpenLocked(path, content)
+}
+
+// didOpenLocked is DidOpen with c.syncMu held.
+func (c *Client) didOpenLocked(path, content string) error {
 	ext := strings.TrimPrefix(filepath.Ext(path), ".")
 	uri := pathToURI(path)
 
@@ -237,6 +256,7 @@ func (c *Client) DidOpen(path, content string) error {
 	c.docVersions[uri] = 1
 	c.mu.Unlock()
 
+	c.setDocTextLocked(uri, content)
 	return c.conn.Notify("textDocument/didOpen", DidOpenTextDocumentParams{
 		TextDocument: TextDocumentItem{
 			URI:        uri,
@@ -258,19 +278,62 @@ func (c *Client) DidOpen(path, content string) error {
 // documented state one edit behind (and any request sent right after,
 // like a rename, silently computed against stale content).
 func (c *Client) DidChange(path, content string) error {
-	uri := pathToURI(path)
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	return c.didChangeLocked(pathToURI(path), content)
+}
 
+// didChangeLocked sends a full-text didChange. c.syncMu must be held; that is
+// what keeps the version bump and the write in order (see DidChange).
+func (c *Client) didChangeLocked(uri, content string) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.docVersions[uri]++
 	ver := c.docVersions[uri]
+	c.mu.Unlock()
 
+	c.setDocTextLocked(uri, content)
 	return c.conn.Notify("textDocument/didChange", DidChangeTextDocumentParams{
 		TextDocument: VersionedTextDocumentIdentifier{URI: uri, Version: ver},
 		ContentChanges: []TextDocumentContentChangeEvent{
 			{Text: content},
 		},
 	})
+}
+
+func (c *Client) setDocTextLocked(uri, content string) {
+	if c.docText == nil {
+		c.docText = make(map[string]string)
+	}
+	c.docText[uri] = content
+}
+
+// syncContentLocked makes sure the server holds exactly content for path, for
+// a request about to be computed against it, and returns a func that puts back
+// whatever it held before. c.syncMu must be held until both have run.
+//
+// The server's copy normally trails or leads the caller's: edits reach it on
+// their own schedule, while a caller like Format works from a snapshot taken
+// at one version. Edits computed against the server's copy and applied to the
+// snapshot land in the wrong places.
+func (c *Client) syncContentLocked(path, content string) (restore func(), err error) {
+	uri := pathToURI(path)
+	c.mu.Lock()
+	_, open := c.docVersions[uri]
+	c.mu.Unlock()
+	if !open {
+		return func() {}, c.didOpenLocked(path, content)
+	}
+	prev, known := c.docText[uri]
+	if known && prev == content {
+		return func() {}, nil
+	}
+	if err := c.didChangeLocked(uri, content); err != nil {
+		return func() {}, err
+	}
+	if !known {
+		return func() {}, nil
+	}
+	return func() { c.didChangeLocked(uri, prev) }, nil //nolint:errcheck
 }
 
 // DidSave notifies the server that a file has been saved.
@@ -283,6 +346,9 @@ func (c *Client) DidSave(path string) error {
 // DidClose notifies the server that a file has been closed.
 func (c *Client) DidClose(path string) error {
 	uri := pathToURI(path)
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	delete(c.docText, uri)
 	c.mu.Lock()
 	delete(c.docVersions, uri)
 	c.mu.Unlock()
@@ -793,27 +859,25 @@ func (c *Client) Rename(path string, line, col int, newName string) (*WorkspaceE
 // lock for the whole call, not just DidChange's write, closes that gap:
 // every DidChange this client sends goes through the same lock, so none can
 // interleave between the two calls made here.
+//
+// The lock is syncMu, not mu. It used to be mu, which the publishDiagnostics
+// handler also takes on the read loop — and a didChange is exactly what makes
+// a server publish diagnostics, so the read loop then sat waiting for this
+// call while this call waited for a response only the read loop could read,
+// until the rename timed out.
 func (c *Client) RenameAfterChange(path, content string, line, col int, newName string) (*WorkspaceEdit, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	supported := c.caps.RenameProvider != nil
+	c.mu.Unlock()
 	if !supported {
 		return nil, nil
 	}
 
-	uri := pathToURI(path)
-	c.docVersions[uri]++
-	ver := c.docVersions[uri]
-	if err := c.conn.Notify("textDocument/didChange", DidChangeTextDocumentParams{
-		TextDocument: VersionedTextDocumentIdentifier{URI: uri, Version: ver},
-		ContentChanges: []TextDocumentContentChangeEvent{
-			{Text: content},
-		},
-	}); err != nil {
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	if err := c.didChangeLocked(pathToURI(path), content); err != nil {
 		return nil, err
 	}
-
 	return c.rename(path, line, col, newName)
 }
 
@@ -903,6 +967,21 @@ func (c *Client) Format(path, content string, opts FormattingOptions) (string, b
 	if !hasFormatting {
 		return content, false, nil
 	}
+
+	// The server computes its edits against its own copy of the document,
+	// and they are applied to content below. The two used to be whatever
+	// they happened to be: the copy trails the buffer by however many edits
+	// are still on their way, and content is a snapshot the caller took, so
+	// the edits landed at offsets meaning something else — a mangled line
+	// rather than a formatted one. Tell the server content first, and put
+	// its copy back afterwards.
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	restore, err := c.syncContentLocked(path, content)
+	if err != nil {
+		return content, false, err
+	}
+	defer restore()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

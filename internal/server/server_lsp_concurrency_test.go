@@ -110,15 +110,14 @@ func TestFormatDoesNotBlockApplyOp(t *testing.T) {
 	}
 }
 
-// TestFormatDiscardsStaleResultOnConcurrentEdit is a regression test for a
-// data-loss bug that call.Go() (see above) exposed: Format reads the buffer,
-// then formats it outside the lock — which can take a while — before
-// writing the result back. Without a staleness check, a keystroke's
-// ApplyOp landing on the buffer while formatting is in flight (e.g. during
-// format-on-save) gets silently clobbered when Format's result, computed
-// from the buffer's older content, overwrites entry.buf. See the
-// buf.Version() check in Format (server_lsp.go).
-func TestFormatDiscardsStaleResultOnConcurrentEdit(t *testing.T) {
+// TestFormatKeepsConcurrentEdit: Format reads the buffer, then formats it
+// outside the lock — which can take a while — before applying the result. A
+// keystroke's ApplyOp landing meanwhile must survive, and so must the
+// formatting. Format used to swap in the formatter's output wholesale; that
+// clobbered the keystroke until a staleness check was added, and the check
+// then threw the formatting away instead. Applied as ops rebased past the
+// keystroke, both are kept (applyFormatted, server_ot.go).
+func TestFormatKeepsConcurrentEdit(t *testing.T) {
 	dir := t.TempDir()
 	startedPath := filepath.Join(dir, "started")
 	cfg := &config.Config{
@@ -187,24 +186,18 @@ func TestFormatDiscardsStaleResultOnConcurrentEdit(t *testing.T) {
 		t.Fatalf("Format errored: %v", err)
 	}
 
-	const want = "hello world\n"
+	const want = "HELLO world\n"
 	if got := s.buffers[1].buf.Content(); got != want {
-		t.Fatalf("buffer content = %q, want %q — the concurrent insert must survive Format's stale (pre-edit) result", got, want)
+		t.Fatalf("buffer content = %q, want %q — both the concurrent insert and the formatting must survive", got, want)
 	}
 }
 
-// TestFormatDiscardsStaleResultAfterBufferSwap is a regression test: version
-// alone is not enough to detect a stale Format result, because
-// document.New() always starts a fresh buffer at version 0. If entry.buf is
-// replaced by a brand-new *document.Buffer while an earlier Format call is
-// still running (e.g. a second, faster concurrent Format call finishing
-// first), the new buffer's version can coincidentally equal the first
-// call's baseVersion despite being a completely different object — a
-// version-only check would then let the first call's stale result clobber
-// the second call's already-committed one. Format must also require the
-// buffer pointer itself to be unchanged. See the entry.buf == baseBuf check
-// in Format (server_lsp.go).
-func TestFormatDiscardsStaleResultAfterBufferSwap(t *testing.T) {
+// TestConcurrentFormatsApplyOnce: two Format calls read the same text, and
+// the faster one applies first. The slower one's output is the same edits, so
+// rebasing it past the first and applying it would apply them twice — here,
+// "HELLO" inserted twice; with gofmt, a line indented twice. It has to start
+// over against the already-formatted text instead (applyFormatted's raced).
+func TestConcurrentFormatsApplyOnce(t *testing.T) {
 	dir := t.TempDir()
 	startedA := filepath.Join(dir, "started-a")
 	releaseA := filepath.Join(dir, "release-a")
@@ -235,7 +228,7 @@ func TestFormatDiscardsStaleResultAfterBufferSwap(t *testing.T) {
 	script := filepath.Join(dir, "formatter.sh")
 	if err := os.WriteFile(script, []byte(
 		"#!/bin/sh\n"+
-			"if [ -f "+useFast+" ]; then exec rev; fi\n"+
+			"if [ -f "+useFast+" ]; then exec tr a-z A-Z; fi\n"+
 			"touch "+startedA+"\n"+
 			"while [ ! -f "+releaseA+" ]; do sleep 0.02; done\n"+
 			"tr a-z A-Z\n",
@@ -285,11 +278,9 @@ func TestFormatDiscardsStaleResultAfterBufferSwap(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// Format A is now genuinely blocked, holding baseVersion=0 from the
-	// original buffer object. Flip the script onto its fast branch so the next
-	// call returns instantly with different output, then run Format again
-	// (call B) to completion — this installs a brand-new *document.Buffer
-	// (also version 0) before A ever resumes.
+	// Format A is now genuinely blocked, holding baseVersion=0. Flip the
+	// script onto its fast branch so the next call returns at once, then run
+	// Format again (call B) to completion before A resumes.
 	if err := os.WriteFile(useFast, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -302,14 +293,12 @@ func TestFormatDiscardsStaleResultAfterBufferSwap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Format call B errored: %v", err)
 	}
-	const wantAfterB = "olleh\n" // rev reverses each line's characters, keeping the trailing newline
+	const wantAfterB = "HELLO\n"
 	if got := s.buffers[1].buf.Content(); got != wantAfterB {
 		t.Fatalf("buffer content after Format B = %q, want %q", got, wantAfterB)
 	}
-	bufAfterB := s.buffers[1].buf
 
-	// Now let formatter A finish and commit (or, pre-fix, incorrectly
-	// overwrite B's result).
+	// Now let formatter A finish.
 	if err := os.WriteFile(releaseA, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -317,11 +306,8 @@ func TestFormatDiscardsStaleResultAfterBufferSwap(t *testing.T) {
 		t.Fatalf("Format call A errored: %v", err)
 	}
 
-	if got := s.buffers[1].buf; got != bufAfterB {
-		t.Fatalf("entry.buf changed after Format A's stale write — Format A clobbered Format B's buffer despite matching version")
-	}
 	if got := s.buffers[1].buf.Content(); got != wantAfterB {
-		t.Fatalf("buffer content = %q, want %q — Format A's stale result (from the pre-swap buffer) must not overwrite Format B's already-committed buffer", got, wantAfterB)
+		t.Fatalf("buffer content = %q, want %q — Format A's edits were applied on top of Format B's identical ones", got, wantAfterB)
 	}
 }
 

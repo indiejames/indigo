@@ -1,6 +1,6 @@
 name        = "bookmarks"
 version     = "0.1.0"
-sdk_version = "0.1.0"
+sdk_version = "0.1.1"
 description     = "Set bookmarks with alt+m; open the bookmark list from the Command menu (space)."
 trigger_key     = "alt+m"
 key_description = "Toggle bookmark at current line (prompts for name)"

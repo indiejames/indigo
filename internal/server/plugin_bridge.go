@@ -53,6 +53,10 @@ func (s *editorService) PluginReadLines(bufID uint32, start, end uint32) ([]stri
 	if end > count {
 		end = count
 	}
+	// Unsigned: a reversed range would make end-start wrap to ~4 billion.
+	if end <= start {
+		return nil, nil
+	}
 	lines := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
 		lines = append(lines, entry.buf.Line(int(i)))

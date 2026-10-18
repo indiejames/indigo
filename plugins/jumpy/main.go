@@ -128,7 +128,12 @@ func (j *Jumpy) captured(key string) sdk.KeyResponse {
 		return sdk.KeyResponse{Handled: true, CaptureKeys: 1}
 	}
 
-	// Second label character: resolve the target and jump.
+	// Second label character: resolve the target and jump. Checked like the
+	// first, because byte(c) truncates: U+0161 (š) would otherwise read as 'a'.
+	if !strings.ContainsRune(labelChars, c) {
+		j.reset()
+		return sdk.KeyResponse{Handled: true, CaptureKeys: 0}
+	}
 	label := string([]byte{j.char1, byte(c)})
 	for _, t := range j.targets {
 		if t.label == label {

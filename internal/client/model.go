@@ -272,9 +272,6 @@ type sigHelpMsg struct {
 	at    document.Pos
 }
 
-// pluginBindingsMsg delivers fresh plugin key bindings for the help popup.
-type pluginBindingsMsg struct{ bindings []ClientPluginBinding }
-
 // fixItemsMsg carries fix suggestions and/or context-sensitive actions for the F popup.
 // bufID/at/version are stamped at request time in fetchFixes and checked on
 // arrival so a slow response for a since-abandoned buffer/cursor position
@@ -1092,7 +1089,6 @@ type Model struct {
 	macroReplayBlocked bool
 
 	// Plugin help entries loaded at startup for the ? popup.
-	pluginBindings []ClientPluginBinding
 
 	// flashTick counts down after a jump (AtPos); the cursor line is highlighted
 	// while it is odd, creating a brief alternating flash effect.
@@ -1144,7 +1140,6 @@ func New(rpc *RPC, bufID uint32, content string, version uint64, filePath, workD
 		detectedIndent:      config.DetectIndentSettings(content),
 		metrics:             &metricsData{},
 		recoveryPrompt:      fromRecovery,
-		pluginBindings:      rpc.PluginBindings(),
 		reservePluginGutter: rpc != nil,
 		lastReportedLine:    -1,
 		lastReportedCol:     -1,
@@ -1884,12 +1879,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if !msg.result.Found {
 			m = m.pushStatus("No hover info")
 		}
-		return m, nil
-
-	case pluginBindingsMsg:
-		m.pluginBindings = msg.bindings
-		m.helpVisible = true
-		m.helpScroll = 0
 		return m, nil
 
 	case sigHelpMsg:

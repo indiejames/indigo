@@ -1,5 +1,5 @@
 // hello is a simple test plugin that just prints "hello" in the status bar when
-// the user presses H.
+// the user picks it from the Command menu (space h).
 package main
 
 import (
@@ -21,20 +21,14 @@ type Hello struct {
 
 func (h *Hello) Init(api *sdk.Api) sdk.Info {
 	h.api = api
-	api.OnKey("H", h.onKey)        //nolint:errcheck
-	api.BroadcastMessage("hello ready: press H to say hello") //nolint:errcheck
-	return sdk.Info{Name: "hello", Version: "0.1.0"}
+	api.OnMenuAction("hello.say", h.onSay)                          //nolint:errcheck
+	api.BroadcastMessage("hello ready: press space h to say hello") //nolint:errcheck
+	return sdk.Info{Name: "hello", Version: "0.2.0"}
 }
 
-// onKey is the single handler registered for "H". It dispatches on ctx.Mode:
-//   - "normal"  → trigger: print hello in status bar
-func (h *Hello) onKey(key string, ctx sdk.KeyContext) sdk.KeyResponse {
-	switch ctx.Mode {
-	case "normal":
-		return h.trigger(ctx)
-	default:
-		return sdk.KeyResponse{}
-	}
+// onSay runs when the Hello item is picked from the Command menu.
+func (h *Hello) onSay(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
+	return h.trigger(ctx)
 }
 
 func (h *Hello) trigger(ctx sdk.KeyContext) sdk.KeyResponse {

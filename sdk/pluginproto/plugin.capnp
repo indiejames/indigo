@@ -15,6 +15,10 @@ interface Plugin {
 # Effect and query methods may be called at any time.
 interface EditorApi {
   # -- Registration --
+  # registerKeyBinding is retired: plugins do not bind keys, and an editor
+  # from SDK 0.2.0 on refuses the call. A plugin's actions are reached through
+  # the Command (space) menu (registerMenuAction). It stays in the schema
+  # because method ordinals cannot be reused.
   registerKeyBinding    @0 (trigger :Text, handler :KeyHandler)           -> ();
   registerInsertHook    @1 (char :Text,    handler :KeyHandler)           -> ();
   registerCommand       @2 (name :Text,    handler :CommandHandler)       -> ();
@@ -22,11 +26,10 @@ interface EditorApi {
   registerDecorations   @4 (provider :DecorationProvider)                 -> ();
   registerActionProvider @16 (provider :ActionProvider)                    -> ();
   # registerMenuAction registers a handler invoked when the user selects this
-  # plugin's item in the Command (space) menu. Unlike registerKeyBinding, the
-  # handler is never bound to a physical key — id is an opaque string chosen
-  # by the plugin and referenced by the "command" field of its plugin.toml
-  # menu_item entries. The handler receives the same KeyContext/KeyResponse
-  # shape as a normal-mode key handler (mode is always "normal").
+  # plugin's item in the Command (space) menu, which is how a plugin's actions
+  # are invoked. id is an opaque string chosen by the plugin and referenced by
+  # the "command" field of its plugin.toml menu_item entries. The handler
+  # receives a KeyContext and returns a KeyResponse (mode is always "normal").
   registerMenuAction @20 (id :Text, handler :KeyHandler)                   -> ();
   # registerCompletionProvider registers a source of completion candidates for
   # this plugin, merged into the same list the editor's LSP-driven completions

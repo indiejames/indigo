@@ -3,12 +3,10 @@
 // Bookmarks persist across sessions in ~/.config/indigo/plugins/bookmarks/bookmarks.json.
 // Line numbers are automatically updated as the buffer is edited.
 //
-// Key bindings (normal mode):
+// Both actions are under Bookmarks in the Command menu:
 //
-//	alt+m  toggle a bookmark on the current line (prompts for a name if adding)
-//
-// The bookmark picker (Enter to jump, Esc to dismiss) is reachable from the
-// Command menu (space) as "Bookmarks".
+//	space b b  toggle a bookmark on the current line (prompts for a name if adding)
+//	space b l  list bookmarks (Enter to jump, Esc to dismiss)
 package main
 
 import (
@@ -58,12 +56,12 @@ func (b *Bookmarks) Init(api *sdk.Api) sdk.Info {
 	b.persistCh = make(chan []bookmark, 64)
 	go b.persistWorker()
 
-	api.OnKey("alt+m", b.onAltM)                 //nolint:errcheck
-	api.OnMenuAction("bookmarks.open", b.onAltB) //nolint:errcheck
-	api.OnEdit(b.onEdit)                         //nolint:errcheck
-	api.Decorations(b.getDecorations)            //nolint:errcheck
+	api.OnMenuAction("bookmarks.toggle", b.onToggle) //nolint:errcheck
+	api.OnMenuAction("bookmarks.open", b.onList)     //nolint:errcheck
+	api.OnEdit(b.onEdit)                             //nolint:errcheck
+	api.Decorations(b.getDecorations)                //nolint:errcheck
 
-	return sdk.Info{Name: "bookmarks", Version: "0.2.0"}
+	return sdk.Info{Name: "bookmarks", Version: "0.3.0"}
 }
 
 // persistWorker drains persistCh and writes each snapshot to disk one at a
@@ -84,7 +82,7 @@ func (b *Bookmarks) persistWorker() {
 //
 // This exists because a snapshot copy alone (see snapshotBookmarks) only
 // fixes the *data race* on b.bookmarks — it does nothing to order the actual
-// disk writes. onAltM's add/remove paths and onEdit's line-shift each
+// disk writes. onToggle's add/remove paths and onEdit's line-shift each
 // call persistBookmarks from their own goroutine (directly, or via `go`);
 // those file writes have no ordering guarantee relative to each other even
 // though their snapshots were taken in the correct mutation order under
@@ -98,18 +96,18 @@ func (b *Bookmarks) persistWorker() {
 // worker's own writes under exactly the high-contention conditions this
 // exists to guard against — deterministic ordering only holds if *every*
 // write goes through the single FIFO worker, no exceptions. Blocking here is
-// safe: onAltM/onEdit already run on their own dispatched goroutine
-// (the plugin manager calls HandleKey/DispatchEditEvent independently per
+// safe: onToggle/onEdit already run on their own dispatched goroutine
+// (the plugin manager calls InvokeMenuAction/DispatchEditEvent independently per
 // invocation), and persistWorker never does anything but drain this channel,
 // so it always eventually catches up.
 func (b *Bookmarks) enqueuePersist(bmarks []bookmark) {
 	b.persistCh <- snapshotBookmarks(bmarks)
 }
 
-// onAltM toggles a bookmark on the current line.
+// onToggle toggles a bookmark on the current line.
 // If a bookmark already exists at this line it is removed; otherwise an input
 // prompt is shown to collect a name before adding it.
-func (b *Bookmarks) onAltM(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
+func (b *Bookmarks) onToggle(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
 	if ctx.Mode != "normal" {
 		return sdk.KeyResponse{Handled: false}
 	}
@@ -143,8 +141,8 @@ func (b *Bookmarks) onAltM(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
 	return sdk.KeyResponse{Handled: true}
 }
 
-// onAltB shows the bookmark picker popup.
-func (b *Bookmarks) onAltB(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
+// onList shows the bookmark picker popup.
+func (b *Bookmarks) onList(_ string, ctx sdk.KeyContext) sdk.KeyResponse {
 	if ctx.Mode != "normal" {
 		return sdk.KeyResponse{Handled: false}
 	}
@@ -292,8 +290,8 @@ func (b *Bookmarks) getDecorations(bufID uint32, _ uint64, _ sdk.Range) []sdk.De
 
 // snapshotBookmarks returns an independent copy of bmarks. Caller must hold
 // b.mu. persistBookmarks does file I/O and must never be called on b.bookmarks
-// directly outside the lock: onEdit can run concurrently with onAltM
-// (the plugin manager dispatches HandleKey and DispatchEditEvent as
+// directly outside the lock: onEdit can run concurrently with onToggle
+// (the plugin manager dispatches InvokeMenuAction and DispatchEditEvent as
 // independent goroutines) and mutates bookmark elements in place via pointer,
 // so an unlocked persistBookmarks call ranging over the live slice would read
 // torn fields or race append's slice-header/backing-array writes. A snapshot
@@ -305,7 +303,7 @@ func snapshotBookmarks(bmarks []bookmark) []bookmark {
 
 // removeBookmarkAt removes the active bookmark at (filePath, line), if any, and
 // reports whether it did. The lookup and the removal share one critical
-// section: onAltM used to find the index, unlock, then lock again and remove by
+// section: onToggle used to find the index, unlock, then lock again and remove by
 // that index, so a concurrent onEdit shift or another removal in between
 // could make it delete a different bookmark or slice out of range.
 func (b *Bookmarks) removeBookmarkAt(filePath string, line uint32) bool {

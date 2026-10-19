@@ -266,21 +266,6 @@ func (m Model) fixableDecorationAtCursor() *ClientDecoration {
 	return nil
 }
 
-// fetchPluginBindings fetches fresh plugin key bindings from the server and
-// opens the help popup once the response arrives. Called when ? is pressed so
-// that plugins registered after startup are always visible.
-func (m Model) fetchPluginBindings() tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		bindings, err := m.rpc.GetPluginBindings(ctx)
-		if err != nil {
-			return pluginBindingsMsg{bindings: m.pluginBindings} // fall back to cached
-		}
-		return pluginBindingsMsg{bindings: bindings}
-	}
-}
-
 // doMoveFunctionToFile finds the function surrounding the cursor (via the
 // language's tree-sitter grammar, the same text object "af"/"if" use) and
 // moves it server-side to destPath, appending to the end of the file (which

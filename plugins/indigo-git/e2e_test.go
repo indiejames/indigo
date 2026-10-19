@@ -98,7 +98,8 @@ func invoke(t *testing.T, m *plugin.Manager, command string, bufID uint32, line 
 }
 
 // TestGitMarksChangesAndTheBranch opens a file whose line 2 changed on disk:
-// the gutter marks it, the status bar names the branch, and alt+n jumps to it.
+// the gutter marks it, the status bar names the branch, and the Next hunk and
+// Previous hunk menu items jump to it.
 func TestGitMarksChangesAndTheBranch(t *testing.T) {
 	repo := newRepo(t, "trunk", "one\ntwo\nthree\n")
 	path := filepath.Join(repo, "a.txt")
@@ -114,9 +115,21 @@ func TestGitMarksChangesAndTheBranch(t *testing.T) {
 		return v.gutter[1] == "+" && v.gutter[0] == "" && strings.Contains(v.status, "trunk")
 	})
 
-	_, _, line, _, hasCursor, _, err := m.HandleKey(context.Background(), "alt+n", "normal", 1, 7, 0, 0)
+	next, ok := findMenuItem(m.AllMenuItems(), "git.next_hunk")
+	if !ok || next.Key != "n" {
+		t.Fatalf("next hunk menu item = %+v (found %v), want one under n", next, ok)
+	}
+	_, _, line, _, hasCursor, _, err := m.InvokeMenuAction(context.Background(), next.PluginName, next.Command, 1, 7, 0, 0)
 	if err != nil || !hasCursor || line != 1 {
-		t.Errorf("alt+n from line 0: cursor %v line %d, err %v; want a jump to line 1", hasCursor, line, err)
+		t.Errorf("next hunk from line 0: cursor %v line %d, err %v; want a jump to line 1", hasCursor, line, err)
+	}
+	prev, ok := findMenuItem(m.AllMenuItems(), "git.prev_hunk")
+	if !ok || prev.Key != "p" {
+		t.Fatalf("previous hunk menu item = %+v (found %v), want one under p", prev, ok)
+	}
+	_, _, line, _, hasCursor, _, err = m.InvokeMenuAction(context.Background(), prev.PluginName, prev.Command, 1, 7, 2, 0)
+	if err != nil || !hasCursor || line != 1 {
+		t.Errorf("previous hunk from line 2: cursor %v line %d, err %v; want a jump to line 1", hasCursor, line, err)
 	}
 }
 
@@ -262,7 +275,7 @@ func TestGitShipsEveryMenuCommand(t *testing.T) {
 	}
 	walk(m.AllMenuItems())
 	slices.Sort(commands)
-	if want := []string{"git.blame", "git.blame_details", "git.diff"}; !slices.Equal(commands, want) {
+	if want := []string{"git.blame", "git.blame_details", "git.diff", "git.next_hunk", "git.prev_hunk"}; !slices.Equal(commands, want) {
 		t.Fatalf("menu commands = %q, want %q", commands, want)
 	}
 	for _, c := range commands {

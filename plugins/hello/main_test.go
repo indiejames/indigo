@@ -2,44 +2,36 @@ package main
 
 import (
 	"context"
-	"slices"
 	"testing"
 
 	"github.com/indiejames/indigo/internal/plugin/plugintest"
-	"github.com/indiejames/indigo/sdk"
 )
 
-// TestHelloSaysHelloOnH runs the built plugin under a real plugin manager: it
-// must register H, announce itself, and answer H in normal mode.
-func TestHelloSaysHelloOnH(t *testing.T) {
+// TestHelloSaysHelloFromTheCommandMenu runs the built plugin under a real
+// plugin manager: it must list its item in the Command menu, announce itself,
+// and say hello when the item is picked. It binds no key.
+func TestHelloSaysHelloFromTheCommandMenu(t *testing.T) {
 	bridge := plugintest.NewBridge()
 	m, _ := plugintest.Start(t, ".", bridge)
 
-	if !slices.Contains(bridge.Keys(), "H") {
-		t.Fatalf("registered keys = %q, want H", bridge.Keys())
+	items := m.AllMenuItems()
+	if len(items) != 1 || items[0].Label != "Hello" || items[0].Key != "h" || items[0].Command != "hello.say" {
+		t.Fatalf("menu items = %+v, want one Hello item under h running hello.say", items)
 	}
-	if msg := bridge.WaitForMessage(t, "hello ready: press H to say hello"); msg.ClientID != 0 {
+	if msg := bridge.WaitForMessage(t, "hello ready: press space h to say hello"); msg.ClientID != 0 {
 		t.Errorf("ready message went to client %d, want every client", msg.ClientID)
 	}
 
-	handled, edits, _, _, hasCursor, capture, err := m.HandleKey(context.Background(), "H", "normal", 1, 7, 0, 0)
+	handled, edits, _, _, hasCursor, capture, err := m.InvokeMenuAction(context.Background(), items[0].PluginName, items[0].Command, 1, 7, 0, 0)
 	if err != nil {
-		t.Fatalf("HandleKey: %v", err)
+		t.Fatalf("InvokeMenuAction: %v", err)
 	}
 	if !handled || len(edits) != 0 || hasCursor || capture != 0 {
-		t.Errorf("H = handled %v, edits %v, cursor %v, capture %d; want handled and nothing else", handled, edits, hasCursor, capture)
+		t.Errorf("hello.say = handled %v, edits %v, cursor %v, capture %d; want handled and nothing else", handled, edits, hasCursor, capture)
 	}
 	bridge.WaitForMessage(t, "hello: activated")
-}
 
-// TestHelloIgnoresHOutsideNormalMode covers onKey's other branch: the handler
-// is registered for H, but only normal mode is its to handle.
-func TestHelloIgnoresHOutsideNormalMode(t *testing.T) {
-	h := &Hello{}
-	if resp := h.onKey("H", sdk.KeyContext{Mode: "insert"}); resp.Handled {
-		t.Errorf("H in insert mode was handled: %+v", resp)
-	}
-	if h.active {
-		t.Error("H in insert mode activated the plugin")
+	if handled, _, _, _, _, _, _ := m.HandleKey(context.Background(), "H", "normal", 1, 7, 0, 0); handled {
+		t.Error("H in normal mode reached the plugin; plugins bind no keys")
 	}
 }

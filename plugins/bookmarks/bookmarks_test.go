@@ -10,12 +10,12 @@ import (
 // TestBookmarksNoRaceBetweenEditEventAndPersist is a regression test for a
 // data race: onEdit mutates bookmark elements in place (bm.line,
 // bm.active) while holding b.mu, but persistBookmarks used to be called on
-// the live b.bookmarks slice *after* releasing the lock (both from onAltM's
+// the live b.bookmarks slice *after* releasing the lock (both from onToggle's
 // add/remove paths and from onEdit's own `go persistBookmarks(...)`).
-// The plugin manager dispatches HandleKey (which drives onAltM) and
+// The plugin manager dispatches InvokeMenuAction (which drives onToggle) and
 // DispatchEditEvent (which drives onEdit) as independent goroutines, so
 // this is a genuine concurrent unsynchronized read/write, not theoretical:
-// rapid line inserts/deletes racing an alt+m toggle could read a torn
+// rapid line inserts/deletes racing a toggle could read a torn
 // bookmark struct or race append's slice-header write, corrupting the
 // persisted bookmarks.json or crashing under -race.
 //
@@ -75,8 +75,8 @@ func TestBookmarksNoRaceBetweenEditEventAndPersist(t *testing.T) {
 		}
 	}()
 
-	// Simulates the alt+m "add a bookmark" path's locked mutate + enqueue
-	// sequence (the same shape onAltM uses), without needing a live sdk.Api
+	// Simulates the Toggle bookmark "add" path's locked mutate + enqueue
+	// sequence (the same shape onToggle uses), without needing a live sdk.Api
 	// for BufferInfo/ShowInputPrompt.
 	go func() {
 		defer wg.Done()

@@ -1,7 +1,7 @@
 name        = "indigo-git"
-version     = "0.2.0"
-sdk_version = "0.1.1"
-description = "Git integration: branch/diff status, inline blame (alt+b), hunk nav (alt+n/alt+p), diff view."
+version     = "0.3.0"
+sdk_version = "0.2.0"
+description = "Git integration: branch/diff status, inline blame, hunk navigation and a diff view, all under space g."
 
 [[menu_item]]
 label = "Git"
@@ -21,6 +21,14 @@ key   = "g"
   label   = "Diff"
   command = "git.diff"
   key     = "d"
+  [[menu_item.children]]
+  label   = "Next hunk"
+  command = "git.next_hunk"
+  key     = "n"
+  [[menu_item.children]]
+  label   = "Previous hunk"
+  command = "git.prev_hunk"
+  key     = "p"
 
 [binaries]
 "darwin/arm64" = "indigo-git-darwin-arm64"

@@ -27,14 +27,14 @@ The gutter column appears only when at least one changed line is detected in the
 
 ## Hunk navigation
 
-- `alt+n` — jump the cursor to the next changed hunk
-- `alt+p` — jump the cursor to the previous changed hunk
+- `space g n` (**Command menu → Git → Next hunk**) — jump the cursor to the next changed hunk
+- `space g p` (**Command menu → Git → Previous hunk**) — jump the cursor to the previous changed hunk
 
 Both wrap around the buffer (from the last hunk back to the first, and vice versa) and use the same diff data that drives the gutter markers above.
 
 ## Inline blame
 
-`alt+b`, or **Command menu → Git → Toggle blame**, toggles per-buffer end-of-line blame annotations:
+`space g b` (**Command menu → Git → Toggle blame**) toggles per-buffer end-of-line blame annotations:
 
 ```go
 func doThing() {              a1b2c3d Jane Doe, 3 days ago

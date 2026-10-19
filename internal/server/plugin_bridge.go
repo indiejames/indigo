@@ -292,34 +292,6 @@ func (s *editorService) PluginVisibleRange(clientID uint64) (startLine, endLine 
 	return entry.topLine, end, nil
 }
 
-// PluginKeyRegistered implements plugin.ServerBridge.
-// Notifies all connected clients that a plugin registered a key binding.
-func (s *editorService) PluginKeyRegistered(trigger string) {
-	s.mu.Lock()
-	mapLen := len(s.clientMap)
-	for id, ce := range s.clientMap {
-		serverLog("PluginKeyRegistered: clientMap[%d].IsValid=%v", id, ce.callback.IsValid())
-	}
-	callbacks := s.allCallbacks()
-	s.mu.Unlock()
-
-	serverLog("PluginKeyRegistered: trigger=%q, clientMapLen=%d, clients=%d", trigger, mapLen, len(callbacks))
-
-	// Fan out to all clients concurrently, each with its own timeout.
-	for i, cb := range callbacks {
-		go func(i int, cb proto.ClientCallback) {
-			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-			defer cancel()
-			fut, rel := cb.KeyRegistered(ctx, func(p proto.ClientCallback_keyRegistered_Params) error {
-				return p.SetTrigger(trigger)
-			})
-			_, err := fut.Struct()
-			rel()
-			serverLog("PluginKeyRegistered: KeyRegistered to client %d: err=%v", i, err)
-		}(i, cb)
-	}
-}
-
 // PluginInsertHookRegistered implements plugin.ServerBridge.
 // Notifies all connected clients that a plugin registered an OnInsert hook.
 func (s *editorService) PluginInsertHookRegistered(char string) {

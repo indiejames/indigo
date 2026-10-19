@@ -8,15 +8,16 @@ interface ClientCallback {
   showMessage     @0 (text :Text)                                -> ();
   moveCursor      @1 (bufId :UInt32, line :UInt32, col :UInt32) -> ();
   openFile        @2 (path :Text, line :UInt32)                  -> ();
+  # keyRegistered is retired: plugins bind no keys since SDK 0.2.0, so the
+  # server never sends it. It stays because method ordinals cannot be reused.
   keyRegistered   @3 (trigger :Text)                             -> ();
   fileChanged     @4 (bufId :UInt32, dirty :Bool)                -> ();
   showPluginPopup @5 (title :Text, items :List(PopupItem))       -> ();
   hidePluginPopup @6 ()                                          -> ();
   showInputPrompt @7 (title :Text, placeholder :Text)            -> ();
   hideInputPrompt @8 ()                                          -> ();
-  # Mirrors keyRegistered but for OnInsert hooks: handles the race where a
-  # plugin registers an insert hook after this client's initial
-  # getPluginInsertChars snapshot was taken.
+  # Handles the race where a plugin registers an insert hook after this
+  # client's initial getPluginInsertChars snapshot was taken.
   insertHookRegistered @9 (char :Text)                           -> ();
   # Sent when a plugin calls the SDK's RefreshDecorations(bufId) — tells the
   # client to refetch decorations for bufId now rather than on the next poll
@@ -239,6 +240,9 @@ interface EditorService {
   handlePluginKey      @15 (clientId :UInt64, bufId :UInt32, key :Text, mode :Text, cursorLine :UInt32, cursorCol :UInt32) -> (result :PluginKeyResult);
   updateViewport       @16 (clientId :UInt64, topLine :UInt32, height :UInt32)      -> ();
   getPluginDecorations @17 (clientId :UInt64, bufId :UInt32)                        -> (decorations :List(PluginDecoration));
+  # getPluginKeys and getPluginBindings are retired and answer with empty
+  # lists: plugins bind no keys since SDK 0.2.0. They stay because method
+  # ordinals cannot be reused, and an older window still calls them.
   getPluginKeys        @18 ()                                                        -> (keys :List(Text));
   getPluginBindings    @24 ()                                                        -> (bindings :List(PluginBinding));
   saveAs               @19 (clientId :UInt64, bufferId :UInt32, path :Text)          -> ();
@@ -323,7 +327,7 @@ interface EditorService {
   # normally the client's visible viewport, not the whole file.
   semanticTokensRange @47 (bufId :UInt32, startLine :UInt32, startCol :UInt32, endLine :UInt32, endCol :UInt32) -> (tokens :List(SemanticToken));
   # Chars with a registered OnInsert hook (any plugin), fetched once at
-  # connect time — mirrors getPluginKeys. See insertHookRegistered for the
+  # connect time. See insertHookRegistered for the
   # live-update counterpart covering hooks registered after connect.
   getPluginInsertChars @48 () -> (chars :List(Text));
   # Requests "source.organizeImports" from bufId's language server over the

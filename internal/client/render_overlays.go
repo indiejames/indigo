@@ -965,11 +965,11 @@ func wrapToWidth(s string, width int) []string {
 // agree. The built-in entries are generated fresh from the live command
 // tree on every call (generateHelpEntries, help_gen.go) rather than read
 // from a static list, so a [[keybind]] override is always reflected here.
-func helpPopupLines(pluginBindings []ClientPluginBinding, innerW int) []string {
+func helpPopupLines(innerW int) []string {
 	descAvail := innerW - helpKeyColW
 	blank := strings.Repeat(" ", helpKeyColW)
 	helpEntries := generateHelpEntries()
-	lines := make([]string, 0, len(helpEntries)+len(pluginBindings)+4)
+	lines := make([]string, 0, len(helpEntries))
 	for _, e := range helpEntries {
 		if e.desc == "" {
 			if e.key == "" {
@@ -993,58 +993,15 @@ func helpPopupLines(pluginBindings []ClientPluginBinding, innerW int) []string {
 		}
 	}
 
-	// Append plugin key bindings grouped by plugin name.
-	if len(pluginBindings) > 0 {
-		// Group by plugin name preserving first-seen order.
-		seen := make(map[string]bool)
-		type group struct {
-			name     string
-			bindings []ClientPluginBinding
-		}
-		var groups []group
-		for _, b := range pluginBindings {
-			if !seen[b.PluginName] {
-				seen[b.PluginName] = true
-				groups = append(groups, group{name: b.PluginName})
-			}
-			for i := range groups {
-				if groups[i].name == b.PluginName {
-					groups[i].bindings = append(groups[i].bindings, b)
-					break
-				}
-			}
-		}
-		lines = append(lines, "")
-		lines = append(lines, popupKeyStyle.Render("Plugins"))
-		for _, g := range groups {
-			// Plugin name sub-header (indented).
-			lines = append(lines, popupTextStyle.Render("  "+g.name))
-			for _, b := range g.bindings {
-				key := b.Key
-				if len([]rune(key)) > helpKeyW-2 {
-					key = string([]rune(key)[:helpKeyW-2])
-				}
-				padded := fmt.Sprintf("    %-*s  ", helpKeyW-2, key)
-				for i, dl := range wrapToWidth(b.Description, descAvail) {
-					prefix := padded
-					if i > 0 {
-						prefix = blank
-					}
-					lines = append(lines, popupTextStyle.Render(prefix)+popupTextStyle.Render(dl))
-				}
-			}
-		}
-	}
-
 	return lines
 }
 
 // renderHelpPopup renders the help popup as a slice of styled, full-width lines.
 // innerW is the content width (excluding borders).
-func renderHelpPopup(width, scroll, maxH int, pluginBindings []ClientPluginBinding) []string {
+func renderHelpPopup(width, scroll, maxH int) []string {
 	innerW := helpPopupInnerWidth(width)
 
-	bodyLines := helpPopupLines(pluginBindings, innerW)
+	bodyLines := helpPopupLines(innerW)
 	total := len(bodyLines)
 	contentH := maxH - 2
 	if contentH < 1 {

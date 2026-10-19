@@ -28,10 +28,12 @@ func buildMiniPlugin(t *testing.T, dir string) string {
 
 // setUpMiniPluginInstall creates a fake `indigo plugins` install directory
 // under a temp XDG_CONFIG_HOME containing miniplugin's manifest and binary,
-// and points the manager's plugin discovery at it via t.Setenv.
+// and points the manager's plugin discovery at it via t.Setenv. The manifest
+// gives mini.x a menu_item, as a real plugin must for its action to be
+// reachable.
 func setUpMiniPluginInstall(t *testing.T) {
 	t.Helper()
-	installMiniPlugin(t, "")
+	installMiniPlugin(t, "\n[[menu_item]]\nlabel = \"Mini\"\ncommand = \"mini.x\"\nkey = \"x\"\n")
 }
 
 // installMiniPlugin is setUpMiniPluginInstall with extra top-level manifest
@@ -59,7 +61,7 @@ func installMiniPlugin(t *testing.T, extraManifest string) {
 // TestManagerStartSpawnsRealPluginAndDispatchesKey is an end-to-end
 // regression/coverage test: it spawns a real plugin process (not a fake),
 // verifies Manager.Start's socket handshake and Initialize RPC actually
-// register the plugin, then drives a genuine HandleKey RPC round-trip
+// register the plugin, then drives a genuine menu-action RPC round-trip
 // through the spawned process and checks the returned edit.
 func TestManagerStartSpawnsRealPluginAndDispatchesKey(t *testing.T) {
 	setUpMiniPluginInstall(t)
@@ -91,16 +93,21 @@ func TestManagerStartSpawnsRealPluginAndDispatchesKey(t *testing.T) {
 		t.Fatal("registered plugin has no process handle")
 	}
 
-	// Drive a real HandleKey RPC round-trip: miniplugin registered "X" via
-	// api.OnKey in its actual (separate-process) Init, so a successful
-	// handled=true + matching edit here proves the whole spawn/handshake/
-	// dispatch chain works, not just that a process started.
-	handled, edits, _, _, _, _, err := m.HandleKey(context.Background(), "X", "normal", 1, 1, 0, 0)
+	items := m.AllMenuItems()
+	if len(items) != 1 || items[0].Command != "mini.x" || items[0].Key != "x" || items[0].PluginName != "miniplugin" {
+		t.Errorf("AllMenuItems = %+v, want miniplugin's mini.x under key x", items)
+	}
+
+	// Drive a real menu-action RPC round-trip: miniplugin registered
+	// "mini.x" via api.OnMenuAction in its actual (separate-process) Init, so
+	// a successful handled=true + matching edit here proves the whole
+	// spawn/handshake/dispatch chain works, not just that a process started.
+	handled, edits, _, _, _, _, err := m.InvokeMenuAction(context.Background(), "miniplugin", "mini.x", 1, 1, 0, 0)
 	if err != nil {
-		t.Fatalf("HandleKey: %v", err)
+		t.Fatalf("InvokeMenuAction: %v", err)
 	}
 	if !handled {
-		t.Fatal("HandleKey: handled = false, want true (miniplugin's \"X\" binding should have fired)")
+		t.Fatal("InvokeMenuAction: handled = false, want true (miniplugin's mini.x action should have fired)")
 	}
 	if len(edits) != 1 || edits[0].NewText != "miniplugin-was-here" {
 		t.Errorf("edits = %+v, want a single edit with NewText %q", edits, "miniplugin-was-here")

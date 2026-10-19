@@ -134,7 +134,6 @@ type Bridge struct {
 	buffers  map[uint32]buffer
 	visible  map[uint64][2]uint32
 	messages []Message
-	keys     []string
 	popups   []Popup
 	prompts  []Prompt
 	opened   []Opened
@@ -193,13 +192,6 @@ func (b *Bridge) WaitForMessage(t *testing.T, text string) Message {
 	return found
 }
 
-// Keys returns the key triggers registered so far.
-func (b *Bridge) Keys() []string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return append([]string(nil), b.keys...)
-}
-
 // WaitForPopup waits for the nth popup (counting from 1) and returns it.
 func (b *Bridge) WaitForPopup(t *testing.T, n int) Popup {
 	t.Helper()
@@ -251,12 +243,6 @@ func (b *Bridge) PluginShowMessage(clientID uint64, text string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.messages = append(b.messages, Message{ClientID: clientID, Text: text})
-}
-
-func (b *Bridge) PluginKeyRegistered(trigger string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.keys = append(b.keys, trigger)
 }
 
 func (b *Bridge) PluginShowPopup(title string, items []plugin.PluginPopupItem, onSelect func(string), onCancel func()) {

@@ -18,27 +18,20 @@ type editorApiServer struct {
 
 // -- Registration methods --
 
+// errKeyBindingsRemoved is RegisterKeyBinding's answer. Plugins do not bind
+// keys: a key a plugin took was checked before the editor's own commands, so
+// any plugin could silently replace one, and two plugins binding one key raced
+// for it. Their actions are reached through the Command (space) menu instead.
+var errKeyBindingsRemoved = fmt.Errorf("plugins cannot bind keys since SDK 0.2.0; " +
+	"register the action with OnMenuAction and give it a menu_item in plugin.toml")
+
+// RegisterKeyBinding refuses. The method stays in the schema because its
+// ordinal cannot be reused; an old plugin that calls it gets this error.
 func (s *editorApiServer) RegisterKeyBinding(_ context.Context, call pluginproto.EditorApi_registerKeyBinding) error {
-	args := call.Args()
-	trigger, err := args.Trigger()
-	if err != nil {
-		return err
+	if h := call.Args().Handler(); h.IsValid() {
+		h.Release() //nolint:errcheck
 	}
-	handler := args.Handler()
-	if !handler.IsValid() {
-		return fmt.Errorf("invalid key handler")
-	}
-	s.reg.mu.Lock()
-	if old, ok := s.reg.keyBindings[trigger]; ok {
-		old.Release()
-	}
-	s.reg.keyBindings[trigger] = handler.AddRef()
-	s.reg.mu.Unlock()
-	if s.bridge != nil {
-		s.bridge.PluginKeyRegistered(trigger)
-	}
-	_, err = call.AllocResults()
-	return err
+	return errKeyBindingsRemoved
 }
 
 func (s *editorApiServer) RegisterInsertHook(_ context.Context, call pluginproto.EditorApi_registerInsertHook) error {

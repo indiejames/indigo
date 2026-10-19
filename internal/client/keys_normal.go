@@ -41,11 +41,6 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Let plugins handle keys they registered before built-in commands.
-	if m.rpc != nil && m.rpc.HasPluginKey(msg.String()) {
-		return m.handlePluginKeyRPC(msg.String())
-	}
-
 	// A single keypress that matches a root-level command tree entry either
 	// fires immediately (leaf) or starts a prefix sequence (branch), taking
 	// priority over the switch below so remapped/config-driven bindings and
@@ -572,8 +567,13 @@ func executeAddCursorBelow(m Model) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func executeFetchPluginBindings(m Model) (tea.Model, tea.Cmd) {
-	return m, m.fetchPluginBindings()
+// executeShowHelp opens the key-binding help popup. It lists the editor's own
+// bindings only: plugins bind no keys, and their actions are listed in the
+// Command (space) menu.
+func executeShowHelp(m Model) (tea.Model, tea.Cmd) {
+	m.helpVisible = true
+	m.helpScroll = 0
+	return m, nil
 }
 
 func executeSplitSelectionIntoCursors(m Model) (tea.Model, tea.Cmd) {

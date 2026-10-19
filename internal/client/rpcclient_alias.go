@@ -48,7 +48,6 @@ type (
 	ClientLspCodeAction         = rpcclient.ClientLspCodeAction
 	ClientLspEdit               = rpcclient.ClientLspEdit
 	ClientMenuItem              = rpcclient.ClientMenuItem
-	ClientPluginBinding         = rpcclient.ClientPluginBinding
 	ClientPopupItem             = rpcclient.ClientPopupItem
 	ClientReference             = rpcclient.ClientReference
 	ClientSemanticToken         = rpcclient.ClientSemanticToken

@@ -145,19 +145,11 @@ func (s *callbackServer) OpenFile(_ context.Context, call proto.ClientCallback_o
 	return err
 }
 
+// KeyRegistered ignores the call. Plugins bind no keys since SDK 0.2.0, and
+// an editor that refuses the binding never sends this; one that still did is
+// not given a key to take.
 func (s *callbackServer) KeyRegistered(_ context.Context, call proto.ClientCallback_keyRegistered) error {
-	trigger, err := call.Args().Trigger()
-	if err != nil {
-		return err
-	}
-	s.mu.RLock()
-	r := s.rpc
-	s.mu.RUnlock()
-	clientLog("KeyRegistered called: trigger=%q, rpc_set=%v", trigger, r != nil)
-	if r != nil {
-		r.addPluginKey(trigger)
-	}
-	_, err = call.AllocResults()
+	_, err := call.AllocResults()
 	return err
 }
 

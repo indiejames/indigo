@@ -117,16 +117,15 @@ func (g *GitPlugin) Init(api *sdk.Api) sdk.Info {
 	})
 	api.Decorations(g.decorations) //nolint:errcheck
 
-	api.OnKey("alt+b", g.onToggleBlame)                     //nolint:errcheck
-	api.OnKey("alt+n", g.onNextHunk)                        //nolint:errcheck
-	api.OnKey("alt+p", g.onPrevHunk)                        //nolint:errcheck
 	api.OnMenuAction("git.blame", g.onToggleBlame)          //nolint:errcheck
 	api.OnMenuAction("git.blame_details", g.onBlameDetails) //nolint:errcheck
 	api.OnMenuAction("git.diff", g.onDiff)                  //nolint:errcheck
+	api.OnMenuAction("git.next_hunk", g.onNextHunk)         //nolint:errcheck
+	api.OnMenuAction("git.prev_hunk", g.onPrevHunk)         //nolint:errcheck
 
 	go g.pollLoop()
 
-	return sdk.Info{Name: "indigo-git", Version: "0.2.0"}
+	return sdk.Info{Name: "indigo-git", Version: "0.3.0"}
 }
 
 func (g *GitPlugin) onOpen(bufID uint32, path string) {

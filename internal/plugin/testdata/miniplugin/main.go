@@ -13,7 +13,7 @@ import (
 type miniPlugin struct{}
 
 func (miniPlugin) Init(api *sdk.Api) sdk.Info {
-	api.OnKey("X", func(key string, ctx sdk.KeyContext) sdk.KeyResponse { //nolint:errcheck
+	api.OnMenuAction("mini.x", func(key string, ctx sdk.KeyContext) sdk.KeyResponse { //nolint:errcheck
 		return sdk.KeyResponse{
 			Handled: true,
 			Edits: []sdk.TextEdit{{

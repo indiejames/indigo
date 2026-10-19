@@ -53,10 +53,8 @@ type ServerBridge interface {
 	PluginShowPopup(title string, items []PluginPopupItem, onSelect func(data string), onCancel func())
 	PluginShowInputPrompt(title, placeholder string, onConfirm func(text string), onCancel func())
 
-	// Key registration notification — called so the server can push to clients.
-	PluginKeyRegistered(trigger string)
-	// Insert-hook registration notification — same purpose as
-	// PluginKeyRegistered, for OnInsert instead of OnKey.
+	// Insert-hook registration notification, so the server can tell clients
+	// which typed characters to report.
 	PluginInsertHookRegistered(char string)
 	// PluginDecorationsChanged pushes an immediate decoration refetch to any
 	// client viewing bufID, instead of it waiting for the next poll tick.
@@ -177,13 +175,6 @@ type PluginToml struct {
 	// in the form "sha256:<hex>". When present, the binary is rejected if its
 	// hash does not match. Manifests that omit this field skip hash checking.
 	Hashes map[string]string `toml:"hashes"`
-	// TriggerKey overrides the key the plugin registers as its trigger.
-	// Only applies when the plugin registers exactly one key binding.
-	// Example: trigger_key = "r"
-	TriggerKey string `toml:"trigger_key"`
-	// KeyDescription is a short description of the trigger key shown in the ? help popup.
-	// If omitted, the plugin's description field is used (truncated).
-	KeyDescription string `toml:"key_description"`
 	// MenuItems declares entries this plugin contributes to the Command (space)
 	// menu. Each entry's Command must match an id passed to api.OnMenuAction.
 	// A group entry (no Command, non-empty Children) becomes a submenu.
@@ -201,11 +192,9 @@ type MenuItemToml struct {
 // registeredPlugin holds a running plugin's process, RPC connection, and
 // the handlers it registered during initialize.
 type registeredPlugin struct {
-	name           string
-	description    string // from manifest description field
-	keyDescription string // from manifest key_description field; empty = use description
-	process        *os.Process
-	rpcConn        *rpc.Conn
+	name    string
+	process *os.Process
+	rpcConn *rpc.Conn
 	// reapDone closes once reapOnDisconnect has Wait()-ed on process,
 	// following its RPC connection closing (crash or Shutdown teardown).
 	// Production code never reads it; it exists so tests can synchronize on
@@ -213,7 +202,6 @@ type registeredPlugin struct {
 	reapDone <-chan struct{}
 
 	mu                 sync.RWMutex
-	keyBindings        map[string]pluginproto.KeyHandler
 	insertHooks        map[string]pluginproto.KeyHandler
 	commands           map[string]pluginproto.CommandHandler
 	menuActions        map[string]pluginproto.KeyHandler
@@ -236,9 +224,6 @@ type registeredPlugin struct {
 func (p *registeredPlugin) release() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for _, h := range p.keyBindings {
-		h.Release()
-	}
 	for _, h := range p.insertHooks {
 		h.Release()
 	}
@@ -425,15 +410,12 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 	}
 
 	reg := &registeredPlugin{
-		name:           name,
-		description:    manifest.Description,
-		keyDescription: manifest.KeyDescription,
-		process:        proc,
-		keyBindings:    make(map[string]pluginproto.KeyHandler),
-		insertHooks:    make(map[string]pluginproto.KeyHandler),
-		commands:       make(map[string]pluginproto.CommandHandler),
-		menuActions:    make(map[string]pluginproto.KeyHandler),
-		menuItems:      manifest.MenuItems,
+		name:        name,
+		process:     proc,
+		insertHooks: make(map[string]pluginproto.KeyHandler),
+		commands:    make(map[string]pluginproto.CommandHandler),
+		menuActions: make(map[string]pluginproto.KeyHandler),
+		menuItems:   manifest.MenuItems,
 	}
 
 	apiServer := &editorApiServer{reg: reg, bridge: m.bridge}
@@ -487,23 +469,6 @@ func (m *Manager) startPlugin(ctx context.Context, manifest *PluginToml, binaryP
 		return fmt.Errorf("plugin %s initialize: %w", name, err)
 	}
 
-	// If trigger_key is set and the plugin registered exactly one key, remap it.
-	if manifest.TriggerKey != "" {
-		reg.mu.Lock()
-		if len(reg.keyBindings) == 1 {
-			for oldKey, h := range reg.keyBindings {
-				if oldKey != manifest.TriggerKey {
-					delete(reg.keyBindings, oldKey)
-					reg.keyBindings[manifest.TriggerKey] = h
-					if m.bridge != nil {
-						m.bridge.PluginKeyRegistered(manifest.TriggerKey)
-					}
-				}
-			}
-		}
-		reg.mu.Unlock()
-	}
-
 	// Reap the process once its RPC connection goes down — whether from a
 	// mid-session crash (no dispatch path otherwise ever calls Wait, so the
 	// process would sit as a zombie until the whole server exits) or from
@@ -541,22 +506,6 @@ func reapOnDisconnect(proc *os.Process, rpcConn *rpc.Conn) <-chan struct{} {
 	return done
 }
 
-// AllRegisteredKeys returns every key trigger registered across all loaded plugins.
-func (m *Manager) AllRegisteredKeys() []string {
-	m.mu.Lock()
-	plugins := m.plugins
-	m.mu.Unlock()
-	var keys []string
-	for _, p := range plugins {
-		p.mu.RLock()
-		for k := range p.keyBindings {
-			keys = append(keys, k)
-		}
-		p.mu.RUnlock()
-	}
-	return keys
-}
-
 // AllRegisteredInsertChars returns every char with an OnInsert hook
 // registered across all loaded plugins.
 func (m *Manager) AllRegisteredInsertChars() []string {
@@ -572,38 +521,6 @@ func (m *Manager) AllRegisteredInsertChars() []string {
 		p.mu.RUnlock()
 	}
 	return chars
-}
-
-// PluginBinding describes one key binding contributed by a plugin.
-type PluginBinding struct {
-	PluginName  string
-	Key         string
-	Description string // short description for the help popup
-}
-
-// AllPluginBindings returns all key bindings contributed by loaded plugins,
-// with the plugin name and a short description for each.
-func (m *Manager) AllPluginBindings() []PluginBinding {
-	m.mu.Lock()
-	plugins := m.plugins
-	m.mu.Unlock()
-	var bindings []PluginBinding
-	for _, p := range plugins {
-		p.mu.RLock()
-		desc := p.keyDescription
-		if desc == "" {
-			desc = p.description
-		}
-		for k := range p.keyBindings {
-			bindings = append(bindings, PluginBinding{
-				PluginName:  p.name,
-				Key:         k,
-				Description: desc,
-			})
-		}
-		p.mu.RUnlock()
-	}
-	return bindings
 }
 
 // MenuItem is one node in a plugin's contributed Command-menu tree, with the
@@ -1262,8 +1179,8 @@ func (m *Manager) Shutdown() {
 //
 // In "capture" mode the key goes to whichever handler last returned captureKeys>0,
 // regardless of the key name. In "insert" mode the key (a single typed char) is
-// looked up in each plugin's registered OnInsert hooks. In all other modes the
-// key is looked up by name in each plugin's registered key bindings.
+// looked up in each plugin's registered OnInsert hooks. Any other key is not a
+// plugin's: plugins bind no keys.
 //
 // Plugin handlers are called with a 300 ms deadline; timeout → handled=false.
 func (m *Manager) HandleKey(ctx context.Context, key, mode string, bufID uint32, clientID uint64, curLine, curCol uint32) (
@@ -1287,15 +1204,15 @@ func (m *Manager) HandleKey(ctx context.Context, key, mode string, bufID uint32,
 	plugins := m.plugins
 	m.mu.Unlock()
 
+	// Outside capture, only a typed character with an insert hook reaches a
+	// plugin. Plugins bind no Normal-mode keys; their actions run from the
+	// Command menu (InvokeMenuAction).
+	if mode != "insert" {
+		return false, nil, 0, 0, false, 0, nil
+	}
 	for _, p := range plugins {
 		p.mu.RLock()
-		var handler pluginproto.KeyHandler
-		var ok bool
-		if mode == "insert" {
-			handler, ok = p.insertHooks[key]
-		} else {
-			handler, ok = p.keyBindings[key]
-		}
+		handler, ok := p.insertHooks[key]
 		p.mu.RUnlock()
 		if !ok {
 			continue
@@ -1543,13 +1460,32 @@ func (m *Manager) pluginSocketPath(pluginName string) string {
 
 func loadManifest(pluginDir string) (*PluginToml, error) {
 	var manifest PluginToml
-	if _, err := toml.DecodeFile(filepath.Join(pluginDir, "plugin.toml"), &manifest); err != nil {
+	md, err := toml.DecodeFile(filepath.Join(pluginDir, "plugin.toml"), &manifest)
+	if err != nil {
 		return nil, err
 	}
 	if manifest.Name == "" {
 		return nil, fmt.Errorf("plugin.toml missing name")
 	}
+	for _, k := range retiredKeyFields(md) {
+		pluginLog("plugin %s: %s in plugin.toml is ignored; plugins cannot bind keys since SDK 0.2.0, "+
+			"so give the action a menu_item instead", manifest.Name, k)
+	}
 	return &manifest, nil
+}
+
+// retiredKeyFields returns the manifest fields that used to bind a plugin's
+// key (trigger_key, key_description) and that md found but did not decode.
+// TOML ignores unknown keys silently, so without this a plugin author would
+// see the key stop working with nothing saying why.
+func retiredKeyFields(md toml.MetaData) []string {
+	var out []string
+	for _, k := range md.Undecoded() {
+		if s := k.String(); s == "trigger_key" || s == "key_description" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func selectBinary(pluginDir string, manifest *PluginToml) (string, error) {

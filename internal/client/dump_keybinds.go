@@ -12,11 +12,9 @@ import (
 // way a hand-written reference doc would as actions get added. Exported
 // for cmd/indigo's --dump-keybinds flag.
 //
-// Deliberately covers built-in actions only, not plugin actions: plugins
-// are per-workspace/per-plugin-set and configured through each plugin's
-// own trigger_key in its plugin.toml manifest, not this global config
-// file — a global dump can't meaningfully enumerate them. See the live "?"
-// help popup for currently-registered plugin bindings instead.
+// Covers built-in actions only. Plugins bind no keys: their actions are
+// listed in the Command (space) menu, under the keys each plugin's manifest
+// gives them.
 func DumpKeybindsTOML() string {
 	var b strings.Builder
 	b.WriteString("# Available actions for [[keybind]] overrides.\n")

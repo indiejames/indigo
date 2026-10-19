@@ -414,7 +414,7 @@ func (m Model) renderFrame() (string, *tea.Cursor) {
 	// Overlay help popup (centered).
 	if m.helpVisible {
 		maxPopH := max(6, vis-4)
-		popup := renderHelpPopup(m.width, m.helpScroll, maxPopH, m.pluginBindings)
+		popup := renderHelpPopup(m.width, m.helpScroll, maxPopH)
 		popH := len(popup)
 		popW := lipgloss.Width(popup[0])
 		popCol := (m.width - popW) / 2

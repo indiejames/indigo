@@ -134,9 +134,7 @@ type RPC struct {
 	cb       *callbackServer
 
 	pluginKeysMu    sync.RWMutex
-	pluginKeys      map[string]bool
 	insertHookChars map[string]bool
-	pluginBindings  []ClientPluginBinding
 	menuItems       []ClientMenuItem
 
 	// disconnecting is set at the start of Disconnect(), before it closes
@@ -145,13 +143,6 @@ type RPC struct {
 	// as the server having crashed — only a close we didn't initiate is a
 	// genuine disconnect worth telling app.App about.
 	disconnecting atomic.Bool
-}
-
-// ClientPluginBinding is a key binding contributed by a plugin, for the help popup.
-type ClientPluginBinding struct {
-	PluginName  string
-	Key         string
-	Description string
 }
 
 // ClientMenuItem is one node in the Command-menu (space menu) tree contributed
@@ -227,7 +218,6 @@ func DialStream(rwc io.ReadWriteCloser) (*RPC, error) {
 		clientID:        res.ClientId(),
 		serverStale:     res.ServerStale(),
 		cb:              cb,
-		pluginKeys:      make(map[string]bool),
 		insertHookChars: make(map[string]bool),
 	}
 	cb.mu.Lock()
@@ -246,57 +236,16 @@ func DialStream(rwc io.ReadWriteCloser) (*RPC, error) {
 		r.handleConnClosed()
 	}()
 
-	// Fetch plugin keys, insert characters, bindings, and menu items in one
-	// round trip's worth of latency instead of four: issue all four calls
-	// before blocking on any of their results, so the server processes them
-	// concurrently. The bindings/menu-items handlers each wait for plugin
-	// startup to finish (see pluginReadyTimeout server-side); firing them
-	// together means that wait is paid once, not stacked four times.
-	kfut, krel := svc.GetPluginKeys(context.Background(), func(_ proto.EditorService_getPluginKeys_Params) error {
-		return nil
-	})
-	bfut, brel := svc.GetPluginBindings(context.Background(), func(_ proto.EditorService_getPluginBindings_Params) error {
-		return nil
-	})
+	// Fetch insert characters and menu items in one round trip's worth of
+	// latency instead of two: issue both calls before blocking on either, so
+	// the server processes them concurrently. The menu-items handler waits for
+	// plugin startup to finish (see pluginReadyTimeout server-side).
 	mfut, mrel := svc.GetMenuItems(context.Background(), func(_ proto.EditorService_getMenuItems_Params) error {
 		return nil
 	})
 	ifut, irel := svc.GetPluginInsertChars(context.Background(), func(_ proto.EditorService_getPluginInsertChars_Params) error {
 		return nil
 	})
-
-	// Keys that plugins registered before this client connected. This handles
-	// the race where the plugin starts and registers keys before the first
-	// client calls Connect.
-	if kres, err := kfut.Struct(); err != nil {
-		clientLog("GetPluginKeys RPC error: %v", err)
-	} else if keys, err := kres.Keys(); err != nil {
-		clientLog("GetPluginKeys Keys() error: %v", err)
-	} else {
-		clientLog("GetPluginKeys returned %d keys", keys.Len())
-		for i := 0; i < keys.Len(); i++ {
-			if k, err := keys.At(i); err == nil {
-				clientLog("GetPluginKeys: adding key %q", k)
-				r.addPluginKey(k)
-			}
-		}
-	}
-	krel()
-
-	// Plugin bindings for the help popup.
-	if bres, err := bfut.Struct(); err == nil {
-		if rawList, err := bres.Bindings(); err == nil {
-			r.pluginBindings = make([]ClientPluginBinding, rawList.Len())
-			for i := range r.pluginBindings {
-				item := rawList.At(i)
-				name, _ := item.PluginName()
-				key, _ := item.Key()
-				desc, _ := item.Description()
-				r.pluginBindings[i] = ClientPluginBinding{PluginName: name, Key: key, Description: desc}
-			}
-		}
-	}
-	brel()
 
 	// Plugin-contributed Command (space) menu items.
 	if mres, err := mfut.Struct(); err == nil {
@@ -306,8 +255,8 @@ func DialStream(rwc io.ReadWriteCloser) (*RPC, error) {
 	}
 	mrel()
 
-	// Chars with a registered insert hook. Same race-handling rationale as
-	// GetPluginKeys above; insertHookRegistered covers late registration.
+	// Chars with a registered insert hook, for plugins that registered before
+	// this client connected; insertHookRegistered covers later registration.
 	if ires, err := ifut.Struct(); err == nil {
 		if chars, err := ires.Chars(); err == nil {
 			for i := 0; i < chars.Len(); i++ {
@@ -363,26 +312,11 @@ func (r *RPC) SetPushSender(send func(tea.Msg)) {
 	r.cb.setSend(send)
 }
 
-// addPluginKey records that a plugin owns this key trigger.
-func (r *RPC) addPluginKey(trigger string) {
-	clientLog("addPluginKey: %q", trigger)
-	r.pluginKeysMu.Lock()
-	r.pluginKeys[trigger] = true
-	r.pluginKeysMu.Unlock()
-}
-
 // addInsertHookChar records that a plugin owns this OnInsert char.
 func (r *RPC) addInsertHookChar(char string) {
 	r.pluginKeysMu.Lock()
 	r.insertHookChars[char] = true
 	r.pluginKeysMu.Unlock()
-}
-
-// PluginBindings returns the cached key bindings snapshot from startup.
-func (r *RPC) PluginBindings() []ClientPluginBinding {
-	r.pluginKeysMu.RLock()
-	defer r.pluginKeysMu.RUnlock()
-	return r.pluginBindings
 }
 
 // handleConnClosed runs once r.conn.Done() fires, from the monitor goroutine

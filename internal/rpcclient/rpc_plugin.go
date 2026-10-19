@@ -6,38 +6,6 @@ import (
 	proto "github.com/indiejames/indigo/internal/proto"
 )
 
-// GetPluginBindings fetches fresh plugin key bindings from the server.
-func (r *RPC) GetPluginBindings(ctx context.Context) ([]ClientPluginBinding, error) {
-	fut, rel := r.svc.GetPluginBindings(ctx, func(_ proto.EditorService_getPluginBindings_Params) error {
-		return nil
-	})
-	defer rel()
-	res, err := fut.Struct()
-	if err != nil {
-		return nil, err
-	}
-	rawList, err := res.Bindings()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ClientPluginBinding, rawList.Len())
-	for i := range out {
-		item := rawList.At(i)
-		name, _ := item.PluginName()
-		key, _ := item.Key()
-		desc, _ := item.Description()
-		out[i] = ClientPluginBinding{PluginName: name, Key: key, Description: desc}
-	}
-	return out, nil
-}
-
-// HasPluginKey reports whether any plugin registered this key trigger.
-func (r *RPC) HasPluginKey(key string) bool {
-	r.pluginKeysMu.RLock()
-	defer r.pluginKeysMu.RUnlock()
-	return r.pluginKeys[key]
-}
-
 // HasInsertHook reports whether any plugin registered an OnInsert hook for char.
 func (r *RPC) HasInsertHook(char string) bool {
 	r.pluginKeysMu.RLock()

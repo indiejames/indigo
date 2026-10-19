@@ -8,7 +8,7 @@ import (
 	proto "github.com/indiejames/indigo/internal/proto"
 )
 
-// pluginReadyTimeout bounds how long GetMenuItems/GetPluginBindings wait for
+// pluginReadyTimeout bounds how long GetMenuItems waits for
 // plugin startup to finish before returning whatever is available so far.
 const pluginReadyTimeout = 2 * time.Second
 
@@ -308,33 +308,16 @@ func (s *editorService) UpdateViewport(_ context.Context, call proto.EditorServi
 	return err
 }
 
-func (s *editorService) GetPluginBindings(ctx context.Context, call proto.EditorService_getPluginBindings) error {
-	waitCtx, cancel := context.WithTimeout(ctx, pluginReadyTimeout)
-	s.pluginMgr.WaitReady(waitCtx)
-	cancel()
-
-	bindings := s.pluginMgr.AllPluginBindings()
+// GetPluginBindings answers with no bindings: plugins bind no keys since SDK
+// 0.2.0. The method stays because a capnp method's ordinal cannot be reused,
+// and a window from an older build still calls it at startup.
+func (s *editorService) GetPluginBindings(_ context.Context, call proto.EditorService_getPluginBindings) error {
 	res, err := call.AllocResults()
 	if err != nil {
 		return err
 	}
-	list, err := res.NewBindings(int32(len(bindings)))
-	if err != nil {
-		return err
-	}
-	for i, b := range bindings {
-		item := list.At(i)
-		if err := item.SetPluginName(b.PluginName); err != nil {
-			return err
-		}
-		if err := item.SetKey(b.Key); err != nil {
-			return err
-		}
-		if err := item.SetDescription(b.Description); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err = res.NewBindings(0)
+	return err
 }
 
 // setMenuItems recursively fills a MenuItemInfo_List from a []plugin.MenuItem tree.
@@ -424,23 +407,15 @@ func (s *editorService) InvokePluginMenuAction(ctx context.Context, call proto.E
 	return nil
 }
 
+// GetPluginKeys answers with no keys, for the same reason as
+// GetPluginBindings.
 func (s *editorService) GetPluginKeys(_ context.Context, call proto.EditorService_getPluginKeys) error {
-	keys := s.pluginMgr.AllRegisteredKeys()
-	serverLog("GetPluginKeys called, returning %d keys: %v", len(keys), keys)
 	res, err := call.AllocResults()
 	if err != nil {
 		return err
 	}
-	list, err := res.NewKeys(int32(len(keys)))
-	if err != nil {
-		return err
-	}
-	for i, k := range keys {
-		if err := list.Set(i, k); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err = res.NewKeys(0)
+	return err
 }
 
 func (s *editorService) GetPluginInsertChars(_ context.Context, call proto.EditorService_getPluginInsertChars) error {

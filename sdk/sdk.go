@@ -8,21 +8,22 @@
 //	type MyPlugin struct{}
 //
 //	func (p *MyPlugin) Init(api *sdk.Api) sdk.Info {
-//	    api.OnKey("f", func(key string, ctx sdk.KeyContext) sdk.KeyResponse {
+//	    api.OnMenuAction("myplugin.run", func(key string, ctx sdk.KeyContext) sdk.KeyResponse {
 //	        return sdk.KeyResponse{Handled: true}
 //	    })
 //	    return sdk.Info{Name: "myplugin", Version: "0.1.0"}
 //	}
+//
+// with a menu_item in plugin.toml whose command is "myplugin.run".
 //
 //	func main() { sdk.Run(&MyPlugin{}) }
 //
 // # Capabilities
 //
 // Registration (called from Init, results are permanent for the plugin lifetime):
-//   - [Api.OnKey] — handle a normal-mode key binding
-//   - [Api.OnInsert] — handle a character typed in insert mode
-//   - [Api.OnCommand] — add an ex command (`:name`)
 //   - [Api.OnMenuAction] — contribute an item to the Command (space) menu
+//   - [Api.OnInsert] — be told when a character is typed in insert mode
+//   - [Api.OnCommand] — add an ex command (`:name`)
 //   - [Api.HandleBufferEvents] — react to buffer open/change/save/close
 //   - [Api.Decorations] / [Api.DecorationsFull] — provide gutter/overlay/status-bar decorations
 //   - [Api.RegisterActionProvider] — contribute items to the F-key action popup
@@ -104,7 +105,7 @@ type Info struct {
 	Version string
 }
 
-// KeyContext is the context passed to key and insert handlers.
+// KeyContext is the context passed to menu-action and insert handlers.
 type KeyContext struct {
 	BufID      uint32
 	Mode       string // "normal", "insert", or "capture"
@@ -113,7 +114,7 @@ type KeyContext struct {
 	CursorCol  uint32
 }
 
-// KeyResponse is returned by key and insert handlers.
+// KeyResponse is returned by menu-action and insert handlers.
 type KeyResponse struct {
 	Handled     bool
 	Edits       []TextEdit
@@ -231,22 +232,19 @@ type Api struct {
 
 // -- Registration --
 
-// OnKey registers fn as the handler for trigger in normal mode.
-// trigger is the key string as reported by Bubble Tea (e.g. "f", "ctrl+j", "space").
-func (a *Api) OnKey(trigger string, fn func(key string, ctx KeyContext) KeyResponse) error {
-	h := pluginproto.KeyHandler_ServerToClient(&keyHandlerServer{fn: fn})
-	fut, rel := a.api.RegisterKeyBinding(context.Background(), func(p pluginproto.EditorApi_registerKeyBinding_Params) error {
-		if err := p.SetTrigger(trigger); err != nil {
-			return err
-		}
-		return p.SetHandler(h)
-	})
-	defer rel()
-	_, err := fut.Struct()
-	return err
-}
+// Plugins do not bind keys. A plugin's actions are reached through the
+// Command (space) menu, under the keys its manifest declares there, so a
+// plugin can never take over a key the editor uses, two plugins can never race
+// for one key, and every plugin action is listed where the user looks for it.
+// OnKey was removed in SDK 0.2.0 for this reason; use [Api.OnMenuAction] with a
+// menu_item in plugin.toml. A plugin can still read the keys that follow its
+// own action (KeyResponse.CaptureKeys) and be told about typed characters
+// ([Api.OnInsert]).
 
-// OnInsert registers fn as the handler when char is typed in insert mode.
+// OnInsert registers fn to be told when char is typed in insert mode. The
+// character is always inserted first and fn runs in the background, so a slow
+// plugin can delay its own response but never the keystroke; fn's KeyResponse
+// can still edit, move the cursor or start capture.
 func (a *Api) OnInsert(char string, fn func(char string, ctx KeyContext) KeyResponse) error {
 	h := pluginproto.KeyHandler_ServerToClient(&keyHandlerServer{fn: func(key string, ctx KeyContext) KeyResponse {
 		return fn(char, ctx)
@@ -263,12 +261,12 @@ func (a *Api) OnInsert(char string, fn func(char string, ctx KeyContext) KeyResp
 }
 
 // OnMenuAction registers fn as the handler for a Command-menu (space menu)
-// item. Unlike OnKey, this never binds to a physical key — id is an opaque
-// string of the plugin's choosing, referenced by the "command" field of a
-// menu_item entry in the plugin's plugin.toml manifest. fn receives the same
-// KeyContext/KeyResponse shape as a normal-mode key handler; ctx.Mode is
-// always "normal" (a KeyResponse with CaptureKeys > 0 still enters capture
-// mode for subsequent physical keystrokes, same as OnKey).
+// item, which is how a plugin's actions are invoked. id is an opaque string of
+// the plugin's choosing, referenced by the "command" field of a menu_item
+// entry in the plugin's plugin.toml manifest, and the menu_item's key is the
+// key under space that runs it. ctx.Mode is always "normal". A KeyResponse
+// with CaptureKeys > 0 sends the next keystrokes to fn too, which is how an
+// action reads a label or a choice after it is invoked.
 func (a *Api) OnMenuAction(id string, fn func(key string, ctx KeyContext) KeyResponse) error {
 	h := pluginproto.KeyHandler_ServerToClient(&keyHandlerServer{fn: fn})
 	fut, rel := a.api.RegisterMenuAction(context.Background(), func(p pluginproto.EditorApi_registerMenuAction_Params) error {

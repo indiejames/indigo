@@ -11,9 +11,9 @@ end — it's not duplicated here as a separate file; see that section for why.
 ## What you'll build
 
 A small plugin that jumps to the next `TODO`/`FIXME` comment in the buffer, marks those
-lines in the gutter, and adds an entry to the Command (space) menu. It touches the four
-things almost every plugin needs: a key binding, a menu action, a decoration provider, and
-reading buffer content.
+lines in the gutter, and runs from an entry in the Command (space) menu. It touches the
+three things almost every plugin needs: a menu action, a decoration provider, and reading
+buffer content.
 
 ## 1. Set up the project
 
@@ -76,23 +76,24 @@ until the editor disconnects.
 This compiles and would load successfully, but doesn't do anything yet — nothing is
 registered in `Init`.
 
-## 3. Register a key binding
+## 3. Add a Command-menu action
 
-Add a normal-mode key binding with `Api.OnKey`. The handler receives the pressed key and a
-`KeyContext` (buffer ID, mode, client ID, cursor position), and returns a `KeyResponse`
-saying what happened.
+A plugin's actions run from the Command menu, which opens when you press `space` in normal
+mode. Register what an action does with `Api.OnMenuAction`, under an opaque id of your
+choosing. The handler receives a `KeyContext` (buffer ID, mode, client ID, cursor position)
+and returns a `KeyResponse` saying what happened.
 
 ```go
 func (p *TodoPlugin) Init(api *sdk.Api) sdk.Info {
     p.api = api
-    api.OnKey("T", p.jumpToNext) //nolint:errcheck
+    api.OnMenuAction("todo.jump", p.jumpToNext) //nolint:errcheck
     return sdk.Info{Name: "todo", Version: "0.1.0"}
 }
 
 // jumpToNext moves the cursor to the next TODO/FIXME after the current line.
 func (p *TodoPlugin) jumpToNext(key string, ctx sdk.KeyContext) sdk.KeyResponse {
-	// ReadBuffer is used in this example for simplicity, but a real plugin would 
-    // probably use Readlines or ReadRange to avoid holding the entire document
+    // ReadBuffer is used in this example for simplicity, but a real plugin would
+    // probably use ReadLines or ReadRange to avoid holding the entire document
     // in memory.
     content, err := p.api.ReadBuffer(ctx.BufID)
     if err != nil {
@@ -110,31 +111,34 @@ func (p *TodoPlugin) jumpToNext(key string, ctx sdk.KeyContext) sdk.KeyResponse 
 }
 ```
 
-`OnKey`/`OnMenuAction`/`OnInsert` all return an `error` from the registration RPC call
+The menu entry itself, with its label and the key that picks it, is declared in
+`plugin.toml` (step 6), not in Go code. `OnMenuAction` only wires up what happens when it's
+selected, and `ctx.Mode` is always `"normal"` there.
+
+`OnMenuAction`/`OnInsert`/`OnCommand` all return an `error` from the registration RPC call
 itself (not from your handler) — it only fails if the connection to the editor is already
 broken, at which point nothing else works either, so the bundled plugins in this repo
 consistently ignore it with `//nolint:errcheck`. This tutorial follows that convention.
 
-A handler has a **300ms deadline** — if it doesn't respond in time, the keypress falls
-through as if nothing handled it. Don't do slow I/O (network calls, etc.) directly in a key
-handler.
+A handler has a **300ms deadline** — if it doesn't respond in time, the action does
+nothing. Don't do slow I/O (network calls, etc.) directly in a handler.
 
-## 4. Add a Command-menu entry
+## 4. Keys: what a plugin can and can't do
 
-Pressing `space` in normal mode opens the Command menu. A menu entry works exactly like a
-key binding except it's never bound to a physical key — it's only reachable by selecting it
-from the menu — so it uses the same handler shape via `OnMenuAction`, registered with an
-opaque id of your choosing:
+**A plugin cannot bind a key.** Every plugin action is reached through the Command menu,
+under the key its `plugin.toml` gives it, so a plugin can never take over a key the editor
+uses, two plugins can never fight over one key, and the user finds every plugin action in
+one place. (SDK 0.1 had `OnKey`; it was removed in 0.2.0, and an editor from 0.2.0 on
+refuses the binding.) Two things that look like key handling are still allowed:
 
-```go
-api.OnMenuAction("todo.jump", p.jumpToNext) //nolint:errcheck
-```
-
-The menu entry itself is declared in `plugin.toml` (step 6), not in Go code — `OnMenuAction`
-just wires up what happens when it's selected. Reusing `p.jumpToNext` here works because it
-already matches the `func(key string, ctx sdk.KeyContext) sdk.KeyResponse` shape both
-`OnKey` and `OnMenuAction` expect; `ctx.Mode` will just always be `"normal"` for a menu
-invocation.
+- **Reading the keys after your own action.** Return `CaptureKeys: n` from the handler and
+  the next `n` keystrokes go to it as well, with `ctx.Mode == "capture"`. That's how the
+  bundled `jumpy` plugin reads the two-letter label of the place to jump to. Esc ends a
+  capture, and is passed to the handler too, so it can clean up.
+- **Being told about typed characters.** `OnInsert(char, fn)` runs `fn` when `char` is typed
+  in insert mode. The character is always inserted first and `fn` runs in the background,
+  so a slow plugin can delay its own response but never the keystroke. An inline-completion
+  plugin uses this.
 
 ## 5. Add a decoration provider
 
@@ -145,9 +149,8 @@ currently-visible range — it should be fast and side-effect-free:
 ```go
 func (p *TodoPlugin) Init(api *sdk.Api) sdk.Info {
     p.api = api
-    api.OnKey("T", p.jumpToNext)               //nolint:errcheck
     api.OnMenuAction("todo.jump", p.jumpToNext) //nolint:errcheck
-    api.Decorations(p.decorate)                //nolint:errcheck
+    api.Decorations(p.decorate)                 //nolint:errcheck
     return sdk.Info{Name: "todo", Version: "0.1.0"}
 }
 
@@ -175,7 +178,7 @@ func (p *TodoPlugin) decorate(bufID uint32, clientID uint64, r sdk.Range) []sdk.
 Only read the visible range (`r`, given to you) rather than the whole buffer — decorations
 are recomputed on every scroll/viewport change, so this runs often. `ReadLines` is the cheap
 way to do that; `ReadBuffer` (used in `jumpToNext`) reads the whole file and is fine for an
-occasional keypress but wasteful to call from a decoration provider.
+occasional action but wasteful to call from a decoration provider.
 
 > Contributing to the completion popup (`api.Completions`/`api.CompletionsFull`) follows the
 > same shape as `Decorations` above — a fast callback the editor calls on every request,
@@ -189,7 +192,7 @@ occasional keypress but wasteful to call from a decoration provider.
 ```toml
 name        = "todo"
 version     = "0.1.0"
-sdk_version = "0.1.1"
+sdk_version = "0.2.0"
 description = "Jump to and highlight TODO/FIXME comments"
 
 [binaries]
@@ -242,10 +245,8 @@ quit every indigo window for the workspace, then reopen one.
 
 Open a file containing a `TODO` comment, then:
 
-- Press `T` — cursor jumps to the next `TODO`/`FIXME` below it, and the status bar
-  confirms.
-- Press `space`, then whatever key you gave `[[menu_item]]` (`t` above) — same action, via
-  the Command menu.
+- Press `space`, then the key you gave `[[menu_item]]` (`t` above) — the cursor jumps to
+  the next `TODO`/`FIXME` below it, and the status bar confirms.
 - Lines containing `TODO`/`FIXME` show a `!` in the gutter.
 
 ## Debugging
@@ -305,8 +306,7 @@ type TodoPlugin struct {
 
 func (p *TodoPlugin) Init(api *sdk.Api) sdk.Info {
     p.api = api
-    api.OnKey("T", p.jumpToNext)                //nolint:errcheck
-    api.OnMenuAction("todo.jump", p.jumpToNext)  //nolint:errcheck
+    api.OnMenuAction("todo.jump", p.jumpToNext) //nolint:errcheck
     api.Decorations(p.decorate)                 //nolint:errcheck
     return sdk.Info{Name: "todo", Version: "0.1.0"}
 }

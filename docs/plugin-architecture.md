@@ -55,7 +55,6 @@ During initialization, a plugin receives an `EditorApi` capability and uses it t
 
 ```
 Plugin.initialize(api: EditorApi):
-    api.registerKeyBinding("ctrl+j", myKeyHandler)
     api.registerBufferHandler(myBufferHandler)
     api.registerCommand("blame", myBlameHandler)
     api.registerMenuAction("myplugin.blame", myBlameMenuHandler)
@@ -83,16 +82,17 @@ The render loop and keypress path **never block** on plugin I/O. Snappiness is e
 | Status bar items                          | Async, cached last result   | none    |
 | Diagnostics (`PublishDiagnostics`)        | Push, cached until republished or the buffer closes | none |
 | Workspace diagnostics (`PublishWorkspaceDiagnostics`) | Push, cached until republished; run from an `OnWorkspaceScan` handler | 2 min per plugin per scan |
-| **Key binding handler**                   | Await response              | 300 ms  |
 | **Insert-mode hook** (e.g. bracket close) | Fire-and-forget notification after char is inserted; response applied if it arrives | 300 ms |
 | **Menu action handler** (Command menu)    | Await response              | 300 ms  |
 | **Action provider** (Shift+F actions)     | Await response              | 500 ms  |
 | **Fix provider** (fixable decorations)    | Await response              | 500 ms  |
 | **Command handler** (`:name`)             | Registered, not yet dispatched — see note | — |
 
-For the interactive cases (key bindings and menu actions), the server dispatches to the plugin in a goroutine and awaits the response with a deadline. If the deadline expires, the keypress falls through as if no plugin handled it.
+For the interactive cases (menu actions and captured keys), the server dispatches to the plugin in a goroutine and awaits the response with a deadline. If the deadline expires, the action does nothing.
 
-**Insert-mode hooks are different on purpose.** Every keystroke goes through `insertSelfInsert`, so gating the character's own insertion on a plugin round trip would risk stalling — or on a timeout, silently dropping — ordinary typing. Instead the client inserts the typed char locally and immediately, exactly as if no hook were registered, and *also* fires the registered `OnInsert` handler (if any) as a background request with the same 300ms deadline as other handlers. If a response comes back in time, it's applied the same way a key binding's response is (decoration refresh, optional cursor move, optional capture mode) — it just never blocks or overrides the insert itself. Use `OnInsert` for per-char triggers (e.g. re-checking something after `.` or `(` is typed); use `OnChange` (fires on every edit, no char filtering) if you need to react to *all* typing.
+**Plugins do not bind keys** (since SDK 0.2.0). A plugin's actions are reached through the Command (space) menu, under the keys its manifest declares there. A binding used to be checked before the editor's own commands, so any plugin could silently replace a key the editor uses, two plugins binding one key raced for it, and the user had no way to remap either. `registerKeyBinding` stays in the schema, since a method ordinal cannot be reused, but the editor refuses it. What remains is a plugin reading the keys after its own action (`CaptureKeys`) and the insert hooks below.
+
+**Insert-mode hooks are different on purpose.** Every keystroke goes through `insertSelfInsert`, so gating the character's own insertion on a plugin round trip would risk stalling — or on a timeout, silently dropping — ordinary typing. Instead the client inserts the typed char locally and immediately, exactly as if no hook were registered, and *also* fires the registered `OnInsert` handler (if any) as a background request with the same 300ms deadline as other handlers. If a response comes back in time, it's applied the same way a menu action's response is (decoration refresh, optional cursor move, optional capture mode) — it just never blocks or overrides the insert itself. Use `OnInsert` for per-char triggers (e.g. re-checking something after `.` or `(` is typed); use `OnChange` (fires on every edit, no char filtering) if you need to react to *all* typing.
 
 > **Note:** `registerCommand`/`OnCommand` handlers are stored server-side but nothing currently calls them — the client's `:name` command line does not yet route to plugin-registered commands. This is a known gap, not a design choice; treat `OnCommand` as reserved for now.
 
@@ -129,7 +129,6 @@ Overlay decorations are rendered in a single pass through each visible line's ru
 | Move cursor          | Jump to a position or selection                 |
 | Open file            | Open a file in a new buffer                     |
 | Show message         | Write to the status bar transiently             |
-| Register key binding | Own a key sequence in normal mode               |
 | Register command     | Add a `:commandname` callable from command mode |
 | Register insert hook | Receive asynchronous notification when a specific character is typed in insert mode |
 | Register menu action | Contribute an item to the space Command menu (invoked by selection, never bound to a physical key) |
@@ -181,7 +180,7 @@ interface Plugin {
 
 interface EditorApi {
     # Registration (called during initialize)
-    registerKeyBinding     @0  (trigger: Text, handler: KeyHandler) -> ();
+    registerKeyBinding     @0  (trigger: Text, handler: KeyHandler) -> ();  # retired: refused since SDK 0.2.0
     registerInsertHook     @1  (char: Text,    handler: KeyHandler) -> ();
     registerCommand        @2  (name: Text,    handler: CommandHandler) -> ();
     registerBufferHandler  @3  (handler: BufferEventHandler) -> ();
@@ -299,11 +298,10 @@ name    = "blame"
 version = "1.0.0"
 description = "Show git blame for the current line"
 
-# Optional: if the plugin registers exactly one key binding, trigger_key
-# overrides which physical key it's bound to; key_description is shown for
-# it in the ? help popup (falls back to description, truncated).
-trigger_key     = "ctrl+g"
-key_description = "Show git blame for current line"
+[[menu_item]]
+label   = "Blame"
+command = "blame.show"
+key     = "B"
 
 [binaries]
 "darwin/arm64" = "blame-darwin-arm64"
@@ -329,18 +327,17 @@ command = "jumpy.start"
 key     = "j"   # selector shown/typed within the Command menu; optional
 ```
 
-`command` is an opaque id chosen by the plugin. At runtime the plugin registers a handler for that id via `OnMenuAction`, which has the same signature as `OnKey` — it receives a `KeyContext` (`ctx.Mode` is always `"normal"`) and returns a `KeyResponse`:
+`command` is an opaque id chosen by the plugin. At runtime the plugin registers a handler for that id via `OnMenuAction`. It receives a `KeyContext` (`ctx.Mode` is always `"normal"`) and returns a `KeyResponse`:
 
 ```go
 api.OnMenuAction("jumpy.start", func(key string, ctx sdk.KeyContext) sdk.KeyResponse {
-    // same handler shape as OnKey; a KeyResponse with CaptureKeys > 0 still
-    // enters capture mode for subsequent physical keystrokes, e.g. jumpy's
-    // 2-character jump labels.
+    // A KeyResponse with CaptureKeys > 0 sends the next keystrokes to this
+    // handler too, e.g. jumpy's 2-character jump labels.
     return sdk.KeyResponse{Handled: true, CaptureKeys: 2}
 })
 ```
 
-Unlike `OnKey`, a menu action is **never** bound to a physical key — it's reachable only by selecting it from the Command menu. This is the key difference from `registerKeyBinding` + `trigger_key`: the latter claims a keystroke; `registerMenuAction` only claims a menu slot.
+A menu action is reached only through the Command menu, which is the only way a plugin's actions are reached at all: it claims a menu slot, never a keystroke. Plugin entries are listed after the editor's own, so a plugin whose `key` matches a built-in entry's cannot take that key over either.
 
 A plugin with multiple actions can group them into a submenu by nesting `[[menu_item.children]]`:
 
@@ -360,7 +357,7 @@ key   = "g"
   key     = "l"
 ```
 
-A group node (has `children`, no `command`) opens a submenu when selected; a leaf node (has `command`, no `children`) invokes the registered handler directly. The `jumpy` and `bookmarks` plugins in `plugins/` are the reference examples — both ship as flat single-item entries, converted from what used to be physical key bindings (`J` and `alt+b` respectively).
+A group node (has `children`, no `command`) opens a submenu when selected; a leaf node (has `command`, no `children`) invokes the registered handler directly. The plugins in `plugins/` are the reference examples: `jumpy` and `hello` ship one entry each, and `bookmarks` and `indigo-git` ship submenus (`space b b` toggles a bookmark, `space g n` jumps to the next changed hunk).
 
 ## Plugin lifecycle
 

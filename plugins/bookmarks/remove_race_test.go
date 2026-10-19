@@ -6,7 +6,7 @@ import (
 )
 
 // TestConcurrentRemovalsRemoveExactlyTheirOwnBookmark is the regression for
-// onAltM finding a bookmark's index under b.mu, unlocking, and removing by that
+// onToggle finding a bookmark's index under b.mu, unlocking, and removing by that
 // index under a second lock: a concurrent removal in between shifted the
 // slice, so the stale index deleted a neighbouring bookmark or sliced out of
 // range. Every goroutine here removes a distinct line at once; exactly those

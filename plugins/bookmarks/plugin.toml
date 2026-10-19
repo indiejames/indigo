@@ -1,14 +1,19 @@
 name        = "bookmarks"
-version     = "0.1.0"
-sdk_version = "0.1.1"
-description     = "Set bookmarks with alt+m; open the bookmark list from the Command menu (space)."
-trigger_key     = "alt+m"
-key_description = "Toggle bookmark at current line (prompts for name)"
+version     = "0.3.0"
+sdk_version = "0.2.0"
+description = "Bookmark lines and jump back to them, under space b in the Command menu."
 
 [[menu_item]]
-label   = "Bookmarks"
-command = "bookmarks.open"
-key     = "b"
+label = "Bookmarks"
+key   = "b"
+  [[menu_item.children]]
+  label   = "Toggle bookmark"
+  command = "bookmarks.toggle"
+  key     = "b"
+  [[menu_item.children]]
+  label   = "List bookmarks"
+  command = "bookmarks.open"
+  key     = "l"
 
 [binaries]
 "darwin/arm64" = "bookmarks-darwin-arm64"

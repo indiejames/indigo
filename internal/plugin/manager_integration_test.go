@@ -59,7 +59,7 @@ func installMiniPlugin(t *testing.T, extraManifest string) {
 // TestManagerStartSpawnsRealPluginAndDispatchesKey is an end-to-end
 // regression/coverage test: it spawns a real plugin process (not a fake),
 // verifies Manager.Start's socket handshake and Initialize RPC actually
-// register the plugin, then drives a genuine HandleKey RPC round-trip
+// register the plugin, then drives a genuine menu-action RPC round-trip
 // through the spawned process and checks the returned edit.
 func TestManagerStartSpawnsRealPluginAndDispatchesKey(t *testing.T) {
 	setUpMiniPluginInstall(t)
@@ -91,16 +91,16 @@ func TestManagerStartSpawnsRealPluginAndDispatchesKey(t *testing.T) {
 		t.Fatal("registered plugin has no process handle")
 	}
 
-	// Drive a real HandleKey RPC round-trip: miniplugin registered "X" via
-	// api.OnKey in its actual (separate-process) Init, so a successful
-	// handled=true + matching edit here proves the whole spawn/handshake/
-	// dispatch chain works, not just that a process started.
-	handled, edits, _, _, _, _, err := m.HandleKey(context.Background(), "X", "normal", 1, 1, 0, 0)
+	// Drive a real menu-action RPC round-trip: miniplugin registered
+	// "mini.x" via api.OnMenuAction in its actual (separate-process) Init, so
+	// a successful handled=true + matching edit here proves the whole
+	// spawn/handshake/dispatch chain works, not just that a process started.
+	handled, edits, _, _, _, _, err := m.InvokeMenuAction(context.Background(), "miniplugin", "mini.x", 1, 1, 0, 0)
 	if err != nil {
-		t.Fatalf("HandleKey: %v", err)
+		t.Fatalf("InvokeMenuAction: %v", err)
 	}
 	if !handled {
-		t.Fatal("HandleKey: handled = false, want true (miniplugin's \"X\" binding should have fired)")
+		t.Fatal("InvokeMenuAction: handled = false, want true (miniplugin's mini.x action should have fired)")
 	}
 	if len(edits) != 1 || edits[0].NewText != "miniplugin-was-here" {
 		t.Errorf("edits = %+v, want a single edit with NewText %q", edits, "miniplugin-was-here")

@@ -1,9 +1,12 @@
 name        = "hello"
-version     = "0.1.0"
-sdk_version = "0.1.1"
+version     = "0.2.0"
+sdk_version = "0.2.0"
 description = "Sample plugin that prints 'hello' in the status bar"
-trigger_key     = "H"
-key_description = "Say hello"
+
+[[menu_item]]
+label   = "Hello"
+command = "hello.say"
+key     = "h"
 
 [binaries]
 "darwin/arm64" = "hello-darwin-arm64"

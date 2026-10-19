@@ -12,9 +12,10 @@ Opening `indigo` in a workspace for the first time (no server running yet) does,
    (`cmd/indigo/main.go`).
 2. The server starts each configured plugin (`internal/plugin/manager.go`) as a subprocess,
    over a Unix socket, then does a Cap'n Proto handshake and calls its `Initialize` RPC.
-3. The client dials the server, then calls `GetPluginKeys`, `GetPluginBindings`, and
-   `GetMenuItems` to pick up plugin-contributed keybindings and menu items before it renders
-   anything.
+3. The client dials the server, then calls `GetMenuItems` and `GetPluginInsertChars` to pick
+   up plugin-contributed menu items and insert hooks before it renders anything. (It also
+   called `GetPluginKeys` and `GetPluginBindings` until plugins stopped binding keys in SDK
+   0.2.0.)
 
 Two distinct things made this slow, and only the first showed up in profiling — the second
 had to be found by testing the actual OS behavior directly.
@@ -36,9 +37,10 @@ Separately, `GetPluginBindings`/`GetMenuItems` (the two client startup RPCs that
 plugins to have finished starting) were each awaited fully before the next was even issued.
 Since both block on the same server-side readiness signal, issuing all three RPCs (including
 `GetPluginKeys`, which doesn't) before awaiting any of them means that wait is paid once
-instead of stacked.
+instead of stacked. (Since SDK 0.2.0 only `GetMenuItems` waits; the key RPCs are gone from
+startup, and the same issue-before-awaiting applies to the two calls left.)
 
-Two polling loops (`waitForSocket` in the plugin manager, `waitForServer` in `cmd/indigo`)
+Two polling loops (`waitForSocket` in the plugin manager, since replaced by `dialSocket`, `waitForServer` in `cmd/indigo`)
 also slept a fixed 50ms between checks. Since the check almost always succeeds well before
 the first sleep elapses, each call was paying close to a full 50ms of pure waiting for
 something that had usually already happened.

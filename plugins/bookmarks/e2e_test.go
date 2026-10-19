@@ -12,10 +12,10 @@ import (
 )
 
 // TestBookmarksEndToEnd drives the built plugin through the editor's own paths:
-// alt+m and its name prompt add a bookmark, the gutter shows it, the Command
-// menu lists it and jumps to it, an edit above moves it, alt+m again removes
-// it, and every step lands in bookmarks.json under the plugin's (temporary)
-// home.
+// Toggle bookmark and its name prompt add a bookmark, the gutter shows it, List
+// bookmarks lists it and jumps to it, an edit above moves it, Toggle bookmark
+// again removes it, and every step lands in bookmarks.json under the plugin's
+// (temporary) home.
 func TestBookmarksEndToEnd(t *testing.T) {
 	bridge := plugintest.NewBridge()
 	m, home := plugintest.Start(t, ".", bridge)
@@ -45,15 +45,15 @@ func TestBookmarksEndToEnd(t *testing.T) {
 	}
 
 	// The menu with nothing to list says so instead of showing an empty popup.
-	item := menuItem(t, m, "Bookmarks")
+	item := menuItem(t, m, "bookmarks.open", "l")
 	if _, _, _, _, _, _, err := m.InvokeMenuAction(ctx, item.PluginName, item.Command, bufID, clientID, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	bridge.WaitForMessage(t, "No bookmarks")
 
-	// alt+m on line 2 prompts for a name; confirming adds the bookmark.
-	if handled, _, _, _, _, _, err := m.HandleKey(ctx, "alt+m", "normal", bufID, clientID, 2, 1); err != nil || !handled {
-		t.Fatalf("alt+m: handled %v, err %v", handled, err)
+	// Toggle bookmark on line 2 prompts for a name; confirming adds it.
+	if handled := toggle(t, m, bufID, clientID, 2, 1); !handled {
+		t.Fatal("Toggle bookmark was not handled")
 	}
 	bridge.WaitForPrompt(t, 1).Confirm("todo")
 	plugintest.Eventually(t, "the bookmark never reached the gutter or the file", func() bool {
@@ -82,11 +82,9 @@ func TestBookmarksEndToEnd(t *testing.T) {
 		return len(g) == 1 && g[0] == 4 && len(d) == 1 && d[0].Line == 4
 	})
 
-	// alt+m on its new line removes it.
-	if _, _, _, _, _, _, err := m.HandleKey(ctx, "alt+m", "normal", bufID, clientID, 4, 0); err != nil {
-		t.Fatal(err)
-	}
-	plugintest.Eventually(t, "alt+m on a bookmarked line did not remove it", func() bool {
+	// Toggle bookmark on its new line removes it.
+	toggle(t, m, bufID, clientID, 4, 0)
+	plugintest.Eventually(t, "Toggle bookmark on a bookmarked line did not remove it", func() bool {
 		return len(gutter()) == 0 && len(onDisk()) == 0
 	})
 	if n := len(bridge.Messages()); n != 1 {
@@ -105,7 +103,7 @@ func TestBookmarksDeletedLineDropsItsBookmark(t *testing.T) {
 	bridge.OpenBuffer(1, path, "0\n1\n2\n3\n4\n5\n")
 
 	for i, line := range []uint32{1, 4} {
-		m.HandleKey(ctx, "alt+m", "normal", 1, 7, line, 0) //nolint:errcheck
+		toggle(t, m, 1, 7, line, 0)
 		bridge.WaitForPrompt(t, i+1).Confirm("")
 	}
 	// Lines 1 and 2 deleted (from 1:0 to 3:0): the first bookmark goes, the
@@ -127,15 +125,37 @@ func TestBookmarksDeletedLineDropsItsBookmark(t *testing.T) {
 	})
 }
 
-func menuItem(t *testing.T, m *plugin.Manager, label string) plugin.MenuItem {
+// menuItem finds the Bookmarks submenu entry that runs command, and checks it
+// sits under the key the plugin's documentation gives it.
+func menuItem(t *testing.T, m *plugin.Manager, command, key string) plugin.MenuItem {
 	t.Helper()
-	for _, it := range m.AllMenuItems() {
-		if it.Label == label {
-			return it
+	for _, group := range m.AllMenuItems() {
+		if group.Label != "Bookmarks" || group.Key != "b" {
+			continue
+		}
+		for _, it := range group.Children {
+			if it.Command == command {
+				if it.Key != key {
+					t.Fatalf("%s is under b %s, want b %s", command, it.Key, key)
+				}
+				return it
+			}
 		}
 	}
-	t.Fatalf("no %q menu item in %+v", label, m.AllMenuItems())
+	t.Fatalf("no Bookmarks item under b runs %s in %+v", command, m.AllMenuItems())
 	return plugin.MenuItem{}
+}
+
+// toggle runs Toggle bookmark (space b b) at line:col and reports whether the
+// plugin handled it.
+func toggle(t *testing.T, m *plugin.Manager, bufID uint32, clientID uint64, line, col uint32) bool {
+	t.Helper()
+	it := menuItem(t, m, "bookmarks.toggle", "b")
+	handled, _, _, _, _, _, err := m.InvokeMenuAction(context.Background(), it.PluginName, it.Command, bufID, clientID, line, col)
+	if err != nil {
+		t.Fatalf("Toggle bookmark: %v", err)
+	}
+	return handled
 }
 
 // TestBookmarksFollowJoinsAndOpenedLines is the regression test for the
@@ -149,7 +169,7 @@ func TestBookmarksFollowJoinsAndOpenedLines(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "a.txt")
 	bridge.OpenBuffer(1, path, "zero\none\ntwo\n")
-	m.HandleKey(ctx, "alt+m", "normal", 1, 7, 1, 0) //nolint:errcheck
+	toggle(t, m, 1, 7, 1, 0)
 	bridge.WaitForPrompt(t, 1).Confirm("")
 	lines := func() []uint32 {
 		var out []uint32

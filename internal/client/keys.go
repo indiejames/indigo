@@ -180,7 +180,7 @@ var prefixCmds = []command{
 	// ctrl+/ and ctrl+_ are the same byte (0x1F) in most terminals.
 	{key: "ctrl+/", name: "toggle-comment", category: "Editing", label: "Toggle comment", execute: executeToggleComment},
 	{key: "ctrl+_", name: "toggle-comment", category: "Editing", label: "Toggle comment", execute: executeToggleComment},
-	{key: "?", name: "show-plugin-bindings", category: "System", label: "Show key bindings", execute: executeFetchPluginBindings},
+	{key: "?", name: "show-plugin-bindings", category: "System", label: "Show key bindings", execute: executeShowHelp},
 	{key: "alt+s", name: "split-selection-into-cursors", category: "Multi-cursor", label: "Split selection into cursors", execute: executeSplitSelectionIntoCursors},
 	{key: "z", name: "set-mark", category: "Marks & Macros", label: "Set mark", execute: executeSetMark},
 	{key: "Z", name: "select-to-mark", category: "Marks & Macros", label: "Select to mark", execute: executeSelectToMark},
@@ -401,12 +401,21 @@ func (m Model) resolveCommand(seq []string) (*command, bool) {
 	if len(seq) == 0 || seq[0] != "space" {
 		return findCommand(seq)
 	}
-	node := commandMenuRoot
-	node.children = append(append([]command{}, node.children...), m.pluginMenuCommands()...)
+	node := spaceMenuWith(m.pluginMenuCommands())
 	if len(seq) == 1 {
 		return &node, true
 	}
 	return findIn(node.children, seq[1:])
+}
+
+// spaceMenuWith is the Command (space) menu with plugin entries after the
+// editor's own. The order is what keeps a plugin from taking over a built-in
+// entry's key: findIn takes the first entry with a key, so a plugin item
+// declaring one the editor already uses is shadowed rather than shadowing.
+func spaceMenuWith(plugins []command) command {
+	node := commandMenuRoot
+	node.children = append(append([]command{}, node.children...), plugins...)
+	return node
 }
 
 // pluginMenuCommands converts the cached plugin-contributed menu tree into
@@ -454,7 +463,7 @@ func keyRune(key, label string) string {
 }
 
 // handleMenuActionRPC dispatches a Command-menu selection to the plugin that
-// registered it, mirroring handlePluginKeyRPC's result handling.
+// registered it, handled like a captured key's result.
 func (m Model) handleMenuActionRPC(pluginName, action string) (tea.Model, tea.Cmd) {
 	bufID := m.bufID
 	curLine := uint32(m.cursor.Line)
@@ -496,7 +505,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Scroll keys navigate the help popup; q/esc/? dismiss it.
 	if m.helpVisible {
-		helpLines := helpPopupLines(m.pluginBindings, helpPopupInnerWidth(m.width))
+		helpLines := helpPopupLines(helpPopupInnerWidth(m.width))
 		maxPopH := max(6, m.height-5) // matches vis-4 in View() where vis = m.height-1
 		contentH := maxPopH - 2
 		maxScroll := max(0, len(helpLines)-contentH)
@@ -690,23 +699,6 @@ func (m Model) handleCapturedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if isEsc {
 				return nil // suppress error on esc-cancel
 			}
-			return errorMsg{err}
-		}
-		return pluginKeyResultMsg{bufID: bufID, result: result}
-	}
-}
-
-// handlePluginKeyRPC dispatches a keypress to the owning plugin and returns a
-// cmd that will deliver the result as a pluginKeyResultMsg.
-func (m Model) handlePluginKeyRPC(key string) (tea.Model, tea.Cmd) {
-	bufID := m.bufID
-	curLine := uint32(m.cursor.Line)
-	curCol := uint32(m.cursor.Col)
-	return m, func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		result, err := m.rpc.HandlePluginKey(ctx, key, "normal", bufID, curLine, curCol)
-		if err != nil {
 			return errorMsg{err}
 		}
 		return pluginKeyResultMsg{bufID: bufID, result: result}

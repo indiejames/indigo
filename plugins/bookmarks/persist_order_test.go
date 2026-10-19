@@ -13,7 +13,7 @@ import (
 // TestBookmarksNoRaceBetweenEditEventAndPersist covers: a snapshot copy
 // alone only protects the in-memory read from a concurrent mutation — it
 // does nothing to order the actual disk writes. Before enqueuePersist,
-// onAltM/onEdit each called persistBookmarks directly (synchronously or
+// onToggle/onEdit each called persistBookmarks directly (synchronously or
 // via `go`) from their own goroutine; those file writes had no ordering
 // guarantee relative to each other even though their snapshots were taken
 // in the correct mutation order under b.mu, so an older snapshot's write
@@ -21,7 +21,7 @@ import (
 // bookmarks.json to stale state.
 //
 // This drives many concurrent mutate-and-enqueue calls (the same shape
-// onAltM/onEdit use: lock, mutate, enqueuePersist, unlock) with
+// onToggle/onEdit use: lock, mutate, enqueuePersist, unlock) with
 // monotonically distinguishable payloads, then waits for the queue to fully
 // drain and asserts the file matches the *last* mutation — the single
 // persistWorker's FIFO processing makes this a deterministic guarantee, not

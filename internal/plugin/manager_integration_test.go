@@ -28,10 +28,12 @@ func buildMiniPlugin(t *testing.T, dir string) string {
 
 // setUpMiniPluginInstall creates a fake `indigo plugins` install directory
 // under a temp XDG_CONFIG_HOME containing miniplugin's manifest and binary,
-// and points the manager's plugin discovery at it via t.Setenv.
+// and points the manager's plugin discovery at it via t.Setenv. The manifest
+// gives mini.x a menu_item, as a real plugin must for its action to be
+// reachable.
 func setUpMiniPluginInstall(t *testing.T) {
 	t.Helper()
-	installMiniPlugin(t, "")
+	installMiniPlugin(t, "\n[[menu_item]]\nlabel = \"Mini\"\ncommand = \"mini.x\"\nkey = \"x\"\n")
 }
 
 // installMiniPlugin is setUpMiniPluginInstall with extra top-level manifest
@@ -89,6 +91,11 @@ func TestManagerStartSpawnsRealPluginAndDispatchesKey(t *testing.T) {
 	}
 	if reg.process == nil {
 		t.Fatal("registered plugin has no process handle")
+	}
+
+	items := m.AllMenuItems()
+	if len(items) != 1 || items[0].Command != "mini.x" || items[0].Key != "x" || items[0].PluginName != "miniplugin" {
+		t.Errorf("AllMenuItems = %+v, want miniplugin's mini.x under key x", items)
 	}
 
 	// Drive a real menu-action RPC round-trip: miniplugin registered

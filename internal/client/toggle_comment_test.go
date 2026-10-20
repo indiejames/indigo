@@ -68,6 +68,24 @@ func TestToggleCommentUsesJSXCommentsAmongChildren(t *testing.T) {
 	}
 }
 
+// TestToggleCommentTakesAMultiLineChildWhole: a child element whose tag spans
+// lines is commented {/* */} on every line. A "//" on its attribute or "/>"
+// line would sit among the children once its first line is commented, and
+// render as text.
+func TestToggleCommentTakesAMultiLineChildWhole(t *testing.T) {
+	src := "const a = (\n  <div>\n    <Foo\n      bar=\"baz\"\n    />\n  </div>\n);\n"
+	m := newTSXModel(t, src)
+	m = toggleLines(m, 2, 4)
+	want := "const a = (\n  <div>\n    {/* <Foo */}\n      {/* bar=\"baz\" */}\n    {/* /> */}\n  </div>\n);\n"
+	if got := m.buf.Content(); got != want {
+		t.Fatalf("after commenting:\n%s\nwant:\n%s", got, want)
+	}
+	m = toggleLines(m, 2, 4)
+	if got := m.buf.Content(); got != src {
+		t.Fatalf("after uncommenting:\n%s\nwant the original:\n%s", got, src)
+	}
+}
+
 // TestToggleCommentUncommentsAJSXLineCommentedWithSlashes: a children line
 // commented with "//" before the toggle understood JSX still uncomments.
 func TestToggleCommentUncommentsAJSXLineCommentedWithSlashes(t *testing.T) {

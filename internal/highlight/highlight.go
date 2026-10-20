@@ -427,6 +427,12 @@ func (h *Highlighter) IsInString(content []byte, line, col int) bool {
 // inside a multi-line tag (attributes accept ordinary comments), and code
 // inside a {expression}. A blank line, and every line of a language whose
 // grammar has no JSX, reports false. The file is parsed once for the range.
+//
+// A child spanning several lines is taken whole from the line it starts on:
+// once that line becomes {/* ... */}, the child's other lines sit among the
+// children too, so a "//" on its attribute or "/>" line would render as text.
+// Every line through the child's last is reported true. A range starting
+// partway into a child still reads those lines on their own.
 func (h *Highlighter) JSXChildLines(content []byte, startLine, endLine int) []bool {
 	out := make([]bool, max(endLine-startLine+1, 0))
 	if h == nil || len(out) == 0 {
@@ -441,6 +447,7 @@ func (h *Highlighter) JSXChildLines(content []byte, startLine, endLine int) []bo
 	defer tree.Close()
 
 	lines := strings.Split(string(content), "\n")
+	through := -1 // last line of a multi-line child begun on a line in range
 	for i := range out {
 		line := startLine + i
 		if line < 0 || line >= len(lines) {
@@ -448,16 +455,25 @@ func (h *Highlighter) JSXChildLines(content []byte, startLine, endLine int) []bo
 		}
 		text := lines[line]
 		byteCol := len(text) - len(strings.TrimLeft(text, " \t"))
-		if byteCol < len(text) {
-			out[i] = inJSXChildren(tree, sitter.Point{Row: uint(line), Column: uint(byteCol)})
+		if byteCol == len(text) {
+			continue
 		}
+		// Look even when an earlier child already covers this line: text
+		// can end on the line where the next child starts, and that child
+		// may run further.
+		ok, last := inJSXChildren(tree, sitter.Point{Row: uint(line), Column: uint(byteCol)})
+		if ok {
+			through = max(through, last)
+		}
+		out[i] = ok || line <= through
 	}
 	return out
 }
 
 // inJSXChildren is JSXChildLines for one line whose first non-blank
-// character is at pt.
-func inJSXChildren(tree *sitter.Tree, pt sitter.Point) bool {
+// character is at pt. When it is among children it also returns the last
+// line of the child that line belongs to.
+func inJSXChildren(tree *sitter.Tree, pt sitter.Point) (bool, int) {
 	for n := tree.RootNode().DescendantForPointRange(pt, pt); !n.IsNull(); n = n.Parent() {
 		switch n.Type() {
 		case "jsx_opening_element", "jsx_closing_element", "jsx_self_closing_element", "jsx_expression":
@@ -466,23 +482,34 @@ func inJSXChildren(tree *sitter.Tree, pt sitter.Point) bool {
 			// its first character makes it the thing on the line, so look at
 			// where it sits.
 			if n.StartPoint() != pt {
-				return false
+				return false, 0
 			}
 		}
 		parent := n.Parent()
 		if parent.IsNull() {
-			return false
+			return false, 0
 		}
 		if parent.Type() == "jsx_element" {
 			switch n.Type() {
 			case "jsx_opening_element", "jsx_closing_element":
 				// The element's own tag: its children status is its element's.
 			default:
-				return true
+				if n.Type() == "jsx_text" {
+					// Text includes the whitespace up to the next tag, so it
+					// ends on that tag's line, which may be the parent's
+					// closing tag. Each line of text is a child on its own.
+					return true, int(pt.Row)
+				}
+				end := n.EndPoint()
+				last := int(end.Row)
+				if end.Column == 0 && last > int(pt.Row) {
+					last-- // ends at the start of a line it doesn't reach into
+				}
+				return true, last
 			}
 		}
 	}
-	return false
+	return false, 0
 }
 
 // mergeAdjacentRanges coalesces touching or overlapping ranges (sorted by

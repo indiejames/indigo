@@ -11,5 +11,5 @@ func init() {
 	fn := func() (*sitter.Language, []byte) {
 		return sitter.NewLanguage(javascript.GetLanguage()), []byte(javascriptHighlightQuery)
 	}
-	registerLang(fn, ".js", ".mjs", ".cjs")
+	registerLang(fn, ".js", ".mjs", ".cjs", ".jsx")
 }

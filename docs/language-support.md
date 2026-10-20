@@ -43,7 +43,7 @@ Syntax highlighting is provided via Tree-sitter grammars and is available for th
 | `.hs` `.lhs` | Haskell |
 | `.html` `.htm` | HTML |
 | `.java` | Java |
-| `.js` `.mjs` `.cjs` | JavaScript |
+| `.js` `.mjs` `.cjs` `.jsx` | JavaScript |
 | `.json` | JSON |
 | `.jl` | Julia |
 | `.kt` `.kts` | Kotlin |

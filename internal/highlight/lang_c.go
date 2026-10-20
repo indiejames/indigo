@@ -3,8 +3,8 @@
 package highlight
 
 import (
-	sitter "github.com/alexaandru/go-tree-sitter-bare"
 	c_lang "github.com/alexaandru/go-sitter-forest/c"
+	sitter "github.com/alexaandru/go-tree-sitter-bare"
 )
 
 func init() {

@@ -3,13 +3,13 @@
 package highlight
 
 import (
-	sitter "github.com/alexaandru/go-tree-sitter-bare"
 	"github.com/alexaandru/go-sitter-forest/javascript"
+	sitter "github.com/alexaandru/go-tree-sitter-bare"
 )
 
 func init() {
 	fn := func() (*sitter.Language, []byte) {
 		return sitter.NewLanguage(javascript.GetLanguage()), []byte(javascriptHighlightQuery)
 	}
-	registerLang(fn, ".js", ".mjs", ".cjs")
+	registerLang(fn, ".js", ".mjs", ".cjs", ".jsx")
 }

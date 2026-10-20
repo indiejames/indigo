@@ -19,13 +19,13 @@ func BracketSpans(content []byte) LineSpans {
 
 	type state uint8
 	const (
-		stNormal state = iota
-		stLineComment  // after //
-		stBlockComment // inside /* … */
-		stHashComment  // after # (Python, Shell, TOML, YAML, …)
-		stDoubleStr    // inside "…"
-		stSingleStr    // inside '…'
-		stRawStr       // inside `…` (Go raw strings, JS template literals)
+		stNormal       state = iota
+		stLineComment        // after //
+		stBlockComment       // inside /* … */
+		stHashComment        // after # (Python, Shell, TOML, YAML, …)
+		stDoubleStr          // inside "…"
+		stSingleStr          // inside '…'
+		stRawStr             // inside `…` (Go raw strings, JS template literals)
 	)
 
 	src := []rune(string(content))

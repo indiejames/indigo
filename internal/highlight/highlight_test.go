@@ -60,11 +60,40 @@ func TestLineCommentPrefixForKey(t *testing.T) {
 		{".py", "#"},        // dotted form works directly
 		{"PY", "#"},         // case-insensitive
 		{"dockerfile", "#"}, // filename-style key, no "." retry needed
-		{"not-a-real-language", "//"},
+		{"go", "//"},
+		{"not-a-real-language", "#"},
 	}
 	for _, c := range cases {
 		if got := LineCommentPrefixForKey(c.key); got != c.want {
 			t.Errorf("LineCommentPrefixForKey(%q) = %q, want %q", c.key, got, c.want)
+		}
+	}
+}
+
+// TestLineCommentPrefixDefaultsToHash: a file in no known language gets "#",
+// the comment of shells, Makefiles and config files, and a known language
+// keeps its own prefix whether or not its grammar is compiled in.
+func TestLineCommentPrefixDefaultsToHash(t *testing.T) {
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/w/main.go", "//"},
+		{"/w/App.JSX", "//"}, // no grammar of its own; case-insensitive
+		{"/w/build.zig", "//"},
+		{"/w/script.py", "#"},
+		{"/w/Makefile", "#"},
+		{"/w/.git/COMMIT_EDITMSG", "#"},
+		{"/w/core.clj", ";"},
+		{"/w/init.lua", "--"},
+		{"/w/.env", "#"},
+		{"/w/settings.conf", "#"},
+		{"/w/no-extension", "#"},
+		{"/w/v1.2/notes", "#"}, // a dot in a directory is not an extension
+	}
+	for _, c := range cases {
+		if got := LineCommentPrefix(c.path); got != c.want {
+			t.Errorf("LineCommentPrefix(%q) = %q, want %q", c.path, got, c.want)
 		}
 	}
 }

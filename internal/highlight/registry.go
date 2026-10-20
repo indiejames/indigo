@@ -145,43 +145,69 @@ func lookupKey(filePath string) string {
 	return ""
 }
 
-// lineCommentByKey maps the registry lookup key (extension or filename) to the
-// line comment prefix for that language.
+// defaultLineComment is the prefix for a file whose language isn't in
+// lineCommentByKey: "#" is the line comment of shells, Makefiles, config
+// files and most scripting languages, which is what an unknown file most
+// often is.
+const defaultLineComment = "#"
+
+// lineCommentByKey maps a lowercased filename or extension to the line
+// comment prefix for that language. "#" languages are listed although they
+// match the default, so the table says what each language uses.
 var lineCommentByKey = map[string]string{
 	// // style
-	".go": "//", ".js": "//", ".mjs": "//", ".cjs": "//",
-	".ts": "//", ".tsx": "//", ".java": "//", ".c": "//", ".h": "//",
-	".cc": "//", ".cpp": "//", ".cxx": "//", ".hh": "//", ".hpp": "//", ".hxx": "//",
+	".go": "//", ".js": "//", ".mjs": "//", ".cjs": "//", ".jsx": "//",
+	".ts": "//", ".mts": "//", ".cts": "//", ".tsx": "//",
+	".java": "//", ".c": "//", ".h": "//",
+	".cc": "//", ".cpp": "//", ".cxx": "//", ".c++": "//", ".hh": "//", ".hpp": "//", ".hxx": "//",
 	".cs": "//", ".dart": "//", ".kt": "//", ".kts": "//",
 	".groovy": "//", ".gvy": "//", ".gy": "//", ".gsh": "//",
 	".scala": "//", ".sc": "//", ".php": "//", ".proto": "//",
 	".tf": "//", ".hcl": "//", ".rs": "//", ".swift": "//",
-	".svelte": "//",
+	".svelte": "//", ".zig": "//", ".gleam": "//", ".cue": "//",
 	// # style
-	".py": "#", ".rb": "#", ".sh": "#", ".bash": "#",
-	"dockerfile": "#", ".r": "#", ".gd": "#",
+	".py": "#", ".rb": "#", ".sh": "#", ".bash": "#", ".zsh": "#", ".fish": "#",
+	"dockerfile": "#", ".r": "#", ".gd": "#", ".jl": "#", ".nim": "#", ".pl": "#",
 	".ex": "#", ".exs": "#", ".nix": "#",
+	"makefile": "#", ".mk": "#", ".mak": "#", ".make": "#",
 	".toml": "#", ".yaml": "#", ".yml": "#", ".graphql": "#", ".gql": "#",
 	// -- style
 	".lua": "--", ".hs": "--", ".lhs": "--", ".elm": "--",
 	".sql": "--", ".ml": "--", ".mli": "--",
+	// ; style
+	".clj": ";", ".cljs": ";", ".cljc": ";", ".edn": ";", ".s": ";", ".asm": ";",
+	// % style
+	".erl": "%", ".hrl": "%",
 }
 
 // LineCommentPrefix returns the line comment prefix for the given file path
-// (e.g. "//" for Go, "#" for Python, "--" for Lua). Falls back to "//".
+// (e.g. "//" for Go, "#" for Python, "--" for Lua). Falls back to "#".
+//
+// It reads lineCommentByKey directly rather than through lookupKey, which
+// only knows languages whose grammar is compiled in: a minimal build would
+// otherwise comment Python with the default.
 func LineCommentPrefix(filePath string) string {
-	k := lookupKey(filePath)
-	if p, ok := lineCommentByKey[k]; ok {
+	base := filePath
+	if i := strings.LastIndex(filePath, "/"); i >= 0 {
+		base = filePath[i+1:]
+	}
+	base = strings.ToLower(base)
+	if p, ok := lineCommentByKey[base]; ok {
 		return p
 	}
-	return "//"
+	if i := strings.LastIndex(base, "."); i >= 0 {
+		if p, ok := lineCommentByKey[base[i:]]; ok {
+			return p
+		}
+	}
+	return defaultLineComment
 }
 
 // LineCommentPrefixForKey is LineCommentPrefix for a registry key typed
 // directly (e.g. a ":set ft=<key>" override) rather than derived from a
 // file path — same key resolution NewForKey uses: the key as given (covers
 // filename-style keys like "dockerfile"), then with a leading "." (covers
-// bare extension keys like "go"). Falls back to "//".
+// bare extension keys like "go"). Falls back to "#".
 func LineCommentPrefixForKey(key string) string {
 	key = strings.ToLower(key)
 	if p, ok := lineCommentByKey[key]; ok {
@@ -190,7 +216,7 @@ func LineCommentPrefixForKey(key string) string {
 	if p, ok := lineCommentByKey["."+key]; ok {
 		return p
 	}
-	return "//"
+	return defaultLineComment
 }
 
 func languageForPath(filePath string) (*sitter.Language, []byte) {

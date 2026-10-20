@@ -418,6 +418,73 @@ func (h *Highlighter) IsInString(content []byte, line, col int) bool {
 	return false
 }
 
+// JSXChildLines reports, for each line from startLine to endLine inclusive,
+// whether it sits among a JSX element's children, read from its first
+// non-blank character: text, a nested element or a {expression} between an
+// opening and a closing tag. A "//" there is rendered as text, so a comment
+// must be written {/* ... */}. Everything else is JavaScript, where "//" is
+// right: code outside any element, an outermost element's own tags, a line
+// inside a multi-line tag (attributes accept ordinary comments), and code
+// inside a {expression}. A blank line, and every line of a language whose
+// grammar has no JSX, reports false. The file is parsed once for the range.
+func (h *Highlighter) JSXChildLines(content []byte, startLine, endLine int) []bool {
+	out := make([]bool, max(endLine-startLine+1, 0))
+	if h == nil || len(out) == 0 {
+		return out
+	}
+	p := sitter.NewParser()
+	p.SetLanguage(h.lang)
+	tree, err := p.ParseString(context.Background(), nil, content)
+	if err != nil || tree == nil {
+		return out
+	}
+	defer tree.Close()
+
+	lines := strings.Split(string(content), "\n")
+	for i := range out {
+		line := startLine + i
+		if line < 0 || line >= len(lines) {
+			continue
+		}
+		text := lines[line]
+		byteCol := len(text) - len(strings.TrimLeft(text, " \t"))
+		if byteCol < len(text) {
+			out[i] = inJSXChildren(tree, sitter.Point{Row: uint(line), Column: uint(byteCol)})
+		}
+	}
+	return out
+}
+
+// inJSXChildren is JSXChildLines for one line whose first non-blank
+// character is at pt.
+func inJSXChildren(tree *sitter.Tree, pt sitter.Point) bool {
+	for n := tree.RootNode().DescendantForPointRange(pt, pt); !n.IsNull(); n = n.Parent() {
+		switch n.Type() {
+		case "jsx_opening_element", "jsx_closing_element", "jsx_self_closing_element", "jsx_expression":
+			// Starting partway into one of these means the line is inside a
+			// tag or a {expression}: JavaScript, not children. Starting at
+			// its first character makes it the thing on the line, so look at
+			// where it sits.
+			if n.StartPoint() != pt {
+				return false
+			}
+		}
+		parent := n.Parent()
+		if parent.IsNull() {
+			return false
+		}
+		if parent.Type() == "jsx_element" {
+			switch n.Type() {
+			case "jsx_opening_element", "jsx_closing_element":
+				// The element's own tag: its children status is its element's.
+			default:
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // mergeAdjacentRanges coalesces touching or overlapping ranges (sorted by
 // start point) into their union. Some languages' highlight queries capture
 // a single string/template literal as several sibling sub-spans rather than

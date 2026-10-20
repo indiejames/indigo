@@ -1,6 +1,7 @@
 package client
 
 import (
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -537,11 +538,23 @@ func (m Model) lineCommentPrefix() string {
 	return highlight.LineCommentPrefix(m.filePath)
 }
 
+// JSX comment delimiters. A line among a JSX element's children is rendered
+// as text, so "//" there would show on the page; it takes {/* ... */} instead.
+const (
+	jsxCommentOpen  = "{/* "
+	jsxCommentClose = " */}"
+)
+
 // executeToggleComment comments or uncomments the current line (or selection).
 // All lines already commented → uncomment; otherwise → comment all.
+//
+// Each line is commented in the style its position needs: the language's line
+// comment, or {/* ... */} for a line among JSX children (a .tsx or .js file),
+// so a selection spanning a component's code and its markup comments both
+// correctly. A line counts as commented in either style, and uncommenting
+// removes whichever it has.
 func executeToggleComment(m Model) (tea.Model, tea.Cmd) {
 	prefix := m.lineCommentPrefix()
-	prefixRunes := []rune(prefix)
 
 	startLine, endLine := m.cursor.Line, m.cursor.Line
 	if m.sel != nil {
@@ -552,60 +565,112 @@ func executeToggleComment(m Model) (tea.Model, tea.Cmd) {
 			startLine, endLine = h.Line, a.Line
 		}
 	}
+	jsx := m.hlr.JSXChildLines([]byte(m.buf.Content()), startLine, endLine)
+	jsxFile := m.isJSXLanguage()
 
-	// Determine whether every line in range starts with the comment prefix.
 	allCommented := true
-outer:
 	for ln := startLine; ln <= endLine; ln++ {
-		runes := []rune(m.buf.Line(ln))
-		indent := leadingWhitespace(runes)
-		rest := runes[indent:]
-		if len(rest) < len(prefixRunes) {
+		if _, ok := commentedLine([]rune(m.buf.Line(ln)), prefix, jsxFile); !ok {
 			allCommented = false
-			break outer
-		}
-		for i, r := range prefixRunes {
-			if rest[i] != r {
-				allCommented = false
-				break outer
-			}
+			break
 		}
 	}
 
-	ops := make([]document.Op, 0, endLine-startLine+1)
-	if allCommented {
-		for ln := startLine; ln <= endLine; ln++ {
-			runes := []rune(m.buf.Line(ln))
-			indent := leadingWhitespace(runes)
-			deleteLen := len(prefixRunes)
-			// Also remove the single space that was added after the prefix.
-			if indent+deleteLen < len(runes) && runes[indent+deleteLen] == ' ' {
-				deleteLen++
+	ops := make([]document.Op, 0, 2*(endLine-startLine+1))
+	for ln := startLine; ln <= endLine; ln++ {
+		runes := []rune(m.buf.Line(ln))
+		indent := leadingWhitespace(runes)
+		if allCommented {
+			del, _ := commentedLine(runes, prefix, jsxFile)
+			// Later range first, so the earlier one's columns still hold.
+			for i := len(del) - 1; i >= 0; i-- {
+				ops = append(ops, document.Op{
+					ClientID: m.rpc.ClientID(),
+					Type:     document.OpDelete,
+					FromLine: ln, FromCol: del[i][0],
+					ToLine: ln, ToCol: del[i][1],
+				})
 			}
-			ops = append(ops, document.Op{
-				ClientID: m.rpc.ClientID(),
-				Type:     document.OpDelete,
-				FromLine: ln, FromCol: indent,
-				ToLine: ln, ToCol: indent + deleteLen,
-			})
+			continue
 		}
-	} else {
-		for ln := startLine; ln <= endLine; ln++ {
-			runes := []rune(m.buf.Line(ln))
-			indent := leadingWhitespace(runes)
-			ops = append(ops, document.Op{
-				ClientID:   m.rpc.ClientID(),
-				Type:       document.OpInsert,
-				InsertLine: ln,
-				InsertCol:  indent,
-				InsertText: prefix + " ",
-			})
+		if jsx[ln-startLine] {
+			end := len([]rune(strings.TrimRight(string(runes), " \t")))
+			ops = append(ops,
+				document.Op{
+					ClientID:   m.rpc.ClientID(),
+					Type:       document.OpInsert,
+					InsertLine: ln, InsertCol: end,
+					InsertText: jsxCommentClose,
+				},
+				document.Op{
+					ClientID:   m.rpc.ClientID(),
+					Type:       document.OpInsert,
+					InsertLine: ln, InsertCol: indent,
+					InsertText: jsxCommentOpen,
+				})
+			continue
 		}
+		ops = append(ops, document.Op{
+			ClientID:   m.rpc.ClientID(),
+			Type:       document.OpInsert,
+			InsertLine: ln,
+			InsertCol:  indent,
+			InsertText: prefix + " ",
+		})
 	}
 
 	m, cmd := applyBatch(m, ops)
 	m.sel = nil
 	return m, cmd
+}
+
+// isJSXLanguage reports whether the buffer's language allows JSX, honoring a
+// ":set ft=<key>" override. Recognising a {/* ... */} comment is decided by
+// this rather than by the parse: commenting an element's opening tag leaves
+// the lines inside it unparseable as children, and they must still uncomment.
+func (m Model) isJSXLanguage() bool {
+	key := m.langOverride
+	if key == "" {
+		key = filepath.Ext(m.filePath)
+	}
+	switch strings.TrimPrefix(strings.ToLower(key), ".") {
+	case "tsx", "jsx", "js", "mjs", "cjs":
+		return true
+	}
+	return false
+}
+
+// commentedLine reports whether runes is commented, with prefix after its
+// indentation or, in a JSX language (jsx), wrapped whole in {/* ... */}, and
+// returns the [from, to) column ranges that uncommenting it deletes, earliest
+// first. The single space each style adds inside its delimiters is deleted
+// with them. A "//" line among JSX children counts too, so a line commented
+// before the toggle understood JSX can still be uncommented.
+func commentedLine(runes []rune, prefix string, jsx bool) ([][2]int, bool) {
+	indent := leadingWhitespace(runes)
+	rest := string(runes[indent:])
+	body := strings.TrimRight(rest, " \t")
+	if jsx && strings.HasPrefix(body, "{/*") && strings.HasSuffix(body, "*/}") && len(body) >= len("{/**/}") {
+		open := len([]rune("{/*"))
+		if strings.HasPrefix(body, jsxCommentOpen) {
+			open = len([]rune(jsxCommentOpen))
+		}
+		closeLen := len([]rune("*/}"))
+		if strings.HasSuffix(body, jsxCommentClose) && len(body) >= len(jsxCommentOpen)+len(jsxCommentClose) {
+			closeLen = len([]rune(jsxCommentClose))
+		}
+		end := indent + len([]rune(body))
+		return [][2]int{{indent, indent + open}, {end - closeLen, end}}, true
+	}
+	if !strings.HasPrefix(rest, prefix) {
+		return nil, false
+	}
+	n := len([]rune(prefix))
+	// Also remove the single space that was added after the prefix.
+	if strings.HasPrefix(rest[len(prefix):], " ") {
+		n++
+	}
+	return [][2]int{{indent, indent + n}}, true
 }
 
 // selectionLineRange returns the first and last line covered by the current

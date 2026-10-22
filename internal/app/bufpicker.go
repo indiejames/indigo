@@ -20,6 +20,7 @@ type bufPickerItem struct {
 	idx   int
 	path  string
 	dirty bool
+	group string // the buffer's tab group, shown only when there are groups to tell apart
 }
 
 type bufPickedMsg struct{ idx int }
@@ -94,6 +95,9 @@ func (bp *bufPicker) render() string {
 	innerW := len("Open Buffers")
 	for _, item := range bp.items {
 		n := len(filepath.Base(item.path))
+		if item.group != "" {
+			n += len(item.group) + 3
+		}
 		if n > innerW {
 			innerW = n
 		}
@@ -131,6 +135,17 @@ func (bp *bufPicker) render() string {
 		maxNameW := innerW - 4
 		if len([]rune(name)) > maxNameW {
 			name = string([]rune(name)[:max(0, maxNameW-1)]) + "…"
+		}
+		// The group label gets whatever room the file name leaves, and is
+		// dropped rather than shortened past recognition.
+		if item.group != "" {
+			group := []rune(item.group)
+			if room := maxNameW - len([]rune(name)) - 4; room >= 3 {
+				if len(group) > room {
+					group = append(group[:room-1], '…')
+				}
+				name += "  · " + string(group)
+			}
 		}
 		var label string
 		if item.dirty {

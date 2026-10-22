@@ -567,7 +567,8 @@ An unknown `mode` or `action` is likewise reported as a warning rather than sile
 | `jump-back` | `-` | `jump-forward` | `=`, `+` |
 | `cut-selection` | `v` | `macro-record-toggle` | `q` |
 | `macro-replay` | `@` | `prev-buffer` | `ctrl+h`, `ctrl+shift+left` |
-| `next-buffer` | `ctrl+l`, `ctrl+shift+right` | | |
+| `next-buffer` | `ctrl+l`, `ctrl+shift+right` | `next-tab-group` | `ctrl+shift+down` |
+| `prev-tab-group` | `ctrl+shift+up` | | |
 
 Multi-key sequences (the `g`, `m`, `M`, `s`, `~`, and Space menus, plus any
 others added later) aren't individually overridable — only the single-key
@@ -626,6 +627,37 @@ Space — Command menu:
 | `n` | New file | `a` | Code Actions (fixes & refactors) |
 | `r` | Refactor: Rename Symbol | `m` | Refactor: Move Function to File |
 | `i` | Organize Imports | `d` | Debug — a submenu, see below |
+| `t` | Tab groups — a submenu, see below | | |
+
+`Space t` — Tab groups:
+
+| Key | Action | Key | Action |
+| --- | --- | --- | --- |
+| `n` | New group with this buffer… | `m` | Move this buffer to a group… |
+| `t` | Switch group… | `r` | Rename this group… |
+| `c` | Close this group | | |
+
+A tab group is a named set of buffers. The tab bar shows only the current
+group's tabs, after the list of group names, so related files can be kept
+together and the bar kept short. Every buffer is in one group, and a file
+you open joins the current one. Buffers you never move are in
+"ungrouped". Next and previous buffer (`ctrl+l`/`ctrl+h`) stay inside the
+group; `ctrl+shift+down`/`ctrl+shift+up` switch groups, as does clicking a
+group's name. Jumping to a file that is open in another group switches to
+that group. The buffer picker (`g b`) lists every buffer, with its group.
+Closing a group's last buffer deletes the group, and closing a group refuses
+while any of its buffers has unsaved changes.
+
+Tab groups are saved per workspace, in `~/.indigo/groups/`, with paths
+relative to the workspace. Started without a file argument (`indigo` or
+`indigo <dir>`), indigo reopens every saved file into its group and returns
+to the group and tab you left. A file that no longer exists is dropped, and
+the tab bar says how many were. Started on a file (`indigo foo.go`), it opens
+only that file. The saved groups still apply as files open, so `foo.go`, and
+any file you open after it, joins its saved group. Such a window adds its
+groups to the saved ones and never removes any. With two windows on one
+workspace, the last one to change its groups is what is saved. Closing the
+last buffer quits and leaves the session as it was just before.
 
 `Space d` — Debug:
 

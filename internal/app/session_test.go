@@ -369,3 +369,53 @@ func TestRestoreShowsTheActiveTabFirst(t *testing.T) {
 		t.Errorf("saved after the restore: %q", groupFiles(s))
 	}
 }
+
+// TestAFileTheRestoreCouldNotOpenStaysSaved: a saved file that exists but
+// fails to open (here, unreadable) is not one shown to be gone, so the
+// restoring window keeps it in its saved group rather than erasing it.
+// Once it opens, it is an ordinary buffer, and closing it drops it.
+func TestAFileTheRestoreCouldNotOpenStaysSaved(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file whatever its mode")
+	}
+	rpc, dir := sessionWorkspace(t, "a.go", "web/c.go")
+	p := sessionHome(t, dir)
+	locked := filepath.Join(dir, "web", "c.go")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o644) }) //nolint:errcheck
+	writeSaved(t, p, savedSession{Version: sessionVersion, Active: "api", Groups: []savedGroup{
+		{Name: "api", Files: []string{"a.go"}, Active: "a.go"},
+		{Name: "web", Files: []string{"web/c.go"}, Active: "web/c.go"},
+	}})
+
+	a := *NewWithPicker(rpc, &config.Config{}, dir)
+	a, _ = step(t, a, tea.WindowSizeMsg{Width: 100, Height: 20})
+	a = run(t, a, a.loadSession(), 10*time.Second, 0)
+
+	if got := bufferNames(a); !slices.Equal(got, []string{"a.go"}) {
+		t.Fatalf("buffers = %v", got)
+	}
+	if !strings.Contains(a.status, "could not be reopened") {
+		t.Errorf("status = %q, want the failed file reported", a.status)
+	}
+	if s := readSaved(t, p); groupFiles(s) != "api:a.go web:web/c.go" {
+		t.Fatalf("saved after restore: %q, want web/c.go kept in web", groupFiles(s))
+	}
+
+	if err := os.Chmod(locked, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a = run(t, a, a.doOpenFile(locked), 5*time.Second, 0)
+	if len(a.restoreFailed) != 0 {
+		t.Errorf("restoreFailed = %v after opening it, want empty", a.restoreFailed)
+	}
+	if g := a.groupOf(a.buffers[a.active].BufID()); g < 0 || a.groups[g].name != "web" {
+		t.Errorf("c.go opened outside its saved group web")
+	}
+	a, _ = step(t, a, client.CloseBufferMsg{})
+	if s := readSaved(t, p); groupFiles(s) != "api:a.go" {
+		t.Errorf("saved after closing c.go: %q, want it gone", groupFiles(s))
+	}
+}

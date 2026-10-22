@@ -460,6 +460,15 @@ func (a App) closeGroup(gi int) (tea.Model, tea.Cmd) {
 		}
 	}
 	a.buffers = kept
+	// Saved files of the group that the restore couldn't reopen go with it,
+	// or the closed group would come back in the saved session.
+	a.restoreFailed = slices.DeleteFunc(slices.Clone(a.restoreFailed), func(p string) bool {
+		if a.placement[p] != g.name {
+			return false
+		}
+		delete(a.placement, p)
+		return true
+	})
 	a.active = 0
 	others := make([]uint32, len(kept))
 	for i, m := range kept {

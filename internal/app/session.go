@@ -223,6 +223,9 @@ func (a App) sessionFingerprint() string {
 			b.WriteString("\x02" + paths[id])
 		}
 	}
+	for _, abs := range a.restoreFailed {
+		b.WriteString("\x03" + abs)
+	}
 	return b.String()
 }
 
@@ -258,6 +261,23 @@ func (a App) sessionSnapshot() savedSession {
 		}
 		if len(sg.Files) > 0 {
 			s.Groups = append(s.Groups, sg)
+		}
+	}
+	// Files the restore couldn't reopen weren't shown to be gone, so they are
+	// kept, in the group they were saved in (renamed with it).
+	for _, abs := range a.restoreFailed {
+		rel, ok := a.sessionRel(abs)
+		if !ok {
+			continue
+		}
+		name := a.placement[abs]
+		gi := slices.IndexFunc(s.Groups, func(g savedGroup) bool { return g.Name == name })
+		if gi < 0 {
+			s.Groups = append(s.Groups, savedGroup{Name: name})
+			gi = len(s.Groups) - 1
+		}
+		if !slices.Contains(s.Groups[gi].Files, rel) {
+			s.Groups[gi].Files = append(s.Groups[gi].Files, rel)
 		}
 	}
 	return s
@@ -350,7 +370,8 @@ type restorePlan struct {
 // reopened.
 type sessionRestoredMsg struct {
 	models  []client.Model
-	missing int      // files in this batch that no longer exist or failed to open
+	missing int      // files in this batch that no longer exist, or are directories
+	failed  []string // files in this batch that could not be checked or opened
 	more    []string // files still to reopen, in the next batch
 	plan    *restorePlan
 }
@@ -368,7 +389,12 @@ func (a App) restoreFiles(files, more []string, plan *restorePlan) tea.Cmd {
 		for _, abs := range files {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			exists, isDir, err := rpc.StatPath(ctx, abs)
-			if err != nil || !exists || isDir {
+			if err != nil {
+				cancel()
+				out.failed = append(out.failed, abs)
+				continue
+			}
+			if !exists || isDir {
 				cancel()
 				out.missing++
 				continue
@@ -376,7 +402,7 @@ func (a App) restoreFiles(files, more []string, plan *restorePlan) tea.Cmd {
 			bufID, content, version, fromRecovery, generation, err := rpc.OpenFile(ctx, abs)
 			cancel()
 			if err != nil {
-				out.missing++
+				out.failed = append(out.failed, abs)
 				continue
 			}
 			out.models = append(out.models, client.New(rpc, bufID, content, version, abs, workDir, cfg, fromRecovery, generation))
@@ -390,13 +416,17 @@ func (a App) restoreFiles(files, more []string, plan *restorePlan) tea.Cmd {
 // the last one, since a session saved halfway through would lose the rest.
 func (a App) handleSessionRestored(msg sessionRestoredMsg) (tea.Model, tea.Cmd) {
 	a.restoreMissing += msg.missing
+	a.restoreFailed = append(slices.Clone(a.restoreFailed), msg.failed...)
 	final := len(msg.more) == 0
 	var cmds []tea.Cmd
 	if !final {
 		cmds = append(cmds, a.restoreFiles(msg.more, nil, msg.plan))
 	} else {
 		a.sessionReady = true
-		if a.restoreMissing > 0 {
+		switch {
+		case len(a.restoreFailed) > 0:
+			a.status = fmt.Sprintf("E: %d file(s) in the saved tab groups could not be reopened", len(a.restoreFailed))
+		case a.restoreMissing > 0:
 			a.status = fmt.Sprintf("%d file(s) in the saved tab groups no longer exist", a.restoreMissing)
 		}
 	}

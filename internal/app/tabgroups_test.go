@@ -382,3 +382,36 @@ func TestBufferPickerShowsGroups(t *testing.T) {
 		t.Error("the picker labels groups when there are none")
 	}
 }
+
+// TestClosingTheLastNamedGroupGivesTheRowBack: closing the only buffer of a
+// named group hides the strip, and with one buffer left the tab bar, so the
+// remaining buffer is resized to the full height. The groups have to be
+// brought up to date before that resize, or it still sees the strip.
+func TestClosingTheLastNamedGroupGivesTheRowBack(t *testing.T) {
+	a := newGroupApp("a.go", "b.go")
+	a = newGroupNamed(t, a, "api") // a.go alone in "api", b.go ungrouped
+	a.active = a.bufIndex(1)
+	a, _ = step(t, a, client.CloseBufferMsg{})
+	if a.showTabBar() {
+		t.Fatal("test setup: the tab bar should be gone with one ungrouped buffer")
+	}
+	if got := lipgloss.Height(a.buffers[a.active].View().Content); got != a.height {
+		t.Errorf("remaining buffer renders %d rows, want the full %d", got, a.height)
+	}
+}
+
+// TestOpeningIntoASavedGroupMakesRoomForTheStrip: the first file opened into
+// an empty window has a saved group, which brings in the strip and the tab
+// bar with it, so the buffer is sized one row short of the window.
+func TestOpeningIntoASavedGroupMakesRoomForTheStrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // the open is recorded in the recent files
+	a := App{width: 120, height: 24, cfg: &config.Config{}, tabUse: map[uint32]uint64{}, fileChangedIdx: -1,
+		placement: map[string]string{"/tmp/a.go": "api"}}
+	a, _ = step(t, a, bufferOpenedMsg{model: newReloadTestModel(1, "/tmp/a.go"), line: -1, col: -1})
+	if !a.showTabBar() {
+		t.Fatal("test setup: a saved group should bring in the tab bar")
+	}
+	if got := lipgloss.Height(a.buffers[a.active].View().Content); got != a.height-1 {
+		t.Errorf("buffer renders %d rows, want %d below the tab bar", got, a.height-1)
+	}
+}

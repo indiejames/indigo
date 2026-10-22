@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -119,7 +120,12 @@ type App struct {
 	restoreSession bool
 	sessionReady   bool
 	sessionMark    string
-	restoreMissing int // saved files a restore could not reopen, over its batches
+	restoreMissing int // saved files a restore found gone, over its batches
+	// restoreFailed holds saved files a restore could not reopen for some
+	// other reason (an RPC error or timeout), in saved order. They are still
+	// saved, in the group placement gives them, so a slow start doesn't erase
+	// them from the session; opening one drops it from here.
+	restoreFailed []string
 
 	// serverGone is set when the RPC connection to the server closes
 	// unexpectedly (server crashed or was killed) rather than via a normal
@@ -888,8 +894,12 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.buffers = append(a.buffers, m)
 		a.active = len(a.buffers) - 1
+		a.restoreFailed = slices.DeleteFunc(slices.Clone(a.restoreFailed), func(p string) bool { return p == m.FilePath() })
 		// Resize ALL buffers — the tab bar may have just become visible,
-		// which changes the available height for every buffer.
+		// which changes the available height for every buffer. Groups first:
+		// a file with a saved group can bring in the group strip, and with it
+		// the tab bar.
+		a = a.syncGroups()
 		resizeCmd := a.resizeAllBuffers()
 		return a, tea.Batch(m.Init(), resizeCmd)
 
@@ -1398,7 +1408,9 @@ func (a App) handleCloseBuffer() (tea.Model, tea.Cmd) {
 	} else if a.active >= len(a.buffers) {
 		a.active = len(a.buffers) - 1
 	}
-	// Resize remaining buffers — tab bar may have just disappeared.
+	// Resize remaining buffers — tab bar may have just disappeared, with the
+	// last named group, so the groups are brought up to date first.
+	a = a.syncGroups()
 	return a, a.resizeAllBuffers()
 }
 

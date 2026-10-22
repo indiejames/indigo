@@ -85,6 +85,23 @@ type pickedMsg struct{ absPath string }
 // pickerCancelledMsg is sent when the user presses Esc.
 type pickerCancelledMsg struct{}
 
+// pickerScan is the workspace scan in flight and the picker it is for.
+type pickerScan struct {
+	picker *filePicker
+	cancel context.CancelFunc
+}
+
+// stopOrphanScan cancels the scan in flight when the picker it was started
+// for is no longer the open one. Run once per Update, so none of the places
+// that close or replace the picker has to remember it. Cancelling a scan that
+// already finished does nothing.
+func (a *App) stopOrphanScan() {
+	if a.scan != nil && a.scan.picker != a.picker {
+		a.scan.cancel()
+		a.scan = nil
+	}
+}
+
 // pickerFilesMsg carries the result of a background workspace file scan
 // (see App.startPickerFileScan). seq is checked against the current
 // picker's own seq before applying — a scan whose picker has since closed,
@@ -106,13 +123,19 @@ type pickerFilesMsg struct {
 // seq still guards the result, for the same reason it always did: a slower
 // older scan must not overwrite a newer one's list. A round trip only makes
 // that more likely, not less.
+//
+// The scan is cancelled as soon as the picker it was started for closes or is
+// replaced (stopOrphanScan), since nothing will show its result; cancelling
+// the call also stops the server's walk.
 func (a *App) startPickerFileScan(workDir string) tea.Cmd {
 	a.pickerFilesSeq++
 	seq := a.pickerFilesSeq
 	a.picker.seq = seq
 	rpc := a.rpc
+	ctx, cancel := context.WithTimeout(context.Background(), workspaceScanTimeout)
+	a.stopOrphanScan() // a scan for a picker this one replaced
+	a.scan = &pickerScan{picker: a.picker, cancel: cancel}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), workspaceScanTimeout)
 		defer cancel()
 		files, truncated, err := rpc.ListWorkspaceFiles(ctx)
 		if err != nil {

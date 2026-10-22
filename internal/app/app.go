@@ -119,6 +119,7 @@ type App struct {
 	restoreSession bool
 	sessionReady   bool
 	sessionMark    string
+	restoreMissing int // saved files a restore could not reopen, over its batches
 
 	// serverGone is set when the RPC connection to the server closes
 	// unexpectedly (server crashed or was killed) rather than via a normal

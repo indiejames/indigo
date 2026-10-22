@@ -285,32 +285,35 @@ func (a App) loadSession() tea.Cmd {
 
 // handleSessionLoaded records where the saved session puts each file, moves
 // the buffers already open into their saved groups, and in a restoring window
-// reopens the rest.
+// reopens the rest: the saved active tab first, so it is on screen after one
+// round trip whatever the session's size, then everything else.
 func (a App) handleSessionLoaded(msg sessionLoadedMsg) (tea.Model, tea.Cmd) {
 	if a.placement == nil {
 		a.placement = make(map[string]string)
 	}
-	var files, groupActive []string
-	var active string
+	var files []string
+	plan := &restorePlan{fileRank: map[string]int{}, groupRank: map[string]int{}}
 	if msg.ok {
 		// The saved group wins over the one a file joined before the session
 		// was read: that was only the default for a file with no group.
-		listed := make(map[string]bool)
-		for _, g := range msg.s.Groups {
+		for gi, g := range msg.s.Groups {
+			if _, dup := plan.groupRank[g.Name]; !dup {
+				plan.groupRank[g.Name] = gi
+			}
 			for _, rel := range g.Files {
 				abs := filepath.Join(a.workDir, rel)
-				if listed[abs] {
+				if _, dup := plan.fileRank[abs]; dup {
 					continue // a hand-edited file listing one file twice: the first wins
 				}
-				listed[abs] = true
+				plan.fileRank[abs] = len(files)
 				a.placement[abs] = g.Name
 				files = append(files, abs)
 			}
 			if g.Active != "" {
 				abs := filepath.Join(a.workDir, g.Active)
-				groupActive = append(groupActive, abs)
+				plan.groupActive = append(plan.groupActive, abs)
 				if g.Name == msg.s.Active {
-					active = abs
+					plan.active = abs
 				}
 			}
 		}
@@ -327,26 +330,41 @@ func (a App) handleSessionLoaded(msg sessionLoadedMsg) (tea.Model, tea.Cmd) {
 		a.sessionReady = true
 		return a, a.resizeAllBuffers() // a saved group can bring in the strip
 	}
-	return a, a.restoreFiles(files, active, groupActive)
+	if i := slices.Index(files, plan.active); i >= 0 && len(files) > 1 {
+		rest := slices.Delete(slices.Clone(files), i, i+1)
+		return a, a.restoreFiles([]string{plan.active}, rest, plan)
+	}
+	return a, a.restoreFiles(files, nil, plan)
 }
 
-// sessionRestoredMsg carries the buffers a restoring window reopened.
+// restorePlan is what a restore needs beyond the files: which tab to return
+// to, and the saved order, which the batches arrive out of.
+type restorePlan struct {
+	active      string         // the saved active tab
+	groupActive []string       // each group's saved active tab
+	fileRank    map[string]int // a file's position in the saved session
+	groupRank   map[string]int // a group's position in the saved session
+}
+
+// sessionRestoredMsg carries one batch of the buffers a restoring window
+// reopened.
 type sessionRestoredMsg struct {
-	models      []client.Model
-	missing     int      // saved files that no longer exist or failed to open
-	active      string   // the saved active tab
-	groupActive []string // each group's saved active tab
+	models  []client.Model
+	missing int      // files in this batch that no longer exist or failed to open
+	more    []string // files still to reopen, in the next batch
+	plan    *restorePlan
 }
 
 // restoreFiles reopens files, in order, through the server. Each is checked
 // with StatPath first, because OpenFile makes an empty buffer for a path that
 // doesn't exist, which would bring a deleted file back as an empty one. The
 // server is asked rather than the local filesystem since, attached to a
-// container, this process may not see the workspace.
-func (a App) restoreFiles(files []string, active string, groupActive []string) tea.Cmd {
+// container, this process may not see the workspace. more is reopened once
+// this batch has been shown.
+func (a App) restoreFiles(files, more []string, plan *restorePlan) tea.Cmd {
 	rpc, cfg, workDir := a.rpc, a.cfg, a.workDir
 	return func() tea.Msg {
-		out := sessionRestoredMsg{active: active, groupActive: groupActive}
+		out := sessionRestoredMsg{more: more, plan: plan}
 		for _, abs := range files {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			exists, isDir, err := rpc.StatPath(ctx, abs)
@@ -367,18 +385,25 @@ func (a App) restoreFiles(files []string, active string, groupActive []string) t
 	}
 }
 
-// handleSessionRestored adds the reopened buffers and returns to the saved
-// tab.
+// handleSessionRestored adds a batch of reopened buffers, goes to the saved
+// tab when this batch brought it, and asks for the next batch. Writes wait for
+// the last one, since a session saved halfway through would lose the rest.
 func (a App) handleSessionRestored(msg sessionRestoredMsg) (tea.Model, tea.Cmd) {
-	a.sessionReady = true
-	if msg.missing > 0 {
-		a.status = fmt.Sprintf("%d file(s) in the saved tab groups no longer exist", msg.missing)
+	a.restoreMissing += msg.missing
+	final := len(msg.more) == 0
+	var cmds []tea.Cmd
+	if !final {
+		cmds = append(cmds, a.restoreFiles(msg.more, nil, msg.plan))
+	} else {
+		a.sessionReady = true
+		if a.restoreMissing > 0 {
+			a.status = fmt.Sprintf("%d file(s) in the saved tab groups no longer exist", a.restoreMissing)
+		}
 	}
 	if len(msg.models) == 0 {
-		return a, nil
+		return a, tea.Batch(cmds...)
 	}
 	hadBuffers := len(a.buffers) > 0
-	var cmds []tea.Cmd
 	prev := uint32(0)
 	if a.active >= 0 && a.active < len(a.buffers) {
 		prev = a.buffers[a.active].BufID()
@@ -406,26 +431,31 @@ func (a App) handleSessionRestored(msg sessionRestoredMsg) (tea.Model, tea.Cmd) 
 		a.buffers = append(a.buffers, m)
 		cmds = append(cmds, m.Init())
 	}
-	// Stamp each group's saved tab as its most recent, so switching to a
-	// group lands where it was left.
 	if a.tabUse == nil {
 		a.tabUse = make(map[uint32]uint64, len(a.buffers))
 	}
-	for _, abs := range msg.groupActive {
-		if i := slices.IndexFunc(a.buffers, func(m client.Model) bool { return m.FilePath() == abs }); i >= 0 {
-			a.tabSeq++
-			a.tabUse[a.buffers[i].BufID()] = a.tabSeq
+	if final {
+		// Stamp each group's saved tab as its most recent, so switching to a
+		// group lands where it was left.
+		for _, abs := range msg.plan.groupActive {
+			if i := slices.IndexFunc(a.buffers, func(m client.Model) bool { return m.FilePath() == abs }); i >= 0 {
+				a.tabSeq++
+				a.tabUse[a.buffers[i].BufID()] = a.tabSeq
+			}
 		}
 	}
+	// Only the batch that brought the saved tab goes to it: a later one would
+	// pull the user back from wherever they have gone since.
+	broughtActive := msg.plan.active != "" && slices.ContainsFunc(msg.models, func(m client.Model) bool { return m.FilePath() == msg.plan.active })
 	switch {
-	case slices.ContainsFunc(a.buffers, func(m client.Model) bool { return m.FilePath() == msg.active }):
-		a.active = slices.IndexFunc(a.buffers, func(m client.Model) bool { return m.FilePath() == msg.active })
+	case broughtActive:
+		a.active = slices.IndexFunc(a.buffers, func(m client.Model) bool { return m.FilePath() == msg.plan.active })
 	case a.bufIndex(prev) >= 0:
 		a.active = a.bufIndex(prev)
 	default:
 		a.active = 0
 	}
-	a = a.syncGroups()
+	a = a.syncGroups().orderBySaved(msg.plan)
 	// The picker a directory start opens with stands in for having nothing
 	// open; now something is. One already being typed in stays.
 	if !hadBuffers && a.picker != nil && a.picker.query == "" {
@@ -433,4 +463,41 @@ func (a App) handleSessionRestored(msg sessionRestoredMsg) (tea.Model, tea.Cmd) 
 	}
 	cmds = append(cmds, a.resizeAllBuffers(), a.buffers[a.active].ReportActiveContextCmd())
 	return a, tea.Batch(cmds...)
+}
+
+// orderBySaved puts the groups, each group's tabs and the buffer list (which
+// the buffer picker shows) back in the saved order, which the batches of a
+// restore arrive out of: the active tab comes first, so its group is created
+// first. Groups and files the saved session doesn't list keep their order
+// after the ones it does. The active buffer stays the same buffer.
+func (a App) orderBySaved(plan *restorePlan) App {
+	rank := func(m map[string]int, k string) int {
+		if r, ok := m[k]; ok {
+			return r
+		}
+		return len(m)
+	}
+	activeID := a.buffers[a.active].BufID()
+	a.buffers = slices.Clone(a.buffers)
+	slices.SortStableFunc(a.buffers, func(x, y client.Model) int {
+		return rank(plan.fileRank, x.FilePath()) - rank(plan.fileRank, y.FilePath())
+	})
+	a.active = a.bufIndex(activeID)
+	paths := make(map[uint32]string, len(a.buffers))
+	for _, m := range a.buffers {
+		paths[m.BufID()] = m.FilePath()
+	}
+	groups := slices.Clone(a.groups)
+	slices.SortStableFunc(groups, func(x, y tabGroup) int {
+		return rank(plan.groupRank, x.name) - rank(plan.groupRank, y.name)
+	})
+	for gi := range groups {
+		ids := slices.Clone(groups[gi].bufIDs)
+		slices.SortStableFunc(ids, func(x, y uint32) int {
+			return rank(plan.fileRank, paths[x]) - rank(plan.fileRank, paths[y])
+		})
+		groups[gi].bufIDs = ids
+	}
+	a.groups = groups
+	return a
 }

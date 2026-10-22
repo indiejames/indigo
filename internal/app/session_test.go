@@ -323,3 +323,49 @@ func TestNoArgumentStartDropsItsEmptyBufferOnRestore(t *testing.T) {
 		t.Errorf("groups = %q", groupsOf(a))
 	}
 }
+
+// TestRestoreShowsTheActiveTabFirst: the saved active tab is reopened on its
+// own, before the rest, so it is on screen after one round trip. Nothing is
+// saved between the batches, the result ends in the saved order, and the
+// second batch leaves focus where the user has gone in the meantime.
+func TestRestoreShowsTheActiveTabFirst(t *testing.T) {
+	rpc, dir := sessionWorkspace(t, "a.go", "b.go", "web/c.go", "d.go")
+	p := sessionHome(t, dir)
+	saved := savedSession{Version: sessionVersion, Active: "web", Groups: []savedGroup{
+		{Name: "api", Files: []string{"a.go", "b.go"}, Active: "a.go"},
+		{Name: "web", Files: []string{"web/c.go"}, Active: "web/c.go"},
+	}}
+	writeSaved(t, p, saved)
+	a := *NewWithPicker(rpc, &config.Config{}, dir)
+	a, _ = step(t, a, tea.WindowSizeMsg{Width: 100, Height: 20})
+
+	a, cmd := step(t, a, a.loadSession()())
+	first, ok := cmd().(sessionRestoredMsg)
+	if !ok || len(first.models) != 1 || filepath.Base(first.models[0].FilePath()) != "c.go" || len(first.more) != 2 {
+		t.Fatalf("first batch = %d model(s), %d more; want c.go alone, then 2", len(first.models), len(first.more))
+	}
+	a, next := step(t, a, first)
+	if got := bufferNames(a); !slices.Equal(got, []string{"c.go"}) || a.picker != nil {
+		t.Fatalf("after the first batch: buffers %v, picker open %v", got, a.picker != nil)
+	}
+	FlushSessionWrites(5 * time.Second)
+	if s, _, _ := readSessionFile(p); !reflect.DeepEqual(s, saved) {
+		t.Fatalf("the session was saved halfway through the restore: %q", groupFiles(s))
+	}
+
+	// The user opens a file before the rest arrives; it keeps focus.
+	a = run(t, a, a.doOpenFile(filepath.Join(dir, "d.go")), 5*time.Second, 0)
+	a = run(t, a, next, 10*time.Second, 0)
+	if got := bufferNames(a); !slices.Equal(got, []string{"a.go", "b.go", "c.go", "d.go"}) {
+		t.Errorf("buffers = %v, want the saved order with d.go after", got)
+	}
+	if got := groupsOf(a); got != "api:"+ids(a, "a.go", "b.go")+" web:"+ids(a, "c.go", "d.go") {
+		t.Errorf("groups = %q, want the saved order", got)
+	}
+	if filepath.Base(a.buffers[a.active].FilePath()) != "d.go" {
+		t.Errorf("active = %s, want d.go: the second batch pulled focus back", a.buffers[a.active].FilePath())
+	}
+	if s := readSaved(t, p); groupFiles(s) != "api:a.go,b.go web:web/c.go,d.go" {
+		t.Errorf("saved after the restore: %q", groupFiles(s))
+	}
+}

@@ -45,30 +45,31 @@ func (r *RPC) ListDir(ctx context.Context, path string) ([]DirEntry, error) {
 	return out, nil
 }
 
-// ListWorkspaceFiles returns every file under the workspace root, as
-// workspace-relative paths.
-func (r *RPC) ListWorkspaceFiles(ctx context.Context) ([]string, error) {
+// ListWorkspaceFiles returns the files under the workspace root, as
+// workspace-relative paths. truncated is set when the server listed only part
+// of them (see workspacefs.CollectFiles).
+func (r *RPC) ListWorkspaceFiles(ctx context.Context) (paths []string, truncated bool, err error) {
 	fut, rel := r.svc.ListWorkspaceFiles(ctx, func(_ proto.EditorService_listWorkspaceFiles_Params) error {
 		return nil
 	})
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	list, err := res.Paths()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out := make([]string, list.Len())
 	for i := range out {
 		p, err := list.At(i)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		out[i] = p
 	}
-	return out, nil
+	return out, res.Truncated(), nil
 }
 
 // GrepWorkspace searches the workspace on the server.

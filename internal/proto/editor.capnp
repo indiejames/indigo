@@ -152,8 +152,11 @@ interface EditorService {
   # have completely different costs, and the picker must open instantly.
   listDir @57 (path :Text) -> (entries :List(DirEntry));
   # listWorkspaceFiles enumerates every file under the workspace root, as
-  # workspace-relative paths, for the picker's fuzzy search.
-  listWorkspaceFiles @58 () -> (paths :List(Text));
+  # workspace-relative paths, for the picker's fuzzy search. truncated is set
+  # when the list is partial: it stops at a size budget, so it fits in one
+  # message, and a home-directory workspace is listed only near the top. An
+  # older server never sets it.
+  listWorkspaceFiles @58 () -> (paths :List(Text), truncated :Bool);
   # grepWorkspace searches the workspace. explicit selects the caller-supplied
   # caseSensitive/isRegex rather than the smart-case and \-prefix conventions
   # the pattern itself carries, matching the two entry points the engine has

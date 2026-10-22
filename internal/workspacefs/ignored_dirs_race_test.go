@@ -1,6 +1,7 @@
 package workspacefs
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sync"
@@ -36,7 +37,7 @@ func TestIgnoredDirsConcurrentAccess(t *testing.T) {
 		{"walkCandidateFiles", func() { walkCandidateFiles(dir) }},                      //nolint:errcheck
 		{"searchWithRg", func() { searchWithRg(dir, "package", "", "", false, false) }}, //nolint:errcheck
 		// The picker's own scan, and the recent-files filter.
-		{"CollectFiles", func() { CollectFiles(dir, IgnoredDirs()) }},
+		{"CollectFiles", func() { CollectFiles(context.Background(), dir, IgnoredDirs()) }},
 		{"IsInIgnoredDir", func() { IsInIgnoredDir("pkg/a.go") }},
 	}
 

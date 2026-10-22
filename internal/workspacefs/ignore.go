@@ -1,6 +1,7 @@
 package workspacefs
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -92,9 +93,30 @@ func SetIgnoredDirs(names []string) {
 // new map rather than mutating the existing one in place, so a snapshot
 // taken once, before the goroutine starts, is safe to read for the rest of
 // this scan with no further synchronization.
-func CollectFiles(root string, ignored map[string]bool) []string {
-	var paths []string
+//
+// The walk stops early, with truncated set, once the paths would exceed
+// MaxCollectBytes, or when ctx is done. The list goes back to the window in
+// one RPC message, and a workspace with no repository above it can be a whole
+// home directory: unbounded, that message once outgrew Cap'n Proto's 64 MiB
+// read limit after a four-minute walk, and the client, unable to decode it,
+// dropped the connection and quit with "connection to server lost".
+//
+// A workspace that is the home directory or / (a start with no repository
+// above it) is a whole user's files rather than a project's. There the walk
+// goes no more than BroadRootDepth directories down, also reported as
+// truncated, which keeps the picker useful for the files near the top
+// without spending minutes on the rest.
+func CollectFiles(ctx context.Context, root string, ignored map[string]bool) (paths []string, truncated bool) {
+	maxDepth := -1
+	if isBroadRoot(root) {
+		maxDepth = BroadRootDepth
+	}
+	size := 0
 	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error { //nolint:errcheck
+		if ctx.Err() != nil {
+			truncated = true
+			return filepath.SkipAll
+		}
 		if err != nil {
 			return nil
 		}
@@ -102,14 +124,60 @@ func CollectFiles(root string, ignored map[string]bool) []string {
 			if ignored[d.Name()] {
 				return filepath.SkipDir
 			}
+			if maxDepth >= 0 && path != root {
+				rel, _ := filepath.Rel(root, path)
+				if strings.Count(rel, string(filepath.Separator))+1 > maxDepth {
+					truncated = true
+					return filepath.SkipDir
+				}
+			}
 			return nil
 		}
 		rel, _ := filepath.Rel(root, path)
+		size += len(rel) + collectEntryOverhead
+		if size > MaxCollectBytes {
+			truncated = true
+			return filepath.SkipAll
+		}
 		paths = append(paths, rel)
 		return nil
 	})
 	sort.Strings(paths)
-	return paths
+	return paths, truncated
+}
+
+// MaxCollectBytes bounds what CollectFiles returns, counted as each path's
+// length plus collectEntryOverhead, roughly what it costs in a Cap'n Proto
+// list of text (a pointer, a NUL and padding to a word). 16 MiB is far beyond
+// any repository's file list and a quarter of the RPC read limit. A var so
+// tests can lower it.
+var MaxCollectBytes = 16 << 20
+
+const collectEntryOverhead = 16
+
+// BroadRootDepth is how many directories deep CollectFiles goes in a home
+// directory or / workspace: 3 lists ~/a/b/c/file and stops above ~/a/b/c/d/.
+const BroadRootDepth = 3
+
+// homeDir is os.UserHomeDir, a var so tests can point it at a temp dir.
+var homeDir = os.UserHomeDir
+
+// isBroadRoot reports whether root is the home directory or the filesystem
+// root, compared with symlinks resolved, since the workspace path is.
+func isBroadRoot(root string) bool {
+	r := resolved(root)
+	if r == string(filepath.Separator) {
+		return true
+	}
+	home, err := homeDir()
+	return err == nil && home != "" && r == resolved(home)
+}
+
+func resolved(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
 }
 
 // Entry is one item in a directory listing.

@@ -111,14 +111,23 @@ func (s *editorService) resolveWorkspaceRel(rel string) (string, error) {
 
 // ListWorkspaceFiles enumerates every file under the workspace root as
 // workspace-relative paths, for the picker's fuzzy search.
-func (s *editorService) ListWorkspaceFiles(_ context.Context, call proto.EditorService_listWorkspaceFiles) error {
+func (s *editorService) ListWorkspaceFiles(ctx context.Context, call proto.EditorService_listWorkspaceFiles) error {
 	call.Go()
 
-	paths := workspacefs.CollectFiles(s.workspaceDir, workspacefs.IgnoredDirs())
+	// ctx ends when the caller gives up (its Finish cancels it), so a scan the
+	// picker has stopped waiting for stops walking too.
+	paths, truncated := workspacefs.CollectFiles(ctx, s.workspaceDir, workspacefs.IgnoredDirs())
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if truncated {
+		serverLog("ListWorkspaceFiles: %s listed in part, %d files", s.workspaceDir, len(paths))
+	}
 	res, err := call.AllocResults()
 	if err != nil {
 		return err
 	}
+	res.SetTruncated(truncated)
 	list, err := res.NewPaths(int32(len(paths)))
 	if err != nil {
 		return err

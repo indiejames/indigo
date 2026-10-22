@@ -679,6 +679,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.picker != nil && msg.seq == a.picker.seq {
 			a.picker.all = msg.files
 			a.picker.loadingAll = false
+			a.picker.partial = msg.partial
 			if a.picker.query != "" {
 				a.picker.setQuery(a.picker.query) // refresh a search already in progress
 			}

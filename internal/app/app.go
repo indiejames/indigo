@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -100,6 +101,31 @@ type App struct {
 	// correctness — a BufID is never reused by the server within a session.
 	tabUse map[uint32]uint64
 	tabSeq uint64
+
+	// groups are the tab groups, in the order the bar lists them; see
+	// tabgroups.go. groupName is the current group's, which a buffer that
+	// opens joins. Both are kept in step with a.buffers by syncGroups.
+	groups      []tabGroup
+	groupName   string
+	groupPicker *groupPicker // non-nil when the tab group picker is open
+
+	// The saved session (session.go). placement maps a file's path to the
+	// group it belongs in, from the saved session and from this window, and
+	// is shared across App copies as tabUse is. restoreSession is set for a
+	// window started without a file argument, which reopens the saved files
+	// and owns the session file. sessionReady holds writes back until the
+	// session has been read and restored; sessionMark is the fingerprint of
+	// what was last written.
+	placement      map[string]string
+	restoreSession bool
+	sessionReady   bool
+	sessionMark    string
+	restoreMissing int // saved files a restore found gone, over its batches
+	// restoreFailed holds saved files a restore could not reopen for some
+	// other reason (an RPC error or timeout), in saved order. They are still
+	// saved, in the group placement gives them, so a slow start doesn't erase
+	// them from the session; opening one drops it from here.
+	restoreFailed []string
 
 	// serverGone is set when the RPC connection to the server closes
 	// unexpectedly (server crashed or was killed) rather than via a normal
@@ -273,13 +299,15 @@ func (a App) newDirectoryPicker() *filePicker {
 }
 
 // NewWithPicker creates an App with the file picker open immediately
-// (used when indigo is started with a directory argument).
+// (used when indigo is started with a directory argument). It restores the
+// workspace's saved tab groups, which close the picker if they reopen anything.
 func NewWithPicker(rpc *client.RPC, cfg *config.Config, workDir string) *App {
 	cfgPath, cfgMod := configPathAndMtime()
 	return &App{
 		rpc:            rpc,
 		cfg:            cfg,
 		workDir:        workDir,
+		restoreSession: true,
 		fileChangedIdx: -1,
 		staleServer:    newStalePrompt(rpc),
 		jumpIdx:        -1,
@@ -294,7 +322,7 @@ func (a App) Init() tea.Cmd {
 	// otherwise the server would use its own config's value until the file
 	// happened to change, which in a container is the image's and not the
 	// user's.
-	cmds := []tea.Cmd{watchConfig(a.configPath, a.configModTime), a.pushIgnoredDirs(), a.initDebug()}
+	cmds := []tea.Cmd{watchConfig(a.configPath, a.configModTime), a.pushIgnoredDirs(), a.initDebug(), a.loadSession()}
 	if len(a.buffers) > 0 {
 		cmds = append(cmds, a.buffers[0].Init())
 	}
@@ -345,7 +373,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return next, cmd
 	}
-	return updated.stampActiveTab().ensureActiveSized().ensureActiveDebugView().ensureStatusShown(), cmd
+	return updated.syncGroups().stampActiveTab().saveSessionIfChanged().ensureActiveSized().ensureActiveDebugView().ensureStatusShown(), cmd
 }
 
 // ensureActiveSized gives the active buffer the window size if it has never had
@@ -507,6 +535,10 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.pluginPopup != nil {
 			a.pluginPopup.width = msg.Width
 			a.pluginPopup.height = msg.Height
+		}
+		if a.groupPicker != nil {
+			a.groupPicker.width = msg.Width
+			a.groupPicker.height = msg.Height
 		}
 		if a.pluginInput != nil {
 			a.pluginInput.width = msg.Width
@@ -788,6 +820,13 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case client.OpenBufPickerMsg:
 		if len(a.buffers) > 0 {
 			a.bufPicker = newBufPicker(a.buffers, a.active, a.width, a.height)
+			if a.showGroupStrip() {
+				for i := range a.bufPicker.items {
+					if gi := a.groupOf(a.buffers[a.bufPicker.items[i].idx].BufID()); gi >= 0 {
+						a.bufPicker.items[i].group = a.groups[gi].label()
+					}
+				}
+			}
 		}
 		return a, nil
 
@@ -855,8 +894,12 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.buffers = append(a.buffers, m)
 		a.active = len(a.buffers) - 1
+		a.restoreFailed = slices.DeleteFunc(slices.Clone(a.restoreFailed), func(p string) bool { return p == m.FilePath() })
 		// Resize ALL buffers — the tab bar may have just become visible,
-		// which changes the available height for every buffer.
+		// which changes the available height for every buffer. Groups first:
+		// a file with a saved group can bring in the group strip, and with it
+		// the tab bar.
+		a = a.syncGroups()
 		resizeCmd := a.resizeAllBuffers()
 		return a, tea.Batch(m.Init(), resizeCmd)
 
@@ -879,18 +922,31 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ---- buffer navigation ----
 	case client.NextBufferMsg:
-		if len(a.buffers) > 1 {
-			a.active = (a.active + 1) % len(a.buffers)
-			a.status = ""
+		if len(a.buffers) == 0 {
+			return a, nil
 		}
+		a = a.cycleBuffer(1)
 		return a, a.buffers[a.active].ReportActiveContextCmd()
 
 	case client.PrevBufferMsg:
-		if len(a.buffers) > 1 {
-			a.active = (a.active - 1 + len(a.buffers)) % len(a.buffers)
-			a.status = ""
+		if len(a.buffers) == 0 {
+			return a, nil
 		}
+		a = a.cycleBuffer(-1)
 		return a, a.buffers[a.active].ReportActiveContextCmd()
+
+	// ---- tab groups ----
+	case client.TabGroupMsg:
+		return a.handleTabGroup(msg)
+
+	case tabGroupNamedMsg:
+		return a.handleTabGroupNamed(msg)
+
+	case sessionLoadedMsg:
+		return a.handleSessionLoaded(msg)
+
+	case sessionRestoredMsg:
+		return a.handleSessionRestored(msg)
 
 	// ---- cleanup done ----
 	case appQuitMsg:
@@ -1204,6 +1260,11 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleBufPickerKey(km)
 		}
 	}
+	if a.groupPicker != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleGroupPickerKey(km)
+		}
+	}
 	if a.searchReplace != nil {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a.handleSearchReplaceKey(km)
@@ -1275,6 +1336,13 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_, isClick := msg.(tea.MouseClickMsg)
 		if mouse.Y == 0 {
 			if isClick && mouse.Button == tea.MouseLeft {
+				if gi, ok := a.groupAtColumn(mouse.X); ok {
+					if gi != a.activeGroup() {
+						a = a.switchToGroup(gi)
+						return a, a.buffers[a.active].ReportActiveContextCmd()
+					}
+					return a, nil
+				}
 				if idx, ok := a.tabAtColumn(mouse.X); ok && idx != a.active {
 					a.active = idx
 					a.status = ""
@@ -1326,16 +1394,23 @@ func (a App) activeFileDir() string {
 }
 
 // handleCloseBuffer closes the active buffer and switches to the next, or quits.
+// The next is its neighbour in its tab group (closeSuccessor), so closing a
+// tab doesn't drop you into a group you weren't looking at.
 func (a App) handleCloseBuffer() (tea.Model, tea.Cmd) {
+	next, hasNext := a.closeSuccessor()
 	a.forgetTabUse(a.buffers[a.active].BufID())
 	a.buffers = append(a.buffers[:a.active], a.buffers[a.active+1:]...)
 	if len(a.buffers) == 0 {
 		return a, a.doDisconnectAndQuit()
 	}
-	if a.active >= len(a.buffers) {
+	if i := a.bufIndex(next); hasNext && i >= 0 {
+		a.active = i
+	} else if a.active >= len(a.buffers) {
 		a.active = len(a.buffers) - 1
 	}
-	// Resize remaining buffers — tab bar may have just disappeared.
+	// Resize remaining buffers — tab bar may have just disappeared, with the
+	// last named group, so the groups are brought up to date first.
+	a = a.syncGroups()
 	return a, a.resizeAllBuffers()
 }
 
@@ -1376,5 +1451,5 @@ func (a App) bufHeight() int {
 }
 
 func (a App) showTabBar() bool {
-	return !a.cfg.HideTabs && len(a.buffers) > 1
+	return !a.cfg.HideTabs && (len(a.buffers) > 1 || a.showGroupStrip())
 }

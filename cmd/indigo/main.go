@@ -163,6 +163,7 @@ func main() {
 		shutdownContainer()
 		fatalf("run: %v", err)
 	}
+	app.FlushSessionWrites(2 * time.Second)
 	shutdownContainer()
 	reportIfServerDisconnected(finalModel)
 }
@@ -356,6 +357,7 @@ func openUntitled(startLine int) {
 	}
 
 	a := app.New(rpc, bufID, content, version, "", cfg, false, workDir, startLine, generation)
+	a.RestoreSession()
 	p := tea.NewProgram(a, tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
 	finalModel, err := p.Run()
@@ -365,6 +367,7 @@ func openUntitled(startLine int) {
 		shutdownContainer()
 		fatalf("run: %v", err)
 	}
+	app.FlushSessionWrites(2 * time.Second)
 	shutdownContainer()
 	reportIfServerDisconnected(finalModel)
 }

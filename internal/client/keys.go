@@ -124,6 +124,8 @@ var prefixCmds = []command{
 	// this was added.
 	{key: "ctrl+shift+left", name: "prev-buffer", category: "Files & Buffers", label: "Previous buffer", execute: executePrevBuffer},
 	{key: "ctrl+shift+right", name: "next-buffer", category: "Files & Buffers", label: "Next buffer", execute: executeNextBuffer},
+	{key: "ctrl+shift+down", name: "next-tab-group", category: "Files & Buffers", label: "Next tab group", execute: executeNextTabGroup},
+	{key: "ctrl+shift+up", name: "prev-tab-group", category: "Files & Buffers", label: "Previous tab group", execute: executePrevTabGroup},
 	{key: ":", name: "command-mode", category: "System", label: "Command mode", execute: executeEnterCommandMode},
 	{key: "/", name: "search", category: "Search", label: "Search", execute: executeEnterSearchMode},
 	{key: "esc", name: "cancel-selection", category: "Selection", label: "Cancel selection", execute: executeEscNormal},
@@ -356,7 +358,8 @@ var commandMenuRoot = command{
 			m.cmdCompletionIdx = -1
 			return m, nil
 		}},
-		debugMenu, // see debug_view.go
+		debugMenu,    // see debug_view.go
+		tabGroupMenu, // see tabgroups.go
 	},
 }
 

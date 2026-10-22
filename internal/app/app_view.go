@@ -30,6 +30,18 @@ var (
 				Background(tabBarBg).
 				Foreground(lipgloss.Color("#7788AA")).
 				Italic(true)
+	// The group strip's names are set apart from the tabs by colour, so a
+	// group name never reads as a file.
+	groupActiveStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#6A4FB0")).
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Bold(true)
+	groupInactiveStyle = lipgloss.NewStyle().
+				Background(tabBarBg).
+				Foreground(lipgloss.Color("#C8B4F0"))
+	groupSeparatorStyle = lipgloss.NewStyle().
+				Background(tabBarBg).
+				Foreground(lipgloss.Color("#AABBCC"))
 )
 
 // View returns the frame plus the terminal modes indigo needs. v2 moved
@@ -100,6 +112,9 @@ func (a App) renderBaseFrame() (string, *tea.Cursor) {
 	}
 	if a.bufPicker != nil {
 		return overlayCenter(base, a.bufPicker.render(), a.width, a.height), nil
+	}
+	if a.groupPicker != nil {
+		return overlayCenter(base, a.groupPicker.render(), a.width, a.height), nil
 	}
 	if a.searchReplace != nil {
 		return overlayCenter(base, a.searchReplace.render(), a.width, a.height), nil
@@ -448,34 +463,45 @@ type tabSlot struct {
 //
 // Nothing becomes unreachable: switching to a hidden buffer (ctrl+tab, the
 // buffer picker, a jump) makes it the most recent, so it appears immediately.
+//
+// Only the active tab group's tabs are laid out (groupTabs), in the group's
+// order, in the room the group strip leaves.
 func (a App) tabLayout() (slots []tabSlot, hidden int) {
-	all := make([]tabSlot, len(a.buffers))
+	tabs := a.groupTabs()
+	all := make([]tabSlot, len(tabs))
+	pos := make(map[int]int, len(tabs)) // buffer index → position in all
 	total := 0
-	for i := range a.buffers {
+	for p, i := range tabs {
 		label, w := a.tabLabel(i)
-		all[i] = tabSlot{idx: i, label: label, width: w}
+		all[p] = tabSlot{idx: i, label: label, width: w}
+		pos[i] = p
 		total += w
 	}
 
-	budget := a.tabBudget()
+	_, stripW := a.groupStrip()
+	budget := a.tabBudget() - stripW
 	if a.width <= 0 || total <= budget {
 		return all, 0
 	}
 
 	// Reserve room for the widest marker this bar could end up showing, so
 	// admitting one more tab can't widen the marker and overflow the row.
-	marker := tabOverflowLabel(len(a.buffers) - 1)
+	marker := tabOverflowLabel(len(tabs) - 1)
 	room := budget - lipgloss.Width(marker)
 	if room < 0 {
 		room = 0
 	}
 
-	admitted := make(map[int]bool, len(all))
+	admitted := make(map[int]bool, len(all)) // keyed by position in all
 	used := 0
 	for _, i := range a.tabsByRecency() {
-		if used+all[i].width <= room {
-			admitted[i] = true
-			used += all[i].width
+		p, ok := pos[i]
+		if !ok {
+			continue // in another group
+		}
+		if used+all[p].width <= room {
+			admitted[p] = true
+			used += all[p].width
 			continue
 		}
 		// Keep scanning rather than stopping at the first tab that doesn't
@@ -486,20 +512,101 @@ func (a App) tabLayout() (slots []tabSlot, hidden int) {
 	// The active tab is guaranteed a slot even when it alone is wider than the
 	// whole bar — truncated to fit rather than dropped, since a tab bar that
 	// can't show where you are is the failure being fixed here.
-	if !admitted[a.active] && a.active >= 0 && a.active < len(all) {
-		t := all[a.active]
+	if p, ok := pos[a.active]; ok && !admitted[p] {
+		t := all[p]
 		t.label = ansi.Truncate(t.label, room, "")
 		t.width = lipgloss.Width(t.label)
-		all[a.active] = t
-		admitted[a.active] = true
+		all[p] = t
+		admitted[p] = true
 	}
 
-	for i := range all {
-		if admitted[i] {
-			slots = append(slots, all[i])
+	for p := range all {
+		if admitted[p] {
+			slots = append(slots, all[p])
 		}
 	}
 	return slots, len(all) - len(slots)
+}
+
+// groupSlot is one tab group name on the bar's group strip.
+type groupSlot struct {
+	gi    int
+	label string
+	width int
+}
+
+// groupSeparator ends the group strip, before the tabs.
+const groupSeparator = "│"
+
+// groupStripMaxShortName is how many runes of a name the strip keeps once
+// the names no longer fit whole.
+const groupStripMaxShortName = 6
+
+// groupStrip lays out the group names the tab bar starts with, and returns
+// their total width including the separator. Empty when the bar shows no
+// strip (showGroupStrip).
+//
+// The strip takes at most half the bar, so the tabs keep room. When the names
+// don't fit whole, the other groups' are shortened, and then left out, but
+// the active group's name is always shown: like the active tab, it is where
+// you are.
+func (a App) groupStrip() (slots []groupSlot, width int) {
+	if !a.showGroupStrip() {
+		return nil, 0
+	}
+	active := a.activeGroup()
+	sepW := lipgloss.Width(groupSeparator)
+	layout := func(short, onlyActive bool) ([]groupSlot, int) {
+		var out []groupSlot
+		w := sepW
+		for gi, g := range a.groups {
+			if onlyActive && gi != active {
+				continue
+			}
+			name := []rune(g.label())
+			if short && gi != active && len(name) > groupStripMaxShortName {
+				name = append(name[:groupStripMaxShortName-1], '…')
+			}
+			label := " " + string(name) + " "
+			lw := lipgloss.Width(label)
+			out = append(out, groupSlot{gi: gi, label: label, width: lw})
+			w += lw
+		}
+		return out, w
+	}
+	if a.width <= 0 {
+		return layout(false, false)
+	}
+	limit := a.tabBudget() / 2
+	for _, try := range []struct{ short, onlyActive bool }{{false, false}, {true, false}, {true, true}} {
+		slots, width = layout(try.short, try.onlyActive)
+		if width <= limit {
+			return slots, width
+		}
+	}
+	// Even the active name alone is too wide: shorten it to fit.
+	if len(slots) == 1 {
+		s := slots[0]
+		s.label = ansi.Truncate(s.label, max(0, limit-sepW), "")
+		s.width = lipgloss.Width(s.label)
+		slots[0] = s
+		width = s.width + sepW
+	}
+	return slots, width
+}
+
+// groupAtColumn returns the index of the group whose name covers column x on
+// the tab bar, or false when x is not on the group strip.
+func (a App) groupAtColumn(x int) (int, bool) {
+	slots, _ := a.groupStrip()
+	col := 0
+	for _, s := range slots {
+		if x >= col && x < col+s.width {
+			return s.gi, true
+		}
+		col += s.width
+	}
+	return -1, false
 }
 
 // tabBudget is how many columns the tabs and the overflow marker have between
@@ -544,7 +651,10 @@ func tabOverflowLabel(hidden int) string {
 // other than the one drawn there.
 func (a App) tabAtColumn(x int) (int, bool) {
 	slots, _ := a.tabLayout()
-	col := 0
+	_, col := a.groupStrip()
+	if x < col {
+		return -1, false
+	}
 	for _, t := range slots {
 		if x < col+t.width {
 			return t.idx, true
@@ -557,6 +667,18 @@ func (a App) tabAtColumn(x int) (int, bool) {
 func (a App) renderTabBar() string {
 	var sb strings.Builder
 	used := 0
+	if groups, stripW := a.groupStrip(); stripW > 0 {
+		active := a.activeGroup()
+		for _, g := range groups {
+			if g.gi == active {
+				sb.WriteString(groupActiveStyle.Render(g.label))
+			} else {
+				sb.WriteString(groupInactiveStyle.Render(g.label))
+			}
+		}
+		sb.WriteString(groupSeparatorStyle.Render(groupSeparator))
+		used += stripW
+	}
 	slots, hidden := a.tabLayout()
 	for _, t := range slots {
 		var rendered string

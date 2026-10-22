@@ -35,10 +35,16 @@ func recentRootOr(workDir string) string {
 // maxRecentFiles caps how many entries are kept per workspace.
 const maxRecentFiles = 30
 
-// recentFilesPath returns the on-disk path for workDir's recent-files list,
-// keyed by a hash of its absolute path (mirrors server.socketDir /
-// server.recoveryFilePath, which key per-workspace state the same way).
+// recentFilesPath returns the on-disk path for workDir's recent-files list.
 func recentFilesPath(workDir string) (string, error) {
+	return workspaceStatePath("recent", workDir)
+}
+
+// workspaceStatePath returns the path of workDir's file under
+// ~/.indigo/<kind>, keyed by a hash of its absolute path (mirrors
+// server.socketDir / server.recoveryFilePath, which key per-workspace state
+// the same way).
+func workspaceStatePath(kind, workDir string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -48,7 +54,7 @@ func recentFilesPath(workDir string) (string, error) {
 		abs = workDir
 	}
 	h := sha256.Sum256([]byte(abs))
-	dir := filepath.Join(home, ".indigo", "recent")
+	dir := filepath.Join(home, ".indigo", kind)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}
@@ -77,8 +83,10 @@ func writeRecentList(p string, rels []string) {
 	os.WriteFile(p, data, 0600) //nolint:errcheck
 }
 
-// withRecentFilesLock runs fn while holding an exclusive advisory lock,
-// serializing recordRecentFile's read-modify-write across concurrent indigo
+// withStateFileLock runs fn while holding an exclusive advisory lock on the
+// per-workspace state file p. It was written for the recent-files list, and
+// the tab group session file shares it for the same reason: it serializes
+// recordRecentFile's read-modify-write across concurrent indigo
 // processes: each terminal window is a separate OS process (see CLAUDE.md's
 // client/server architecture) sharing the same per-workspace recent-files
 // file, so two windows opening files back-to-back without this lock could
@@ -89,7 +97,7 @@ func writeRecentList(p string, rels []string) {
 // Best-effort: if the lock file can't be opened or locked, fn still runs
 // unlocked rather than losing the update entirely — recording a recent file
 // is not worth failing over.
-func withRecentFilesLock(p string, fn func()) {
+func withStateFileLock(p string, fn func()) {
 	f, err := os.OpenFile(p+".lock", os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		fn()
@@ -157,7 +165,7 @@ func recordRecentFile(workDir, recentRoot, absPath string) {
 	if err != nil {
 		return
 	}
-	withRecentFilesLock(p, func() {
+	withStateFileLock(p, func() {
 		rels := append([]string{rel}, dropString(readRecentList(p), rel)...)
 		if len(rels) > maxRecentFiles {
 			rels = rels[:maxRecentFiles]

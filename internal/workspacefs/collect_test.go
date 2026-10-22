@@ -98,3 +98,73 @@ func TestAHomeDirectoryIsListedOnlyNearTheTop(t *testing.T) {
 		t.Errorf("as home: %v truncated=%v, want %v, truncated", paths, truncated, want)
 	}
 }
+
+// cancelAfter is a context that reads as cancelled from its n+1th Err call.
+type cancelAfter struct {
+	context.Context
+	n int
+}
+
+func (c *cancelAfter) Err() error {
+	if c.n <= 0 {
+		return context.Canceled
+	}
+	c.n--
+	return nil
+}
+
+// TestCollectFilesStopsPartWayThroughADirectory: cancellation is checked as
+// entries are read, so a directory bigger than one read batch is abandoned
+// part way through rather than read to the end first.
+func TestCollectFilesStopsPartWayThroughADirectory(t *testing.T) {
+	dir := collectTree(t, collectBatch*2+10)
+	ctx := &cancelAfter{Context: context.Background(), n: collectBatch + 5}
+	paths, truncated := CollectFiles(ctx, dir, IgnoredDirs())
+	if !truncated || len(paths) != collectBatch+5 {
+		t.Errorf("got %d paths, truncated=%v; want %d, truncated", len(paths), truncated, collectBatch+5)
+	}
+}
+
+// TestCollectFilesKeepsTheShallowestFilesWhenCutShort: the walk is
+// breadth-first, so a list the budget cuts short holds the files nearest the
+// root, which are the likeliest to be wanted. Each branch has a near file and a
+// deeper one, so a depth-first walk reaches a deep file before the second
+// near file whichever branch it takes first (ReadDir order is the
+// filesystem's, not sorted).
+func TestCollectFilesKeepsTheShallowestFilesWhenCutShort(t *testing.T) {
+	root := t.TempDir()
+	for _, rel := range []string{"a/n.md", "a/y/d.md", "z/n.md", "z/y/d.md"} {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func(old int) { MaxCollectBytes = old }(MaxCollectBytes)
+	MaxCollectBytes = 2 * (len("a/n.md") + collectEntryOverhead)
+	paths, truncated := CollectFiles(context.Background(), root, IgnoredDirs())
+	if want := []string{"a/n.md", "z/n.md"}; !truncated || !slices.Equal(paths, want) {
+		t.Errorf("got %v truncated=%v, want %v, truncated", paths, truncated, want)
+	}
+}
+
+// TestCollectFilesListsASymlinkWithoutFollowingIt, as filepath.WalkDir did:
+// following one could walk out of the workspace, or round a loop.
+func TestCollectFilesListsASymlinkWithoutFollowingIt(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "real", "f.md"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(root, filepath.Join(root, "loop")); err != nil {
+		t.Fatal(err)
+	}
+	paths, truncated := CollectFiles(context.Background(), root, IgnoredDirs())
+	if want := []string{"loop", "real/f.md"}; truncated || !slices.Equal(paths, want) {
+		t.Errorf("got %v truncated=%v, want %v", paths, truncated, want)
+	}
+}

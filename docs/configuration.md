@@ -131,6 +131,15 @@ the query score well above ones that merely contain those characters elsewhere, 
 acts as a de facto filter without excluding anything outright. When `fuzzy_search = false`,
 the picker uses simple substring matching with no ranking.
 
+Search covers the files the picker has listed, and the list can be partial in two cases,
+which the title reports as `[partial: N files listed; browse for the rest]`:
+
+- **Home directory or `/`.** With no repository above the starting folder, the workspace can be your
+  whole home directory. There the list covers only files up to three directories down
+  (`~/a/b/c/file`). Browsing (an empty query) still reaches everything.
+- **Very large workspace.** The list is capped at about 16 MiB of paths, which no ordinary
+  repository comes near.
+
 ## Indentation
 
 **The file's own indentation wins first.** When a buffer is opened, its content is scanned

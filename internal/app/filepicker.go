@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -57,6 +58,7 @@ type filePicker struct {
 	// directory) overwriting a newer one's results — see pickerFilesMsg.
 	seq        int
 	loadingAll bool
+	partial    bool // the scan listed only part of the workspace (see pickerFilesMsg)
 
 	// loadingDir is browse mode's equivalent of loadingAll: the directory
 	// listing is now a round trip to the server, because the server is the
@@ -83,14 +85,32 @@ type pickedMsg struct{ absPath string }
 // pickerCancelledMsg is sent when the user presses Esc.
 type pickerCancelledMsg struct{}
 
+// pickerScan is the workspace scan in flight and the picker it is for.
+type pickerScan struct {
+	picker *filePicker
+	cancel context.CancelFunc
+}
+
+// stopOrphanScan cancels the scan in flight when the picker it was started
+// for is no longer the open one. Run once per Update, so none of the places
+// that close or replace the picker has to remember it. Cancelling a scan that
+// already finished does nothing.
+func (a *App) stopOrphanScan() {
+	if a.scan != nil && a.scan.picker != a.picker {
+		a.scan.cancel()
+		a.scan = nil
+	}
+}
+
 // pickerFilesMsg carries the result of a background workspace file scan
 // (see App.startPickerFileScan). seq is checked against the current
 // picker's own seq before applying — a scan whose picker has since closed,
 // or been reopened for a different directory, is discarded rather than
 // clobbering a newer scan's results.
 type pickerFilesMsg struct {
-	seq   int
-	files []string
+	seq     int
+	files   []string
+	partial bool // the server listed only part of the workspace
 }
 
 // startPickerFileScan asks the server to enumerate the workspace for the
@@ -103,22 +123,28 @@ type pickerFilesMsg struct {
 // seq still guards the result, for the same reason it always did: a slower
 // older scan must not overwrite a newer one's list. A round trip only makes
 // that more likely, not less.
+//
+// The scan is cancelled as soon as the picker it was started for closes or is
+// replaced (stopOrphanScan), since nothing will show its result; cancelling
+// the call also stops the server's walk.
 func (a *App) startPickerFileScan(workDir string) tea.Cmd {
 	a.pickerFilesSeq++
 	seq := a.pickerFilesSeq
 	a.picker.seq = seq
 	rpc := a.rpc
+	ctx, cancel := context.WithTimeout(context.Background(), workspaceScanTimeout)
+	a.stopOrphanScan() // a scan for a picker this one replaced
+	a.scan = &pickerScan{picker: a.picker, cancel: cancel}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), workspaceScanTimeout)
 		defer cancel()
-		files, err := rpc.ListWorkspaceFiles(ctx)
+		files, truncated, err := rpc.ListWorkspaceFiles(ctx)
 		if err != nil {
 			// A failed scan leaves the fuzzy list empty rather than stale;
 			// browse mode still works, which is the useful half.
 			appLog("picker file scan failed: %v", err)
 			return pickerFilesMsg{seq: seq}
 		}
-		return pickerFilesMsg{seq: seq, files: files}
+		return pickerFilesMsg{seq: seq, files: files, partial: truncated}
 	}
 }
 
@@ -494,8 +520,13 @@ func (fp *filePicker) View() string {
 		sb.WriteString(pickerTitleStyle.Render(clamp(title)))
 	default:
 		title := "  Open File"
-		if fp.loadingAll {
+		switch {
+		case fp.loadingAll:
 			title += "  [scanning files…]"
+		case fp.partial:
+			// Search can't find a file the list doesn't have, so say so
+			// rather than let a miss look like the file isn't there.
+			title += fmt.Sprintf("  [partial: %d files listed; browse for the rest]", len(fp.all))
 		}
 		sb.WriteString(pickerTitleStyle.Render(clamp(title)))
 	}

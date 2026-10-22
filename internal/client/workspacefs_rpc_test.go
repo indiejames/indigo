@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/indiejames/indigo/internal/server"
+	"github.com/indiejames/indigo/internal/workspacefs"
 )
 
 // dialWorkspaceServer brings up a real server over an in-memory stream and
@@ -111,7 +112,7 @@ func TestListWorkspaceFilesOverRPCSkipsIgnoredDirs(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	paths, err := r.ListWorkspaceFiles(ctx)
+	paths, _, err := r.ListWorkspaceFiles(ctx)
 	if err != nil {
 		t.Fatalf("ListWorkspaceFiles: %v", err)
 	}
@@ -275,7 +276,7 @@ func TestSetIgnoredDirsOverRPC(t *testing.T) {
 	defer cancel()
 
 	// "build" is not a built-in ignore, so it starts visible.
-	before, err := r.ListWorkspaceFiles(ctx)
+	before, _, err := r.ListWorkspaceFiles(ctx)
 	if err != nil {
 		t.Fatalf("ListWorkspaceFiles: %v", err)
 	}
@@ -292,7 +293,7 @@ func TestSetIgnoredDirsOverRPC(t *testing.T) {
 		r.SetIgnoredDirs(c, nil) //nolint:errcheck // package-level state; other tests share it
 	})
 
-	after, err := r.ListWorkspaceFiles(ctx)
+	after, _, err := r.ListWorkspaceFiles(ctx)
 	if err != nil {
 		t.Fatalf("ListWorkspaceFiles: %v", err)
 	}
@@ -369,5 +370,26 @@ func TestListDirRefusesToLeaveTheWorkspace(t *testing.T) {
 	// A path that merely *looks* like it escapes but does not must still work.
 	if _, err := r.ListDir(ctx, filepath.Join("sub", "..")); err != nil {
 		t.Errorf("ListDir of a path that stays inside was refused: %v", err)
+	}
+}
+
+// TestListWorkspaceFilesReportsAPartialListing: a list the server cut short
+// says so over the wire, which is how the picker knows a search miss may only
+// mean the file wasn't listed.
+func TestListWorkspaceFilesReportsAPartialListing(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{"a.txt": "a", "b.txt": "b", "c.txt": "c"})
+	r := dialWorkspaceServer(t, dir)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if _, truncated, err := r.ListWorkspaceFiles(ctx); err != nil || truncated {
+		t.Fatalf("full listing: truncated=%v err=%v, want neither", truncated, err)
+	}
+	defer func(old int) { workspacefs.MaxCollectBytes = old }(workspacefs.MaxCollectBytes)
+	workspacefs.MaxCollectBytes = 1
+	paths, truncated, err := r.ListWorkspaceFiles(ctx)
+	if err != nil || !truncated || len(paths) != 0 {
+		t.Errorf("over budget: %v truncated=%v err=%v, want none, truncated", paths, truncated, err)
 	}
 }

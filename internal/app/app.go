@@ -135,6 +135,7 @@ type App struct {
 	serverGone bool
 
 	picker          *filePicker          // non-nil when file picker is open
+	scan            *pickerScan          // the picker's workspace scan in flight; see stopOrphanScan
 	pickerFilesSeq  int                  // bumped on every new picker file scan; see pickerFilesMsg
 	pickerDirSeq    int                  // bumped on every picker directory listing; see pickerDirMsg
 	pickerRecentSeq int                  // bumped on every recent-files filter; see recentFilesMsg
@@ -373,6 +374,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return next, cmd
 	}
+	updated.stopOrphanScan()
 	return updated.syncGroups().stampActiveTab().saveSessionIfChanged().ensureActiveSized().ensureActiveDebugView().ensureStatusShown(), cmd
 }
 
@@ -679,6 +681,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.picker != nil && msg.seq == a.picker.seq {
 			a.picker.all = msg.files
 			a.picker.loadingAll = false
+			a.picker.partial = msg.partial
 			if a.picker.query != "" {
 				a.picker.setQuery(a.picker.query) // refresh a search already in progress
 			}

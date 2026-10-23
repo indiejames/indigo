@@ -293,6 +293,9 @@ type editorService struct {
 	// can tell a client it is talking to code that has since been replaced on
 	// disk. See staleness.go.
 	staleWatch *staleWatch
+	// build is this server's own build, compared with the one a window
+	// expects (connect's expectedBuild). See staleness.go.
+	build ownBuild
 
 	// shutdown is called when the last client disconnects (cleanly or not).
 	shutdown        func()
@@ -740,7 +743,11 @@ func (s *editorService) connect(connID uint64, call proto.EditorService_connect)
 			ModTime: bin.ModTimeUnixNano,
 		})
 	}
-	if desc := s.staleWatch.staleDescription(); desc != "" {
+	expected, _ := call.Args().ExpectedBuild()
+	for _, desc := range []string{s.staleWatch.staleDescription(), s.build.buildMismatch(expected)} {
+		if desc == "" {
+			continue
+		}
 		// Deliberately reported, not acted on: someone may be editing in this
 		// server, and dropping their session to pick up a new build would be
 		// worse than serving old code for a while longer. The client decides

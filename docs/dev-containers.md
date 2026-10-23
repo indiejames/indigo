@@ -67,6 +67,14 @@ points. The binary is copied into a container once and reused, and it needs no
 changes to your image — it is statically linked, so glibc and musl images both
 work (tested on Alpine).
 
+**Upgrading needs no rebuild.** Each build is copied to its own path, named by a
+hash of its contents, so the first attach after an upgrade copies the new one
+in. A container runs one server per workspace, though, and a window joins it if
+one is already running. If an older build's server is still running because
+another window, or an agent, is still attached, the new window shows the
+stale-server prompt. Close everything attached to that workspace and the next
+window starts the new build.
+
 If your image already ships one, say so in `devcontainer.json` and indigo will
 use it instead of copying anything:
 

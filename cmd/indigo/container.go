@@ -266,11 +266,13 @@ func connect(workDir string) (*client.RPC, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), attachTimeout)
 	defer cancel()
 	clientToken = newClientToken()
+	var serverBuild string // the build this attach started; "" for a project's own server
 	opts := container.AttachOptions{
 		ServerPath:  projectServerPath,
 		ClientToken: clientToken,
 		Locate:      container.LocateServerBinary,
 		Warn:        func(msg string) { fmt.Fprintf(os.Stderr, "indigo: %s\n", msg) },
+		ServerBuild: func(build string) { serverBuild = build },
 	}
 
 	if len(remoteEnv) > 0 {
@@ -294,7 +296,10 @@ func connect(workDir string) (*client.RPC, error) {
 	if err != nil {
 		return nil, fmt.Errorf("attach to container %s: %w", containerName, err)
 	}
-	rpc, err := client.DialStream(stream)
+	// The container keeps one server per workspace, and a window joins one
+	// already running rather than starting its own. Naming the build this
+	// attach started lets that server say when it is an older one.
+	rpc, err := client.DialStreamExpecting(stream, serverBuild)
 	if err != nil {
 		stream.Close() //nolint:errcheck
 		return nil, fmt.Errorf("connect to server in container %s: %w", containerName, err)

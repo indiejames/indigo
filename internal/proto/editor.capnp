@@ -49,7 +49,14 @@ interface EditorService {
   # since been replaced on disk — its own binary or a plugin's. The server
   # cannot restart itself without disrupting whoever is connected, so it
   # reports the condition and lets the client decide what to say.
-  connect         @0 (callback :ClientCallback)                                -> (clientId :UInt64, serverStale :Bool);
+  #
+  # expectedBuild, when not empty, is the content hash of the server binary
+  # the window started (binstamp.ContentHash); serverStale is also set when it
+  # differs from this server's own. A dev container keeps each build at its own
+  # path, so a server left running from an older build is never "replaced on
+  # disk", and this comparison is the only way a newer window finds out it
+  # joined one. An older server ignores it; a window on the host sends none.
+  connect         @0 (callback :ClientCallback, expectedBuild :Text)           -> (clientId :UInt64, serverStale :Bool);
   disconnect      @1 (clientId :UInt64)                                        -> ();
   # generation increments every time the server replaces this buffer's
   # underlying object wholesale (SaveAs, DiscardRecovery, reloadBuffer)

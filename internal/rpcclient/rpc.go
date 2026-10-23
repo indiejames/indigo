@@ -177,6 +177,14 @@ func Dial(socketPath string) (*RPC, error) {
 // The caller owns rwc until this returns successfully; after that the RPC owns
 // it and closing the connection closes the stream.
 func DialStream(rwc io.ReadWriteCloser) (*RPC, error) {
+	return DialStreamExpecting(rwc, "")
+}
+
+// DialStreamExpecting is DialStream for a window that knows which server build
+// it started (a dev container's, from container.AttachOptions.ServerBuild).
+// The server compares it with its own, so a window that joined a server left
+// running from an older build is shown the stale-server prompt.
+func DialStreamExpecting(rwc io.ReadWriteCloser, expectedBuild string) (*RPC, error) {
 	c := rwc
 
 	cb := &callbackServer{}
@@ -203,6 +211,11 @@ func DialStream(rwc io.ReadWriteCloser) (*RPC, error) {
 
 	// Register with server, passing our callback capability.
 	fut, rel := svc.Connect(context.Background(), func(p proto.EditorService_connect_Params) error {
+		if expectedBuild != "" {
+			if err := p.SetExpectedBuild(expectedBuild); err != nil {
+				return err
+			}
+		}
 		return p.SetCallback(proto.ClientCallback(capnp.Client(cbCap).AddRef()))
 	})
 	defer rel()

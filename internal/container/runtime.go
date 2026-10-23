@@ -23,14 +23,14 @@ package container
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/indiejames/indigo/internal/binstamp"
 )
 
 // Runtime is a container engine — docker, or anything that behaves like it.
@@ -114,23 +114,11 @@ func linkStable(ctx context.Context, rt Runtime, id, target, link string) error 
 // exact instant can miss it; it only happens when a window attaches.
 const stableLinkScript = `ln -sfn -- "$INDIGO_TARGET" "$INDIGO_LINK"`
 
-// hashFile returns a short content hash of the file at path.
-//
-// Short because it names a file a human may see in a process list, and eight
-// bytes is ample to distinguish builds of one program — this is addressing, not
-// a security boundary.
-func hashFile(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close() //nolint:errcheck
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)[:8]), nil
-}
+// hashFile returns a short content hash of the file at path. It is
+// binstamp.ContentHash, the same hash a server computes of its own executable,
+// so the name a binary is copied in under and the build the server reports
+// cannot disagree.
+func hashFile(path string) (string, error) { return binstamp.ContentHash(path) }
 
 // AttachOptions carries the parts of an attach that vary.
 type AttachOptions struct {
@@ -146,6 +134,12 @@ type AttachOptions struct {
 	// earlier version printed "could not mark /w as a safe git directory"
 	// into CI output from a test that was deliberately inducing it.
 	Warn func(string)
+	// ServerBuild, when set, is told the content hash of the server binary
+	// this attach copied in or found already there, before the server starts.
+	// The window sends it in connect, so a server left running from an older
+	// build, which this attach joins rather than replaces, can say so. Not
+	// called for a ServerPath from the project, whose build isn't known here.
+	ServerBuild func(string)
 	// ClientToken marks this window's bridge process inside the container, so
 	// the windows can be told apart in a process list. Without it a window
 	// leaving cannot distinguish its own bridge from another window's — see
@@ -200,6 +194,9 @@ func Attach(ctx context.Context, rt Runtime, id, workspaceDir string, opts Attac
 			return nil, fmt.Errorf("hash %s: %w", local, err)
 		}
 		remote = ServerPath(goarch, hash)
+		if opts.ServerBuild != nil {
+			opts.ServerBuild(hash)
+		}
 	}
 
 	env := append([]string(nil), opts.Env...)

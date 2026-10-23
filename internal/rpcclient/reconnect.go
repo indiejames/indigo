@@ -6,6 +6,8 @@ import (
 	"io"
 	"time"
 
+	"capnproto.org/go/capnp/v3"
+
 	proto "github.com/indiejames/indigo/internal/proto"
 )
 
@@ -127,16 +129,19 @@ func (r *RPC) redialOnce(redial Redialer) (*link, error) {
 func (r *RPC) Reconnects() uint64 { return r.reconnects.Load() }
 
 // Reconnecting reports whether the connection has dropped and is being, or is
-// about to be, re-established. A buffer whose edit just failed asks, because
-// the edit is typically one typed in the instant before the window heard of
-// the drop: reconnecting reconciles it, and reporting it as a failed edit
-// would only put an error in front of the user (and take their next key to
-// dismiss it).
-func (r *RPC) Reconnecting() bool {
+// about to be, re-established, given err, the error a call just failed with. A
+// buffer whose edit just failed asks, because the edit is typically one typed
+// in the instant before the window heard of the drop: reconnecting reconciles
+// it, and reporting it as a failed edit would only put an error in front of
+// the user (and take their next key to dismiss it).
+//
+// err counts as well as the connection, because a call can fail with
+// "connection closed" before conn.Done() fires, while Alive is still true.
+func (r *RPC) Reconnecting(err error) bool {
 	if r == nil || r.redialer() == nil {
 		return false
 	}
-	return r.reconnecting.Load() || !r.Alive()
+	return r.reconnecting.Load() || !r.Alive() || capnp.IsDisconnected(err)
 }
 
 // Reattached is a buffer as the server holds it after RPC.Reattach.

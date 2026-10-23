@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"sync"
 	"testing"
 	"time"
 
+	"capnproto.org/go/capnp/v3"
+	"capnproto.org/go/capnp/v3/rpc"
 	tea "charm.land/bubbletea/v2"
 
 	proto "github.com/indiejames/indigo/internal/proto"
@@ -83,5 +86,33 @@ func TestQuittingStopsAReconnect(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("reconnect kept going after the window quit")
+	}
+}
+
+// TestAnEditFailingAsDisconnectedCountsAsReconnecting: a call can fail with
+// "connection closed" before the connection's Done fires, so Alive is still
+// true. A window that took that for an ordinary failed edit showed an error
+// modal, which took the next key (an Esc ending insert mode) to dismiss.
+func TestAnEditFailingAsDisconnectedCountsAsReconnecting(t *testing.T) {
+	p1, p2 := net.Pipe()
+	defer p2.Close() //nolint:errcheck
+	conn := rpc.NewConn(rpc.NewStreamTransport(p1), nil)
+	defer conn.Close() //nolint:errcheck
+	r := rpcOver(proto.EditorService{})
+	r.link.Store(&link{conn: conn, maxLocal: &r.maxLocal})
+	if !r.Alive() {
+		t.Fatal("fixture's connection is not alive")
+	}
+	closed := capnp.Disconnected("connection closed")
+
+	if r.Reconnecting(closed) {
+		t.Error("reconnecting with no redialer set")
+	}
+	r.SetRedial(func(context.Context) (io.ReadWriteCloser, string, error) { return nil, "", errors.New("unused") })
+	if !r.Reconnecting(closed) {
+		t.Error("a call that failed as disconnected does not count as reconnecting while the connection still looks alive")
+	}
+	if r.Reconnecting(errors.New("generation mismatch")) {
+		t.Error("an ordinary failure on a live connection counts as reconnecting")
 	}
 }

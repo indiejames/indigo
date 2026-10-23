@@ -1628,7 +1628,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.bufID != m.bufID {
 			return m, nil // stale result from a previous buffer switch; discard
 		}
-		if m.detached || m.rpc.Reconnecting() {
+		if m.detached || m.rpc.Reconnecting(msg.err) {
 			// The connection is gone and a reconnect is under way, though the
 			// window may not have been told yet. The edit is still in the
 			// buffer, and reattaching reconciles it; a resync now would only
@@ -1648,7 +1648,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.bufID != m.bufID {
 			return m, nil // stale result from a previous buffer switch; discard
 		}
-		if msg.err != nil && (m.detached || m.rpc.Reconnecting()) {
+		if msg.err != nil && (m.detached || m.rpc.Reconnecting(msg.err)) {
 			// Started just before the connection dropped. Stay paused:
 			// reattaching settles this buffer once the server is back.
 			return m.Detach(), nil

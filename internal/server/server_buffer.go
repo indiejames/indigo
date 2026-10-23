@@ -86,7 +86,7 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 
 	// Read outside the lock — a slow or hung filesystem must not block every
 	// other RPC on this connection.
-	content, fromRecovery, crlf, err := s.loadContent(path)
+	content, fromRecovery, crlf, onDisk, err := s.loadContent(path)
 	if err != nil {
 		serverLog("OpenFile: reading %q failed: %v", path, err)
 		return fmt.Errorf("read %s: %w", path, err)
@@ -107,6 +107,10 @@ func (s *editorService) OpenFile(_ context.Context, call proto.EditorService_ope
 	buf := document.New(path, content)
 	if fromRecovery {
 		buf.MarkDirty()
+		// What is saved is the file, not the restored text. Every poll
+		// reports this hash, and a window holding text equal to it shows
+		// the buffer as saved, so the restored edits looked saved at once.
+		buf.SetSaved(onDisk)
 	}
 	s.buffers[bufID] = &bufferEntry{
 		id:            bufID,
@@ -370,9 +374,12 @@ func (s *editorService) ReloadBuffer(_ context.Context, call proto.EditorService
 // here: that's the ordinary new-file case (and a file that's since been
 // deleted may still have a recovery file worth replaying), so it keeps
 // falling through to the recovery check with empty content.
-func (s *editorService) loadContent(path string) (content string, fromRecovery, crlf bool, err error) {
+//
+// onDisk is the file's content, which differs from content when that comes from
+// a recovery file: it is what the buffer counts as saved.
+func (s *editorService) loadContent(path string) (content string, fromRecovery, crlf bool, onDisk string, err error) {
 	if path == "" {
-		return "", false, false, nil // untitled buffer: no content, no recovery
+		return "", false, false, "", nil // untitled buffer: no content, no recovery
 	}
 	s.forgetSelfWrites(path)
 	var origModTime time.Time
@@ -386,7 +393,7 @@ func (s *editorService) loadContent(path string) (content string, fromRecovery, 
 		// comes from a recovery snapshot: it describes how to write back.
 		content, crlf = document.NormalizeCRLF(string(data))
 	case !os.IsNotExist(readErr):
-		return "", false, false, readErr
+		return "", false, false, "", readErr
 	}
 	rp := recoveryFilePath(s.recDir, path)
 	if recInfo, statErr := os.Stat(rp); statErr == nil && recInfo.ModTime().After(origModTime) {
@@ -394,10 +401,10 @@ func (s *editorService) loadContent(path string) (content string, fromRecovery, 
 			// Snapshots are written from the buffer, so already "\n"; one
 			// from before line endings were normalized may not be.
 			rec, _ := document.NormalizeCRLF(string(recData))
-			return rec, true, crlf, nil
+			return rec, true, crlf, content, nil
 		}
 	}
-	return content, false, crlf, nil
+	return content, false, crlf, content, nil
 }
 
 func (s *editorService) GetUpdates(_ context.Context, call proto.EditorService_getUpdates) error {

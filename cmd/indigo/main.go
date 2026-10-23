@@ -156,6 +156,7 @@ func main() {
 
 	p := tea.NewProgram(a, tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
+	armReconnect(rpc, workDir)
 	finalModel, err := p.Run()
 	if err != nil {
 		// fatalf exits, so without this a dev container indigo started would
@@ -360,6 +361,7 @@ func openUntitled(startLine int) {
 	a.RestoreSession()
 	p := tea.NewProgram(a, tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
+	armReconnect(rpc, workDir)
 	finalModel, err := p.Run()
 	if err != nil {
 		// fatalf exits, so without this a dev container indigo started would
@@ -396,6 +398,7 @@ func runDebugWindow() {
 
 	p := tea.NewProgram(debugwin.New(rpc), tea.WithoutSignalHandler())
 	rpc.SetPushSender(p.Send)
+	armReconnect(rpc, workDir)
 	_, runErr := p.Run()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	rpc.Disconnect(ctx) //nolint:errcheck

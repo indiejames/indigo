@@ -10,7 +10,7 @@ import (
 // The key identifies this client's contribution; passing an empty text removes it.
 // The text appears in the status bar of all editor windows for this workspace.
 func (r *RPC) SetStatusBarText(ctx context.Context, key, text string) error {
-	fut, rel := r.svc.SetStatusBarText(ctx, func(p proto.EditorService_setStatusBarText_Params) error {
+	fut, rel := r.cur().svc.SetStatusBarText(ctx, func(p proto.EditorService_setStatusBarText_Params) error {
 		if err := p.SetKey(key); err != nil {
 			return err
 		}

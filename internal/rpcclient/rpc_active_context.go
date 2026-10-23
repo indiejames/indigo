@@ -36,9 +36,9 @@ type ActiveSelection struct {
 // SetActiveSelection reports this client's selection (or clears it when
 // active=false). Coordinates must be in document order, end column inclusive.
 func (r *RPC) SetActiveSelection(ctx context.Context, clientID uint64, bufID uint32, sel ActiveSelection) error {
-	fut, rel := r.svc.SetActiveSelection(ctx, func(p proto.EditorService_setActiveSelection_Params) error {
+	fut, rel := r.cur().svc.SetActiveSelection(ctx, func(p proto.EditorService_setActiveSelection_Params) error {
 		p.SetClientId(clientID)
-		p.SetBufId(bufID)
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetStartLine(sel.StartLine)
 		p.SetStartCol(sel.StartCol)
 		p.SetEndLine(sel.EndLine)
@@ -54,7 +54,7 @@ func (r *RPC) SetActiveSelection(ctx context.Context, clientID uint64, bufID uin
 
 // GetActiveSelection returns the most recently reported editor selection.
 func (r *RPC) GetActiveSelection(ctx context.Context) (ActiveSelection, error) {
-	fut, rel := r.svc.GetActiveSelection(ctx, func(proto.EditorService_getActiveSelection_Params) error {
+	fut, rel := r.cur().svc.GetActiveSelection(ctx, func(proto.EditorService_getActiveSelection_Params) error {
 		return nil
 	})
 	defer rel()
@@ -79,9 +79,9 @@ func (r *RPC) GetActiveSelection(ctx context.Context) (ActiveSelection, error) {
 // SetActiveContext notifies the server that this client's cursor/edit position
 // is the current active context. Call on buffer switch, cursor move, or any edit.
 func (r *RPC) SetActiveContext(ctx context.Context, clientID uint64, bufID uint32, filePath string, line, col uint32) error {
-	fut, rel := r.svc.SetActiveContext(ctx, func(p proto.EditorService_setActiveContext_Params) error {
+	fut, rel := r.cur().svc.SetActiveContext(ctx, func(p proto.EditorService_setActiveContext_Params) error {
 		p.SetClientId(clientID)
-		p.SetBufId(bufID)
+		p.SetBufId(r.cur().toServer(bufID))
 		if err := p.SetFilePath(filePath); err != nil {
 			return err
 		}
@@ -96,7 +96,7 @@ func (r *RPC) SetActiveContext(ctx context.Context, clientID uint64, bufID uint3
 
 // GetActiveContext returns the server's current active context (last editor that called SetActiveContext).
 func (r *RPC) GetActiveContext(ctx context.Context) (ActiveContext, error) {
-	fut, rel := r.svc.GetActiveContext(ctx, func(proto.EditorService_getActiveContext_Params) error {
+	fut, rel := r.cur().svc.GetActiveContext(ctx, func(proto.EditorService_getActiveContext_Params) error {
 		return nil
 	})
 	defer rel()

@@ -47,7 +47,7 @@ func TestDialWatchesOutgoingCalls(t *testing.T) {
 		r.Disconnect(ctx) //nolint:errcheck
 	})
 
-	if got := capnp.Client(r.svc).String(); !strings.Contains(got, "rpcwatch.outgoing") {
+	if got := capnp.Client(r.cur().svc).String(); !strings.Contains(got, "rpcwatch.outgoing") {
 		t.Errorf("service capability = %q; outgoing calls are not being watched", got)
 	}
 

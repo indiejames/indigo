@@ -99,6 +99,17 @@ func (s *callbackServer) hasDispatcher() bool {
 	return s.send != nil
 }
 
+// local translates a buffer id the server sent into the editor's. See link.
+func (s *callbackServer) local(remote uint32) uint32 {
+	s.mu.RLock()
+	r := s.rpc
+	s.mu.RUnlock()
+	if r == nil || r.cur() == nil {
+		return remote
+	}
+	return r.cur().fromServer(remote)
+}
+
 func (s *callbackServer) dispatch(msg tea.Msg) {
 	s.mu.Lock()
 	fn := s.send
@@ -126,7 +137,7 @@ func (s *callbackServer) ShowMessage(_ context.Context, call proto.ClientCallbac
 func (s *callbackServer) MoveCursor(_ context.Context, call proto.ClientCallback_moveCursor) error {
 	args := call.Args()
 	s.dispatch(PluginMoveCursorMsg{
-		BufID: args.BufId(),
+		BufID: s.local(args.BufId()),
 		Line:  args.Line(),
 		Col:   args.Col(),
 	})
@@ -154,7 +165,7 @@ func (s *callbackServer) KeyRegistered(_ context.Context, call proto.ClientCallb
 }
 
 func (s *callbackServer) DecorationsChanged(_ context.Context, call proto.ClientCallback_decorationsChanged) error {
-	s.dispatch(PluginDecorationsChangedMsg{BufID: call.Args().BufId()})
+	s.dispatch(PluginDecorationsChangedMsg{BufID: s.local(call.Args().BufId())})
 	_, err := call.AllocResults()
 	return err
 }
@@ -232,7 +243,7 @@ type FileChangedMsg struct {
 
 func (s *callbackServer) FileChanged(_ context.Context, call proto.ClientCallback_fileChanged) error {
 	args := call.Args()
-	msg := FileChangedMsg{BufID: args.BufId(), Dirty: args.Dirty()}
+	msg := FileChangedMsg{BufID: s.local(args.BufId()), Dirty: args.Dirty()}
 	clientLog("FileChanged callback: bufID=%d dirty=%v", msg.BufID, msg.Dirty)
 	s.dispatch(msg)
 	_, err := call.AllocResults()
@@ -273,7 +284,7 @@ const reportBufferStateTimeout = 2 * time.Second
 // ReportBufferState answers the server's consistency check with a hash of what
 // this client holds for the requested buffer.
 func (s *callbackServer) ReportBufferState(ctx context.Context, call proto.ClientCallback_reportBufferState) error {
-	bufID := call.Args().BufId()
+	bufID := s.local(call.Args().BufId())
 
 	// No dispatcher means there is nothing here that holds buffer content, and
 	// never will be for this connection — agenttools dials through DialStream

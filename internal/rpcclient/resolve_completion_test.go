@@ -44,7 +44,7 @@ func TestResolveCompletionRetainsPreResolveTextEditWhenResponseOmitsIt(t *testin
 	}}
 	client := proto.EditorService_ServerToClient(fake)
 	t.Cleanup(client.Release)
-	r := &RPC{svc: client}
+	r := rpcOver(client)
 
 	original := ClientCompletion{
 		Label: "1.2.3",
@@ -98,7 +98,7 @@ func TestResolveCompletionUsesResolvedTextEditWhenPresent(t *testing.T) {
 	}}
 	client := proto.EditorService_ServerToClient(fake)
 	t.Cleanup(client.Release)
-	r := &RPC{svc: client}
+	r := rpcOver(client)
 
 	original := ClientCompletion{
 		Label: "1.2.3",

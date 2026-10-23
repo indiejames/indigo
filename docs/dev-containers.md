@@ -148,6 +148,36 @@ Compose-based dev containers are left running, with a note on exit. Stopping
 means bringing the whole project down, and stopping only indigo's own service
 container would look like it worked while leaving the rest up.
 
+## When the connection drops
+
+A window talks to its server through a `docker exec` session, and those can end
+for reasons outside indigo: the Mac sleeping, or Docker Desktop pausing or
+restarting its VM. The window does not quit when that happens. It keeps your
+files on screen, shows "reconnecting…" in the status line, and attaches again,
+usually within a second.
+
+- **Input is refused while it reconnects.** Nothing typed could reach a
+  server. ctrl+c gives up and quits.
+- **Unsaved changes are kept.** Usually the window finds a new server, since
+  the old one exits when its last window goes. That server restores each file
+  from the recovery file the old one wrote. The window then sends it any edit
+  that was still on its way when the connection broke. Undo history is kept.
+- **A file with no unsaved changes follows the file on disk.** If it changed
+  while the window was disconnected, it is reloaded.
+- **A file another window also has open takes that window's copy.** Its edits
+  made during the outage are there. An edit this window had not finished
+  sending may be lost, and the window says so.
+- **A stopped container is started again.** If Docker stopped it, as a VM
+  restart does, the window brings it back up with `devcontainer up`. With
+  `--container` it does not, since that container is yours to start.
+- **It gives up after three minutes.** If the container cannot be reached by
+  then, the window exits with "connection to server lost", as it used to at
+  once. Time the Mac spends asleep does not count.
+
+A window running on this machine without a container still exits when its
+server goes away. There the server itself has gone, rather than the
+connection to it.
+
 ## Multiple windows
 
 Open as many indigo windows onto one container as you like: they share a single
@@ -346,6 +376,12 @@ container.
 helpers live beside the `docker` binary and are found through `PATH`. indigo
 adds that directory for the processes it spawns, so this should not reach you;
 if it does, add Docker's `bin` directory to your `PATH`.
+
+**"connection to server lost; exiting"** — the window spent three minutes trying
+to reconnect (see [When the connection drops](#when-the-connection-drops)) and
+could not. Each attempt and its error is in the log on this machine, under
+`reconnect attempt`. The log inside the container is in UTC, and its file is
+named by the UTC date, so look in the next day's file for an evening session.
 
 Diagnostics go to the same shared log as everything else; see
 `docs/agent-integration.md` for `get_logs`, and note that a wedged connection is

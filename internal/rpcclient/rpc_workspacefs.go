@@ -21,7 +21,7 @@ type DirEntry struct {
 // the workspace root, which spares a caller from having to know what that is on
 // the server's side of a container boundary.
 func (r *RPC) ListDir(ctx context.Context, path string) ([]DirEntry, error) {
-	fut, rel := r.svc.ListDir(ctx, func(p proto.EditorService_listDir_Params) error {
+	fut, rel := r.cur().svc.ListDir(ctx, func(p proto.EditorService_listDir_Params) error {
 		return p.SetPath(path)
 	})
 	defer rel()
@@ -49,7 +49,7 @@ func (r *RPC) ListDir(ctx context.Context, path string) ([]DirEntry, error) {
 // workspace-relative paths. truncated is set when the server listed only part
 // of them (see workspacefs.CollectFiles).
 func (r *RPC) ListWorkspaceFiles(ctx context.Context) (paths []string, truncated bool, err error) {
-	fut, rel := r.svc.ListWorkspaceFiles(ctx, func(_ proto.EditorService_listWorkspaceFiles_Params) error {
+	fut, rel := r.cur().svc.ListWorkspaceFiles(ctx, func(_ proto.EditorService_listWorkspaceFiles_Params) error {
 		return nil
 	})
 	defer rel()
@@ -83,7 +83,7 @@ func (r *RPC) ListWorkspaceFiles(ctx context.Context) (paths []string, truncated
 // the error return is reserved for RPC failures — so a typo cannot be mistaken
 // for the connection being in trouble.
 func (r *RPC) GrepWorkspace(ctx context.Context, pattern, include, exclude string, caseSensitive, isRegex, explicit bool) ([]workspacefs.Result, string, error) {
-	fut, rel := r.svc.GrepWorkspace(ctx, func(p proto.EditorService_grepWorkspace_Params) error {
+	fut, rel := r.cur().svc.GrepWorkspace(ctx, func(p proto.EditorService_grepWorkspace_Params) error {
 		if err := p.SetPattern(pattern); err != nil {
 			return err
 		}
@@ -137,7 +137,7 @@ func (r *RPC) GrepWorkspace(ctx context.Context, pattern, include, exclude strin
 // FilterWorkspaceFiles keeps the workspace-relative paths that still exist, are
 // not under an ignored directory, and are not gitignored.
 func (r *RPC) FilterWorkspaceFiles(ctx context.Context, rels []string) ([]string, error) {
-	fut, rel := r.svc.FilterWorkspaceFiles(ctx, func(p proto.EditorService_filterWorkspaceFiles_Params) error {
+	fut, rel := r.cur().svc.FilterWorkspaceFiles(ctx, func(p proto.EditorService_filterWorkspaceFiles_Params) error {
 		list, err := p.NewPaths(int32(len(rels)))
 		if err != nil {
 			return err
@@ -177,7 +177,7 @@ func (r *RPC) FilterWorkspaceFiles(ctx context.Context, rels []string) ([]string
 // treat differently — offering to create something that is merely missing is
 // reasonable, guessing past a permission error is not.
 func (r *RPC) StatPath(ctx context.Context, path string) (exists, isDir bool, err error) {
-	fut, rel := r.svc.StatPath(ctx, func(p proto.EditorService_statPath_Params) error {
+	fut, rel := r.cur().svc.StatPath(ctx, func(p proto.EditorService_statPath_Params) error {
 		return p.SetPath(path)
 	})
 	defer rel()
@@ -195,7 +195,7 @@ func (r *RPC) StatPath(ctx context.Context, path string) (exists, isDir bool, er
 
 // CreateDir creates dir and any missing parents on the server's filesystem.
 func (r *RPC) CreateDir(ctx context.Context, dir string) error {
-	fut, rel := r.svc.CreateDir(ctx, func(p proto.EditorService_createDir_Params) error {
+	fut, rel := r.cur().svc.CreateDir(ctx, func(p proto.EditorService_createDir_Params) error {
 		return p.SetPath(dir)
 	})
 	defer rel()
@@ -217,7 +217,7 @@ func (r *RPC) CreateDir(ctx context.Context, dir string) error {
 // picker, recent files and workspace grep. See the schema for why the client
 // owns this rather than the server reading it from its own config.
 func (r *RPC) SetIgnoredDirs(ctx context.Context, dirs []string) error {
-	fut, rel := r.svc.SetIgnoredDirs(ctx, func(p proto.EditorService_setIgnoredDirs_Params) error {
+	fut, rel := r.cur().svc.SetIgnoredDirs(ctx, func(p proto.EditorService_setIgnoredDirs_Params) error {
 		list, err := p.NewDirs(int32(len(dirs)))
 		if err != nil {
 			return err

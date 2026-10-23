@@ -379,15 +379,16 @@ func TestListDirRefusesToLeaveTheWorkspace(t *testing.T) {
 func TestListWorkspaceFilesReportsAPartialListing(t *testing.T) {
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{"a.txt": "a", "b.txt": "b", "c.txt": "c"})
+	// Lowered before the server starts, not between two calls. The server runs
+	// in this process, and a call reaches it through a socket, which the race
+	// detector does not see as ordering: changing the budget between calls was
+	// reported as racing the first call's read of it.
+	defer func(old int) { workspacefs.MaxCollectBytes = old }(workspacefs.MaxCollectBytes)
+	workspacefs.MaxCollectBytes = 1
 	r := dialWorkspaceServer(t, dir)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if _, truncated, err := r.ListWorkspaceFiles(ctx); err != nil || truncated {
-		t.Fatalf("full listing: truncated=%v err=%v, want neither", truncated, err)
-	}
-	defer func(old int) { workspacefs.MaxCollectBytes = old }(workspacefs.MaxCollectBytes)
-	workspacefs.MaxCollectBytes = 1
 	paths, truncated, err := r.ListWorkspaceFiles(ctx)
 	if err != nil || !truncated || len(paths) != 0 {
 		t.Errorf("over budget: %v truncated=%v err=%v, want none, truncated", paths, truncated, err)

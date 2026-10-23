@@ -66,8 +66,8 @@ type DiagnosticsResult struct {
 }
 
 func (r *RPC) GetDiagnostics(ctx context.Context, bufID uint32) (DiagnosticsResult, error) {
-	fut, rel := r.svc.GetDiagnostics(ctx, func(p proto.EditorService_getDiagnostics_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.GetDiagnostics(ctx, func(p proto.EditorService_getDiagnostics_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		return nil
 	})
 	defer rel()
@@ -97,8 +97,8 @@ func (r *RPC) GetDiagnostics(ctx context.Context, bufID uint32) (DiagnosticsResu
 
 // Hover fetches hover information for bufID at (line, col).
 func (r *RPC) Hover(ctx context.Context, bufID uint32, line, col int) (ClientHoverResult, error) {
-	fut, rel := r.svc.Hover(ctx, func(p proto.EditorService_hover_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.Hover(ctx, func(p proto.EditorService_hover_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetLine(uint32(line))
 		p.SetCol(uint32(col))
 		return nil
@@ -118,8 +118,8 @@ func (r *RPC) Hover(ctx context.Context, bufID uint32, line, col int) (ClientHov
 
 // SignatureHelp fetches signature help for bufID at (line, col).
 func (r *RPC) SignatureHelp(ctx context.Context, bufID uint32, line, col int) (ClientSigHelp, error) {
-	fut, rel := r.svc.SignatureHelp(ctx, func(p proto.EditorService_signatureHelp_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.SignatureHelp(ctx, func(p proto.EditorService_signatureHelp_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetLine(uint32(line))
 		p.SetCol(uint32(col))
 		return nil
@@ -165,8 +165,8 @@ func (r *RPC) SignatureHelp(ctx context.Context, bufID uint32, line, col int) (C
 
 // Complete fetches completion items for bufID at (line, col).
 func (r *RPC) Complete(ctx context.Context, bufID uint32, line, col int) ([]ClientCompletion, error) {
-	fut, rel := r.svc.Complete(ctx, func(p proto.EditorService_complete_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.Complete(ctx, func(p proto.EditorService_complete_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetLine(uint32(line))
 		p.SetCol(uint32(col))
 		return nil
@@ -245,8 +245,8 @@ func completionFromProto(it proto.CompletionItem) ClientCompletion {
 // that (e.g. a semver range operator prefix). Returns the item unchanged on
 // error.
 func (r *RPC) ResolveCompletion(ctx context.Context, bufID uint32, item ClientCompletion) (ClientCompletion, error) {
-	fut, rel := r.svc.ResolveCompletion(ctx, func(p proto.EditorService_resolveCompletion_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.ResolveCompletion(ctx, func(p proto.EditorService_resolveCompletion_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		ci, err := p.NewItem()
 		if err != nil {
 			return err
@@ -297,8 +297,8 @@ type ClientLocation struct {
 
 // Definition fetches the definition location for the symbol at (line, col) in bufID.
 func (r *RPC) Definition(ctx context.Context, bufID uint32, line, col int) (ClientLocation, bool, error) {
-	fut, rel := r.svc.Definition(ctx, func(p proto.EditorService_definition_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.Definition(ctx, func(p proto.EditorService_definition_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetLine(uint32(line))
 		p.SetCol(uint32(col))
 		return nil
@@ -407,8 +407,8 @@ func kindLabel(k uint8) string {
 
 // References fetches all reference locations for the symbol at (line, col) in bufID.
 func (r *RPC) References(ctx context.Context, bufID uint32, line, col int) ([]ClientReference, error) {
-	fut, rel := r.svc.References(ctx, func(p proto.EditorService_references_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.References(ctx, func(p proto.EditorService_references_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetLine(uint32(line))
 		p.SetCol(uint32(col))
 		return nil
@@ -440,8 +440,8 @@ func (r *RPC) References(ctx context.Context, bufID uint32, line, col int) ([]Cl
 // WorkspaceSymbols queries the server for workspace symbols matching query.
 // bufID is used as a hint to select the right language server.
 func (r *RPC) WorkspaceSymbols(ctx context.Context, bufID uint32, query string) ([]ClientSymbol, error) {
-	fut, rel := r.svc.WorkspaceSymbols(ctx, func(p proto.EditorService_workspaceSymbols_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.WorkspaceSymbols(ctx, func(p proto.EditorService_workspaceSymbols_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		return p.SetQuery(query)
 	})
 	defer rel()
@@ -475,8 +475,8 @@ func (r *RPC) WorkspaceSymbols(ctx context.Context, bufID uint32, query string) 
 
 // DocumentSymbols fetches symbols for the document in bufID.
 func (r *RPC) DocumentSymbols(ctx context.Context, bufID uint32) ([]ClientSymbol, error) {
-	fut, rel := r.svc.DocumentSymbols(ctx, func(p proto.EditorService_documentSymbols_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.DocumentSymbols(ctx, func(p proto.EditorService_documentSymbols_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		return nil
 	})
 	defer rel()
@@ -512,8 +512,8 @@ func (r *RPC) DocumentSymbols(ctx context.Context, bufID uint32) ([]ClientSymbol
 // server as ordinary edits and arrives through GetUpdates like anyone
 // else's; changed reports whether there were any.
 func (r *RPC) Format(ctx context.Context, bufID uint32) (changed bool, noFormatter bool, err error) {
-	fut, rel := r.svc.Format(ctx, func(p proto.EditorService_format_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.Format(ctx, func(p proto.EditorService_format_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		return nil
 	})
 	defer rel()
@@ -536,8 +536,8 @@ type ClientInlayHint struct {
 // InlayHints fetches inlay hints for bufID within [startLine,endLine) —
 // normally the client's visible viewport, not the whole file.
 func (r *RPC) InlayHints(ctx context.Context, bufID uint32, startLine, startCol, endLine, endCol int) ([]ClientInlayHint, error) {
-	fut, rel := r.svc.InlayHints(ctx, func(p proto.EditorService_inlayHints_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.InlayHints(ctx, func(p proto.EditorService_inlayHints_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetStartLine(uint32(startLine))
 		p.SetStartCol(uint32(startCol))
 		p.SetEndLine(uint32(endLine))
@@ -580,8 +580,8 @@ type ClientSemanticToken struct {
 // within [startLine,endLine) — normally the client's visible viewport, not
 // the whole file.
 func (r *RPC) SemanticTokensRange(ctx context.Context, bufID uint32, startLine, startCol, endLine, endCol int) ([]ClientSemanticToken, error) {
-	fut, rel := r.svc.SemanticTokensRange(ctx, func(p proto.EditorService_semanticTokensRange_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.SemanticTokensRange(ctx, func(p proto.EditorService_semanticTokensRange_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetStartLine(uint32(startLine))
 		p.SetStartCol(uint32(startCol))
 		p.SetEndLine(uint32(endLine))
@@ -628,9 +628,9 @@ type ClientLspEdit struct {
 // if there's no language server for this buffer, it doesn't support
 // renaming, or there was nothing to rename.
 func (r *RPC) LspRename(ctx context.Context, bufID uint32, line, col int, newName string) (applied, files int, err error) {
-	fut, rel := r.svc.LspRename(ctx, func(p proto.EditorService_lspRename_Params) error {
+	fut, rel := r.cur().svc.LspRename(ctx, func(p proto.EditorService_lspRename_Params) error {
 		p.SetClientId(0) // see ApplyWorkspaceEdits: 0 so this client's own open tabs still refresh
-		p.SetBufId(bufID)
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetLine(uint32(line))
 		p.SetCol(uint32(col))
 		return p.SetNewName(newName)
@@ -656,8 +656,8 @@ type ClientLspCodeAction struct {
 // position) or span a selection, letting the server offer range-only
 // actions like Extract Function/Extract Variable too.
 func (r *RPC) LspCodeActions(ctx context.Context, bufID uint32, startLine, startCol, endLine, endCol int) ([]ClientLspCodeAction, error) {
-	fut, rel := r.svc.LspCodeActions(ctx, func(p proto.EditorService_lspCodeActions_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.LspCodeActions(ctx, func(p proto.EditorService_lspCodeActions_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetLine(uint32(startLine))
 		p.SetCol(uint32(startCol))
 		p.SetEndLine(uint32(endLine))
@@ -703,8 +703,8 @@ func (r *RPC) LspCodeActions(ctx context.Context, bufID uint32, startLine, start
 // like any other LSP edit. Empty means no language server, no
 // organize-imports support, or nothing to change.
 func (r *RPC) LspOrganizeImports(ctx context.Context, bufID uint32) ([]ClientLspEdit, error) {
-	fut, rel := r.svc.LspOrganizeImports(ctx, func(p proto.EditorService_lspOrganizeImports_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.LspOrganizeImports(ctx, func(p proto.EditorService_lspOrganizeImports_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		return nil
 	})
 	defer rel()

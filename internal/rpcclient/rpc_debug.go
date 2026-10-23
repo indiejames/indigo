@@ -160,7 +160,7 @@ func (p DebugProcess) IsNode() bool { return p.Name == "node" }
 // ListProcesses returns the processes on the server's machine the debugger
 // could attach to, Go programs first.
 func (r *RPC) ListProcesses(ctx context.Context) ([]DebugProcess, error) {
-	fut, rel := r.svc.ListProcesses(ctx, nil)
+	fut, rel := r.cur().svc.ListProcesses(ctx, nil)
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
@@ -224,7 +224,7 @@ const (
 // ToggleBreakpoint adds or removes the breakpoint at path:line, reporting
 // whether one is now set.
 func (r *RPC) ToggleBreakpoint(ctx context.Context, path string, line int) (bool, error) {
-	fut, rel := r.svc.ToggleBreakpoint(ctx, func(p proto.EditorService_toggleBreakpoint_Params) error {
+	fut, rel := r.cur().svc.ToggleBreakpoint(ctx, func(p proto.EditorService_toggleBreakpoint_Params) error {
 		p.SetLine(uint32(line))
 		return p.SetPath(path)
 	})
@@ -239,7 +239,7 @@ func (r *RPC) ToggleBreakpoint(ctx context.Context, path string, line int) (bool
 // SetBreakpoint sets a breakpoint at path:line with a condition and a log
 // message, creating it if there is none. Both empty make a plain breakpoint.
 func (r *RPC) SetBreakpoint(ctx context.Context, path string, line int, condition, logMessage string) error {
-	fut, rel := r.svc.SetBreakpoint(ctx, func(p proto.EditorService_setBreakpoint_Params) error {
+	fut, rel := r.cur().svc.SetBreakpoint(ctx, func(p proto.EditorService_setBreakpoint_Params) error {
 		p.SetLine(uint32(line))
 		for _, set := range []func() error{
 			func() error { return p.SetPath(path) },
@@ -260,7 +260,7 @@ func (r *RPC) SetBreakpoint(ctx context.Context, path string, line int, conditio
 // ListBreakpoints returns the breakpoints in path ("" for every file) and the
 // store's sequence number.
 func (r *RPC) ListBreakpoints(ctx context.Context, path string) ([]DebugBreakpoint, uint64, error) {
-	fut, rel := r.svc.ListBreakpoints(ctx, func(p proto.EditorService_listBreakpoints_Params) error {
+	fut, rel := r.cur().svc.ListBreakpoints(ctx, func(p proto.EditorService_listBreakpoints_Params) error {
 		return p.SetPath(path)
 	})
 	defer rel()
@@ -293,7 +293,7 @@ func (r *RPC) DebugStart(ctx context.Context, cfg DebugConfig) error {
 // DebugStartWithWarning is DebugStart, also returning the server's warning
 // about a session that started but will not fully work ("" for none).
 func (r *RPC) DebugStartWithWarning(ctx context.Context, cfg DebugConfig) (string, error) {
-	fut, rel := r.svc.DebugStart(ctx, func(p proto.EditorService_debugStart_Params) error {
+	fut, rel := r.cur().svc.DebugStart(ctx, func(p proto.EditorService_debugStart_Params) error {
 		pc, err := p.NewConfig()
 		if err != nil {
 			return err
@@ -317,7 +317,7 @@ func (r *RPC) DebugStartWithWarning(ctx context.Context, cfg DebugConfig) (strin
 // error with configurations means some file could not be read; the
 // configurations are the ones that could.
 func (r *RPC) DebugConfigs(ctx context.Context, activeFile string) ([]DebugConfig, error) {
-	fut, rel := r.svc.DebugConfigs(ctx, func(p proto.EditorService_debugConfigs_Params) error {
+	fut, rel := r.cur().svc.DebugConfigs(ctx, func(p proto.EditorService_debugConfigs_Params) error {
 		return p.SetActiveFile(activeFile)
 	})
 	defer rel()
@@ -339,7 +339,7 @@ func (r *RPC) DebugConfigs(ctx context.Context, activeFile string) ([]DebugConfi
 // configuration launched — also when the launch fails, so the caller can say
 // what failed.
 func (r *RPC) DebugRestart(ctx context.Context, fallback DebugConfig) (DebugConfig, error) {
-	fut, rel := r.svc.DebugRestart(ctx, func(p proto.EditorService_debugRestart_Params) error {
+	fut, rel := r.cur().svc.DebugRestart(ctx, func(p proto.EditorService_debugRestart_Params) error {
 		pc, err := p.NewFallback()
 		if err != nil {
 			return err
@@ -431,7 +431,7 @@ func textList(list capnp.TextList, err error) []string {
 
 // DebugControl continues, steps, pauses or stops the program.
 func (r *RPC) DebugControl(ctx context.Context, action DebugAction) error {
-	fut, rel := r.svc.DebugControl(ctx, func(p proto.EditorService_debugControl_Params) error {
+	fut, rel := r.cur().svc.DebugControl(ctx, func(p proto.EditorService_debugControl_Params) error {
 		p.SetAction(proto.DebugAction(action))
 		return nil
 	})
@@ -445,7 +445,7 @@ func (r *RPC) DebugControl(ctx context.Context, action DebugAction) error {
 
 // DebugState returns the session's current state.
 func (r *RPC) DebugState(ctx context.Context) (DebugState, error) {
-	fut, rel := r.svc.DebugState(ctx, func(proto.EditorService_debugState_Params) error { return nil })
+	fut, rel := r.cur().svc.DebugState(ctx, func(proto.EditorService_debugState_Params) error { return nil })
 	defer rel()
 	res, err := fut.Struct()
 	if err != nil {
@@ -475,7 +475,7 @@ func (r *RPC) DebugState(ctx context.Context) (DebugState, error) {
 
 // DebugStackTrace returns thread's stack (0: the stopped thread).
 func (r *RPC) DebugStackTrace(ctx context.Context, threadID int64) ([]DebugFrame, error) {
-	fut, rel := r.svc.DebugStackTrace(ctx, func(p proto.EditorService_debugStackTrace_Params) error {
+	fut, rel := r.cur().svc.DebugStackTrace(ctx, func(p proto.EditorService_debugStackTrace_Params) error {
 		p.SetThreadId(threadID)
 		return nil
 	})
@@ -503,7 +503,7 @@ func (r *RPC) DebugStackTrace(ctx context.Context, threadID int64) ([]DebugFrame
 
 // DebugScopes returns a frame's variable groups.
 func (r *RPC) DebugScopes(ctx context.Context, frameID int64) ([]DebugScope, error) {
-	fut, rel := r.svc.DebugScopes(ctx, func(p proto.EditorService_debugScopes_Params) error {
+	fut, rel := r.cur().svc.DebugScopes(ctx, func(p proto.EditorService_debugScopes_Params) error {
 		p.SetFrameId(frameID)
 		return nil
 	})
@@ -530,7 +530,7 @@ func (r *RPC) DebugScopes(ctx context.Context, frameID int64) ([]DebugScope, err
 
 // DebugVariables returns the children of ref.
 func (r *RPC) DebugVariables(ctx context.Context, ref int64) ([]DebugVariable, error) {
-	fut, rel := r.svc.DebugVariables(ctx, func(p proto.EditorService_debugVariables_Params) error {
+	fut, rel := r.cur().svc.DebugVariables(ctx, func(p proto.EditorService_debugVariables_Params) error {
 		p.SetRef(ref)
 		return nil
 	})
@@ -556,7 +556,7 @@ func (r *RPC) DebugVariables(ctx context.Context, ref int64) ([]DebugVariable, e
 // DebugEvaluate evaluates expr in frameID (0: the stopped thread's top frame).
 // evalContext is "hover", "watch" or "repl".
 func (r *RPC) DebugEvaluate(ctx context.Context, expr string, frameID int64, evalContext string) (DebugVariable, error) {
-	fut, rel := r.svc.DebugEvaluate(ctx, func(p proto.EditorService_debugEvaluate_Params) error {
+	fut, rel := r.cur().svc.DebugEvaluate(ctx, func(p proto.EditorService_debugEvaluate_Params) error {
 		p.SetFrameId(frameID)
 		p.SetContext(evalContext) //nolint:errcheck
 		return p.SetExpression(expr)
@@ -579,7 +579,7 @@ func (r *RPC) DebugEvaluate(ctx context.Context, expr string, frameID int64, eva
 // DebugOutput returns output chunks after sinceSeq, the latest seq, and
 // whether some were dropped before this call could see them.
 func (r *RPC) DebugOutput(ctx context.Context, sinceSeq uint64) ([]DebugOutputChunk, uint64, bool, error) {
-	fut, rel := r.svc.DebugOutput(ctx, func(p proto.EditorService_debugOutput_Params) error {
+	fut, rel := r.cur().svc.DebugOutput(ctx, func(p proto.EditorService_debugOutput_Params) error {
 		p.SetSinceSeq(sinceSeq)
 		return nil
 	})

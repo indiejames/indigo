@@ -384,6 +384,17 @@ func (d Docker) execEnvCommand(ctx context.Context, id string, env, argv []strin
 	return cmd
 }
 
+// IsRunning reports whether container id is running. A window reconnecting to
+// its dev container asks first, since Docker Desktop restarting its VM stops
+// every container in it.
+func (d Docker) IsRunning(ctx context.Context, id string) (bool, error) {
+	out, err := d.output(ctx, "inspect", "--format", "{{.State.Running}}", id)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) == "true", nil
+}
+
 func (d Docker) Stop(ctx context.Context, id string) error {
 	_, err := d.output(ctx, "stop", id)
 	return err

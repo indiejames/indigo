@@ -71,6 +71,9 @@ type (
 	RPC                         = rpcclient.RPC
 	ReportBufferStateMsg        = rpcclient.ReportBufferStateMsg
 	ServerDisconnectedMsg       = rpcclient.ServerDisconnectedMsg
+	ServerReconnectingMsg       = rpcclient.ServerReconnectingMsg
+	ServerReconnectedMsg        = rpcclient.ServerReconnectedMsg
+	Redialer                    = rpcclient.Redialer
 	ShowInputPromptMsg          = rpcclient.ShowInputPromptMsg
 	ShowPluginPopupMsg          = rpcclient.ShowPluginPopupMsg
 	WorkspaceDiagnosticsResult  = rpcclient.WorkspaceDiagnosticsResult

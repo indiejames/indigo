@@ -29,6 +29,15 @@ func (m Model) Detach() Model {
 	return m
 }
 
+// reconnectSeq is the number of the connection this window is on now
+// (RPC.Reconnects), or 0 with no RPC, as in tests.
+func (m Model) reconnectSeq() uint64 {
+	if m.rpc == nil {
+		return 0
+	}
+	return m.rpc.Reconnects()
+}
+
 // ReattachCmd reopens this buffer on the reconnected server. seq is the
 // reconnect's (rpcclient.ServerReconnectedMsg.Seq), returned in ReattachedMsg.
 func (m Model) ReattachCmd(seq uint64) tea.Cmd {
@@ -80,7 +89,7 @@ func (m Model) handleReattached(msg reattachedMsg) (Model, tea.Cmd) {
 	if msg.bufID != m.bufID {
 		return m, nil
 	}
-	if m.rpc != nil && msg.seq != m.rpc.Reconnects() {
+	if msg.seq != m.reconnectSeq() {
 		// The connection dropped again while this was in flight, and the
 		// buffer has been detached since. Its content came from a server the
 		// window is no longer connected to; the next reconnect reattaches it.

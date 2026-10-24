@@ -166,6 +166,11 @@ type bufferResyncMsg struct {
 	// this the user sees "Buffer resynced" with no hint of why and no way to
 	// find out.
 	failureCause string
+	// seq is the reconnect the resync was started under (RPC.Reconnects). A
+	// result from an earlier one came from a connection since replaced: a
+	// failure says nothing about the current one, and a snapshot describes a
+	// server the buffer has since reattached to afresh.
+	seq uint64
 }
 
 // savedMsg signals a successful save. bufID is stamped at request time and
@@ -1648,7 +1653,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.bufID != m.bufID {
 			return m, nil // stale result from a previous buffer switch; discard
 		}
-		if msg.err != nil && (m.detached || m.rpc.Reconnecting(msg.err)) {
+		if msg.seq != m.reconnectSeq() || m.detached {
+			// Superseded by a reconnect, or one is under way. Reattaching
+			// settles this buffer and resets its send queue; adopting this
+			// result would replace what the reattach established, and treating
+			// its failure as a new drop would detach a buffer that has already
+			// reattached, leaving it paused for good.
+			return m, nil
+		}
+		if msg.err != nil && m.rpc.Reconnecting(msg.err) {
 			// Started just before the connection dropped. Stay paused:
 			// reattaching settles this buffer once the server is back.
 			return m.Detach(), nil

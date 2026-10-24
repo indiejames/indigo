@@ -26,7 +26,7 @@ env:
 jobs:
   version:
     name: Version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       version: ${{ steps.v.outputs.version }}
       publish: ${{ steps.v.outputs.publish }}
@@ -64,8 +64,8 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -90,7 +90,7 @@ jobs:
           dist/bin/indigo-darwin-arm64 --version | grep -F "$VERSION"
           file dist/bin/indigo-darwin-amd64 | grep -q x86_64
           codesign -dvv dist/bin/indigo-darwin-arm64 2>&1 | grep -E 'Authority|TeamIdentifier|flags' || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bin-darwin
           path: dist/bin/
@@ -108,15 +108,15 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-26.04
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: ~/alpine-go
           key: alpine-go-${{ matrix.arch }}-${{ env.GO_VERSION }}-${{ hashFiles('go.sum') }}
@@ -138,7 +138,7 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" dist ~/alpine-go
       - name: Smoke test
         run: dist/bin/indigo-linux-${{ matrix.arch }} --version | grep -F "$VERSION"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bin-linux-${{ matrix.arch }}
           path: dist/bin/
@@ -148,19 +148,19 @@ jobs:
   portable:
     name: Servers and plugins
     needs: version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
       - run: scripts/release/build-portable.sh dist/bin
         env:
           PLUGIN_PLATFORMS: linux/amd64 linux/arm64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bin-portable
           path: dist/bin/
@@ -169,14 +169,14 @@ jobs:
   release:
     name: Package and publish
     needs: [version, darwin, linux, portable]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: bin-*
           path: dist/bin
@@ -201,7 +201,7 @@ jobs:
           "$RUNNER_TEMP/home/.local/bin/indigo" --version | grep -F "$VERSION"
           test -x "$RUNNER_TEMP/home/.indigo/indigo-server-linux-arm64"
           test -x "$RUNNER_TEMP/home/.config/indigo/plugins/indigo-git/indigo-git-linux-amd64"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release
           path: dist/release/
@@ -222,7 +222,7 @@ jobs:
     name: Update Homebrew tap
     needs: [version, release]
     if: needs.version.outputs.publish == 'true' && needs.version.outputs.prerelease == 'false'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       VERSION: ${{ needs.version.outputs.version }}
       TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -236,14 +236,14 @@ jobs:
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.token.outputs.ok == 'true'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: steps.token.outputs.ok == 'true'
         with:
           name: release
           path: dist/release
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.token.outputs.ok == 'true'
         with:
           repository: ${{ github.repository_owner }}/homebrew-tap

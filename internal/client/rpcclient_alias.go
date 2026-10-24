@@ -71,6 +71,9 @@ type (
 	RPC                         = rpcclient.RPC
 	ReportBufferStateMsg        = rpcclient.ReportBufferStateMsg
 	ServerDisconnectedMsg       = rpcclient.ServerDisconnectedMsg
+	ServerReconnectingMsg       = rpcclient.ServerReconnectingMsg
+	ServerReconnectedMsg        = rpcclient.ServerReconnectedMsg
+	Redialer                    = rpcclient.Redialer
 	ShowInputPromptMsg          = rpcclient.ShowInputPromptMsg
 	ShowPluginPopupMsg          = rpcclient.ShowPluginPopupMsg
 	WorkspaceDiagnosticsResult  = rpcclient.WorkspaceDiagnosticsResult
@@ -107,6 +110,12 @@ func Dial(socketPath string) (*RPC, error) { return rpcclient.Dial(socketPath) }
 
 // DialStream is Dial over an already-open stream. See rpcclient.DialStream.
 func DialStream(rwc io.ReadWriteCloser) (*RPC, error) { return rpcclient.DialStream(rwc) }
+
+// DialStreamExpecting is DialStream naming the server build the window
+// started. See rpcclient.DialStreamExpecting.
+func DialStreamExpecting(rwc io.ReadWriteCloser, expectedBuild string) (*RPC, error) {
+	return rpcclient.DialStreamExpecting(rwc, expectedBuild)
+}
 
 func clientLog(format string, args ...any) {
 	debuglog.Write("client", format, args...)

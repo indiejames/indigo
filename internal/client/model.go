@@ -166,6 +166,11 @@ type bufferResyncMsg struct {
 	// this the user sees "Buffer resynced" with no hint of why and no way to
 	// find out.
 	failureCause string
+	// seq is the reconnect the resync was started under (RPC.Reconnects). A
+	// result from an earlier one came from a connection since replaced: a
+	// failure says nothing about the current one, and a snapshot describes a
+	// server the buffer has since reattached to afresh.
+	seq uint64
 }
 
 // savedMsg signals a successful save. bufID is stamped at request time and
@@ -892,18 +897,21 @@ type Model struct {
 
 	generation      uint64 // last-known buffer generation; see updatesMsg's handler
 	generationKnown bool   // false until the first updatesMsg/bufferResyncMsg establishes a baseline
-	mode            Mode
-	cursor          document.Pos
-	goalCol         int  // sticky column for consecutive Up/Down moves; -1 when unset
-	goalColActive   bool // set by moveCursor's vertical branch; tells the Update() dispatcher whether to keep goalCol
-	topLine         int  // first visible line
-	topChunk        int  // first visible wrap chunk of topLine (0-based)
-	width           int
-	height          int
-	filePath        string
-	workDir         string    // project root, used for display-path shortening
-	status          string    // transient status/error message shown in modeline or, for error-class text, the toast overlay (see isErrMessage)
-	statusAt        time.Time // when status was last set; drives toast auto-dismiss
+	// detached is set while the connection to the server is being re-established
+	// (Detach), until this buffer is reopened on it (handleReattached).
+	detached      bool
+	mode          Mode
+	cursor        document.Pos
+	goalCol       int  // sticky column for consecutive Up/Down moves; -1 when unset
+	goalColActive bool // set by moveCursor's vertical branch; tells the Update() dispatcher whether to keep goalCol
+	topLine       int  // first visible line
+	topChunk      int  // first visible wrap chunk of topLine (0-based)
+	width         int
+	height        int
+	filePath      string
+	workDir       string    // project root, used for display-path shortening
+	status        string    // transient status/error message shown in modeline or, for error-class text, the toast overlay (see isErrMessage)
+	statusAt      time.Time // when status was last set; drives toast auto-dismiss
 	// keepStatusOnNextSave, when true, tells the next savedMsg handler to
 	// skip its usual pushStatus("") clear once, then reset itself to false.
 	// Set by formatResultMsg when format-on-save (thenSave) found nothing
@@ -1618,9 +1626,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m = m.pushStatus("ERR: " + msg.err.Error())
 		return m, nil
 
+	case reattachedMsg:
+		return m.handleReattached(msg)
+
 	case applyOpFailedMsg:
 		if msg.bufID != m.bufID {
 			return m, nil // stale result from a previous buffer switch; discard
+		}
+		if m.detached || m.rpc.Reconnecting(msg.err) {
+			// The connection is gone and a reconnect is under way, though the
+			// window may not have been told yet. The edit is still in the
+			// buffer, and reattaching reconciles it; a resync now would only
+			// fail against the dead connection.
+			return m.Detach(), nil
 		}
 		// Shown immediately *and* carried into the resync. severeErr is a single
 		// field, so this modal is replaced by the resync's own within
@@ -1634,6 +1652,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case bufferResyncMsg:
 		if msg.bufID != m.bufID {
 			return m, nil // stale result from a previous buffer switch; discard
+		}
+		if msg.seq != m.reconnectSeq() || m.detached {
+			// Superseded by a reconnect, or one is under way. Reattaching
+			// settles this buffer and resets its send queue; adopting this
+			// result would replace what the reattach established, and treating
+			// its failure as a new drop would detach a buffer that has already
+			// reattached, leaving it paused for good.
+			return m, nil
+		}
+		if msg.err != nil && m.rpc.Reconnecting(msg.err) {
+			// Started just before the connection dropped. Stay paused:
+			// reattaching settles this buffer once the server is back.
+			return m.Detach(), nil
 		}
 		if msg.err != nil {
 			m = m.pushSevereError("ERR: resync failed, buffer may be out of sync with the server: " + msg.err.Error())
@@ -1655,35 +1686,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		m.buf = document.New(m.filePath, msg.content)
-		// Everything in flight described the pre-resync content. Keeping it
-		// would rebase future incoming ops past edits that no longer exist.
-		m.sendQ.discard()
-		m.pending = nil
-		// Reset alongside pending: that count is what retires pending
-		// entries, and the server zeroed its count of ops applied from this
-		// client when it served the snapshot (ResyncBuffer), whether or not
-		// the buffer was swapped. The two must restart together — a server
-		// count left ahead of this one retires ops it has never seen.
-		m.nextSeq = 0
-		m.buf.MarkDirty() // server's content may itself be unsaved-to-disk; err toward "unsaved" rather than a false-clean marker
-		m.version = msg.version
-		m.generation = msg.generation
-		m.generationKnown = true
-		m.undoStack = nil
-		m.redoStack = nil
-		m.currentGroup = nil
-		m.sel = nil
-		m.extraCursors = nil
-		m.savedUndoDepth = -1 // never matches len(undoStack); only an explicit Save should clear dirty from here
-		lc := m.buf.LineCount()
-		if m.cursor.Line >= lc {
-			m.cursor.Line = max(0, lc-1)
-		}
-		if lineLen := m.buf.LineLen(m.cursor.Line); m.cursor.Col > lineLen {
-			m.cursor.Col = lineLen
-		}
-		m.scrollToCursor()
+		// The server zeroed its count of ops applied from this client when it
+		// served the snapshot (ResyncBuffer), whether or not the buffer was
+		// swapped, which is what adoptSnapshot's reset of nextSeq matches.
+		m = m.adoptSnapshot(msg.content, msg.version, msg.generation, false)
 		if msg.failureCause != "" {
 			// An edit really did fail to reach the server. The undo history was
 			// just discarded (its inverse ops describe pre-resync content), so

@@ -70,7 +70,7 @@ func TestHandleConnClosedSuppressesForIntentionalDisconnect(t *testing.T) {
 	r := &RPC{cb: cb}
 	r.disconnecting.Store(true)
 
-	r.handleConnClosed()
+	r.handleConnClosed(nil)
 
 	var got []tea.Msg
 	cb.setSend(func(msg tea.Msg) { got = append(got, msg) })
@@ -82,10 +82,12 @@ func TestHandleConnClosedSuppressesForIntentionalDisconnect(t *testing.T) {
 func TestHandleConnClosedDispatchesForGenuineDisconnect(t *testing.T) {
 	cb := &callbackServer{}
 	r := &RPC{cb: cb}
+	l := &link{}
+	r.link.Store(l)
 	// r.disconnecting left false: this is an unexpected close, e.g. the
 	// server process crashing.
 
-	r.handleConnClosed()
+	r.handleConnClosed(l)
 
 	var got []tea.Msg
 	cb.setSend(func(msg tea.Msg) { got = append(got, msg) })
@@ -111,7 +113,9 @@ func TestDisconnectSetsFlagBeforeClosingConn(t *testing.T) {
 	conn := rpc.NewConn(transport, &rpc.Options{})
 
 	cb := &callbackServer{}
-	r := &RPC{conn: conn, cb: cb}
+	r := &RPC{cb: cb}
+	l := &link{conn: conn}
+	r.link.Store(l)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -127,7 +131,7 @@ func TestDisconnectSetsFlagBeforeClosingConn(t *testing.T) {
 		t.Fatal("conn.Done() did not fire after Disconnect closed the connection")
 	}
 
-	r.handleConnClosed()
+	r.handleConnClosed(l)
 	var got []tea.Msg
 	cb.setSend(func(msg tea.Msg) { got = append(got, msg) })
 	if len(got) != 0 {

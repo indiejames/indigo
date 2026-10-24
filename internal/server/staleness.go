@@ -126,3 +126,39 @@ func (w *staleWatch) staleDescription() string {
 	}
 	return fmt.Sprintf("%d binary/binaries replaced since this server started: %v", len(changed), changed)
 }
+
+// ownBuild is this server's build, as a window names the server binary it
+// started: binstamp.ContentHash of the executable. Computed on the first
+// connect that asks, not at startup, since only a dev-container window sends
+// an expected build and hashing the binary costs a full read of it. Taken
+// late, it would describe a binary replaced since this process started; that
+// can't happen to the content-addressed copies in a container, the one place
+// it is compared, and on the host the stamp check reports a replacement.
+type ownBuild struct {
+	once sync.Once
+	hash string // "" when the executable couldn't be read
+}
+
+func (b *ownBuild) get() string {
+	b.once.Do(func() {
+		exe, err := os.Executable()
+		if err != nil {
+			return
+		}
+		b.hash, _ = binstamp.ContentHash(exe)
+	})
+	return b.hash
+}
+
+// buildMismatch describes how expected differs from this server's build, or
+// is "" when it doesn't, or can't be told.
+func (b *ownBuild) buildMismatch(expected string) string {
+	if expected == "" {
+		return ""
+	}
+	own := b.get()
+	if own == "" || own == expected {
+		return ""
+	}
+	return fmt.Sprintf("this window started server build %s, but joined a running server of build %s", expected, own)
+}

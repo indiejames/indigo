@@ -184,6 +184,7 @@ func (m Model) resyncFromServer(failureCause string) tea.Cmd {
 	// the client's remembered path, which may be stale if another client
 	// renamed the buffer, but a possibly-stale path beats none.
 	knownPath := m.filePath
+	seq := m.reconnectSeq()
 	syncevent.Record("client", syncevent.ResyncStarted, bufID, knownPath, failureCause)
 	// Synchronously, in Update: from here no edit is sent until the snapshot
 	// is adopted. One sent in between could be applied after the snapshot was
@@ -211,7 +212,7 @@ func (m Model) resyncFromServer(failureCause string) tea.Cmd {
 			syncevent.Recordf("client", syncevent.ResyncOK, bufID, path,
 				"version=%d generation=%d", version, generation)
 		}
-		return bufferResyncMsg{bufID: bufID, content: content, version: version, generation: generation, path: path, err: err, failureCause: failureCause}
+		return bufferResyncMsg{bufID: bufID, content: content, version: version, generation: generation, path: path, err: err, failureCause: failureCause, seq: seq}
 	}
 }
 

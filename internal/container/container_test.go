@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/indiejames/indigo/internal/binstamp"
 	"github.com/indiejames/indigo/internal/procutil"
 )
 
@@ -650,4 +651,40 @@ func TestAttachSurvivesAFailedGitFixup(t *testing.T) {
 		t.Fatalf("Attach failed over a git fixup it should only have warned about: %v", err)
 	}
 	stream.Close() //nolint:errcheck
+}
+
+// TestAttachReportsTheServerBuildItStarted: the window sends this hash in
+// connect, and the server compares it with binstamp.ContentHash of its own
+// executable, so it must be the same hash, of the same file, that names the
+// path the server runs from. A project's own server is a build this side
+// doesn't know, so nothing is reported for it.
+func TestAttachReportsTheServerBuildItStarted(t *testing.T) {
+	locate, local, hash := locateReal(t, "a server binary")
+	var got []string
+	report := func(b string) { got = append(got, b) }
+
+	rt := &fakeRuntime{arch: "arm64", exists: true}
+	stream, err := Attach(context.Background(), rt, "c1", "/w", AttachOptions{Locate: locate, ServerBuild: report})
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	stream.Close() //nolint:errcheck
+	own, err := binstamp.ContentHash(local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != own || rt.execArgv[0] != ServerPath("arm64", hash) || hash != own {
+		t.Errorf("reported %v for a server started at %s, want [%s]", got, rt.execArgv[0], own)
+	}
+
+	got = nil
+	rt = &fakeRuntime{arch: "arm64", exists: true}
+	stream, err = Attach(context.Background(), rt, "c1", "/w", AttachOptions{ServerPath: "/usr/local/bin/indigo-server", ServerBuild: report})
+	if err != nil {
+		t.Fatalf("Attach with a project server: %v", err)
+	}
+	stream.Close() //nolint:errcheck
+	if len(got) != 0 {
+		t.Errorf("reported %v for the project's own server, want nothing", got)
+	}
 }

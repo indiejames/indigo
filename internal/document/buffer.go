@@ -94,6 +94,15 @@ func (b *Buffer) SetClean() {
 	b.mu.Unlock()
 }
 
+// SetSaved records saved as the content last loaded from or written to disk,
+// for a buffer whose own content is not that: one restored from a recovery
+// file, where New would otherwise take the restored text as what is saved.
+func (b *Buffer) SetSaved(saved string) {
+	b.mu.Lock()
+	b.savedHash = sha256.Sum256([]byte(saved))
+	b.mu.Unlock()
+}
+
 func (b *Buffer) SavedHash() [32]byte {
 	b.mu.RLock()
 	defer b.mu.RUnlock()

@@ -12,8 +12,9 @@ import (
 // server replaces this buffer's object wholesale (SaveAs, DiscardRecovery,
 // ReloadBuffer) — see GetUpdates.
 func (r *RPC) OpenFile(ctx context.Context, path string) (uint32, string, uint64, bool, uint64, error) {
-	fut, rel := r.svc.OpenFile(ctx, func(p proto.EditorService_openFile_Params) error {
-		p.SetClientId(r.clientID)
+	l := r.cur()
+	fut, rel := l.svc.OpenFile(ctx, func(p proto.EditorService_openFile_Params) error {
+		p.SetClientId(l.clientID)
 		return p.SetPath(path)
 	})
 	defer rel()
@@ -25,7 +26,7 @@ func (r *RPC) OpenFile(ctx context.Context, path string) (uint32, string, uint64
 	if err != nil {
 		return 0, "", 0, false, 0, err
 	}
-	return res.BufferId(), content, res.Version(), res.FromRecovery(), res.Generation(), nil
+	return l.fromServer(res.BufferId()), content, res.Version(), res.FromRecovery(), res.Generation(), nil
 }
 
 // DiscardRecovery tells the server to delete the recovery file and reload the
@@ -38,9 +39,9 @@ func (r *RPC) OpenFile(ctx context.Context, path string) (uint32, string, uint64
 // marks the buffer dirty, which is exactly backwards here, since discarding
 // recovery is what makes the buffer match disk.
 func (r *RPC) DiscardRecovery(ctx context.Context, bufID uint32) (string, uint64, error) {
-	fut, rel := r.svc.DiscardRecovery(ctx, func(p proto.EditorService_discardRecovery_Params) error {
-		p.SetClientId(r.clientID)
-		p.SetBufferId(bufID)
+	fut, rel := r.cur().svc.DiscardRecovery(ctx, func(p proto.EditorService_discardRecovery_Params) error {
+		p.SetClientId(r.cur().clientID)
+		p.SetBufferId(r.cur().toServer(bufID))
 		return nil
 	})
 	defer rel()
@@ -88,9 +89,9 @@ func encodeOp(protoOp proto.EditOp, op document.Op) error {
 // past ops this client already had — corrupting the very coordinates the
 // mechanism exists to protect.
 func (r *RPC) ApplyOp(ctx context.Context, bufID uint32, op document.Op, generation, baseVersion uint64) (uint64, error) {
-	fut, rel := r.svc.ApplyOp(ctx, func(p proto.EditorService_applyOp_Params) error {
-		p.SetClientId(r.clientID)
-		p.SetBufferId(bufID)
+	fut, rel := r.cur().svc.ApplyOp(ctx, func(p proto.EditorService_applyOp_Params) error {
+		p.SetClientId(r.cur().clientID)
+		p.SetBufferId(r.cur().toServer(bufID))
 		p.SetGeneration(generation)
 		p.SetBaseVersion(baseVersion)
 		protoOp, err := p.NewOp()
@@ -117,9 +118,9 @@ func (r *RPC) ApplyOp(ctx context.Context, bufID uint32, op document.Op, generat
 // rejects the batch if the buffer has been swapped since; retrying with the
 // same coordinates is wrong, so a caller should re-read and recompute.
 func (r *RPC) ApplyOps(ctx context.Context, bufID uint32, ops []document.Op, generation, baseVersion uint64) (uint64, error) {
-	fut, rel := r.svc.ApplyOps(ctx, func(p proto.EditorService_applyOps_Params) error {
-		p.SetClientId(r.clientID)
-		p.SetBufferId(bufID)
+	fut, rel := r.cur().svc.ApplyOps(ctx, func(p proto.EditorService_applyOps_Params) error {
+		p.SetClientId(r.cur().clientID)
+		p.SetBufferId(r.cur().toServer(bufID))
 		p.SetGeneration(generation)
 		p.SetBaseVersion(baseVersion)
 		list, err := p.NewOps(int32(len(ops)))
@@ -157,9 +158,9 @@ type WorkspaceEdit struct {
 // skipped because OldText no longer matched (a concurrent change since the
 // edit was queued).
 func (r *RPC) ApplyWorkspaceEdits(ctx context.Context, edits []WorkspaceEdit) (applied int, skippedIdx []int, err error) {
-	fut, rel := r.svc.ApplyWorkspaceEdits(ctx, func(p proto.EditorService_applyWorkspaceEdits_Params) error {
+	fut, rel := r.cur().svc.ApplyWorkspaceEdits(ctx, func(p proto.EditorService_applyWorkspaceEdits_Params) error {
 		// clientID 0 (never assigned to a real connection) rather than
-		// r.clientID: a "replace all" can touch a file this same client
+		// r.cur().clientID: a "replace all" can touch a file this same client
 		// already has open as a live tab, and that tab's own poll loop
 		// filters out ops whose ClientID matches its own — using our real ID
 		// here would leave such a tab showing stale content forever.
@@ -204,9 +205,9 @@ func (r *RPC) ApplyWorkspaceEdits(ctx context.Context, edits []WorkspaceEdit) (a
 // generation increments every time the server replaces the buffer's object
 // wholesale — see OpenFile.
 func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]document.Op, uint64, []byte, uint64, uint64, error) {
-	fut, rel := r.svc.GetUpdates(ctx, func(p proto.EditorService_getUpdates_Params) error {
-		p.SetClientId(r.clientID)
-		p.SetBufferId(bufID)
+	fut, rel := r.cur().svc.GetUpdates(ctx, func(p proto.EditorService_getUpdates_Params) error {
+		p.SetClientId(r.cur().clientID)
+		p.SetBufferId(r.cur().toServer(bufID))
 		p.SetSinceVersion(since)
 		return nil
 	})
@@ -267,9 +268,9 @@ func (r *RPC) GetUpdates(ctx context.Context, bufID uint32, since uint64) ([]doc
 // in-memory buffer. Other windows pick the change up via the generation bump on
 // their next poll.
 func (r *RPC) ReloadBuffer(ctx context.Context, bufID uint32) (content string, version, generation uint64, err error) {
-	fut, rel := r.svc.ReloadBuffer(ctx, func(p proto.EditorService_reloadBuffer_Params) error {
-		p.SetClientId(r.clientID)
-		p.SetBufferId(bufID)
+	fut, rel := r.cur().svc.ReloadBuffer(ctx, func(p proto.EditorService_reloadBuffer_Params) error {
+		p.SetClientId(r.cur().clientID)
+		p.SetBufferId(r.cur().toServer(bufID))
 		return nil
 	})
 	defer rel()
@@ -309,8 +310,8 @@ type ClientSyncState struct {
 // GetSyncState reports the server's buffer-sync bookkeeping. bufID 0 means
 // every open buffer.
 func (r *RPC) GetSyncState(ctx context.Context, bufID uint32) ([]BufferSyncState, error) {
-	fut, rel := r.svc.GetSyncState(ctx, func(p proto.EditorService_getSyncState_Params) error {
-		p.SetBufferId(bufID)
+	fut, rel := r.cur().svc.GetSyncState(ctx, func(p proto.EditorService_getSyncState_Params) error {
+		p.SetBufferId(r.cur().toServer(bufID))
 		return nil
 	})
 	defer rel()
@@ -374,12 +375,12 @@ func (r *RPC) GetBufferSnapshot(ctx context.Context, bufID uint32) (content stri
 // without that, its count of ops applied from this client stays at the old
 // value and the client retires new ops the server has never seen.
 func (r *RPC) ResyncBuffer(ctx context.Context, bufID uint32) (content string, version, generation uint64, path string, err error) {
-	return r.bufferSnapshot(ctx, bufID, r.clientID)
+	return r.bufferSnapshot(ctx, bufID, r.cur().clientID)
 }
 
 func (r *RPC) bufferSnapshot(ctx context.Context, bufID uint32, resyncClientID uint64) (content string, version, generation uint64, path string, err error) {
-	fut, rel := r.svc.GetBufferSnapshot(ctx, func(p proto.EditorService_getBufferSnapshot_Params) error {
-		p.SetBufferId(bufID)
+	fut, rel := r.cur().svc.GetBufferSnapshot(ctx, func(p proto.EditorService_getBufferSnapshot_Params) error {
+		p.SetBufferId(r.cur().toServer(bufID))
 		p.SetResyncClientId(resyncClientID)
 		return nil
 	})
@@ -401,9 +402,9 @@ func (r *RPC) bufferSnapshot(ctx context.Context, bufID uint32, resyncClientID u
 
 // Save asks the server to flush bufID to disk.
 func (r *RPC) Save(ctx context.Context, bufID uint32) error {
-	fut, rel := r.svc.Save(ctx, func(p proto.EditorService_save_Params) error {
-		p.SetClientId(r.clientID)
-		p.SetBufferId(bufID)
+	fut, rel := r.cur().svc.Save(ctx, func(p proto.EditorService_save_Params) error {
+		p.SetClientId(r.cur().clientID)
+		p.SetBufferId(r.cur().toServer(bufID))
 		return nil
 	})
 	defer rel()
@@ -413,9 +414,9 @@ func (r *RPC) Save(ctx context.Context, bufID uint32) error {
 
 // SaveAs writes the buffer to newPath and updates the server's path record.
 func (r *RPC) SaveAs(ctx context.Context, bufID uint32, newPath string) error {
-	fut, rel := r.svc.SaveAs(ctx, func(p proto.EditorService_saveAs_Params) error {
-		p.SetClientId(r.clientID)
-		p.SetBufferId(bufID)
+	fut, rel := r.cur().svc.SaveAs(ctx, func(p proto.EditorService_saveAs_Params) error {
+		p.SetClientId(r.cur().clientID)
+		p.SetBufferId(r.cur().toServer(bufID))
 		return p.SetPath(newPath)
 	})
 	defer rel()
@@ -425,9 +426,9 @@ func (r *RPC) SaveAs(ctx context.Context, bufID uint32, newPath string) error {
 
 // CloseBuffer signals the server that this client is done with bufID.
 func (r *RPC) CloseBuffer(ctx context.Context, bufID uint32) error {
-	fut, rel := r.svc.CloseBuffer(ctx, func(p proto.EditorService_closeBuffer_Params) error {
-		p.SetClientId(r.clientID)
-		p.SetBufferId(bufID)
+	fut, rel := r.cur().svc.CloseBuffer(ctx, func(p proto.EditorService_closeBuffer_Params) error {
+		p.SetClientId(r.cur().clientID)
+		p.SetBufferId(r.cur().toServer(bufID))
 		return nil
 	})
 	defer rel()
@@ -439,7 +440,7 @@ func (r *RPC) CloseBuffer(ctx context.Context, bufID uint32) error {
 // 0-based line, the same broadcast Go-native plugins get via
 // ServerBridge.PluginOpenFile.
 func (r *RPC) RequestOpenFile(ctx context.Context, path string, line uint32) error {
-	fut, rel := r.svc.RequestOpenFile(ctx, func(p proto.EditorService_requestOpenFile_Params) error {
+	fut, rel := r.cur().svc.RequestOpenFile(ctx, func(p proto.EditorService_requestOpenFile_Params) error {
 		p.SetLine(line)
 		return p.SetPath(path)
 	})
@@ -450,8 +451,8 @@ func (r *RPC) RequestOpenFile(ctx context.Context, path string, line uint32) err
 
 // BufferClientCount returns how many clients currently have bufID open.
 func (r *RPC) BufferClientCount(ctx context.Context, bufID uint32) (uint32, error) {
-	fut, rel := r.svc.BufferClientCount(ctx, func(p proto.EditorService_bufferClientCount_Params) error {
-		p.SetBufferId(bufID)
+	fut, rel := r.cur().svc.BufferClientCount(ctx, func(p proto.EditorService_bufferClientCount_Params) error {
+		p.SetBufferId(r.cur().toServer(bufID))
 		return nil
 	})
 	defer rel()
@@ -467,9 +468,9 @@ func (r *RPC) BufferClientCount(ctx context.Context, bufID uint32) (uint32, erro
 // destPath is resolved server-side against whatever's already open, so it
 // should be an absolute path.
 func (r *RPC) MoveTextToFile(ctx context.Context, bufID uint32, fromLine, fromCol, toLine, toCol int, destPath string) error {
-	fut, rel := r.svc.MoveTextToFile(ctx, func(p proto.EditorService_moveTextToFile_Params) error {
+	fut, rel := r.cur().svc.MoveTextToFile(ctx, func(p proto.EditorService_moveTextToFile_Params) error {
 		p.SetClientId(0) // see ApplyWorkspaceEdits: 0 so this client's own open tabs still refresh
-		p.SetBufId(bufID)
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetFromLine(uint32(fromLine))
 		p.SetFromCol(uint32(fromCol))
 		p.SetToLine(uint32(toLine))
@@ -511,8 +512,8 @@ type ClientBufferReport struct {
 // a mismatch is real divergence needs two samples — see the get_sync_state /
 // check_buffer_consistency tooling in internal/agenttools.
 func (r *RPC) CheckBufferConsistency(ctx context.Context, bufID uint32) ([]BufferConsistency, error) {
-	fut, rel := r.svc.CheckBufferConsistency(ctx, func(p proto.EditorService_checkBufferConsistency_Params) error {
-		p.SetBufferId(bufID)
+	fut, rel := r.cur().svc.CheckBufferConsistency(ctx, func(p proto.EditorService_checkBufferConsistency_Params) error {
+		p.SetBufferId(r.cur().toServer(bufID))
 		return nil
 	})
 	defer rel()

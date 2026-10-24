@@ -30,7 +30,7 @@ type WorkspaceDiagnosticsResult struct {
 // coverage for unopened files is a known, documented gap, not yet
 // implemented.
 func (r *RPC) GetWorkspaceDiagnostics(ctx context.Context) (WorkspaceDiagnosticsResult, error) {
-	fut, rel := r.svc.GetWorkspaceDiagnostics(ctx, func(proto.EditorService_getWorkspaceDiagnostics_Params) error {
+	fut, rel := r.cur().svc.GetWorkspaceDiagnostics(ctx, func(proto.EditorService_getWorkspaceDiagnostics_Params) error {
 		return nil
 	})
 	defer rel()
@@ -69,7 +69,7 @@ type WorkspaceDiagnosticsSummary struct {
 // GetWorkspaceDiagnosticsSummary fetches just the counts, for a
 // workspace-wide status indicator that doesn't need the full item list.
 func (r *RPC) GetWorkspaceDiagnosticsSummary(ctx context.Context) (WorkspaceDiagnosticsSummary, error) {
-	fut, rel := r.svc.GetWorkspaceDiagnosticsSummary(ctx, func(proto.EditorService_getWorkspaceDiagnosticsSummary_Params) error {
+	fut, rel := r.cur().svc.GetWorkspaceDiagnosticsSummary(ctx, func(proto.EditorService_getWorkspaceDiagnosticsSummary_Params) error {
 		return nil
 	})
 	defer rel()
@@ -91,7 +91,7 @@ func (r *RPC) GetWorkspaceDiagnosticsSummary(ctx context.Context) (WorkspaceDiag
 // once the scan has been (re)started, not once it completes — call
 // GetWorkspaceDiagnostics/Summary again afterward to pick up fresh results.
 func (r *RPC) RescanWorkspaceDiagnostics(ctx context.Context) error {
-	fut, rel := r.svc.RescanWorkspaceDiagnostics(ctx, func(proto.EditorService_rescanWorkspaceDiagnostics_Params) error {
+	fut, rel := r.cur().svc.RescanWorkspaceDiagnostics(ctx, func(proto.EditorService_rescanWorkspaceDiagnostics_Params) error {
 		return nil
 	})
 	defer rel()

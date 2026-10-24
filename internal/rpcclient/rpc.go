@@ -121,17 +121,22 @@ type ClientDecoration struct {
 
 // RPC wraps a Cap'n Proto connection to the editor server.
 type RPC struct {
-	// serverStale is what the server said at connect time: its own binary, or
-	// a plugin's, has been replaced on disk since it started, so it is serving
-	// code older than what is installed. Surfaced to the user rather than
-	// acted on — see internal/server/staleness.go for why the server does not
-	// simply restart itself.
-	serverStale bool
-
-	conn     *rpc.Conn
-	svc      proto.EditorService
-	clientID uint64
+	// link is the connection calls go out on, replaced when a dropped one is
+	// reconnected. See link.go.
+	link atomic.Pointer[link]
+	// maxLocal is the highest buffer id the editor has been handed. See
+	// link.maxLocal.
+	maxLocal atomic.Uint32
 	cb       *callbackServer
+
+	// redial, when set, makes a dropped connection something to reconnect
+	// rather than a reason to quit. See reconnect.go.
+	redialMu sync.Mutex
+	redial   Redialer
+	// reconnects counts successful reconnects, and numbers them for
+	// ServerReconnectedMsg. reconnecting is set while one is under way.
+	reconnects   atomic.Uint64
+	reconnecting atomic.Bool
 
 	pluginKeysMu    sync.RWMutex
 	insertHookChars map[string]bool
@@ -177,13 +182,44 @@ func Dial(socketPath string) (*RPC, error) {
 // The caller owns rwc until this returns successfully; after that the RPC owns
 // it and closing the connection closes the stream.
 func DialStream(rwc io.ReadWriteCloser) (*RPC, error) {
-	c := rwc
+	return DialStreamExpecting(rwc, "")
+}
 
-	cb := &callbackServer{}
-	cbCap := proto.ClientCallback_ServerToClient(cb)
+// DialStreamExpecting is DialStream for a window that knows which server build
+// it started (a dev container's, from container.AttachOptions.ServerBuild).
+// The server compares it with its own, so a window that joined a server left
+// running from an older build is shown the stale-server prompt.
+func DialStreamExpecting(rwc io.ReadWriteCloser, expectedBuild string) (*RPC, error) {
+	r := &RPC{cb: &callbackServer{}, insertHookChars: make(map[string]bool)}
+	r.cb.rpc = r
+	l, err := r.handshake(context.Background(), rwc, expectedBuild, false)
+	if err != nil {
+		return nil, err
+	}
+	r.link.Store(l)
+	clientLog("Dial: connected, clientID=%d", l.clientID)
+
+	// Monitor connection lifecycle. l.conn.Done() fires both when we close
+	// it ourselves (Disconnect, a normal quit) and when the server process
+	// dies/crashes out from under us — the transport's read fails either way
+	// and the capnp rpc layer closes Done() (see rpc.Conn.shutdown) — so
+	// handleConnClosed is what tells the two apart.
+	go r.watch(l)
+
+	r.loadPluginInfo(l)
+	return r, nil
+}
+
+// handshake opens a connection over rwc and registers this window with the
+// server on it. mapped is false for the first connection and true for a
+// reconnect, whose server numbers buffers its own way (see link).
+//
+// It closes the connection, and with it rwc, on failure.
+func (r *RPC) handshake(ctx context.Context, rwc io.ReadWriteCloser, expectedBuild string, mapped bool) (*link, error) {
+	cbCap := proto.ClientCallback_ServerToClient(r.cb)
 	defer cbCap.Release()
 
-	transport := rpc.NewStreamTransport(c)
+	transport := rpc.NewStreamTransport(rwc)
 	conn := rpc.NewConn(transport, &rpc.Options{
 		BootstrapClient: capnp.Client(cbCap).AddRef(),
 		Logger:          &rpcLogger{},
@@ -202,7 +238,12 @@ func DialStream(rwc io.ReadWriteCloser) (*RPC, error) {
 	svc := proto.EditorService(rpcwatch.WrapOutgoing("client", conn.Bootstrap(context.Background())))
 
 	// Register with server, passing our callback capability.
-	fut, rel := svc.Connect(context.Background(), func(p proto.EditorService_connect_Params) error {
+	fut, rel := svc.Connect(ctx, func(p proto.EditorService_connect_Params) error {
+		if expectedBuild != "" {
+			if err := p.SetExpectedBuild(expectedBuild); err != nil {
+				return err
+			}
+		}
 		return p.SetCallback(proto.ClientCallback(capnp.Client(cbCap).AddRef()))
 	})
 	defer rel()
@@ -211,64 +252,76 @@ func DialStream(rwc io.ReadWriteCloser) (*RPC, error) {
 		conn.Close() //nolint:errcheck
 		return nil, fmt.Errorf("connect: %w", err)
 	}
-
-	r := &RPC{
-		conn:            conn,
-		svc:             svc,
-		clientID:        res.ClientId(),
-		serverStale:     res.ServerStale(),
-		cb:              cb,
-		insertHookChars: make(map[string]bool),
+	l := &link{
+		conn:        conn,
+		svc:         svc,
+		clientID:    res.ClientId(),
+		serverStale: res.ServerStale(),
+		mapped:      mapped,
+		maxLocal:    &r.maxLocal,
 	}
-	cb.mu.Lock()
-	cb.rpc = r
-	cb.mu.Unlock()
-	clientLog("Dial: connected, clientID=%d", r.clientID)
+	if mapped {
+		l.toRemote = make(map[uint32]uint32)
+		l.toLocal = make(map[uint32]uint32)
+	}
+	return l, nil
+}
 
-	// Monitor connection lifecycle. r.conn.Done() fires both when we close
-	// it ourselves (Disconnect, a normal quit) and when the server process
-	// dies/crashes out from under us — the transport's read fails either way
-	// and the capnp rpc layer closes Done() (see rpc.Conn.shutdown) — so
-	// handleConnClosed is what tells the two apart.
-	go func() {
-		<-r.conn.Done()
-		clientLog("server connection closed")
-		r.handleConnClosed()
-	}()
+// watch waits for l to close and reports it.
+func (r *RPC) watch(l *link) {
+	<-l.conn.Done()
+	clientLog("server connection closed")
+	r.handleConnClosed(l)
+}
 
+// loadPluginInfo fetches what plugins contribute to the window from the server
+// on l. Run again after a reconnect, since a server started afresh may have
+// different plugins.
+func (r *RPC) loadPluginInfo(l *link) {
 	// Fetch insert characters and menu items in one round trip's worth of
 	// latency instead of two: issue both calls before blocking on either, so
 	// the server processes them concurrently. The menu-items handler waits for
 	// plugin startup to finish (see pluginReadyTimeout server-side).
-	mfut, mrel := svc.GetMenuItems(context.Background(), func(_ proto.EditorService_getMenuItems_Params) error {
+	mfut, mrel := l.svc.GetMenuItems(context.Background(), func(_ proto.EditorService_getMenuItems_Params) error {
 		return nil
 	})
-	ifut, irel := svc.GetPluginInsertChars(context.Background(), func(_ proto.EditorService_getPluginInsertChars_Params) error {
+	ifut, irel := l.svc.GetPluginInsertChars(context.Background(), func(_ proto.EditorService_getPluginInsertChars_Params) error {
 		return nil
 	})
 
 	// Plugin-contributed Command (space) menu items.
+	var items []ClientMenuItem
 	if mres, err := mfut.Struct(); err == nil {
 		if rawList, err := mres.Items(); err == nil {
-			r.menuItems = decodeMenuItems(rawList)
+			items = decodeMenuItems(rawList)
 		}
 	}
 	mrel()
 
 	// Chars with a registered insert hook, for plugins that registered before
 	// this client connected; insertHookRegistered covers later registration.
+	chars := make(map[string]bool)
 	if ires, err := ifut.Struct(); err == nil {
-		if chars, err := ires.Chars(); err == nil {
-			for i := 0; i < chars.Len(); i++ {
-				if c, err := chars.At(i); err == nil {
-					r.addInsertHookChar(c)
+		if list, err := ires.Chars(); err == nil {
+			for i := 0; i < list.Len(); i++ {
+				if c, err := list.At(i); err == nil {
+					chars[c] = true
 				}
 			}
 		}
 	}
 	irel()
 
-	return r, nil
+	// Hooks are merged, not replaced: one a plugin registers while this runs
+	// arrives as a push (insertHookRegistered), and clearing the set here could
+	// drop it. A hook left over from an earlier server costs a call that
+	// nothing handles.
+	r.pluginKeysMu.Lock()
+	r.menuItems = items
+	for c := range chars {
+		r.insertHookChars[c] = true
+	}
+	r.pluginKeysMu.Unlock()
 }
 
 // decodeMenuItems recursively converts a capnp MenuItemInfo_List into
@@ -303,7 +356,7 @@ func (r *RPC) MenuItems() []ClientMenuItem {
 	return r.menuItems
 }
 
-func (r *RPC) ClientID() uint64 { return r.clientID }
+func (r *RPC) ClientID() uint64 { return r.cur().clientID }
 
 // SetPushSender wires a Bubble Tea send function so that server push
 // notifications (plugin effects) are routed into the running program.
@@ -319,13 +372,22 @@ func (r *RPC) addInsertHookChar(char string) {
 	r.pluginKeysMu.Unlock()
 }
 
-// handleConnClosed runs once r.conn.Done() fires, from the monitor goroutine
-// started in Dial. It suppresses ServerDisconnectedMsg when the close was
-// caused by our own Disconnect() — a normal quit — and dispatches it
-// otherwise (the server process died or was killed out from under us).
-func (r *RPC) handleConnClosed() {
+// handleConnClosed runs once l's connection closes, from the goroutine watch
+// runs on. It suppresses ServerDisconnectedMsg when the close was caused by our
+// own Disconnect() — a normal quit. Otherwise the server process died or was
+// killed out from under us, or the stream to it broke: with a redialer set
+// (a dev container) that starts a reconnect, and without one the window is
+// told the server has gone.
+func (r *RPC) handleConnClosed(l *link) {
 	if r.disconnecting.Load() {
 		clientLog("server connection closed: expected (local Disconnect)")
+		return
+	}
+	if r.cur() != l {
+		return // an earlier connection, already replaced
+	}
+	if redial := r.redialer(); redial != nil {
+		r.reconnect(redial)
 		return
 	}
 	r.cb.dispatch(ServerDisconnectedMsg{})
@@ -334,18 +396,19 @@ func (r *RPC) handleConnClosed() {
 // Disconnect unregisters this client from the server.
 func (r *RPC) Disconnect(ctx context.Context) error {
 	// Set before doing anything else: conn.Done() firing as a result of the
-	// r.conn.Close() below must see this already true, so the monitor
+	// conn.Close() below must see this already true, so the monitor
 	// goroutine in Dial doesn't mistake this intentional close for the
 	// server crashing.
 	r.disconnecting.Store(true)
-	fut, rel := r.svc.Disconnect(ctx, func(p proto.EditorService_disconnect_Params) error {
-		p.SetClientId(r.clientID)
+	l := r.cur()
+	fut, rel := l.svc.Disconnect(ctx, func(p proto.EditorService_disconnect_Params) error {
+		p.SetClientId(l.clientID)
 		return nil
 	})
 	defer rel()
 	_, err := fut.Struct()
-	r.svc.Release()
-	r.conn.Close() //nolint:errcheck
+	l.svc.Release()
+	l.conn.Close() //nolint:errcheck
 	return err
 }
 
@@ -357,11 +420,15 @@ func (r *RPC) Disconnect(ctx context.Context) error {
 // "rpc: connection closed" forever. Checking before use is what lets such a
 // client redial instead of failing for the rest of its life.
 func (r *RPC) Alive() bool {
-	if r == nil || r.conn == nil {
+	if r == nil {
+		return false
+	}
+	l := r.cur()
+	if l == nil || l.conn == nil {
 		return false
 	}
 	select {
-	case <-r.conn.Done():
+	case <-l.conn.Done():
 		return false
 	default:
 		return true
@@ -374,4 +441,10 @@ func (r *RPC) Alive() bool {
 // Worth surfacing prominently: a stale server looks completely normal — it
 // connects, answers, and quietly lacks whatever was just built — so the
 // natural conclusion is that the new code is broken rather than absent.
-func (r *RPC) ServerStale() bool { return r != nil && r.serverStale }
+func (r *RPC) ServerStale() bool {
+	if r == nil {
+		return false
+	}
+	l := r.cur()
+	return l != nil && l.serverStale
+}

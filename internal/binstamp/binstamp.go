@@ -10,7 +10,12 @@
 // about what "replaced" means.
 package binstamp
 
-import "os"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
+	"os"
+)
 
 // Stamp is size plus modification time, not a hash: this runs where a
 // filesystem round trip is already the budget, and the question is "was this
@@ -39,4 +44,26 @@ func Of(path string) (s Stamp, ok bool) {
 func Replaced(path string, want Stamp) bool {
 	got, ok := Of(path)
 	return !ok || got != want
+}
+
+// ContentHash returns a short hash of the file at path's contents: the first
+// eight bytes of its SHA-256, in hex.
+//
+// Unlike a Stamp it identifies a build wherever the file sits, which is what
+// the dev-container path needs: the server binary copied into a container is
+// named by this hash (container.ServerPath), and a window compares it with the
+// hash of the server it reached to learn whether that server is its own build.
+// Short because it names files a person may see in a process list; this is
+// addressing, not a security boundary.
+func ContentHash(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close() //nolint:errcheck
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)[:8]), nil
 }

@@ -69,7 +69,7 @@ func TestLoadContentDoesNotCreateAMissingFile(t *testing.T) {
 	path := filepath.Join(dir, "never-written.txt")
 	s := &editorService{}
 
-	content, fromRecovery, crlf, err := s.loadContent(path)
+	content, fromRecovery, crlf, _, err := s.loadContent(path)
 	if err != nil {
 		t.Fatalf("loadContent: %v", err)
 	}

@@ -16,14 +16,14 @@ func (r *RPC) HasInsertHook(char string) bool {
 // HandlePluginKey asks the server to dispatch a keypress to the owning plugin.
 func (r *RPC) HandlePluginKey(ctx context.Context, key, mode string, bufID uint32, cursorLine, cursorCol uint32) (PluginKeyResult, error) {
 	select {
-	case <-r.conn.Done():
+	case <-r.cur().conn.Done():
 		clientLog("HandlePluginKey: conn already done!")
 	default:
 		clientLog("HandlePluginKey: conn is alive, key=%q", key)
 	}
-	fut, rel := r.svc.HandlePluginKey(ctx, func(p proto.EditorService_handlePluginKey_Params) error {
-		p.SetClientId(r.clientID)
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.HandlePluginKey(ctx, func(p proto.EditorService_handlePluginKey_Params) error {
+		p.SetClientId(r.cur().clientID)
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetCursorLine(cursorLine)
 		p.SetCursorCol(cursorCol)
 		if err := p.SetKey(key); err != nil {
@@ -52,9 +52,9 @@ func (r *RPC) HandlePluginKey(ctx context.Context, key, mode string, bufID uint3
 // InvokeMenuAction asks the server to dispatch a Command-menu selection to the
 // plugin that registered pluginName+command via OnMenuAction.
 func (r *RPC) InvokeMenuAction(ctx context.Context, pluginName, command string, bufID uint32, cursorLine, cursorCol uint32) (PluginKeyResult, error) {
-	fut, rel := r.svc.InvokePluginMenuAction(ctx, func(p proto.EditorService_invokePluginMenuAction_Params) error {
-		p.SetClientId(r.clientID)
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.InvokePluginMenuAction(ctx, func(p proto.EditorService_invokePluginMenuAction_Params) error {
+		p.SetClientId(r.cur().clientID)
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetCursorLine(cursorLine)
 		p.SetCursorCol(cursorCol)
 		if err := p.SetPluginName(pluginName); err != nil {
@@ -83,8 +83,8 @@ func (r *RPC) InvokeMenuAction(ctx context.Context, pluginName, command string, 
 // UpdateViewport informs the server of this client's current scroll position
 // and visible height so plugins can use visibleRange accurately.
 func (r *RPC) UpdateViewport(ctx context.Context, topLine, height uint32) {
-	fut, rel := r.svc.UpdateViewport(ctx, func(p proto.EditorService_updateViewport_Params) error {
-		p.SetClientId(r.clientID)
+	fut, rel := r.cur().svc.UpdateViewport(ctx, func(p proto.EditorService_updateViewport_Params) error {
+		p.SetClientId(r.cur().clientID)
 		p.SetTopLine(topLine)
 		p.SetHeight(height)
 		return nil
@@ -95,9 +95,9 @@ func (r *RPC) UpdateViewport(ctx context.Context, topLine, height uint32) {
 
 // GetDecorations fetches plugin decorations for the current client viewport.
 func (r *RPC) GetDecorations(ctx context.Context, bufID uint32) ([]ClientDecoration, error) {
-	fut, rel := r.svc.GetPluginDecorations(ctx, func(p proto.EditorService_getPluginDecorations_Params) error {
-		p.SetClientId(r.clientID)
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.GetPluginDecorations(ctx, func(p proto.EditorService_getPluginDecorations_Params) error {
+		p.SetClientId(r.cur().clientID)
+		p.SetBufId(r.cur().toServer(bufID))
 		return nil
 	})
 	defer rel()
@@ -152,7 +152,7 @@ func (r *RPC) GetDecorations(ctx context.Context, bufID uint32) ([]ClientDecorat
 
 // GetPluginFixes fetches fix suggestions for a fixable decoration.
 func (r *RPC) GetPluginFixes(ctx context.Context, pluginName, fixData string) ([]ClientFixItem, error) {
-	fut, rel := r.svc.GetPluginFixes(ctx, func(p proto.EditorService_getPluginFixes_Params) error {
+	fut, rel := r.cur().svc.GetPluginFixes(ctx, func(p proto.EditorService_getPluginFixes_Params) error {
 		if err := p.SetPluginName(pluginName); err != nil {
 			return err
 		}
@@ -185,7 +185,7 @@ func (r *RPC) GetPluginFixes(ctx context.Context, pluginName, fixData string) ([
 
 // ApplyPluginFix asks the plugin to apply a fix by index.
 func (r *RPC) ApplyPluginFix(ctx context.Context, pluginName, fixData string, index uint32) error {
-	fut, rel := r.svc.ApplyPluginFix(ctx, func(p proto.EditorService_applyPluginFix_Params) error {
+	fut, rel := r.cur().svc.ApplyPluginFix(ctx, func(p proto.EditorService_applyPluginFix_Params) error {
 		if err := p.SetPluginName(pluginName); err != nil {
 			return err
 		}
@@ -202,8 +202,8 @@ func (r *RPC) ApplyPluginFix(ctx context.Context, pluginName, fixData string, in
 
 // GetPluginActions fetches context-sensitive actions from all registered action providers.
 func (r *RPC) GetPluginActions(ctx context.Context, bufID uint32, line, col uint32) ([]ClientFixItem, error) {
-	fut, rel := r.svc.GetPluginActions(ctx, func(p proto.EditorService_getPluginActions_Params) error {
-		p.SetBufId(bufID)
+	fut, rel := r.cur().svc.GetPluginActions(ctx, func(p proto.EditorService_getPluginActions_Params) error {
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetLine(line)
 		p.SetCol(col)
 		return nil
@@ -240,11 +240,11 @@ func (r *RPC) GetPluginActions(ctx context.Context, bufID uint32, line, col uint
 
 // ApplyPluginAction asks an action provider plugin to execute a custom action.
 func (r *RPC) ApplyPluginAction(ctx context.Context, pluginName string, bufID, line, col, index uint32) error {
-	fut, rel := r.svc.ApplyPluginAction(ctx, func(p proto.EditorService_applyPluginAction_Params) error {
+	fut, rel := r.cur().svc.ApplyPluginAction(ctx, func(p proto.EditorService_applyPluginAction_Params) error {
 		if err := p.SetPluginName(pluginName); err != nil {
 			return err
 		}
-		p.SetBufId(bufID)
+		p.SetBufId(r.cur().toServer(bufID))
 		p.SetLine(line)
 		p.SetCol(col)
 		p.SetIndex(index)
@@ -257,7 +257,7 @@ func (r *RPC) ApplyPluginAction(ctx context.Context, pluginName string, bufID, l
 
 // PluginPopupSelected tells the server the user picked item at index in the active plugin popup.
 func (r *RPC) PluginPopupSelected(ctx context.Context, index uint32) error {
-	fut, rel := r.svc.PluginPopupSelected(ctx, func(p proto.EditorService_pluginPopupSelected_Params) error {
+	fut, rel := r.cur().svc.PluginPopupSelected(ctx, func(p proto.EditorService_pluginPopupSelected_Params) error {
 		p.SetIndex(index)
 		return nil
 	})
@@ -268,7 +268,7 @@ func (r *RPC) PluginPopupSelected(ctx context.Context, index uint32) error {
 
 // PluginPopupCancelled tells the server the user dismissed the plugin popup without selecting.
 func (r *RPC) PluginPopupCancelled(ctx context.Context) error {
-	fut, rel := r.svc.PluginPopupCancelled(ctx, nil)
+	fut, rel := r.cur().svc.PluginPopupCancelled(ctx, nil)
 	defer rel()
 	_, err := fut.Struct()
 	return err
@@ -276,7 +276,7 @@ func (r *RPC) PluginPopupCancelled(ctx context.Context) error {
 
 // PluginInputConfirmed tells the server the user confirmed the input prompt with text.
 func (r *RPC) PluginInputConfirmed(ctx context.Context, text string) error {
-	fut, rel := r.svc.PluginInputConfirmed(ctx, func(p proto.EditorService_pluginInputConfirmed_Params) error {
+	fut, rel := r.cur().svc.PluginInputConfirmed(ctx, func(p proto.EditorService_pluginInputConfirmed_Params) error {
 		return p.SetText(text)
 	})
 	defer rel()
@@ -286,7 +286,7 @@ func (r *RPC) PluginInputConfirmed(ctx context.Context, text string) error {
 
 // PluginInputCancelled tells the server the user dismissed the input prompt.
 func (r *RPC) PluginInputCancelled(ctx context.Context) error {
-	fut, rel := r.svc.PluginInputCancelled(ctx, nil)
+	fut, rel := r.cur().svc.PluginInputCancelled(ctx, nil)
 	defer rel()
 	_, err := fut.Struct()
 	return err

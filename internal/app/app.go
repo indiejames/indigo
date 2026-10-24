@@ -134,6 +134,15 @@ type App struct {
 	// screen is already torn down by then, so there's no in-TUI message to show.
 	serverGone bool
 
+	// reconnecting is set from a dropped connection until every buffer is open
+	// on the new one; input is refused meanwhile. reconnectSeq is the
+	// reconnect being finished, and reattachPending/reattachFailed count its
+	// buffers. See reconnect.go.
+	reconnecting    bool
+	reconnectSeq    uint64
+	reattachPending int
+	reattachFailed  int
+
 	picker          *filePicker          // non-nil when file picker is open
 	scan            *pickerScan          // the picker's workspace scan in flight; see stopOrphanScan
 	pickerFilesSeq  int                  // bumped on every new picker file scan; see pickerFilesMsg
@@ -919,6 +928,16 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.serverGone = true
 		return a, tea.Quit
 
+	// ---- connection re-established (dev containers; see reconnect.go) ----
+	case client.ServerReconnectingMsg:
+		return a.handleReconnecting(), nil
+
+	case client.ServerReconnectedMsg:
+		return a.handleReconnected(msg)
+
+	case client.ReattachedMsg:
+		return a.handleBufferReattached(msg)
+
 	// ---- quit all ----
 	case client.QuitAllMsg:
 		return a.handleQuitAll(msg)
@@ -1188,6 +1207,10 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.symbolPicker.loading = false
 		}
 		return a, nil
+	}
+
+	if blocked, cmd, ok := a.blockedWhileReconnecting(msg); ok {
+		return blocked, cmd
 	}
 
 	// Each picker intercepts key input only. Non-key messages (tickMsg, diagnosticsMsg,

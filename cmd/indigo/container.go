@@ -5,15 +5,18 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/indiejames/indigo/internal/app"
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/container"
+	"github.com/indiejames/indigo/internal/debuglog"
 	"github.com/indiejames/indigo/internal/server"
 )
 
@@ -49,6 +52,9 @@ var (
 	// remoteEnv is devcontainer.json's remoteEnv, unresolved. Resolved against
 	// the container at attach time — see container.ResolveRemoteEnv.
 	remoteEnv map[string]*string
+	// devcontainerRoot is the folder `devcontainer up` was run on, so a
+	// reconnect can bring a stopped container back up the same way.
+	devcontainerRoot string
 )
 
 // pathMap translates between the workspace as this machine names it and as the
@@ -174,6 +180,7 @@ func bringUpDevcontainer(hostWorkDir string) string {
 		// The CLI says what is missing better than a second message would.
 		root = hostWorkDir
 	}
+	devcontainerRoot = root
 	probe := probeDevcontainer(root, hostWorkDir)
 	sessionDir := ""
 	if probe.state == devcontainerSession && containerDir == "" {
@@ -266,40 +273,123 @@ func connect(workDir string) (*client.RPC, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), attachTimeout)
 	defer cancel()
 	clientToken = newClientToken()
+	stream, serverBuild, err := attachContainer(ctx, workDir, startupNotice)
+	if err != nil {
+		return nil, err
+	}
+	// The container keeps one server per workspace, and a window joins one
+	// already running rather than starting its own. Naming the build this
+	// attach started lets that server say when it is an older one.
+	rpc, err := client.DialStreamExpecting(stream, serverBuild)
+	if err != nil {
+		stream.Close() //nolint:errcheck
+		return nil, fmt.Errorf("connect to server in container %s: %w", containerName, err)
+	}
+	return rpc, nil
+}
+
+// startupNotice prints a message about attaching to the terminal, which is
+// where it belongs before the editor has taken over the screen.
+func startupNotice(msg string) { fmt.Fprintf(os.Stderr, "indigo: %s\n", msg) }
+
+// attachContainer gets this window's server running in the container and
+// returns the stream to it, with the server build it started ("" for a
+// project's own server). notice receives what the attach has to say: the
+// terminal at startup, the log on a reconnect, when the editor owns the screen.
+func attachContainer(ctx context.Context, workDir string, notice func(string)) (io.ReadWriteCloser, string, error) {
+	var serverBuild string
 	opts := container.AttachOptions{
 		ServerPath:  projectServerPath,
 		ClientToken: clientToken,
 		Locate:      container.LocateServerBinary,
-		Warn:        func(msg string) { fmt.Fprintf(os.Stderr, "indigo: %s\n", msg) },
+		Warn:        notice,
+		ServerBuild: func(build string) { serverBuild = build },
 	}
 
 	if len(remoteEnv) > 0 {
-		opts.Env = serverRemoteEnv(ctx)
+		opts.Env = serverRemoteEnv(ctx, notice)
 	}
 
 	// Plugins run wherever the server runs, so the user's have to be carried
 	// in. Failing to stage them is not worth refusing to open an editor over:
 	// a session without plugins still edits files.
 	if staged, err := stagePluginsForContainer(); err != nil {
-		fmt.Fprintf(os.Stderr, "indigo: could not prepare plugins for the container: %v\n", err)
+		notice(fmt.Sprintf("could not prepare plugins for the container: %v", err))
 	} else if staged != nil {
 		defer os.RemoveAll(staged.Dir) //nolint:errcheck
 		opts.PluginsDir, opts.PluginsHash = staged.Dir, staged.Hash
 		if msg := staged.Describe(); msg != "" {
-			fmt.Fprintf(os.Stderr, "indigo: %s\n", msg)
+			notice(msg)
 		}
 	}
 
-	stream, err := container.Attach(ctx, container.Docker{User: remoteUser}, containerName, workDir, opts)
+	id := currentContainer()
+	stream, err := container.Attach(ctx, container.Docker{User: remoteUser}, id, workDir, opts)
 	if err != nil {
-		return nil, fmt.Errorf("attach to container %s: %w", containerName, err)
+		return nil, "", fmt.Errorf("attach to container %s: %w", id, err)
 	}
-	rpc, err := client.DialStream(stream)
+	return stream, serverBuild, nil
+}
+
+// armReconnect lets a container window survive its connection dropping, by
+// attaching again. A no-op for a server on this machine, where a dropped
+// connection means the server itself has gone. Called once the editor is
+// running; see RPC.SetRedial.
+func armReconnect(rpc *client.RPC, workDir string) {
+	if containerName == "" {
+		return
+	}
+	notice := func(msg string) { debuglog.Write("container", "%s", msg) }
+	rpc.SetRedial(func(ctx context.Context) (io.ReadWriteCloser, string, error) {
+		if err := ensureContainerRunning(ctx); err != nil {
+			return nil, "", err
+		}
+		return attachContainer(ctx, workDir, notice)
+	})
+}
+
+// ensureContainerRunning brings back a dev container that stopped while the
+// window was disconnected, such as when Docker Desktop restarted its VM.
+//
+// Only one indigo started: a container named with --container is the user's,
+// and starting it is theirs to decide, so a stopped one fails the attempt.
+func ensureContainerRunning(ctx context.Context) error {
+	id := currentContainer()
+	running, err := (container.Docker{User: remoteUser}).IsRunning(ctx, id)
+	if err == nil && running {
+		return nil
+	}
+	if !useDevcontainer {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("container %s is not running", id)
+	}
+	debuglog.Write("container", "dev container %s is not running; bringing it up", id)
+	res, err := (container.CLI{}).Up(ctx, devcontainerRoot)
 	if err != nil {
-		stream.Close() //nolint:errcheck
-		return nil, fmt.Errorf("connect to server in container %s: %w", containerName, err)
+		return err
 	}
-	return rpc, nil
+	setContainer(res.ContainerID)
+	return nil
+}
+
+// containerMu guards containerName once the editor is running, when a
+// reconnect (ensureContainerRunning) may replace it on one goroutine while the
+// window quits (shutdownContainer) on another. Startup reads it directly,
+// before either exists.
+var containerMu sync.Mutex
+
+func currentContainer() string {
+	containerMu.Lock()
+	defer containerMu.Unlock()
+	return containerName
+}
+
+func setContainer(id string) {
+	containerMu.Lock()
+	containerName = id
+	containerMu.Unlock()
 }
 
 // shutdownContainer stops a dev container indigo started, once nothing is using
@@ -318,6 +408,7 @@ func connect(workDir string) (*client.RPC, error) {
 //     truthfully. Stopping while a second window is editing would be a far
 //     worse bug than leaving a container running.
 func shutdownContainer() {
+	containerName := currentContainer()
 	if !useDevcontainer || containerName == "" || !stopOnExit {
 		return
 	}
@@ -360,11 +451,11 @@ func shutdownContainer() {
 // "${containerEnv:PATH}:/extra" would *replace* PATH with just "/extra" and
 // break every tool on it. So the entries that need the container are dropped
 // instead, and the ones that do not are still applied.
-func serverRemoteEnv(ctx context.Context) []string {
-	cenv, err := (container.Docker{User: remoteUser}).InspectEnv(ctx, containerName)
+func serverRemoteEnv(ctx context.Context, notice func(string)) []string {
+	cenv, err := (container.Docker{User: remoteUser}).InspectEnv(ctx, currentContainer())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "indigo: could not read the container's environment, "+
-			"so remoteEnv entries that refer to it are not applied: %v\n", err)
+		notice(fmt.Sprintf("could not read the container's environment, "+
+			"so remoteEnv entries that refer to it are not applied: %v", err))
 		return container.ResolveRemoteEnv(container.WithoutContainerEnvRefs(remoteEnv), nil, os.LookupEnv)
 	}
 	return container.ResolveRemoteEnv(remoteEnv, cenv, os.LookupEnv)

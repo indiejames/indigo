@@ -1156,3 +1156,58 @@ func sameSet(a, b []string) bool {
 	}
 	return true
 }
+
+// TestLiveAStoppedDevcontainerComesBackUp checks what a reconnecting window
+// relies on when Docker has stopped its container (Docker Desktop restarting
+// its VM stops them all): IsRunning sees the stop, and `devcontainer up` on
+// the same folder starts that same container again rather than failing or
+// building another, so the window's workspace is still where it was.
+func TestLiveAStoppedDevcontainerComesBackUp(t *testing.T) {
+	d := liveRuntime(t)
+	cli := CLI{}
+	if !cli.Available() {
+		t.Skip("devcontainer CLI not installed")
+	}
+
+	ws := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ws, ".devcontainer"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := `{"name":"restart test","image":"alpine:latest","overrideCommand":true}`
+	if err := os.WriteFile(filepath.Join(ws, ".devcontainer", "devcontainer.json"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	res, err := cli.Up(ctx, ws)
+	if err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	t.Cleanup(func() {
+		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		exec.CommandContext(c, d.bin(), "rm", "-f", res.ContainerID).Run() //nolint:errcheck
+	})
+
+	if running, err := d.IsRunning(ctx, res.ContainerID); err != nil || !running {
+		t.Fatalf("IsRunning after up = %v, %v; want true", running, err)
+	}
+	if err := d.Stop(ctx, res.ContainerID); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if running, err := d.IsRunning(ctx, res.ContainerID); err != nil || running {
+		t.Fatalf("IsRunning after Stop = %v, %v; want false", running, err)
+	}
+
+	again, err := cli.Up(ctx, ws)
+	if err != nil {
+		t.Fatalf("up on the stopped container: %v", err)
+	}
+	if again.ContainerID != res.ContainerID {
+		t.Errorf("up started container %s, want the stopped one %s", again.ContainerID, res.ContainerID)
+	}
+	if running, err := d.IsRunning(ctx, again.ContainerID); err != nil || !running {
+		t.Errorf("IsRunning after the second up = %v, %v; want true", running, err)
+	}
+}

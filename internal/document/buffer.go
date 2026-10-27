@@ -483,6 +483,15 @@ func (b *Buffer) TrimHistory(minVersion uint64) {
 	b.historyBase += idx
 }
 
+// Text returns the text in the half-open range [from, to), with positions
+// clamped to the buffer the way RuneOffset clamps them. A reversed range is
+// empty.
+func (b *Buffer) Text(from, to Pos) string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return string(b.logicalSlice(b.logicalOffset(from.Line, from.Col), b.logicalOffset(to.Line, to.Col)))
+}
+
 func (b *Buffer) RuneOffset(line, col int) int {
 	b.mu.RLock()
 	defer b.mu.RUnlock()

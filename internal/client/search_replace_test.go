@@ -10,7 +10,7 @@ import (
 // resulting Model still in ModeSearch.
 func typeInSearch(t *testing.T, m Model, query string) Model {
 	t.Helper()
-	m2, _ := m.handleKey(fakeKey("/"))
+	m2, _ := m.handleKey(ctrlKey('f'))
 	got := m2.(Model)
 	for _, ch := range query {
 		m2, _ = got.handleKey(fakeKey(string(ch)))
@@ -49,8 +49,8 @@ func TestSearchReplaceEnterCommits(t *testing.T) {
 	if final.buf.Content() != want {
 		t.Errorf("content = %q, want %q", final.buf.Content(), want)
 	}
-	if final.mode != ModeNormal {
-		t.Errorf("mode = %v, want ModeNormal", final.mode)
+	if final.mode != ModeInsert {
+		t.Errorf("mode = %v, want ModeInsert", final.mode)
 	}
 	if final.status != "2 substitution(s)" {
 		t.Errorf("status = %q, want '2 substitution(s)'", final.status)
@@ -77,8 +77,8 @@ func TestSearchReplaceEnterWithoutSlashDoesNotEdit(t *testing.T) {
 	if final.buf.Content() != "foo bar\n" {
 		t.Errorf("plain search modified the buffer: %q", final.buf.Content())
 	}
-	if final.mode != ModeNormal {
-		t.Errorf("mode = %v, want ModeNormal", final.mode)
+	if final.mode != ModeInsert {
+		t.Errorf("mode = %v, want ModeInsert", final.mode)
 	}
 }
 
@@ -93,8 +93,8 @@ func TestSearchReplaceEscCancelsWithoutEditing(t *testing.T) {
 	if final.buf.Content() != "foo bar foo\n" {
 		t.Errorf("esc should not edit the buffer, got %q", final.buf.Content())
 	}
-	if final.mode != ModeNormal {
-		t.Errorf("mode = %v, want ModeNormal", final.mode)
+	if final.mode != ModeInsert {
+		t.Errorf("mode = %v, want ModeInsert", final.mode)
 	}
 	if final.searchReplacing {
 		t.Error("searchReplacing should be cleared after esc")
@@ -118,11 +118,10 @@ func TestSearchReplaceBackreferences(t *testing.T) {
 func TestSearchReplaceScopedToSelection(t *testing.T) {
 	m := newTestModel("foo\nfoo\nfoo\n")
 	m.rpc = &RPC{}
-	// Linewise selection covering just line 1 (0-based).
+	// A selection covering line 1's text (0-based).
 	m.sel = &Selection{
 		Anchor: document.Pos{Line: 1, Col: 0},
-		Head:   document.Pos{Line: 1, Col: 2},
-		IsLine: true,
+		Head:   document.Pos{Line: 1, Col: 3},
 	}
 	got := typeInSearch(t, m, "foo/bar")
 	if len(got.searchMatches) != 1 || got.searchMatches[0].line != 1 {
@@ -146,8 +145,7 @@ func TestSearchScopedToSelectionWhenNotReplacing(t *testing.T) {
 	m := newTestModel("foo\nfoo\nfoo\n")
 	m.sel = &Selection{
 		Anchor: document.Pos{Line: 1, Col: 0},
-		Head:   document.Pos{Line: 1, Col: 2},
-		IsLine: true,
+		Head:   document.Pos{Line: 1, Col: 3},
 	}
 	got := typeInSearch(t, m, "foo")
 	if len(got.searchMatches) != 1 || got.searchMatches[0].line != 1 {

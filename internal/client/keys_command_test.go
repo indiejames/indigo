@@ -49,8 +49,8 @@ func TestExecuteCommandSetFileType(t *testing.T) {
 	m2, _ := m.executeCommand()
 	got := m2.(Model)
 
-	if got.mode != ModeNormal {
-		t.Errorf("mode = %v, want ModeNormal", got.mode)
+	if got.mode != ModeInsert {
+		t.Errorf("mode = %v, want ModeInsert", got.mode)
 	}
 	if got.langOverride != "py" {
 		t.Errorf("langOverride = %q, want %q", got.langOverride, "py")
@@ -123,8 +123,8 @@ func TestExecuteCommandSaveViaAlias(t *testing.T) {
 	m.cmdBuf = "save"
 	m2, cmd := m.executeCommand()
 	got := m2.(Model)
-	if got.mode != ModeNormal {
-		t.Errorf("mode = %v, want ModeNormal", got.mode)
+	if got.mode != ModeInsert {
+		t.Errorf("mode = %v, want ModeInsert", got.mode)
 	}
 	if strings.Contains(got.status, "unknown command") {
 		t.Errorf("status = %q, want no unknown-command error", got.status)
@@ -148,8 +148,8 @@ func TestExecuteCommandQuitDirtyGuard(t *testing.T) {
 		if !strings.Contains(got.status, "unsaved changes") {
 			t.Errorf(":%s on dirty buffer: status = %q, want it to mention unsaved changes", cmdText, got.status)
 		}
-		if got.mode != ModeNormal {
-			t.Errorf(":%s on dirty buffer: mode = %v, want ModeNormal", cmdText, got.mode)
+		if got.mode != ModeInsert {
+			t.Errorf(":%s on dirty buffer: mode = %v, want ModeInsert", cmdText, got.mode)
 		}
 		if cmd != nil {
 			t.Errorf(":%s on dirty buffer: cmd = %v, want nil (buffer must not close)", cmdText, cmd)
@@ -197,7 +197,7 @@ func TestExecuteCommandAliasesPinTrickyPairs(t *testing.T) {
 func TestExecuteCommandSaveSurvivesCtrlSRebind(t *testing.T) {
 	resetKeybinds(t)
 	cfg := &config.Config{Keybinds: []config.Keybind{
-		{Mode: "normal", Key: "ctrl+s", Action: "select-all"},
+		{Key: "ctrl+s", Action: "select-all"},
 	}}
 	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)

@@ -3,6 +3,8 @@ package client
 import (
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/indiejames/indigo/internal/document"
 )
 
@@ -148,34 +150,51 @@ func TestDocSymbolsPickerUsesTheRequestedBuffer(t *testing.T) {
 	}
 }
 
-// TestCompletionsAfterLeavingInsertModeAreDiscarded is the regression for a
-// popup left open in Normal mode, following the cursor around: pressing Esc
-// while a completion request was in flight (or before the auto-trigger's
-// debounce expired) let the response open the popup after Insert mode had
-// ended, and Normal mode has no key that closes it.
-func TestCompletionsAfterLeavingInsertModeAreDiscarded(t *testing.T) {
+// TestCompletionsAfterMovingOnAreDiscarded: a completion list, or a debounced
+// request for one, that arrives after the user has moved on from where they
+// were typing must not open the popup where the cursor is now. Esc, a cursor
+// move and a click each count as moving on. Before, a list that arrived after
+// Esc opened anyway, and so did one after a cursor move, at the new position.
+func TestCompletionsAfterMovingOnAreDiscarded(t *testing.T) {
+	moves := map[string]func(Model) Model{
+		"esc": func(m Model) Model {
+			out, _ := m.handleInsert(fakeKey("esc"))
+			return out.(Model)
+		},
+		"cursor move": func(m Model) Model {
+			out, _ := m.handleInsert(fakeKey("left"))
+			return out.(Model)
+		},
+		"click": func(m Model) Model {
+			out, _ := m.Update(tea.MouseClickMsg{X: 4, Y: 2, Button: tea.MouseLeft})
+			return out.(Model)
+		},
+	}
+	for name, move := range moves {
+		t.Run(name, func(t *testing.T) {
+			m := staleTestModel()
+			m.cursor = document.Pos{Line: 2, Col: 5}
+			seq, epoch := m.completionSeq, m.completionEpoch
+			m = move(m)
+
+			// "function" matches whatever prefix the cursor is on now, so
+			// only the epoch, not the filter, can keep the popup closed.
+			out, _ := m.Update(completionsMsg{items: []ClientCompletion{{Label: "function"}}, bufID: m.bufID, epoch: epoch})
+			if out.(Model).completionOn {
+				t.Error("a completion list asked for before the move opened the popup")
+			}
+			if _, cmd := m.Update(triggerCompletionMsg{seq: seq}); cmd != nil {
+				t.Error("a debounced completion trigger fired after the move and started a fetch")
+			}
+		})
+	}
+
+	// A list for where the user still is opens as before.
 	m := staleTestModel()
-	m.mode = ModeInsert
 	m.cursor = document.Pos{Line: 2, Col: 5}
-	seq := m.completionSeq
-
-	// Esc before the response arrives.
-	updated, _ := executeInsertEsc(m)
-	m = updated.(Model)
-	if m.mode != ModeNormal {
-		t.Fatalf("mode = %v after Esc, want Normal", m.mode)
-	}
-
-	// "function" matches whatever prefix the cursor is on after Esc ("func" or
-	// none), so only the mode check — not the filter — can keep it closed.
-	updated, _ = m.Update(completionsMsg{items: []ClientCompletion{{Label: "function"}}, bufID: m.bufID})
-	if updated.(Model).completionOn {
-		t.Error("a completion list that arrived after Esc opened the popup in Normal mode")
-	}
-
-	// The debounced trigger firing after Esc must not start a fetch at all.
-	if _, cmd := m.Update(triggerCompletionMsg{seq: seq}); cmd != nil {
-		t.Error("a debounced completion trigger fired after Esc and started a fetch")
+	out, _ := m.Update(completionsMsg{items: []ClientCompletion{{Label: "function"}}, bufID: m.bufID, epoch: m.completionEpoch})
+	if !out.(Model).completionOn {
+		t.Error("a current completion list did not open the popup")
 	}
 }
 

@@ -365,3 +365,25 @@ func TestLineLen(t *testing.T) {
 		t.Fatalf("LineLen(2)=%d, want 0", b.LineLen(2))
 	}
 }
+
+// TestText covers the half-open range a selection is sliced with, including
+// a range across a line break and positions past a line's end, which clamp.
+func TestText(t *testing.T) {
+	b := New("", "one\ntwo\nthree\n")
+	for _, tc := range []struct {
+		from, to Pos
+		want     string
+	}{
+		{Pos{0, 1}, Pos{0, 3}, "ne"},
+		{Pos{0, 1}, Pos{1, 2}, "ne\ntw"},
+		{Pos{0, 3}, Pos{1, 0}, "\n"},
+		{Pos{0, 0}, Pos{3, 0}, "one\ntwo\nthree\n"},
+		{Pos{1, 9}, Pos{2, 1}, "\nt"}, // past the end of "two" clamps to it
+		{Pos{1, 2}, Pos{1, 2}, ""},
+		{Pos{1, 2}, Pos{0, 1}, ""}, // reversed is empty
+	} {
+		if got := b.Text(tc.from, tc.to); got != tc.want {
+			t.Errorf("Text(%v, %v) = %q, want %q", tc.from, tc.to, got, tc.want)
+		}
+	}
+}

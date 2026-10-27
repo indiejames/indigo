@@ -56,17 +56,18 @@ func TestCollectHelpRowsShowsFullPathForNestedMenus(t *testing.T) {
 	if insideWord == aroundWord {
 		t.Errorf("select-inside-word and select-around-word render identically (%q) — must be distinguishable", insideWord)
 	}
-	if insideWord != "miw" {
-		t.Errorf("select-inside-word seq = %q, want %q", insideWord, "miw")
+	// The Command menu reaches the Match menu as m.
+	if !strings.Contains(insideWord, "Ctrl+Space miw") {
+		t.Errorf("select-inside-word seq = %q, want it to include %q", insideWord, "Ctrl+Space miw")
 	}
-	if aroundWord != "maw" {
-		t.Errorf("select-around-word seq = %q, want %q", aroundWord, "maw")
+	if !strings.Contains(aroundWord, "Ctrl+Space maw") {
+		t.Errorf("select-around-word seq = %q, want it to include %q", aroundWord, "Ctrl+Space maw")
 	}
 }
 
 // TestDisplaySequence spot-checks the multi-key path rendering rules,
 // including the two-level convention this codebase already established
-// ("gd") extended to three levels, and the Space-menu's "SPC " form.
+// ("gd") extended to three levels, and the Command menu's "Ctrl+Space " form.
 func TestDisplaySequence(t *testing.T) {
 	cases := map[string]string{}
 	cases["single"] = displaySequence([]string{"left"})
@@ -79,19 +80,15 @@ func TestDisplaySequence(t *testing.T) {
 	if got := displaySequence([]string{"m", "i", "w"}); got != "miw" {
 		t.Errorf("displaySequence([m i w]) = %q, want %q", got, "miw")
 	}
-	if got := displaySequence([]string{"space", "a"}); got != "SPC a" {
-		t.Errorf(`displaySequence([space a]) = %q, want %q`, got, "SPC a")
+	if got := displaySequence([]string{"space", "a"}); got != "Ctrl+Space a" {
+		t.Errorf(`displaySequence([space a]) = %q, want %q`, got, "Ctrl+Space a")
 	}
 }
 
-// TestGenerateHelpEntriesCategoryOrder pins the exact section order —
-// a basic-to-advanced narrative: movement, then editing (with Insert
-// mode's own keys right after it, since that's how you get there), then
-// selection and its Match extension, then search/multi-cursor, then two
-// specific editing transforms, then power-user and language-server
-// features, then the catch-all menus. "Insert mode" is a synthetic
-// category (see generateHelpEntries) that must be able to sit anywhere in
-// this sequence, not just trail at the very end.
+// TestGenerateHelpEntriesCategoryOrder pins the exact section order — a
+// basic-to-advanced narrative: movement, then editing, then selection and
+// its Match extension, then search, then case, then language-server
+// features, then the catch-all menus and the palette's commands.
 func TestGenerateHelpEntriesCategoryOrder(t *testing.T) {
 	resetKeybinds(t)
 	entries := generateHelpEntries()
@@ -103,10 +100,9 @@ func TestGenerateHelpEntriesCategoryOrder(t *testing.T) {
 		}
 	}
 	want := []string{
-		"Navigation", "Go to (g)", "Editing", "Insert mode", "Selection",
-		"Match (m)", "Search", "Multi-cursor", "Sort (s)", "Case (~)",
-		"Marks & Macros", "LSP / Diagnostics", "Debug", "Files & Buffers",
-		"Command (space)", "Commands (:)",
+		"Navigation", "Go to (g)", "Editing", "Selection", "Match (m)",
+		"Search", "Case (~)", "LSP / Diagnostics", "Debug", "Files & Buffers",
+		"Commands", "Command (space)", "Commands (Ctrl+Shift+P)",
 	}
 	if len(headers) != len(want) {
 		t.Fatalf("section headers = %v, want %v", headers, want)
@@ -118,20 +114,20 @@ func TestGenerateHelpEntriesCategoryOrder(t *testing.T) {
 	}
 }
 
-// TestGenerateHelpEntriesIncludesInsertModeAndCommands verifies the two
-// non-Normal-mode sections (generated from insertCmds and
+// TestGenerateHelpEntriesIncludesTheKeymapAndCommands verifies the keymap's
+// sections and the palette's commands (generated from insertCmds and
 // generateExCommands respectively) are present, rather than the old
 // hand-copied text.
-func TestGenerateHelpEntriesIncludesInsertModeAndCommands(t *testing.T) {
+func TestGenerateHelpEntriesIncludesTheKeymapAndCommands(t *testing.T) {
 	resetKeybinds(t)
 	entries := generateHelpEntries()
 
-	var sawInsertHeader, sawCommandsHeader, sawSaveCmd bool
+	var sawEditingHeader, sawCommandsHeader, sawSaveCmd bool
 	for _, e := range entries {
 		switch {
-		case e.key == "Insert mode":
-			sawInsertHeader = true
-		case e.key == "Commands (:)":
+		case e.key == "Editing":
+			sawEditingHeader = true
+		case e.key == "Commands (Ctrl+Shift+P)":
 			sawCommandsHeader = true
 		case strings.Contains(e.key, "save") && strings.Contains(e.key, "write"):
 			// "save" is grouped with its other aliases (s/save/w/write) into
@@ -143,14 +139,14 @@ func TestGenerateHelpEntriesIncludesInsertModeAndCommands(t *testing.T) {
 			sawSaveCmd = true
 		}
 	}
-	if !sawInsertHeader {
-		t.Error(`missing "Insert mode" section header`)
+	if !sawEditingHeader {
+		t.Error(`missing "Editing" section header`)
 	}
 	if !sawCommandsHeader {
-		t.Error(`missing "Commands (:)" section header`)
+		t.Error(`missing "Commands (Ctrl+Shift+P)" section header`)
 	}
 	if !sawSaveCmd {
-		t.Error(`missing "save" entry under Commands (:) (from generateExCommands)`)
+		t.Error(`missing "save" entry under Commands (Ctrl+Shift+P) (from generateExCommands)`)
 	}
 }
 
@@ -200,22 +196,16 @@ func TestGenerateHelpEntriesExcludesSystemFromInsertModeToo(t *testing.T) {
 func TestGenerateHelpEntriesReflectsOverride(t *testing.T) {
 	resetKeybinds(t)
 	cfg := &config.Config{Keybinds: []config.Keybind{
-		{Mode: "normal", Key: "j", Action: "cursor-up"},
+		{Key: "down", Action: "cursor-up"},
 	}}
 	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
 
+	down := displaySequence([]string{"down"})
 	entries := generateHelpEntries()
 	var cursorDownKeys, cursorUpKeys string
 	for _, e := range entries {
-		// Stop at "Insert mode": insertCmds has its own separate "cursor-up"/
-		// "cursor-down" actions with the same display label, unaffected by a
-		// Normal-mode-only override — scanning past this point would let
-		// that unrelated entry overwrite the one this test is checking.
-		if e.key == "Insert mode" {
-			break
-		}
 		if e.desc == "Cursor down" {
 			cursorDownKeys = e.key
 		}
@@ -223,11 +213,11 @@ func TestGenerateHelpEntriesReflectsOverride(t *testing.T) {
 			cursorUpKeys = e.key
 		}
 	}
-	if strings.Contains(cursorDownKeys, "j") {
-		t.Errorf("cursor-down keys = %q, should no longer include %q after rebinding it away", cursorDownKeys, "j")
+	if strings.Contains(cursorDownKeys, down) {
+		t.Errorf("cursor-down keys = %q, should no longer include %q after rebinding it away", cursorDownKeys, down)
 	}
-	if !strings.Contains(cursorUpKeys, "j") {
-		t.Errorf("cursor-up keys = %q, should now include %q", cursorUpKeys, "j")
+	if !strings.Contains(cursorUpKeys, down) {
+		t.Errorf("cursor-up keys = %q, should now include %q", cursorUpKeys, down)
 	}
 }
 

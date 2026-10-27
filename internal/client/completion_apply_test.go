@@ -231,8 +231,8 @@ func TestApplyCompletionAddsParensForImportedFunction(t *testing.T) {
 	if got.buf.Line(0) != "greetLoudly(name)" {
 		t.Errorf("line 0 = %q, want greetLoudly(name) (imported function gets named placeholder)", got.buf.Line(0))
 	}
-	if got.cursor.Col != 12 {
-		t.Errorf("cursor col = %d, want 12 (start of the first argument placeholder)", got.cursor.Col)
+	if got.cursor.Col != 16 {
+		t.Errorf("cursor col = %d, want 16 (the end of the selected first argument placeholder)", got.cursor.Col)
 	}
 }
 
@@ -251,8 +251,8 @@ func TestApplyCompletionFillsMultipleArgPlaceholders(t *testing.T) {
 	if got.buf.Line(0) != "greet(name, times)" {
 		t.Errorf("line 0 = %q, want greet(name, times)", got.buf.Line(0))
 	}
-	if got.cursor.Col != 6 { // start of "name" (g0 r1 e2 e3 t4 (5 n6)
-		t.Errorf("cursor col = %d, want 6 (start of first arg)", got.cursor.Col)
+	if got.cursor.Col != 10 { // end of "name" (g0 r1 e2 e3 t4 (5 n6 a7 m8 e9)
+		t.Errorf("cursor col = %d, want 10 (the end of the selected first arg)", got.cursor.Col)
 	}
 }
 

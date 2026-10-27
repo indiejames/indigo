@@ -8,8 +8,8 @@ import (
 	"github.com/indiejames/indigo/internal/config"
 )
 
-// applyKeymenus merges cfg's [[keymenu]] entries into cmds (a Normal-mode
-// tree under construction — see applyKeybindOverrides), returning the
+// applyKeymenus merges cfg's [[keymenu]] entries into cmds (the keymap
+// under construction — see applyKeybindOverrides), returning the
 // updated tree and a warning per entry that's structurally invalid or
 // shadows an existing root-level binding. display/actions are the same
 // merged registries applyKeybindOverrides already built for [[keybind]]

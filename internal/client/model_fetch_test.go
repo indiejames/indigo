@@ -21,8 +21,8 @@ func TestCodeActionRangeUsesSelectionOrderedWithExclusiveEnd(t *testing.T) {
 	sel := &Selection{Anchor: document.Pos{Line: 2, Col: 4}, Head: document.Pos{Line: 5, Col: 9}}
 
 	sl, sc, el, ec := codeActionRange(cursor, sel)
-	if sl != 2 || sc != 4 || el != 5 || ec != 10 {
-		t.Errorf("codeActionRange = (%d,%d,%d,%d), want (2,4,5,10) — end col should be exclusive (Head.Col+1)", sl, sc, el, ec)
+	if sl != 2 || sc != 4 || el != 5 || ec != 9 {
+		t.Errorf("codeActionRange = (%d,%d,%d,%d), want (2,4,5,9) — a selection is half-open, like an LSP range", sl, sc, el, ec)
 	}
 }
 
@@ -32,8 +32,8 @@ func TestCodeActionRangeSelectionReversedStillOrdered(t *testing.T) {
 	sel := &Selection{Anchor: document.Pos{Line: 5, Col: 9}, Head: document.Pos{Line: 2, Col: 4}}
 
 	sl, sc, el, ec := codeActionRange(cursor, sel)
-	if sl != 2 || sc != 4 || el != 5 || ec != 10 {
-		t.Errorf("codeActionRange = (%d,%d,%d,%d), want (2,4,5,10) regardless of anchor/head order", sl, sc, el, ec)
+	if sl != 2 || sc != 4 || el != 5 || ec != 9 {
+		t.Errorf("codeActionRange = (%d,%d,%d,%d), want (2,4,5,9) regardless of anchor/head order", sl, sc, el, ec)
 	}
 }
 

@@ -18,12 +18,8 @@ func TestDumpKeybindsTOMLContainsKnownActions(t *testing.T) {
 		`action = "save"`,
 		`action = "cursor-left"`,
 		`action = "quit-force"`,
-		"# --- Navigation (normal mode) ---",
-		"# --- Insert mode ---",
+		"# --- Navigation ---",
 		"# --- No default key (bind one to use it as a keypress) ---",
-		// "System" is excluded from the ? popup (a curated reference) but
-		// stays in the dump (still legitimate [[keybind]] targets).
-		"# --- System (normal mode) ---",
 		`action = "show-plugin-bindings"`,
 	} {
 		if !strings.Contains(out, want) {
@@ -62,8 +58,11 @@ func TestDumpKeybindsTOMLUncommentedBlockParses(t *testing.T) {
 		t.Fatalf("expected exactly one [[keybind]] entry, got %d: %+v", len(cfg.Keybinds), cfg.Keybinds)
 	}
 	kb := cfg.Keybinds[0]
-	if kb.Mode != "normal" || kb.Key != "left" || kb.Action != "cursor-left" {
-		t.Errorf("parsed keybind = %+v, want {Mode:normal Key:left Action:cursor-left}", kb)
+	if kb.Mode != "" || kb.Key != "left" || kb.Action != "cursor-left" {
+		t.Errorf("parsed keybind = %+v, want {Key:left Action:cursor-left}", kb)
+	}
+	if strings.Contains(out, "mode =") {
+		t.Error("the dump still writes a mode, and there is only one keymap")
 	}
 
 	// And it must actually be accepted as a real override, closing the loop

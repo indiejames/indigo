@@ -198,47 +198,9 @@ var prefixCmds = []command{
 	{key: "-", name: "jump-back", category: "Navigation", label: "Jump back", execute: executeJumpBack},
 	{key: "=", name: "jump-forward", category: "Navigation", label: "Jump forward", execute: executeJumpForward},
 	{key: "+", name: "jump-forward", category: "Navigation", label: "Jump forward", execute: executeJumpForward},
-	{
-		key:       "g",
-		label:     "Go",
-		menuTitle: "Go",
-		category:  "Go to (g)",
-		children: []command{
-			{key: "g", name: "go-to-top", label: "Go to top of file", execute: executeGoToTop},
-			{key: "e", name: "go-to-end", label: "Go to end of file", execute: executeGoToEnd},
-			{key: "d", name: "go-to-definition", label: "Go to definition", execute: executeGoToDefinition},
-			{key: "h", name: "go-to-line-start", label: "Go to line start", execute: executeGoToLineStart},
-			{key: "l", name: "go-to-line-end", label: "Go to line end", execute: executeGoToLineEnd},
-			// s/S swapped from their original assignment so shift+s
-			// consistently means "in project" here and in the Space menu
-			// (where "S" is also go-to-symbol-in-project).
-			{key: "s", name: "go-to-symbol-in-file", label: "Go to symbol in file", execute: func(m Model) (tea.Model, tea.Cmd) {
-				return m, m.fetchDocSymbols()
-			}},
-			{key: "S", name: "go-to-symbol-in-project", label: "Go to symbol in project", execute: executeOpenSymbolPicker},
-			{key: "r", name: "find-references", label: "Find references", execute: func(m Model) (tea.Model, tea.Cmd) {
-				return m, m.fetchReferences()
-			}},
-			{key: "b", name: "open-buffer-picker", label: "Open buffer picker", execute: func(m Model) (tea.Model, tea.Cmd) {
-				return m, func() tea.Msg { return OpenBufPickerMsg{} }
-			}},
-		},
-	},
+	goMenu,
 	commandMenuRoot,
-	{
-		key:       "~",
-		label:     "Case",
-		menuTitle: "Case",
-		category:  "Case (~)",
-		children: []command{
-			{key: "s", name: "case-to-snake", label: "snake_case", execute: executeCaseConvertSnake},
-			{key: "S", name: "case-to-screaming-snake", label: "SCREAMING_SNAKE_CASE", execute: executeCaseConvertScreamingSnake},
-			{key: "c", name: "case-to-camel", label: "camelCase", execute: executeCaseConvertCamel},
-			{key: "p", name: "case-to-pascal", label: "PascalCase", execute: executeCaseConvertPascal},
-			{key: "k", name: "case-to-kebab", label: "kebab-case", execute: executeCaseConvertKebab},
-			{key: "d", name: "case-to-dot", label: "dot.case", execute: executeCaseConvertDot},
-		},
-	},
+	caseMenu,
 	{
 		key:       "M",
 		label:     "Move",
@@ -259,45 +221,7 @@ var prefixCmds = []command{
 			{key: "d", name: "sort-lines-descending", label: "Sort lines descending", execute: executeSortLinesDescending},
 		},
 	},
-	{
-		key:       "m",
-		label:     "Match",
-		menuTitle: "Match",
-		category:  "Match (m)",
-		children: []command{
-			{key: "m", name: "go-to-matching-bracket", label: "Go to matching bracket", execute: perCursor(executeGotoMatchingBracket)},
-			{
-				key:       "i",
-				label:     "Select inside object",
-				menuTitle: "Match Inside",
-				children: []command{
-					{key: "w", name: "select-inside-word", label: "Word", execute: executeSelectInsideWord},
-					{key: "s", name: "select-inside-whitespace", label: "Whitespace", execute: executeSelectInsideWhitespace},
-					{key: "m", name: "select-inside-brackets", label: "Closest surrounding pair", execute: perCursor(executeSelectInsideBrackets)},
-					{key: ".", name: "select-inside-delimiter", label: "Quote/delimiter pair", execute: perCursor(executeSelectInsideChar)},
-					{key: "f", name: "select-inside-function", label: "Function", execute: perCursor(executeSelectInsideFunction)},
-					{key: "t", name: "select-inside-type", label: "Type definition", execute: perCursor(executeSelectInsideType)},
-					{key: "a", name: "select-inside-argument", label: "Argument/parameter", execute: perCursor(executeSelectInsideArgument)},
-					{key: "c", name: "select-inside-comment", label: "Comment", execute: perCursor(executeSelectInsideComment)},
-				},
-			},
-			{
-				key:       "a",
-				label:     "Select around object",
-				menuTitle: "Match Around",
-				children: []command{
-					{key: "w", name: "select-around-word", label: "Word", execute: executeSelectInsideWord},
-					{key: "s", name: "select-around-whitespace", label: "Whitespace", execute: executeSelectInsideWhitespace},
-					{key: "m", name: "select-around-brackets", label: "Closest surrounding pair", execute: perCursor(executeSelectAroundBrackets)},
-					{key: ".", name: "select-around-delimiter", label: "Quote/delimiter pair", execute: perCursor(executeSelectAroundChar)},
-					{key: "f", name: "select-around-function", label: "Function", execute: perCursor(executeSelectAroundFunction)},
-					{key: "t", name: "select-around-type", label: "Type definition", execute: perCursor(executeSelectAroundType)},
-					{key: "a", name: "select-around-argument", label: "Argument/parameter", execute: perCursor(executeSelectAroundArgument)},
-					{key: "c", name: "select-around-comment", label: "Comment", execute: perCursor(executeSelectAroundComment)},
-				},
-			},
-		},
-	},
+	matchMenu,
 }
 
 // commandMenuRoot is the top-level node for the Command (space) menu. Its
@@ -350,7 +274,7 @@ var commandMenuRoot = command{
 			m.cmdCompletionIdx = -1
 			return m, nil
 		}},
-		{key: "m", name: "start-move-to-file", label: "Refactor: Move Function to File", execute: func(m Model) (tea.Model, tea.Cmd) {
+		{key: "M", name: "start-move-to-file", label: "Refactor: Move Function to File", execute: func(m Model) (tea.Model, tea.Cmd) {
 			// Tree-sitter based (no language server needed); see
 			// doMoveFunctionToFile / EditorService.moveTextToFile.
 			m.mode = ModeCommand
@@ -360,7 +284,105 @@ var commandMenuRoot = command{
 		}},
 		debugMenu,    // see debug_view.go
 		tabGroupMenu, // see tabgroups.go
+		goMenu,
+		withKey(caseMenu, "c"),
+		withKey(matchMenu, "m"),
+		{key: "q", name: "macro-record-toggle", label: "Start/stop recording macro", execute: executeMacroRecordToggle},
+		{key: "@", name: "macro-replay", label: "Replay macro", execute: executeMacroReplay},
 	},
+}
+
+// matchMenu is reached from the catalog's root and from the Command (space)
+// menu, as m in both.
+var matchMenu = command{
+	key:       "m",
+	label:     "Match",
+	menuTitle: "Match",
+	category:  "Match (m)",
+	children: []command{
+		{key: "m", name: "go-to-matching-bracket", label: "Go to matching bracket", execute: perCursor(executeGotoMatchingBracket)},
+		{
+			key:       "i",
+			label:     "Select inside object",
+			menuTitle: "Match Inside",
+			children: []command{
+				{key: "w", name: "select-inside-word", label: "Word", execute: executeSelectInsideWord},
+				{key: "s", name: "select-inside-whitespace", label: "Whitespace", execute: executeSelectInsideWhitespace},
+				{key: "m", name: "select-inside-brackets", label: "Closest surrounding pair", execute: perCursor(executeSelectInsideBrackets)},
+				{key: ".", name: "select-inside-delimiter", label: "Quote/delimiter pair", execute: perCursor(executeSelectInsideChar)},
+				{key: "f", name: "select-inside-function", label: "Function", execute: perCursor(executeSelectInsideFunction)},
+				{key: "t", name: "select-inside-type", label: "Type definition", execute: perCursor(executeSelectInsideType)},
+				{key: "a", name: "select-inside-argument", label: "Argument/parameter", execute: perCursor(executeSelectInsideArgument)},
+				{key: "c", name: "select-inside-comment", label: "Comment", execute: perCursor(executeSelectInsideComment)},
+			},
+		},
+		{
+			key:       "a",
+			label:     "Select around object",
+			menuTitle: "Match Around",
+			children: []command{
+				{key: "w", name: "select-around-word", label: "Word", execute: executeSelectInsideWord},
+				{key: "s", name: "select-around-whitespace", label: "Whitespace", execute: executeSelectInsideWhitespace},
+				{key: "m", name: "select-around-brackets", label: "Closest surrounding pair", execute: perCursor(executeSelectAroundBrackets)},
+				{key: ".", name: "select-around-delimiter", label: "Quote/delimiter pair", execute: perCursor(executeSelectAroundChar)},
+				{key: "f", name: "select-around-function", label: "Function", execute: perCursor(executeSelectAroundFunction)},
+				{key: "t", name: "select-around-type", label: "Type definition", execute: perCursor(executeSelectAroundType)},
+				{key: "a", name: "select-around-argument", label: "Argument/parameter", execute: perCursor(executeSelectAroundArgument)},
+				{key: "c", name: "select-around-comment", label: "Comment", execute: perCursor(executeSelectAroundComment)},
+			},
+		},
+	},
+}
+
+// goMenu and caseMenu are reached from the catalog's root (g, ~) and from
+// the Command (space) menu (g, c), which is how the modeless keymap gets to
+// them.
+var goMenu = command{
+	key:       "g",
+	label:     "Go",
+	menuTitle: "Go",
+	category:  "Go to (g)",
+	children: []command{
+		{key: "g", name: "go-to-top", label: "Go to top of file", execute: executeGoToTop},
+		{key: "e", name: "go-to-end", label: "Go to end of file", execute: executeGoToEnd},
+		{key: "d", name: "go-to-definition", label: "Go to definition", execute: executeGoToDefinition},
+		{key: "h", name: "go-to-line-start", label: "Go to line start", execute: executeGoToLineStart},
+		{key: "l", name: "go-to-line-end", label: "Go to line end", execute: executeGoToLineEnd},
+		// s/S swapped from their original assignment so shift+s
+		// consistently means "in project" here and in the Space menu
+		// (where "S" is also go-to-symbol-in-project).
+		{key: "s", name: "go-to-symbol-in-file", label: "Go to symbol in file", execute: func(m Model) (tea.Model, tea.Cmd) {
+			return m, m.fetchDocSymbols()
+		}},
+		{key: "S", name: "go-to-symbol-in-project", label: "Go to symbol in project", execute: executeOpenSymbolPicker},
+		{key: "r", name: "find-references", label: "Find references", execute: func(m Model) (tea.Model, tea.Cmd) {
+			return m, m.fetchReferences()
+		}},
+		{key: "b", name: "open-buffer-picker", label: "Open buffer picker", execute: func(m Model) (tea.Model, tea.Cmd) {
+			return m, func() tea.Msg { return OpenBufPickerMsg{} }
+		}},
+	},
+}
+
+var caseMenu = command{
+	key:       "~",
+	label:     "Case",
+	menuTitle: "Case",
+	category:  "Case (~)",
+	children: []command{
+		{key: "s", name: "case-to-snake", label: "snake_case", execute: executeCaseConvertSnake},
+		{key: "S", name: "case-to-screaming-snake", label: "SCREAMING_SNAKE_CASE", execute: executeCaseConvertScreamingSnake},
+		{key: "c", name: "case-to-camel", label: "camelCase", execute: executeCaseConvertCamel},
+		{key: "p", name: "case-to-pascal", label: "PascalCase", execute: executeCaseConvertPascal},
+		{key: "k", name: "case-to-kebab", label: "kebab-case", execute: executeCaseConvertKebab},
+		{key: "d", name: "case-to-dot", label: "dot.case", execute: executeCaseConvertDot},
+	},
+}
+
+// withKey is cmd reached by a different key.
+func withKey(cmd command, key string) command {
+	cmd.key = key
+	return cmd
 }
 
 // findCommand navigates prefixCmds following seq and returns the final node.
@@ -400,6 +422,12 @@ func (m Model) resolveCommand(seq []string) (*command, bool) {
 			return &node, true
 		}
 		return findIn(node.children, seq[1:])
+	}
+	if len(seq) > 0 {
+		// A menu the user's config added to the keymap.
+		if node, ok := findIn(insertCmds, seq[:1]); ok && len(node.children) > 0 {
+			return findIn(insertCmds, seq)
+		}
 	}
 	if len(seq) == 0 || seq[0] != "space" {
 		return findCommand(seq)
@@ -506,7 +534,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.diagPopupSuppressed = true
 	}
 
-	// Scroll keys navigate the help popup; q/esc/? dismiss it.
+	// Scroll keys navigate the help popup; q, Esc and the keys that open it
+	// dismiss it.
 	if m.helpVisible {
 		helpLines := helpPopupLines(helpPopupInnerWidth(m.width))
 		maxPopH := max(6, m.height-5) // matches vis-4 in View() where vis = m.height-1
@@ -519,13 +548,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "k", "up":
 			m.helpScroll = max(0, m.helpScroll-1)
 			return m, nil
-		case "ctrl+f":
+		case "ctrl+f", "pgdown":
 			m.helpScroll = min(m.helpScroll+m.height/4, maxScroll)
 			return m, nil
-		case "ctrl+b":
+		case "ctrl+b", "pgup":
 			m.helpScroll = max(0, m.helpScroll-m.height/4)
 			return m, nil
-		case "esc", "q", "?":
+		case "esc", "q", "?", "ctrl+shift+/", "ctrl+?", "f1":
 			m.helpVisible = false
 			m.helpScroll = 0
 			return m, nil
@@ -569,17 +598,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		maxPopH := max(6, m.height-4)
 		contentH := maxPopH - 2
 		maxScroll := max(0, m.hoverTotalLines-contentH)
+		// Letters and arrows are typing and movement, so only the page keys
+		// scroll; anything else closes the popup and then does its own job.
 		switch msg.String() {
-		case "j", "down":
-			m.hoverScroll = min(m.hoverScroll+1, maxScroll)
-			return m, nil
-		case "k", "up":
-			m.hoverScroll = max(0, m.hoverScroll-1)
-			return m, nil
-		case "ctrl+f":
+		case "pgdown":
 			m.hoverScroll = min(m.hoverScroll+m.height/4, maxScroll)
 			return m, nil
-		case "ctrl+b":
+		case "pgup":
 			m.hoverScroll = max(0, m.hoverScroll-m.height/4)
 			return m, nil
 		case "esc":

@@ -15,15 +15,18 @@ func cursorTestApp(t *testing.T, nBuffers int, cfg *config.Config) App {
 	for i := range nBuffers {
 		m := client.New(&client.RPC{}, uint32(i+1), "hello\nworld\n", 0, "/tmp/a.go", "/tmp", cfg, false, 0)
 		sized, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		bufs = append(bufs, sized.(client.Model))
+		// The buffer's cursor is a painted cell, not the terminal's; the
+		// terminal cursor belongs to a prompt, so open the palette's.
+		palette, _ := sized.(client.Model).Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl | tea.ModShift})
+		bufs = append(bufs, palette.(client.Model))
 	}
 	// -1 is "no file-changed prompt"; the zero value would read as "prompt
 	// showing for buffer 0" and suppress the cursor.
 	return App{buffers: bufs, active: 0, width: 80, height: 24, cfg: cfg, fileChangedIdx: -1}
 }
 
-// TestAppCursorShiftsForTabBar checks the buffer's cursor row is offset by
-// the tab bar App draws above it. Without the shift the terminal cursor sits
+// TestAppCursorShiftsForTabBar checks the buffer view's cursor row is offset
+// by the tab bar App draws above it. Without the shift the terminal cursor sits
 // one row above where typing actually lands, on the tab bar itself.
 func TestAppCursorShiftsForTabBar(t *testing.T) {
 	cfg := &config.Config{}

@@ -19,9 +19,12 @@ import (
 
 type Mode int
 
+// ModeInsert is the zero value: the editor is modeless, so typing is what it
+// does unless the command line or search has the keyboard. ModeNormal is
+// unreachable and survives only until the modal code is removed.
 const (
-	ModeNormal Mode = iota
-	ModeInsert
+	ModeInsert Mode = iota
+	ModeNormal
 	ModeCommand
 	ModeSearch
 )
@@ -306,6 +309,7 @@ type fixItemsMsg struct {
 type completionsMsg struct {
 	items []ClientCompletion
 	bufID uint32
+	epoch int // completionEpoch when the request was made
 }
 
 // lspOverlayRefreshMsg fires after the post-edit debounce delay to re-fetch
@@ -557,6 +561,14 @@ type PrevBufferMsg struct{}
 // OpenBufPickerMsg signals the App to open the buffer picker popup.
 type OpenBufPickerMsg struct{}
 
+// ConfirmCloseMsg asks the App whether to save the active buffer, which has
+// unsaved changes, before closing it (Ctrl+W).
+type ConfirmCloseMsg struct{}
+
+// QuitRequestMsg asks the App to quit, prompting first if any buffer has
+// unsaved changes (Ctrl+Q).
+type QuitRequestMsg struct{}
+
 // QuitAllMsg signals the App to quit all buffers (:qa / :qa! / :wqa).
 type QuitAllMsg struct {
 	Force   bool // :qa! — skip dirty check
@@ -633,13 +645,12 @@ type metricsData struct {
 // theme.UI.InsertCursorBg instead — see [theme.UI.InsertCursorBg].
 const (
 	normalAccentColor = "#FFFFFF"
-	insertAccentColor = "#AAFFAA"
+	insertAccentColor = "#FFFFFF"
 )
 
 // UI styles — initialized to default-dark values; replaced by ApplyTheme before first render.
 var (
 	barStyle        lipgloss.Style
-	normalModeStyle lipgloss.Style
 	insertModeStyle lipgloss.Style
 
 	// cursorStyle is the style actually used to render the buffer cursor —
@@ -736,10 +747,6 @@ func ApplyTheme(t *theme.Theme) {
 	pb := lipgloss.Color(t.UI.PopupBg)
 
 	barStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(t.UI.BarFg))
-	// normalModeStyle/insertModeStyle use the fixed accent colors below rather
-	// than t.UI.NormalModeFg — normal mode has no separate cursor color to
-	// match (its cursor is reverse-video), so its label isn't themeable yet.
-	normalModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(normalAccentColor)).Bold(true)
 	insertModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(t.UI.InsertCursorBg)).Bold(true)
 	normalCursorStyle = lipgloss.NewStyle().Reverse(true)
 	insertCursorStyle = lipgloss.NewStyle().Background(lipgloss.Color(t.UI.InsertCursorBg)).Foreground(lipgloss.Color("#000000"))
@@ -800,7 +807,6 @@ func applyDefaultDark() {
 	pb := lipgloss.Color("#1E2A38")
 
 	barStyle = lipgloss.NewStyle().Background(barBg).Foreground(barFg)
-	normalModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(normalAccentColor)).Bold(true)
 	insertModeStyle = lipgloss.NewStyle().Background(barBg).Foreground(lipgloss.Color(insertAccentColor)).Bold(true)
 	normalCursorStyle = lipgloss.NewStyle().Reverse(true)
 	insertCursorStyle = lipgloss.NewStyle().Background(lipgloss.Color(insertAccentColor)).Foreground(lipgloss.Color("#000000"))
@@ -842,13 +848,14 @@ func applyDefaultDark() {
 	bdrLipgloss = lipgloss.RoundedBorder()
 }
 
-// Selection tracks the selected range in the buffer.
-// [Anchor, Head] is inclusive on both ends for display purposes.
-// IsLine marks a linewise selection (x) which deletes the entire line + newline.
+// Selection tracks the selected range in the buffer: the half-open range
+// between Anchor and Head in document order. Positions sit between characters,
+// the cursor always equals Head, and an empty selection is represented as no
+// selection (nil). A whole-line selection runs from a line's start to the
+// next line's start; nothing marks it specially.
 type Selection struct {
 	Anchor document.Pos
 	Head   document.Pos
-	IsLine bool
 }
 
 // ExtraCursor represents a secondary cursor with an optional selection.
@@ -924,6 +931,7 @@ type Model struct {
 	severeErr            string // non-empty = must-dismiss error modal is visible (see handleKey); state-affecting failures only
 	sel                  *Selection
 	dragging             bool
+	dragAnchor           document.Pos // where a mouse drag started; the selection's anchor once it moves
 	lastClickAt          time.Time
 	lastClickPos         document.Pos
 	undoStack            []undoEntry    // each entry is inverse ops + pre-edit cursor snapshot
@@ -931,6 +939,7 @@ type Model struct {
 	currentGroup         []document.Op  // non-nil while accumulating ops for the current Insert session
 	groupBefore          cursorSnapshot // cursor state when currentGroup was opened
 	insertLineCount      int            // buf line count at the start of the insert session
+	lastTypedAt          time.Time      // when the open typing run last grew; see beginTyping
 	savedUndoDepth       int            // len(undoStack) at the time of the last save
 	cmdBuf               string         // text typed after ':' while in ModeCommand
 	cmdCompletionIdx     int            // selected item in command completion popup (−1 = none)
@@ -1045,6 +1054,7 @@ type Model struct {
 	completionIdx    int
 	completionPrefix string
 	completionSeq    int // debounce token; only the latest auto-trigger fetches
+	completionEpoch  int // bumped by abandonCompletion; older lists are dropped
 
 	// Snippet (argument-placeholder) mode: after accepting a callable
 	// completion, the inserted parameter names become tab stops the user can
@@ -1079,14 +1089,22 @@ type Model struct {
 	debug DebugView
 
 	// Macro recording: a single, in-memory-only slot (no named registers,
-	// no persistence — see the design discussion this followed). q toggles
-	// recording; every key seen by Update while macroRecording is true gets
-	// appended to macroKeys, except the q keypresses that started/stopped
+	// no persistence — see the design discussion this followed). Ctrl+Space q
+	// toggles recording; every key seen by Update while macroRecording is
+	// true gets appended to macroKeys, except the keys that started/stopped
 	// the recording itself (Update's tea.KeyMsg case excludes those by
-	// comparing macroRecording before/after handleKey). @ replays lastMacro.
+	// comparing macroRecording before/after handleKey, and cuts the menu
+	// keys before them using macroMenuStart). Ctrl+Space @ replays lastMacro.
 	macroRecording bool
 	macroKeys      []tea.KeyMsg
 	lastMacro      []tea.KeyMsg
+	// macroInMenu is true while a key menu opened during a recording is
+	// still open, and macroMenuStart is where in macroKeys its keys begin. A
+	// menu sequence that stops the recording, or asks for a refused replay,
+	// is cut from the macro from there, so the macro holds only the keys
+	// meant for it.
+	macroInMenu    bool
+	macroMenuStart int
 	// macroReplayBlocked is set by executeMacroReplay when it refuses a @
 	// press because a recording is in progress, and read (and cleared) by
 	// Update's tea.KeyMsg case right after — see that case for why: without
@@ -1095,6 +1113,10 @@ type Model struct {
 	// actually runs), which schedules another full replay of the same
 	// macro — containing the same @ — recursing without end.
 	macroReplayBlocked bool
+
+	// lastKeyAt is when the last key was pressed; the cursor stays solid for
+	// a while after it (see insertCursorOn).
+	lastKeyAt time.Time
 
 	// Plugin help entries loaded at startup for the ? popup.
 
@@ -1357,11 +1379,12 @@ func (m Model) AtMatch(line, col, matchLen, bufHeight int) Model {
 	m.topLine = max(0, line-quarter)
 	m.topChunk = 0
 	if matchLen > 0 {
-		endCol := min(col+matchLen-1, max(0, lineLen-1))
-		if endCol >= col {
+		// Anchored at the match's end, so the head — and the cursor, which
+		// always equals it — is at the start.
+		if endCol := min(col+matchLen, lineLen); endCol > col {
 			m.sel = &Selection{
-				Anchor: document.Pos{Line: line, Col: col},
-				Head:   document.Pos{Line: line, Col: endCol},
+				Anchor: document.Pos{Line: line, Col: endCol},
+				Head:   document.Pos{Line: line, Col: col},
 			}
 		}
 	}
@@ -1907,11 +1930,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.bufID != m.bufID {
 			return m, nil // stale result from a previous buffer switch; discard
 		}
-		// A list that arrives after the user left Insert mode — Esc while the
-		// request was in flight — must not open the popup. Normal mode has no
-		// key that dismisses it, and it is drawn at the cursor, so it stayed
-		// open and followed the cursor around until the next Insert session.
-		if m.mode != ModeInsert {
+		// A list that arrives after the user moved on — Esc, a cursor move,
+		// a command or a click while the request was in flight — must not
+		// open the popup where the cursor is now.
+		if msg.epoch != m.completionEpoch {
 			return m, nil
 		}
 		// Recompute the prefix from the live buffer: the fetch was async and the
@@ -2009,9 +2031,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case triggerCompletionMsg:
 		if msg.seq != m.completionSeq {
 			return m, nil // superseded by a later keystroke
-		}
-		if m.mode != ModeInsert {
-			return m, nil // debounce expired after Esc; see completionsMsg
 		}
 		return m, m.fetchCompletions()
 
@@ -2149,13 +2168,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.MouseReleaseMsg:
 			if mouse.Button == tea.MouseLeft {
 				m.dragging = false
-				// A press+release on the same spot is just a cursor move; clear selection.
-				if m.sel != nil && m.sel.Anchor == m.sel.Head {
-					m.sel = nil
-				}
 			}
 		}
 		var cmds []tea.Cmd
+		// A click, or a scroll that drags the cursor along, moves the user on
+		// from where they were typing: what they type next is a new undo step,
+		// and a completion list asked for back there is no longer wanted.
+		_, clicked := msg.(tea.MouseClickMsg)
+		if clicked || m.cursor != prevCursor {
+			m = m.abandonCompletion()
+			var endCmd tea.Cmd
+			m, endCmd = m.endTyping()
+			cmds = append(cmds, endCmd)
+		}
 		if m.topLine != prevTopLine {
 			cmds = append(cmds, m.updateViewportCmd())
 		}
@@ -2264,8 +2289,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and is recorded normally.
 		if nm.macroReplayBlocked {
 			nm.macroReplayBlocked = false
+			if nm.macroInMenu {
+				nm.macroKeys = nm.macroKeys[:nm.macroMenuStart]
+			}
 		} else if wasRecording && nm.macroRecording {
+			if !nm.macroInMenu && len(nm.prefixSeq) > 0 {
+				nm.macroInMenu = true
+				nm.macroMenuStart = len(nm.macroKeys)
+			}
 			nm.macroKeys = append(nm.macroKeys, msg)
+		}
+		if len(nm.prefixSeq) == 0 {
+			nm.macroInMenu = false
 		}
 		// Only a vertical move (moveCursor's dLine!=0/dCol==0 branch) sets
 		// goalColActive; any other key — horizontal movement, edits, jumps —
@@ -2274,6 +2309,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !nm.goalColActive {
 			nm.goalCol = -1
 		}
+		nm.lastKeyAt = nowFunc()
 		if nm.topLine != prevTopLine {
 			cmd = tea.Batch(cmd, nm.updateViewportCmd())
 		}

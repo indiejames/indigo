@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/indiejames/indigo/internal/config"
 )
 
@@ -22,12 +24,11 @@ func TestApplyKeymenusSimpleMenu(t *testing.T) {
 	}
 
 	m := newTestModel("hello\n")
-	m2, _ := m.handleNormal(fakeKey("ctrl+g"))
-	got := m2.(Model)
+	got, _ := pressBound(m, "ctrl+g")
 	if got.prefixSeq == nil {
 		t.Fatal("ctrl+g should enter a pending prefix sequence")
 	}
-	m3, cmd := got.handleNormal(fakeKey("s"))
+	m3, cmd := pressBound(got, "s")
 	if cmd == nil {
 		t.Error("ctrl+g s should dispatch save (expected non-nil cmd)")
 	}
@@ -48,7 +49,7 @@ func TestApplyKeymenusArbitraryDepth(t *testing.T) {
 	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
-	cmd, ok := findCommand([]string{"ctrl+g", "i", "s"})
+	cmd, ok := findKeymap([]string{"ctrl+g", "i", "s"})
 	if !ok {
 		t.Fatal("ctrl+g i s not found")
 	}
@@ -57,11 +58,9 @@ func TestApplyKeymenusArbitraryDepth(t *testing.T) {
 	}
 }
 
-// TestApplyKeymenusCollisionWithBuiltinMenu verifies a user-defined menu at
-// an existing built-in menu's key (here "s", built-in Sort) fully replaces
-// it, with a warning — "config always wins," matching [[keybind]]'s
-// existing precedent.
-func TestApplyKeymenusCollisionWithBuiltinMenu(t *testing.T) {
+// TestApplyKeymenusRefusesATypedKey: a menu opened by a character would stop
+// that character being typed, so it is refused.
+func TestApplyKeymenusRefusesATypedKey(t *testing.T) {
 	resetKeybinds(t)
 	cfg := &config.Config{Keymenus: []config.KeymenuNode{
 		{Key: "s", Label: "Custom", Children: []config.KeymenuNode{
@@ -69,15 +68,11 @@ func TestApplyKeymenusCollisionWithBuiltinMenu(t *testing.T) {
 		}},
 	}}
 	warnings := applyKeybindOverrides(cfg)
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "shadows") {
-		t.Fatalf("warnings = %v, want one containing 'shadows'", warnings)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "types a character") {
+		t.Fatalf("warnings = %v, want one saying s types a character", warnings)
 	}
-	if _, ok := findCommand([]string{"s", "a"}); ok {
-		t.Error("built-in Sort's \"a\" child should be unreachable after shadowing")
-	}
-	cmd, ok := findCommand([]string{"s", "x"})
-	if !ok || cmd.name != "save" {
-		t.Error("custom menu's \"x\" child should be reachable at s x")
+	if _, ok := findKeymap([]string{"s", "x"}); ok {
+		t.Error("a menu was added at a typed key")
 	}
 }
 
@@ -95,7 +90,7 @@ func TestApplyKeymenusCollisionWithBuiltinLeaf(t *testing.T) {
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "shadows") {
 		t.Fatalf("warnings = %v, want one containing 'shadows'", warnings)
 	}
-	cmd, ok := findCommand([]string{"ctrl+s", "x"})
+	cmd, ok := findKeymap([]string{"ctrl+s", "x"})
 	if !ok || cmd.name != "quit" {
 		t.Error("custom menu's \"x\" child should be reachable at ctrl+s x")
 	}
@@ -115,7 +110,7 @@ func TestApplyKeymenusBothActionAndChildren(t *testing.T) {
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "both an action and child") {
 		t.Fatalf("warnings = %v, want one containing 'both an action and child'", warnings)
 	}
-	if _, ok := findCommand([]string{"ctrl+g"}); ok {
+	if _, ok := findKeymap([]string{"ctrl+g"}); ok {
 		t.Error("invalid top-level node should not be applied at all")
 	}
 }
@@ -149,11 +144,11 @@ func TestApplyKeymenusDuplicateSiblingKey(t *testing.T) {
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "more than one child with key") {
 		t.Fatalf("warnings = %v, want one containing 'more than one child with key'", warnings)
 	}
-	cmd, ok := findCommand([]string{"ctrl+g", "s"})
+	cmd, ok := findKeymap([]string{"ctrl+g", "s"})
 	if !ok || cmd.name != "save" {
 		t.Error("first sibling with key \"s\" (save) should win")
 	}
-	if _, ok := findCommand([]string{"ctrl+g", "q"}); !ok {
+	if _, ok := findKeymap([]string{"ctrl+g", "q"}); !ok {
 		t.Error("unrelated valid sibling \"q\" should still apply")
 	}
 }
@@ -172,10 +167,10 @@ func TestApplyKeymenusUnknownAction(t *testing.T) {
 	if len(warnings) != 1 || !strings.Contains(warnings[0], `unknown action "does-not-exist"`) {
 		t.Fatalf("warnings = %v, want one containing the unknown action", warnings)
 	}
-	if _, ok := findCommand([]string{"ctrl+g", "z"}); ok {
+	if _, ok := findKeymap([]string{"ctrl+g", "z"}); ok {
 		t.Error("invalid child (unknown action) should not be reachable at ctrl+g z")
 	}
-	if _, ok := findCommand([]string{"ctrl+g", "s"}); !ok {
+	if _, ok := findKeymap([]string{"ctrl+g", "s"}); !ok {
 		t.Error("valid sibling should still apply despite the invalid one")
 	}
 }
@@ -199,16 +194,43 @@ func TestApplyKeymenusEmptyTopLevelKey(t *testing.T) {
 func TestApplyKeymenusRevertsOnReload(t *testing.T) {
 	resetKeybinds(t)
 	applyKeybindOverrides(&config.Config{Keymenus: []config.KeymenuNode{
-		{Key: "s", Label: "Custom", Children: []config.KeymenuNode{{Key: "x", Action: "save"}}},
+		{Key: "ctrl+s", Label: "Custom", Children: []config.KeymenuNode{{Key: "x", Action: "quit"}}},
 	}})
 	applyKeybindOverrides(&config.Config{})
 
-	if _, ok := findCommand([]string{"s", "x"}); ok {
+	if _, ok := findKeymap([]string{"ctrl+s", "x"}); ok {
 		t.Error("custom menu should be gone after reload without it")
 	}
-	cmd, ok := findCommand([]string{"s", "a"})
-	if !ok || cmd.name != "sort-lines-ascending" {
-		t.Error("built-in Sort menu should be restored after reload")
+	cmd, ok := findKeymap([]string{"ctrl+s"})
+	if !ok || cmd.name != "save" {
+		t.Error("built-in ctrl+s should be restored after reload")
+	}
+}
+
+// TestAKeymenuOpensFromTheKeymapAndShowsItsMenu: the menu's key, pressed
+// while typing, opens the menu rather than doing nothing, and the popup
+// lists the menu's entries.
+func TestAKeymenuOpensFromTheKeymapAndShowsItsMenu(t *testing.T) {
+	resetKeybinds(t)
+	if w := applyKeybindOverrides(&config.Config{Keymenus: []config.KeymenuNode{
+		{Key: "ctrl+o", Label: "Mine", Children: []config.KeymenuNode{{Key: "a", Action: "select-all"}}},
+	}}); len(w) != 0 {
+		t.Fatalf("unexpected warnings: %v", w)
+	}
+	m := typeText(t, modelessModel("hello\n"), "x")
+	m, _ = pressKey(t, m, ctrlKey('o'))
+	if len(m.prefixSeq) != 1 || m.prefixSeq[0] != "ctrl+o" {
+		t.Fatalf("prefixSeq = %v after ctrl+o, want the menu open", m.prefixSeq)
+	}
+	if v := ansiStrip(m.View().Content); !strings.Contains(v, "Select all") {
+		t.Errorf("the open menu's popup doesn't list its entry:\n%s", v)
+	}
+	m, _ = pressKey(t, m, tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if m.sel == nil {
+		t.Error("ctrl+o a did not run select-all")
+	}
+	if got := m.buf.Content(); got != "xhello\n" {
+		t.Errorf("content = %q, want the menu key typed nothing", got)
 	}
 }
 
@@ -268,11 +290,16 @@ func TestApplyKeymenusLabelFallback(t *testing.T) {
 	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
-	cmd, ok := findCommand([]string{"ctrl+g", "s"})
+	cmd, ok := findKeymap([]string{"ctrl+g", "s"})
 	if !ok {
 		t.Fatal("ctrl+g s not found")
 	}
 	if cmd.label != "Save" {
 		t.Errorf("label = %q, want canonical label %q (not bare action name)", cmd.label, "Save")
 	}
+}
+
+// findKeymap looks seq up in the keymap, where [[keymenu]] menus go.
+func findKeymap(seq []string) (*command, bool) {
+	return findIn(insertCmds, seq)
 }

@@ -131,7 +131,7 @@ func TestExpressionAtCursor(t *testing.T) {
 	}
 	// A one-line selection is evaluated as selected.
 	m := newTestModel("a + b\n")
-	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 4}}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 5}}
 	if got := m.expressionAtCursor(); got != "a + b" {
 		t.Errorf("selection: %q, want %q", got, "a + b")
 	}

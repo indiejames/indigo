@@ -51,8 +51,8 @@ func TestExecuteCommandGotoLine(t *testing.T) {
 	if got.cursor.Line != 1 {
 		t.Errorf("goto 2: cursor.Line = %d, want 1", got.cursor.Line)
 	}
-	if got.mode != ModeNormal {
-		t.Errorf("goto 2: mode = %v, want ModeNormal", got.mode)
+	if got.mode != ModeInsert {
+		t.Errorf("goto 2: mode = %v, want ModeInsert", got.mode)
 	}
 	if got.cmdBuf != "" {
 		t.Errorf("goto 2: cmdBuf = %q, want empty", got.cmdBuf)
@@ -96,8 +96,8 @@ func TestExecuteCommandUnknown(t *testing.T) {
 	if got.status == "" {
 		t.Error("unknown command should set status error")
 	}
-	if got.mode != ModeNormal {
-		t.Errorf("unknown command: mode = %v, want ModeNormal", got.mode)
+	if got.mode != ModeInsert {
+		t.Errorf("unknown command: mode = %v, want ModeInsert", got.mode)
 	}
 }
 
@@ -145,8 +145,8 @@ func TestExecuteCommandSaveAliases(t *testing.T) {
 		m2, _ := m.executeCommand()
 		got := m2.(Model)
 		// Cmd is a tea.Cmd func that calls RPC — we just verify state is clean.
-		if got.mode != ModeNormal {
-			t.Errorf("%q: mode = %v, want ModeNormal", cmd, got.mode)
+		if got.mode != ModeInsert {
+			t.Errorf("%q: mode = %v, want ModeInsert", cmd, got.mode)
 		}
 		if got.cmdBuf != "" {
 			t.Errorf("%q: cmdBuf not cleared", cmd)
@@ -160,8 +160,8 @@ func TestExecuteCommandWriteQuitAliases(t *testing.T) {
 		m.cmdBuf = cmd
 		m2, _ := m.executeCommand()
 		got := m2.(Model)
-		if got.mode != ModeNormal {
-			t.Errorf("%q: mode = %v, want ModeNormal", cmd, got.mode)
+		if got.mode != ModeInsert {
+			t.Errorf("%q: mode = %v, want ModeInsert", cmd, got.mode)
 		}
 	}
 }
@@ -200,8 +200,8 @@ func TestHandleCommandBackspaceEmpty(t *testing.T) {
 
 	m2, _ := m.handleCommand(fakeKey("backspace"))
 	got := m2.(Model)
-	if got.mode != ModeNormal {
-		t.Errorf("backspace on empty buf: mode = %v, want ModeNormal", got.mode)
+	if got.mode != ModeInsert {
+		t.Errorf("backspace on empty buf: mode = %v, want ModeInsert", got.mode)
 	}
 }
 
@@ -212,8 +212,8 @@ func TestHandleCommandEsc(t *testing.T) {
 
 	m2, _ := m.handleCommand(fakeKey("esc"))
 	got := m2.(Model)
-	if got.mode != ModeNormal {
-		t.Errorf("esc: mode = %v, want ModeNormal", got.mode)
+	if got.mode != ModeInsert {
+		t.Errorf("esc: mode = %v, want ModeInsert", got.mode)
 	}
 	if got.cmdBuf != "" {
 		t.Errorf("esc: cmdBuf = %q, want empty", got.cmdBuf)

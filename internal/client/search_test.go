@@ -3,6 +3,8 @@ package client
 import (
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/indiejames/indigo/internal/document"
 )
 
@@ -239,7 +241,7 @@ func TestFindSubstituteMatchesLiteralHasNoBackreferences(t *testing.T) {
 
 func TestFindSubstituteMatchesBoundedToOneLine(t *testing.T) {
 	buf := document.New("", "foo\nfoo\nfoo\n")
-	bounds := &substituteBounds{from: document.Pos{Line: 1, Col: 0}, to: document.Pos{Line: 1, Col: 2}}
+	bounds := &substituteBounds{from: document.Pos{Line: 1, Col: 0}, to: document.Pos{Line: 1, Col: 3}}
 	matches, err := findSubstituteMatches(buf, "foo", "bar", bounds)
 	if err != nil {
 		t.Fatal(err)
@@ -252,7 +254,7 @@ func TestFindSubstituteMatchesBoundedToOneLine(t *testing.T) {
 func TestFindSubstituteMatchesBoundedPartialLine(t *testing.T) {
 	// Bounds cover only "foo foo" — up to but not including the third foo.
 	buf := document.New("", "foo foo foo\n")
-	bounds := &substituteBounds{from: document.Pos{Line: 0, Col: 0}, to: document.Pos{Line: 0, Col: 6}}
+	bounds := &substituteBounds{from: document.Pos{Line: 0, Col: 0}, to: document.Pos{Line: 0, Col: 7}}
 	matches, err := findSubstituteMatches(buf, "foo", "x", bounds)
 	if err != nil {
 		t.Fatal(err)
@@ -375,16 +377,21 @@ func TestSplitSearchQuery(t *testing.T) {
 
 // --- integration: entering search mode and navigating ---
 
+var (
+	f3Key      = tea.KeyPressMsg{Code: tea.KeyF3}
+	shiftF3Key = tea.KeyPressMsg{Code: tea.KeyF3, Mod: tea.ModShift}
+)
+
 func TestSearchModeEnterAndCancel(t *testing.T) {
 	m := newTestModel("hello world\nhello again\n")
 	m.cursor.Line = 0
 	m.cursor.Col = 0
 
-	// Press "/" to enter search mode.
-	m2, _ := m.handleKey(fakeKey("/"))
+	// Press Ctrl+F to enter search mode.
+	m2, _ := m.handleKey(ctrlKey('f'))
 	got := m2.(Model)
 	if got.mode != ModeSearch {
-		t.Fatalf("after '/': mode = %v, want ModeSearch", got.mode)
+		t.Fatalf("after Ctrl+F: mode = %v, want ModeSearch", got.mode)
 	}
 
 	// Type "hello".
@@ -403,8 +410,8 @@ func TestSearchModeEnterAndCancel(t *testing.T) {
 	origin := got.searchOrigin
 	m2, _ = got.handleKey(fakeKey("esc"))
 	got = m2.(Model)
-	if got.mode != ModeNormal {
-		t.Errorf("after esc: mode = %v, want ModeNormal", got.mode)
+	if got.mode != ModeInsert {
+		t.Errorf("after esc: mode = %v, want ModeInsert", got.mode)
 	}
 	if got.cursor != origin {
 		t.Errorf("cursor not restored: got %v, want %v", got.cursor, origin)
@@ -417,7 +424,7 @@ func TestSearchModeEnterAndCancel(t *testing.T) {
 func TestSearchModeEnterConfirm(t *testing.T) {
 	m := newTestModel("hello world\nhello again\n")
 
-	m2, _ := m.handleKey(fakeKey("/"))
+	m2, _ := m.handleKey(ctrlKey('f'))
 	got := m2.(Model)
 	for _, ch := range "hello" {
 		m2, _ = got.handleKey(fakeKey(string(ch)))
@@ -426,8 +433,8 @@ func TestSearchModeEnterConfirm(t *testing.T) {
 	// Enter confirms.
 	m2, _ = got.handleKey(fakeKey("enter"))
 	got = m2.(Model)
-	if got.mode != ModeNormal {
-		t.Errorf("after enter: mode = %v, want ModeNormal", got.mode)
+	if got.mode != ModeInsert {
+		t.Errorf("after enter: mode = %v, want ModeInsert", got.mode)
 	}
 	// Cursor should be on a match.
 	if got.cursor.Line != 0 || got.cursor.Col != 0 {
@@ -438,7 +445,7 @@ func TestSearchModeEnterConfirm(t *testing.T) {
 func TestSearchNavigation(t *testing.T) {
 	m := newTestModel("aaa bbb\naaa ccc\n")
 	// Prime matches by going through search mode.
-	m2, _ := m.handleKey(fakeKey("/"))
+	m2, _ := m.handleKey(ctrlKey('f'))
 	got := m2.(Model)
 	for _, ch := range "aaa" {
 		m2, _ = got.handleKey(fakeKey(string(ch)))
@@ -451,18 +458,18 @@ func TestSearchNavigation(t *testing.T) {
 		t.Errorf("first match: got %v, want {0,0}", got.cursor)
 	}
 
-	// n → next match.
-	m2, _ = got.handleKey(fakeKey("n"))
+	// F3 → next match.
+	m2, _ = got.handleKey(f3Key)
 	got = m2.(Model)
 	if got.cursor.Line != 1 || got.cursor.Col != 0 {
-		t.Errorf("n: got %v, want {1,0}", got.cursor)
+		t.Errorf("F3: got %v, want {1,0}", got.cursor)
 	}
 
-	// N → previous match.
-	m2, _ = got.handleKey(fakeKey("N"))
+	// Shift+F3 → previous match.
+	m2, _ = got.handleKey(shiftF3Key)
 	got = m2.(Model)
 	if got.cursor.Line != 0 || got.cursor.Col != 0 {
-		t.Errorf("N: got %v, want {0,0}", got.cursor)
+		t.Errorf("Shift+F3: got %v, want {0,0}", got.cursor)
 	}
 }
 
@@ -603,10 +610,10 @@ func TestNAfterEscReactivatesLastSearch(t *testing.T) {
 		t.Fatal("expected matches after committing the search")
 	}
 
-	m2, _ = got.handleNormal(fakeKey("n")) // jump around a bit, as described
+	m2, _ = got.handleKey(f3Key) // jump around a bit, as described
 	got = m2.(Model)
 
-	m2, _ = got.handleNormal(fakeKey("esc")) // "break out"
+	m2, _ = got.handleKey(fakeKey("esc")) // "break out"
 	got = m2.(Model)
 	if len(got.searchMatches) != 0 {
 		t.Fatal("expected search state cleared after Esc")
@@ -618,7 +625,7 @@ func TestNAfterEscReactivatesLastSearch(t *testing.T) {
 	// "At some later date" — move the cursor away first, to prove this
 	// isn't just relying on the cursor already sitting on a match.
 	got.cursor = document.Pos{Line: 2, Col: 5}
-	m2, _ = got.handleNormal(fakeKey("n"))
+	m2, _ = got.handleKey(f3Key)
 	got = m2.(Model)
 
 	if got.cursor.Line != 0 || got.cursor.Col != 0 {
@@ -642,7 +649,7 @@ func TestNDoesNotReactivateOnFailedLiveSearch(t *testing.T) {
 	m2, _ := got.handleKey(fakeKey("enter"))
 	got = m2.(Model)
 
-	m2, _ = got.handleNormal(fakeKey("esc")) // clears search; lastSearchQuery = "hello"
+	m2, _ = got.handleKey(fakeKey("esc")) // clears search; lastSearchQuery = "hello"
 	got = m2.(Model)
 	if got.lastSearchQuery != "hello" {
 		t.Fatalf("lastSearchQuery = %q, want %q", got.lastSearchQuery, "hello")
@@ -664,7 +671,7 @@ func TestNDoesNotReactivateOnFailedLiveSearch(t *testing.T) {
 	// actually observable.
 	got.cursor = document.Pos{Line: 1, Col: 3}
 
-	m2, _ = got.handleNormal(fakeKey("n"))
+	m2, _ = got.handleKey(f3Key)
 	got = m2.(Model)
 
 	if len(got.searchMatches) != 0 {

@@ -1,6 +1,8 @@
 package client
 
 import (
+	"reflect"
+	"slices"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -22,70 +24,114 @@ func runKeys(t *testing.T, m Model, keys ...tea.KeyMsg) Model {
 	return m
 }
 
+var (
+	endKey  = tea.KeyPressMsg{Code: tea.KeyEnd}
+	downKey = tea.KeyPressMsg{Code: tea.KeyDown}
+)
+
+// macroKeyNames is a macro as key names, for comparing.
+func macroKeyNames(keys []tea.KeyMsg) []string {
+	names := make([]string, len(keys))
+	for i, k := range keys {
+		names[i] = k.String()
+	}
+	return names
+}
+
+func wantMacro(t *testing.T, m Model, want ...string) {
+	t.Helper()
+	if got := macroKeyNames(m.lastMacro); !slices.Equal(got, want) {
+		t.Errorf("lastMacro = %q, want %q", got, want)
+	}
+}
+
 // TestMacroRecordExcludesToggleKeys is a regression test for the core
-// recording contract: the q keypresses that start and stop recording must
-// never themselves end up in the recorded sequence, only the keys typed in
-// between.
+// recording contract: the Ctrl+Space q sequences that start and stop
+// recording must never themselves end up in the recorded sequence, only the
+// keys typed in between.
 func TestMacroRecordExcludesToggleKeys(t *testing.T) {
-	m := newTestModel("one\ntwo\nthree\n")
-	m.rpc = &RPC{} // zero-value RPC is safe: ClientID() just reads a field, no dial
+	m := modelessModel("one\ntwo\nthree\n")
 
 	m = runKeys(t, m,
-		fakeKey("q"),   // start recording (excluded)
-		fakeKey("A"),   // append at line end (recorded)
-		fakeKey("!"),   // insert '!' (recorded)
-		fakeKey("esc"), // back to normal (recorded)
-		fakeKey("q"),   // stop recording (excluded)
+		ctrlSpace, fakeKey("q"), // start recording (excluded)
+		endKey,                  // to the line end (recorded)
+		fakeKey("!"),            // type '!' (recorded)
+		ctrlSpace, fakeKey("q"), // stop recording (excluded)
 	)
 
 	if m.macroRecording {
-		t.Fatal("macroRecording still true after second q")
+		t.Fatal("macroRecording still true after stopping")
 	}
 	if len(m.macroKeys) != 0 {
 		t.Errorf("macroKeys = %v, want cleared after stopping", m.macroKeys)
 	}
-	want := []tea.KeyMsg{fakeKey("A"), fakeKey("!"), fakeKey("esc")}
-	if len(m.lastMacro) != len(want) {
-		t.Fatalf("lastMacro = %v, want %v", m.lastMacro, want)
-	}
-	for i, k := range want {
-		if m.lastMacro[i].String() != k.String() {
-			t.Errorf("lastMacro[%d] = %q, want %q", i, m.lastMacro[i].String(), k.String())
-		}
-	}
+	wantMacro(t, m, "end", "!")
 	// The recorded edit itself must also have actually happened once, live.
 	if got := m.buf.Content(); got != "one!\ntwo\nthree\n" {
 		t.Errorf("buffer after recording = %q, want %q", got, "one!\ntwo\nthree\n")
 	}
 }
 
-// TestMacroReplayReproducesRecordedEdit verifies that feeding the recorded
-// key sequence back through Update — what executeMacroReplay's tea.Sequence
-// does at runtime, one key delivered to Update at a time in order —
-// reproduces the same edit on a different line. tea.Sequence's own delivery
-// ordering is bubbletea's guarantee, not re-tested here; what's under test is
-// that lastMacro holds the right keys and that replaying them through the
-// normal dispatch path does the right thing.
+// TestMacroReplayReproducesRecordedEdit verifies that Ctrl+Space @ replays
+// the recorded keys and reproduces the same edit on a different line.
 func TestMacroReplayReproducesRecordedEdit(t *testing.T) {
-	m := newTestModel("one\ntwo\nthree\n")
-	m.rpc = &RPC{} // zero-value RPC is safe: ClientID() just reads a field, no dial
+	m := modelessModel("one\ntwo\nthree\n")
 
-	m = runKeys(t, m, fakeKey("q"), fakeKey("A"), fakeKey("!"), fakeKey("esc"), fakeKey("q"))
+	m = runKeys(t, m, ctrlSpace, fakeKey("q"), endKey, fakeKey("!"), ctrlSpace, fakeKey("q"))
 	if got := m.buf.Content(); got != "one!\ntwo\nthree\n" {
 		t.Fatalf("setup: buffer = %q, want %q", got, "one!\ntwo\nthree\n")
 	}
 
 	// Move to line 1 ("two") and replay the recorded macro there.
-	m = runKeys(t, m, fakeKey("down"))
+	m = runKeys(t, m, downKey)
 	if m.cursor.Line != 1 {
 		t.Fatalf("setup: cursor.Line = %d, want 1", m.cursor.Line)
 	}
-	m = runKeys(t, m, m.lastMacro...)
+	m = runKeys(t, m, ctrlSpace)
+	out, cmd := m.Update(fakeKey("@"))
+	m = out.(Model)
+	m = runKeys(t, m, replayedKeys(t, cmd)...)
 
 	want := "one!\ntwo!\nthree\n"
 	if got := m.buf.Content(); got != want {
 		t.Errorf("buffer after replay = %q, want %q", got, want)
 	}
+}
+
+// replayedKeys runs the tea.Sequence executeMacroReplay returns and collects
+// the keys it would deliver.
+func replayedKeys(t *testing.T, cmd tea.Cmd) []tea.KeyMsg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("replay returned no command")
+	}
+	var keys []tea.KeyMsg
+	var collect func(tea.Msg)
+	collect = func(msg tea.Msg) {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			keys = append(keys, msg)
+		case tea.BatchMsg:
+			for _, c := range msg {
+				if c != nil {
+					collect(c())
+				}
+			}
+		default:
+			// tea.Sequence's message type is unexported; read its commands
+			// through reflection rather than depend on its name.
+			v := reflect.ValueOf(msg)
+			if v.Kind() == reflect.Slice {
+				for i := range v.Len() {
+					if c, ok := v.Index(i).Interface().(tea.Cmd); ok && c != nil {
+						collect(c())
+					}
+				}
+			}
+		}
+	}
+	collect(cmd())
+	return keys
 }
 
 // TestMacroReplayBlockedWhileRecording verifies @ refuses to replay (and
@@ -122,91 +168,60 @@ func TestMacroReplayNoopWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestMacroRecordLiteralQInInsertMode is a regression test for the obvious
-// question the q-toggles-recording design raises: how do you get a literal
-// 'q' character into a macro? Answer: q only toggles recording when it's a
-// Normal-mode *command* — in Insert mode it's an ordinary self-inserted
-// character, handled entirely outside the Normal-mode dispatch table q's
-// toggle is registered in, so it types 'q' and gets recorded like any other
-// key instead of stopping the recording.
-func TestMacroRecordLiteralQInInsertMode(t *testing.T) {
-	m := newTestModel("one\n")
-	m.rpc = &RPC{} // zero-value RPC is safe: ClientID() just reads a field, no dial
+// TestMacroRecordsMenuLettersTypedOutsideTheMenu: q and @ are only macro
+// commands inside the Command menu. Typed on their own they are text, and
+// are recorded like any other key.
+func TestMacroRecordsMenuLettersTypedOutsideTheMenu(t *testing.T) {
+	m := modelessModel("one\n")
 
 	m = runKeys(t, m,
-		fakeKey("q"),   // start recording
-		fakeKey("i"),   // enter insert mode
-		fakeKey("q"),   // literal 'q' — must NOT stop recording
-		fakeKey("u"),   // literal 'u'
-		fakeKey("esc"), // back to normal
-		fakeKey("q"),   // stop recording
+		ctrlSpace, fakeKey("q"), // start recording
+		fakeKey("q"),            // literal 'q' — must NOT stop recording
+		fakeKey("@"),            // literal '@' — must NOT replay
+		ctrlSpace, fakeKey("q"), // stop recording
 	)
 
 	if m.macroRecording {
-		t.Fatal("recording should have stopped by the final q")
+		t.Fatal("recording should have stopped")
 	}
-	if got := m.buf.Content(); got != "quone\n" {
-		t.Fatalf("buffer = %q, want %q (literal q typed, not treated as stop-toggle)", got, "quone\n")
+	if got := m.buf.Content(); got != "q@one\n" {
+		t.Fatalf("buffer = %q, want %q (literal q and @ typed)", got, "q@one\n")
 	}
-	want := []string{"i", "q", "u", "esc"}
-	if len(m.lastMacro) != len(want) {
-		t.Fatalf("lastMacro = %v, want keys %v", m.lastMacro, want)
-	}
-	for i, k := range want {
-		if got := m.lastMacro[i].String(); got != k {
-			t.Errorf("lastMacro[%d] = %q, want %q", i, got, k)
-		}
-	}
+	wantMacro(t, m, "q", "@")
 }
 
 // TestMacroExcludesRejectedReplayFromRecording is a regression test for a
-// self-referential-replay bug: pressing @ in Normal mode while a recording
-// is in progress is rejected by executeMacroReplay (no nested replay runs
-// at that moment) — but without macroReplayBlocked's special handling, that
-// rejected @ keypress would still get *recorded* into the macro like any
-// other key. Later, replaying the finished macro would redeliver that
-// recorded @ — no longer "while recording" at that point, so it would
+// self-referential-replay bug: asking for a replay while a recording is in
+// progress is rejected by executeMacroReplay — but without
+// macroReplayBlocked's special handling, the keys asking for it would still
+// get *recorded* into the macro. Later, replaying the finished macro would
+// redeliver them — no longer "while recording" at that point, so they would
 // actually run — scheduling another full replay of the same macro, which
-// itself contains the same @, recursing without end. Excluding the rejected
-// @ from macroKeys prevents this at the root: @ never appears in lastMacro
-// at all, so a replay can never re-trigger itself.
+// itself contains the same keys, recursing without end.
 func TestMacroExcludesRejectedReplayFromRecording(t *testing.T) {
-	m := newTestModel("one\ntwo\n")
-	m.rpc = &RPC{} // zero-value RPC is safe: ClientID() just reads a field, no dial
+	m := modelessModel("one\ntwo\n")
 
 	m = runKeys(t, m,
-		fakeKey("q"),   // start recording
-		fakeKey("i"),   // enter insert mode
-		fakeKey("x"),   // literal 'x'
-		fakeKey("esc"), // back to normal
-		fakeKey("@"),   // replay attempt while recording — rejected, must NOT be recorded
-		fakeKey("q"),   // stop recording
+		ctrlSpace, fakeKey("q"), // start recording
+		fakeKey("x"),            // literal 'x'
+		ctrlSpace, fakeKey("@"), // replay attempt while recording — rejected, must NOT be recorded
+		ctrlSpace, fakeKey("q"), // stop recording
 	)
 
 	if m.macroRecording {
-		t.Fatal("recording should have stopped by the final q")
+		t.Fatal("recording should have stopped")
 	}
 	if m.macroReplayBlocked {
 		t.Error("macroReplayBlocked left set — should be cleared the moment it's consumed")
 	}
-	want := []string{"i", "x", "esc"}
-	if len(m.lastMacro) != len(want) {
-		t.Fatalf("lastMacro = %v, want keys %v (no @)", m.lastMacro, want)
-	}
-	for i, k := range want {
-		if got := m.lastMacro[i].String(); got != k {
-			t.Errorf("lastMacro[%d] = %q, want %q", i, got, k)
-		}
-	}
+	wantMacro(t, m, "x")
 
 	// Replaying the finished macro on a fresh line must apply the recorded
-	// edit exactly once, not recurse — there's no @ left in the sequence to
-	// re-trigger executeMacroReplay.
-	m = runKeys(t, m, fakeKey("down")) // move to "two"
+	// edit exactly once, not recurse.
+	m = runKeys(t, m, downKey, tea.KeyPressMsg{Code: tea.KeyHome})
 	m = runKeys(t, m, m.lastMacro...)
-	want2 := "xone\nxtwo\n"
-	if got := m.buf.Content(); got != want2 {
-		t.Errorf("buffer after replay = %q, want %q", got, want2)
+	if want := "xone\nxtwo\n"; m.buf.Content() != want {
+		t.Errorf("buffer after replay = %q, want %q", m.buf.Content(), want)
 	}
 }
 
@@ -214,13 +229,26 @@ func TestMacroExcludesRejectedReplayFromRecording(t *testing.T) {
 // stopping recording (no keys typed in between) produces an empty, harmless
 // macro rather than one containing stray state.
 func TestMacroRecordToggleTwiceIsEmptyMacro(t *testing.T) {
-	m := newTestModel("one\n")
+	m := modelessModel("one\n")
 
-	m = runKeys(t, m, fakeKey("q"), fakeKey("q"))
+	m = runKeys(t, m, ctrlSpace, fakeKey("q"), ctrlSpace, fakeKey("q"))
 	if m.macroRecording {
 		t.Error("macroRecording still true after immediate stop")
 	}
 	if len(m.lastMacro) != 0 {
 		t.Errorf("lastMacro = %v, want empty", m.lastMacro)
 	}
+}
+
+// TestMacroKeepsMenuCommandsItRecorded: a menu command recorded in a macro
+// stays in it; only the menu sequence that stops the recording is cut.
+func TestMacroKeepsMenuCommandsItRecorded(t *testing.T) {
+	m := modelessModel("one\n")
+
+	m = runKeys(t, m,
+		ctrlSpace, fakeKey("q"),
+		ctrlSpace, fakeKey("g"), fakeKey("e"), // go to end of file (recorded)
+		ctrlSpace, fakeKey("q"),
+	)
+	wantMacro(t, m, "ctrl+space", "g", "e")
 }

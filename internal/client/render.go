@@ -142,15 +142,15 @@ func (m *Model) normalLineEnd(line int) int {
 	return max(0, lineLen-1)
 }
 
-// moveCursorChar moves the Normal-mode cursor by one character, treating the
-// line break between two lines as a single crossable character: moving right
-// from the last character steps onto the line break, then a further right
-// step crosses onto the next line; moving left is the mirror image.
+// moveCursorChar moves the cursor one position, treating the line break
+// between two lines as one character: moving right from the end of a line
+// crosses to the start of the next, and moving left is the mirror image. The
+// cursor sits between characters, so every line's end is a position.
 func (m *Model) moveCursorChar(delta int) {
 	line, col := m.cursor.Line, m.cursor.Col
 	switch {
 	case delta > 0:
-		if end := m.normalLineEnd(line); col < end {
+		if col < m.buf.LineLen(line) {
 			col++
 		} else if line < m.buf.LineCount()-1 {
 			line++
@@ -161,7 +161,7 @@ func (m *Model) moveCursorChar(delta int) {
 			col--
 		} else if line > 0 {
 			line--
-			col = m.normalLineEnd(line)
+			col = m.buf.LineLen(line)
 		}
 	}
 	m.cursor.Line, m.cursor.Col = line, col
@@ -546,8 +546,10 @@ func (m Model) gutterWidth() int {
 	return w
 }
 
-// selectionCols returns the inclusive [selA, selB] column range selected on
-// lineNum, or (-1, -1) when lineNum is not inside the current selection.
+// selectionCols returns the inclusive [selA, selB] range of cells to draw as
+// selected on lineNum, or (-1, -1) when none are. The selection itself is
+// half-open; a line whose line break is selected draws one cell past its last
+// character, so an empty line inside a selection still shows as selected.
 func (m Model) selectionCols(lineNum, lineLen int) (selA, selB int) {
 	if m.sel == nil {
 		return -1, -1
@@ -560,9 +562,9 @@ func (m Model) selectionCols(lineNum, lineLen int) (selA, selB int) {
 	if lineNum == start.Line {
 		selA = start.Col
 	}
-	selB = max(0, lineLen-1)
-	if !m.sel.IsLine && lineNum == end.Line {
-		selB = min(end.Col, max(0, lineLen-1))
+	selB = lineLen // the line break, selected when the selection goes past it
+	if lineNum == end.Line {
+		selB = end.Col - 1
 	}
 	if selA > selB {
 		return -1, -1

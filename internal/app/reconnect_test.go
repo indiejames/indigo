@@ -31,7 +31,7 @@ func typeKeys(t *testing.T, a App, keys ...tea.KeyPressMsg) App {
 
 func char(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: string(r)} }
 
-var esc = tea.KeyPressMsg{Code: tea.KeyEscape}
+var endKey = tea.KeyPressMsg{Code: tea.KeyEnd}
 
 func bufferFor(t *testing.T, a App, path string) client.Model {
 	t.Helper()
@@ -129,12 +129,12 @@ func TestAWindowSurvivesItsConnectionDropping(t *testing.T) {
 	a = run(t, updated.(App), cmd, time.Second, 0)
 	updated, cmd = a.Update(client.OpenFileAtMsg{Path: bPath, Col: -1})
 	a = run(t, updated.(App), cmd, 3*time.Second, 0)
-	a = typeKeys(t, a, char('i'), char('X'), esc) // reaches the first server
+	a = typeKeys(t, a, char('X')) // reaches the first server
 
 	conn1.Close() //nolint:errcheck
 	// Typed before the window has heard of the drop: this edit is sent on a
 	// dead connection and never reaches any server.
-	a = typeKeys(t, a, char('A'), char('Y'), esc)
+	a = typeKeys(t, a, endKey, char('Y'))
 
 	a = pump(t, a, q, "the reconnect to finish", func(a App) bool {
 		return a.reconnectSeq == 1 && !a.reconnecting
@@ -164,7 +164,7 @@ func TestAWindowSurvivesItsConnectionDropping(t *testing.T) {
 	}
 	checkServer(aPath, aWant)
 
-	a = typeKeys(t, a, char('A'), char('Z'), esc)
+	a = typeKeys(t, a, endKey, char('Z'))
 	checkServer(bPath, "XbravoYZ\n")
 }
 

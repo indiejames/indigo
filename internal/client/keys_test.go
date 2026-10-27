@@ -354,8 +354,8 @@ func TestHandleNormalSelectLine(t *testing.T) {
 	if got.sel == nil {
 		t.Fatal("x: sel should be set")
 	}
-	if !got.sel.IsLine {
-		t.Error("x: sel.IsLine should be true")
+	if !got.isLineSelection() {
+		t.Error("x: selection should cover the whole line")
 	}
 }
 
@@ -418,17 +418,19 @@ func TestHandleNormalPrefixMIWExecutes(t *testing.T) {
 
 // --- handleInsert (safe: esc and movement only) ---
 
-func TestHandleInsertEscToNormal(t *testing.T) {
+// TestHandleInsertEscKeepsTyping: Esc closes things, and leaves the cursor
+// where it is, ready to type.
+func TestHandleInsertEscKeepsTyping(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.mode = ModeInsert
 	m.cursor.Col = 3
 	m2, _ := m.handleInsert(fakeKey("esc"))
 	got := m2.(Model)
-	if got.mode != ModeNormal {
-		t.Errorf("esc: mode = %v, want ModeNormal", got.mode)
+	if got.mode != ModeInsert {
+		t.Errorf("esc: mode = %v, want ModeInsert", got.mode)
 	}
-	if got.cursor.Col != 2 {
-		t.Errorf("esc: cursor.Col = %d, want 2 (decremented)", got.cursor.Col)
+	if got.cursor.Col != 3 {
+		t.Errorf("esc: cursor.Col = %d, want 3 (unmoved)", got.cursor.Col)
 	}
 }
 
@@ -527,8 +529,8 @@ func TestExecuteSelectInsideWordMid(t *testing.T) {
 	if got.sel == nil {
 		t.Fatal("miw: sel should be set")
 	}
-	if got.sel.Anchor.Col != 0 || got.sel.Head.Col != 4 {
-		t.Errorf("miw: sel [%d,%d], want [0,4]", got.sel.Anchor.Col, got.sel.Head.Col)
+	if got.sel.Anchor.Col != 0 || got.sel.Head.Col != 5 {
+		t.Errorf("miw: sel [%d,%d), want [0,5)", got.sel.Anchor.Col, got.sel.Head.Col)
 	}
 }
 
@@ -611,9 +613,9 @@ func TestIndentCurrentLine(t *testing.T) {
 
 func TestIndentMultipleLines(t *testing.T) {
 	m := newTestModel("aa\nbb\ncc\n")
-	m.sel = &Selection{
+	m.sel = &Selection{ // lines 0 and 1, through line 1's break
 		Anchor: document.Pos{Line: 0, Col: 0},
-		Head:   document.Pos{Line: 1, Col: 0},
+		Head:   document.Pos{Line: 2, Col: 0},
 	}
 	m2, _ := executeIndent(m)
 	got := m2.(Model)
@@ -634,8 +636,8 @@ func TestIndentMultipleLines(t *testing.T) {
 	if got.sel.Anchor != (document.Pos{Line: 0, Col: 1}) {
 		t.Errorf("indent: sel.Anchor = %v, want {0,1}", got.sel.Anchor)
 	}
-	if got.sel.Head != (document.Pos{Line: 1, Col: 1}) {
-		t.Errorf("indent: sel.Head = %v, want {1,1}", got.sel.Head)
+	if got.sel.Head != (document.Pos{Line: 2, Col: 0}) {
+		t.Errorf("indent: sel.Head = %v, want {2,0} (line 2 is not indented)", got.sel.Head)
 	}
 }
 
@@ -646,7 +648,7 @@ func TestIndentTwiceKeepsSelection(t *testing.T) {
 	m := newTestModel("aa\nbb\n")
 	m.sel = &Selection{
 		Anchor: document.Pos{Line: 0, Col: 0},
-		Head:   document.Pos{Line: 1, Col: 0},
+		Head:   document.Pos{Line: 2, Col: 0},
 	}
 	m2, _ := executeIndent(m)
 	m3, _ := executeIndent(m2.(Model))
@@ -780,8 +782,8 @@ func TestExtendLineEndFromCursor(t *testing.T) {
 	if got.sel.Anchor != (document.Pos{Line: 0, Col: 2}) {
 		t.Errorf("shift+end: sel.Anchor = %v, want {0,2}", got.sel.Anchor)
 	}
-	if got.sel.Head != (document.Pos{Line: 0, Col: 10}) {
-		t.Errorf("shift+end: sel.Head = %v, want {0,10} (last char)", got.sel.Head)
+	if got.sel.Head != (document.Pos{Line: 0, Col: 11}) {
+		t.Errorf("shift+end: sel.Head = %v, want {0,11} (the line end)", got.sel.Head)
 	}
 	if got.cursor != got.sel.Head {
 		t.Errorf("shift+end: cursor = %v, want %v (sel.Head)", got.cursor, got.sel.Head)
@@ -819,8 +821,8 @@ func TestExtendLineEndExtendsExistingSelection(t *testing.T) {
 	if got.sel.Anchor != (document.Pos{Line: 0, Col: 2}) {
 		t.Errorf("shift+end: sel.Anchor = %v, want {0,2} (unchanged)", got.sel.Anchor)
 	}
-	if got.sel.Head != (document.Pos{Line: 0, Col: 10}) {
-		t.Errorf("shift+end: sel.Head = %v, want {0,10}", got.sel.Head)
+	if got.sel.Head != (document.Pos{Line: 0, Col: 11}) {
+		t.Errorf("shift+end: sel.Head = %v, want {0,11}", got.sel.Head)
 	}
 }
 
@@ -921,13 +923,9 @@ func TestExtendCharForwardCrossesLineBreak(t *testing.T) {
 	if got.cursor != got.sel.Head {
 		t.Errorf("shift+right x2: cursor = %v, want %v (sel.Head)", got.cursor, got.sel.Head)
 	}
-	// The selected text includes 'c': Head rests at (1,0), the position of
-	// 'c', and per this codebase's inclusive-Head convention (see
-	// extendToLineEnd/extendWordForward) whatever character the cursor lands
-	// on is part of the selection — same rule that makes the very first
-	// shift+right select 2 characters instead of 1. This is intentional, not
-	// a VS-Code-style "select only what was crossed" model.
-	if want := "b\nc"; got.selectedText() != want {
+	// Selections are half-open: what was crossed is selected, 'b' and the
+	// line break, and the head at (1,0) sits before 'c'.
+	if want := "b\n"; got.selectedText() != want {
 		t.Errorf("shift+right x2: selectedText() = %q, want %q", got.selectedText(), want)
 	}
 }

@@ -158,6 +158,7 @@ func (m Model) fetchSignatureHelp() tea.Cmd {
 
 func (m Model) fetchCompletions() tea.Cmd {
 	bufID := m.bufID
+	epoch := m.completionEpoch
 	line, col := m.cursor.Line, m.cursor.Col
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -166,7 +167,7 @@ func (m Model) fetchCompletions() tea.Cmd {
 		if err != nil {
 			return nil
 		}
-		return completionsMsg{items: items, bufID: bufID}
+		return completionsMsg{items: items, bufID: bufID, epoch: epoch}
 	}
 }
 
@@ -353,14 +354,14 @@ func (m Model) doOrganizeImports() tea.Cmd {
 // codeActionRange returns the request range for LSP code actions: the active
 // selection's ordered bounds if one exists (letting the server offer
 // range-only actions like Extract Function/Extract Variable), or a
-// zero-width point at the cursor otherwise. Selection.Anchor/Head are
-// inclusive on both ends; LSP ranges are exclusive on the end, hence the +1.
+// zero-width point at the cursor otherwise. A selection is half-open, the
+// same as an LSP range.
 func codeActionRange(cursor document.Pos, sel *Selection) (startLine, startCol, endLine, endCol int) {
 	if sel == nil {
 		return cursor.Line, cursor.Col, cursor.Line, cursor.Col
 	}
 	start, end := sel.ordered()
-	return start.Line, start.Col, end.Line, end.Col + 1
+	return start.Line, start.Col, end.Line, end.Col
 }
 
 // fetchFixes collects fix items from the fixable decoration at the cursor (if any)

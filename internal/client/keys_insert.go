@@ -16,6 +16,18 @@ import (
 // (navigation, incremental narrowing, dismissal) before delegating the actual
 // edit to handleInsertKey.
 func (m Model) handleInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Fix popup navigation takes priority.
+	if len(m.fixItems) > 0 {
+		return m.handleFixPopup(msg)
+	}
+	// Capture mode: plugin owns keypresses until it signals done.
+	if m.captureMode {
+		return m.handleCapturedKey(msg)
+	}
+	// A menu opened with Ctrl+Space takes the next keys until it resolves.
+	if len(m.prefixSeq) > 0 {
+		return m.handlePrefixKey(msg)
+	}
 	if m.completionOn {
 		switch msg.String() {
 		case "enter", "tab":
@@ -87,9 +99,9 @@ func (m Model) selectSnippetStop(idx int) Model {
 	if s.end > s.start {
 		m.sel = &Selection{
 			Anchor: document.Pos{Line: m.snippetLine, Col: s.start},
-			Head:   document.Pos{Line: m.snippetLine, Col: s.end - 1}, // selection end is inclusive
+			Head:   document.Pos{Line: m.snippetLine, Col: s.end},
 		}
-		m.cursor = document.Pos{Line: m.snippetLine, Col: s.start}
+		m.cursor = m.sel.Head
 	} else {
 		m.sel = nil
 		m.cursor = document.Pos{Line: m.snippetLine, Col: s.start}
@@ -160,42 +172,10 @@ func (m Model) snippetEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Sequence(cmds...)
 }
 
-// insertCmds is the flat (non-nested) set of Insert-mode key bindings; unlike
-// prefixCmds there are no multi-key sequences, so lookup is a single findIn
-// call. Any key not listed here falls through to insertSelfInsert.
-var insertCmds = []command{
-	// ctrl+space sends NUL → "ctrl+@" in most terminals.
-	{key: "ctrl+@", name: "trigger-completion", label: "Trigger completion", execute: executeTriggerCompletion},
-	{key: "ctrl+space", name: "trigger-completion", label: "Trigger completion", execute: executeTriggerCompletion},
-	{key: "esc", name: "exit-insert-mode", label: "Exit insert mode", execute: executeInsertEsc},
-	// Escape to normal mode (vim convention) — never close from insert mode.
-	{key: "ctrl+c", name: "cancel-insert-mode", label: "Cancel insert mode", execute: executeInsertCtrlC},
-	{key: "ctrl+s", name: "save", label: "Save", execute: executeSave},
-	{key: "ctrl+h", name: "prev-buffer", label: "Previous buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
-		return m, func() tea.Msg { return PrevBufferMsg{} }
-	}},
-	{key: "ctrl+l", name: "next-buffer", label: "Next buffer", execute: func(m Model) (tea.Model, tea.Cmd) {
-		return m, func() tea.Msg { return NextBufferMsg{} }
-	}},
-	{key: "backspace", name: "backspace", label: "Backspace", execute: executeInsertBackspace},
-	{key: "delete", name: "delete-forward", label: "Delete forward", execute: executeInsertDelete},
-	{key: "enter", name: "newline", label: "Newline", execute: executeInsertEnter},
-	{key: "tab", name: "insert-tab", label: "Insert tab", execute: executeInsertTab},
-	{key: "left", name: "cursor-left", label: "Cursor left", execute: executeInsertMoveLeft},
-	{key: "right", name: "cursor-right", label: "Cursor right", execute: executeInsertMoveRight},
-	{key: "up", name: "cursor-up", label: "Cursor up", execute: executeInsertMoveUp},
-	{key: "down", name: "cursor-down", label: "Cursor down", execute: executeInsertMoveDown},
-	{key: "home", name: "line-start", label: "Line start", execute: executeInsertHome},
-	{key: "end", name: "line-end", label: "Line end", execute: executeInsertEnd},
-}
-
 // handleInsertKey handles a single insert-mode key edit. Completion-popup
 // bookkeeping lives in handleInsert; this function only edits the buffer.
 func (m Model) handleInsertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if cmd, ok := findIn(insertCmds, []string{msg.String()}); ok && cmd.execute != nil {
-		return cmd.execute(m)
-	}
-	return m.insertSelfInsert(msg)
+	return m.handleModelessKey(msg)
 }
 
 func executeTriggerCompletion(m Model) (tea.Model, tea.Cmd) {
@@ -221,19 +201,6 @@ func executeInsertEsc(m Model) (tea.Model, tea.Cmd) {
 	}
 	m.currentGroup = nil
 	return m, recordCmd
-}
-
-func executeInsertCtrlC(m Model) (tea.Model, tea.Cmd) {
-	m.mode = ModeNormal
-	m.sigHelp = nil
-	if m.cursor.Col > 0 {
-		m.cursor.Col--
-	}
-	if len(m.currentGroup) > 0 {
-		m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: m.groupBefore})
-	}
-	m.currentGroup = nil
-	return m, nil
 }
 
 func executeInsertBackspace(m Model) (tea.Model, tea.Cmd) {
@@ -318,36 +285,6 @@ func executeInsertTab(m Model) (tea.Model, tea.Cmd) {
 	}
 	m.cursor.Col += len([]rune(text))
 	return applyOp(m, op)
-}
-
-func executeInsertMoveLeft(m Model) (tea.Model, tea.Cmd) {
-	m.moveCursor(0, -1)
-	return m, nil
-}
-
-func executeInsertMoveRight(m Model) (tea.Model, tea.Cmd) {
-	m.moveCursor(0, 1)
-	return m, nil
-}
-
-func executeInsertMoveUp(m Model) (tea.Model, tea.Cmd) {
-	m.moveCursor(-1, 0)
-	return m, nil
-}
-
-func executeInsertMoveDown(m Model) (tea.Model, tea.Cmd) {
-	m.moveCursor(1, 0)
-	return m, nil
-}
-
-func executeInsertHome(m Model) (tea.Model, tea.Cmd) {
-	m.cursor.Col = 0
-	return m, nil
-}
-
-func executeInsertEnd(m Model) (tea.Model, tea.Cmd) {
-	m.cursor.Col = m.buf.LineLen(m.cursor.Line)
-	return m, nil
 }
 
 // insertHookCmd fires the plugin OnInsert hook registered for r, if any, as a
@@ -579,6 +516,15 @@ func (m Model) bufCharAfterIs(at document.Pos, ch rune) bool {
 }
 
 // clearedCompletion returns m with all completion-popup state reset.
+// abandonCompletion closes the popup and drops any list still on its way,
+// whether the request is in flight or waiting out the typing debounce. For
+// anything that moves the user on from where they were typing.
+func (m Model) abandonCompletion() Model {
+	m.completionSeq++
+	m.completionEpoch++
+	return m.clearedCompletion()
+}
+
 func (m Model) clearedCompletion() Model {
 	m.completionOn = false
 	m.completions = nil

@@ -58,17 +58,6 @@ func TestPasteMsgIsHandled(t *testing.T) {
 		}
 	})
 
-	t.Run("normal mode ignores it", func(t *testing.T) {
-		// Matches v1, where the whole pasted string arrived as one key event,
-		// matched no binding, and was dropped. Inserting it instead would let
-		// a stray paste silently modify the buffer outside insert mode.
-		m := newTestModel("abc\n")
-		got, _ := m.Update(tea.PasteMsg{Content: "xyz"})
-		if content := got.(Model).buf.Content(); strings.Contains(content, "xyz") {
-			t.Errorf("normal-mode paste modified the buffer: %q", content)
-		}
-	})
-
 	t.Run("empty paste is a no-op", func(t *testing.T) {
 		m := newTestModel("abc\n")
 		m.rpc = &RPC{}

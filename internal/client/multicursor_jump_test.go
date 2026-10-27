@@ -40,10 +40,10 @@ func TestMultiCursorDeleteTellsTheJumpList(t *testing.T) {
 	m := pausedModel("l0\nl1\nl2\nl3\nl4\n")
 	// Each cursor selects a whole line up to and including its line break.
 	m.cursor = document.Pos{Line: 1, Col: 2}
-	m.sel = &Selection{Anchor: document.Pos{Line: 1, Col: 0}, Head: document.Pos{Line: 1, Col: 2}}
+	m.sel = &Selection{Anchor: document.Pos{Line: 1, Col: 0}, Head: document.Pos{Line: 2, Col: 0}}
 	m.extraCursors = []ExtraCursor{{
 		pos:     document.Pos{Line: 3, Col: 2},
-		sel:     &Selection{Anchor: document.Pos{Line: 3, Col: 0}, Head: document.Pos{Line: 3, Col: 2}},
+		sel:     &Selection{Anchor: document.Pos{Line: 3, Col: 0}, Head: document.Pos{Line: 4, Col: 0}},
 		goalCol: -1,
 	}}
 

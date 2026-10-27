@@ -66,13 +66,13 @@ func TestSnippetModeArgPlaceholders(t *testing.T) {
 	if m.buf.Line(0) != "greet(name, times)" {
 		t.Fatalf("inserted line = %q, want greet(name, times)", m.buf.Line(0))
 	}
-	if m.sel == nil || m.sel.Anchor.Col != 6 || m.sel.Head.Col != 9 {
+	if m.sel == nil || m.sel.Anchor.Col != 6 || m.sel.Head.Col != 10 {
 		t.Fatalf("first placeholder not selected: sel=%+v", m.sel)
 	}
 
-	// Tab selects the second placeholder ("times" at cols 12..16 inclusive).
+	// Tab selects the second placeholder ("times", [12,17)).
 	m2 := m.snippetJump(1).(Model)
-	if m2.sel == nil || m2.sel.Anchor.Col != 12 || m2.sel.Head.Col != 16 {
+	if m2.sel == nil || m2.sel.Anchor.Col != 12 || m2.sel.Head.Col != 17 {
 		t.Fatalf("second placeholder not selected after Tab: sel=%+v", m2.sel)
 	}
 
@@ -88,9 +88,9 @@ func TestSnippetModeArgPlaceholders(t *testing.T) {
 	}
 }
 
-// TestSnippetEscLeavesInsertMode verifies a single Esc exits snippet mode AND
-// insert mode (vim-consistent), rather than requiring two presses.
-func TestSnippetEscLeavesInsertMode(t *testing.T) {
+// TestSnippetEscLeavesSnippetMode verifies Esc exits snippet mode and keeps
+// typing.
+func TestSnippetEscLeavesSnippetMode(t *testing.T) {
 	m := newCompletionApplyTestModel("greet(name)\n")
 	m.cursor = document.Pos{Line: 0, Col: 6}
 	m = m.enterSnippet(0, []snippetStop{{6, 10}, {11, 11}})
@@ -103,8 +103,8 @@ func TestSnippetEscLeavesInsertMode(t *testing.T) {
 	if got.snippetOn {
 		t.Error("snippet mode still on after Esc")
 	}
-	if got.mode != ModeNormal {
-		t.Errorf("mode = %v after Esc, want ModeNormal (single Esc should leave insert mode)", got.mode)
+	if got.mode != ModeInsert {
+		t.Errorf("mode = %v after Esc, want ModeInsert", got.mode)
 	}
 }
 
@@ -164,12 +164,10 @@ func TestMouseClickDuringSnippetExitsSnippetMode(t *testing.T) {
 		t.Error("snippet mode should be exited by a mouse click elsewhere")
 	}
 	want := document.Pos{Line: 1, Col: 0}
-	// The click sets its own fresh single-point selection (normal click
-	// behavior) — the bug is a stale *placeholder* selection surviving, not
-	// selection-in-general, so assert the selection is anchored at the click,
-	// not left over from the snippet.
-	if m.sel == nil || m.sel.Anchor != want || m.sel.Head != want {
-		t.Errorf("sel = %+v, want a fresh point selection at %v (not the stale placeholder)", m.sel, want)
+	// A click alone selects nothing; the bug was the stale placeholder
+	// selection surviving it.
+	if m.sel != nil {
+		t.Errorf("sel = %+v, want none (not the stale placeholder)", *m.sel)
 	}
 	if m.cursor != want {
 		t.Errorf("cursor = %v, want %v (the clicked position, not snapped back to the snippet)", m.cursor, want)

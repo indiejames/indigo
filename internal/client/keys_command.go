@@ -15,7 +15,7 @@ import (
 func (m Model) handleCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		m.mode = ModeNormal
+		m.mode = ModeInsert
 		m.cmdBuf = ""
 		m.cmdCompletionIdx = -1
 		m.pendingExtract = nil
@@ -64,7 +64,7 @@ func (m Model) handleCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cmdBuf = string(runes[:len(runes)-1])
 			m.cmdCompletionIdx = -1
 		} else {
-			m.mode = ModeNormal
+			m.mode = ModeInsert
 			m.cmdCompletionIdx = -1
 		}
 
@@ -80,7 +80,7 @@ func (m Model) handleCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		m.mode = ModeNormal
+		m.mode = ModeInsert
 		m.cursor = m.searchOrigin
 		m.scrollToCursor()
 		m = m.withClearedSearch()
@@ -92,7 +92,7 @@ func (m Model) handleSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.searchReplacing {
 			return m.applySearchReplace()
 		}
-		m.mode = ModeNormal
+		m.mode = ModeInsert
 		m.searchErr = ""
 		if len(m.searchMatches) > 0 && m.searchIdx >= 0 {
 			sm := m.searchMatches[m.searchIdx]
@@ -106,7 +106,7 @@ func (m Model) handleSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m = m.pushStatus("E: pattern not found")
 			return m, nil
 		}
-		m.mode = ModeNormal
+		m.mode = ModeInsert
 		m = m.withClearedSearch()
 	case "backspace":
 		runes := []rune(m.searchQuery)
@@ -114,7 +114,7 @@ func (m Model) handleSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.searchQuery = string(runes[:len(runes)-1])
 			m.updateSearch()
 		} else {
-			m.mode = ModeNormal
+			m.mode = ModeInsert
 			m.cursor = m.searchOrigin
 			m.scrollToCursor()
 			m = m.withClearedSearch()
@@ -235,7 +235,7 @@ func (m *Model) updateSearch() {
 func (m Model) applySearchReplace() (tea.Model, tea.Cmd) {
 	matches := m.searchMatches
 	hadSelection := m.sel != nil
-	m.mode = ModeNormal
+	m.mode = ModeInsert
 
 	if len(matches) == 0 {
 		m = m.pushStatus("E: pattern not found")
@@ -274,7 +274,7 @@ func (m Model) applySearchReplace() (tea.Model, tea.Cmd) {
 
 func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 	cmd := strings.TrimSpace(m.cmdBuf)
-	m.mode = ModeNormal
+	m.mode = ModeInsert
 	m.cmdBuf = ""
 
 	// :grep/:find [pattern] [glob] — workspace search; falls back to current search query.
@@ -321,6 +321,10 @@ func (m Model) executeCommand() (tea.Model, tea.Cmd) {
 		if fn, ok := exActionRegistry()[name]; ok {
 			return fn(m)
 		}
+	}
+	// Any action by its own name, which is what a palette entry fills in.
+	if fn, ok := exActionRegistry()[cmd]; ok {
+		return fn(m)
 	}
 
 	if path, ok := strings.CutPrefix(cmd, "w "); ok && strings.TrimSpace(path) != "" {

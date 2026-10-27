@@ -57,21 +57,25 @@ func TestClickToPosClampsColToLineLen(t *testing.T) {
 	}
 }
 
-func TestHandleMousePressSetsSelection(t *testing.T) {
+// TestHandleMousePressStartsADrag: a press places the cursor and remembers
+// where a drag would start, but selects nothing until the pointer moves; a
+// drag then selects from there.
+func TestHandleMousePressStartsADrag(t *testing.T) {
 	m := newTestModel("hello\nworld\n")
 	m.handleMousePress(2, 0)
 	want := document.Pos{Line: 0, Col: 2}
 	if m.cursor != want {
 		t.Errorf("cursor = %v, want %v", m.cursor, want)
 	}
-	if m.sel == nil {
-		t.Fatal("sel should be set after mouse press")
-	}
-	if m.sel.Anchor != want || m.sel.Head != want {
-		t.Errorf("sel = {%v, %v}, want both %v", m.sel.Anchor, m.sel.Head, want)
+	if m.sel != nil {
+		t.Errorf("sel = %+v after a press alone, want none", *m.sel)
 	}
 	if !m.dragging {
-		t.Error("dragging should be true after mouse press")
+		t.Fatal("dragging should be true after mouse press")
+	}
+	m.handleMouseDrag(4, 0)
+	if m.sel == nil || m.sel.Anchor != want || m.sel.Head != (document.Pos{Line: 0, Col: 4}) {
+		t.Errorf("sel = %+v after dragging, want from %v to the pointer", m.sel, want)
 	}
 }
 
@@ -126,7 +130,7 @@ func TestDoubleClickSelectsWord(t *testing.T) {
 		t.Error("dragging should be false after double-click")
 	}
 	start, end := m.sel.ordered()
-	got := []rune(m.buf.Line(0))[start.Col : end.Col+1]
+	got := []rune(m.buf.Line(0))[start.Col:end.Col]
 	if string(got) != "hello" {
 		t.Errorf("selected %q, want %q", string(got), "hello")
 	}

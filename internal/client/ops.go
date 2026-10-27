@@ -27,19 +27,7 @@ func (m Model) ReportActiveContextCmd() tea.Cmd {
 	line := uint32(m.cursor.Line)
 	col := uint32(m.cursor.Col)
 
-	var sel ActiveSelection
-	if m.sel != nil {
-		start, end := m.sel.ordered()
-		sel = ActiveSelection{
-			Found:     true,
-			BufID:     bufID,
-			StartLine: uint32(start.Line),
-			StartCol:  uint32(start.Col),
-			EndLine:   uint32(end.Line),
-			EndCol:    uint32(end.Col), // inclusive, matching selectedText
-			IsLine:    m.sel.IsLine,
-		}
-	}
+	sel := m.reportedSelection()
 
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -48,6 +36,36 @@ func (m Model) ReportActiveContextCmd() tea.Cmd {
 		_ = m.rpc.SetActiveSelection(ctx, clientID, bufID, sel)
 		return nil
 	}
+}
+
+// reportedSelection is the selection as setActiveSelection reports it. The
+// protocol's end is inclusive (editor.capnp), while a selection here is
+// half-open, so the reported end is the last selected character: the line
+// break before end when end is at a line start, which the protocol spells as
+// column LineLen. A whole-line selection is reported as its lines.
+func (m Model) reportedSelection() ActiveSelection {
+	if m.sel == nil {
+		return ActiveSelection{}
+	}
+	start, end := m.sel.ordered()
+	lastLine, lastCol := end.Line, end.Col-1
+	if end.Col == 0 && end.Line > 0 {
+		lastLine, lastCol = end.Line-1, m.buf.LineLen(end.Line-1)
+	}
+	sel := ActiveSelection{
+		Found:     true,
+		BufID:     m.bufID,
+		StartLine: uint32(start.Line),
+		StartCol:  uint32(start.Col),
+		EndLine:   uint32(lastLine),
+		EndCol:    uint32(max(lastCol, 0)),
+		IsLine:    m.isLineSelection(),
+	}
+	if sel.IsLine {
+		first, last := m.selectedLines()
+		sel.StartLine, sel.EndLine = uint32(first), uint32(last)
+	}
+	return sel
 }
 
 // sendOp applies the op locally and sends it to the server.
@@ -666,6 +684,14 @@ func (m Model) doCloseBuffer() tea.Cmd {
 		return CloseBufferMsg{}
 	}
 }
+
+// CloseCmd closes the buffer without saving it, for the App's
+// unsaved-changes prompt.
+func (m Model) CloseCmd() tea.Cmd { return m.doCloseBuffer() }
+
+// SaveAndCloseCmd saves the buffer, then closes it, for the App's
+// unsaved-changes prompt.
+func (m Model) SaveAndCloseCmd() tea.Cmd { return m.doSaveAndClose() }
 
 // doSaveAndClose saves the buffer, then closes it.
 func (m Model) doSaveAndClose() tea.Cmd {

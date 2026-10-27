@@ -15,8 +15,7 @@ func TestSelectedTextLineWiseMultiLine(t *testing.T) {
 	m := newTestModel("one\ntwo\nthree\n")
 	m.sel = &Selection{
 		Anchor: document.Pos{Line: 0, Col: 0},
-		Head:   document.Pos{Line: 1, Col: 2},
-		IsLine: true,
+		Head:   document.Pos{Line: 2, Col: 0},
 	}
 	got := m.selectedText()
 	want := "one\ntwo\n"
@@ -69,8 +68,8 @@ func TestSelectWordFresh(t *testing.T) {
 	if m.sel == nil {
 		t.Fatal("selectWord: sel is nil")
 	}
-	if m.sel.Anchor.Col != 0 || m.sel.Head.Col != 4 {
-		t.Errorf("selectWord: [%d,%d], want [0,4]", m.sel.Anchor.Col, m.sel.Head.Col)
+	if m.sel.Anchor.Col != 0 || m.sel.Head.Col != 5 {
+		t.Errorf("selectWord: [%d,%d), want [0,5)", m.sel.Anchor.Col, m.sel.Head.Col)
 	}
 }
 
@@ -84,8 +83,8 @@ func TestSelectWordAdvances(t *testing.T) {
 	if m.sel == nil {
 		t.Fatal("selectWord advance: sel is nil")
 	}
-	if m.sel.Anchor.Col != 6 || m.sel.Head.Col != 10 {
-		t.Errorf("advance: [%d,%d], want [6,10]", m.sel.Anchor.Col, m.sel.Head.Col)
+	if m.sel.Anchor.Col != 6 || m.sel.Head.Col != 11 {
+		t.Errorf("advance: [%d,%d), want [6,11)", m.sel.Anchor.Col, m.sel.Head.Col)
 	}
 }
 
@@ -111,14 +110,11 @@ func TestSelectLine(t *testing.T) {
 	if m.sel == nil {
 		t.Fatal("selectLine: sel is nil")
 	}
-	if !m.sel.IsLine {
-		t.Error("selectLine: IsLine should be true")
+	if !m.isLineSelection() {
+		t.Error("selectLine: should be a whole-line selection")
 	}
-	if m.sel.Anchor.Col != 0 {
-		t.Errorf("selectLine: Anchor.Col = %d, want 0", m.sel.Anchor.Col)
-	}
-	if m.sel.Head.Col != 4 { // "hello" len=5, maxCol=4
-		t.Errorf("selectLine: Head.Col = %d, want 4", m.sel.Head.Col)
+	if m.sel.Anchor != (document.Pos{Line: 0}) || m.sel.Head != (document.Pos{Line: 1}) {
+		t.Errorf("selectLine: %+v, want line 0 through its line break", *m.sel)
 	}
 }
 
@@ -129,8 +125,8 @@ func TestSelectLineEmptyLine(t *testing.T) {
 	if m.sel == nil {
 		t.Fatal("selectLine empty: sel is nil")
 	}
-	if !m.sel.IsLine {
-		t.Error("selectLine empty: IsLine should be true")
+	if !m.isLineSelection() {
+		t.Error("selectLine empty: should be a whole-line selection")
 	}
 	if m.sel.Anchor.Col != 0 || m.sel.Head.Col != 0 {
 		t.Errorf("selectLine empty: [%d,%d], want [0,0]", m.sel.Anchor.Col, m.sel.Head.Col)
@@ -143,12 +139,12 @@ func TestSelectLineExtendForward(t *testing.T) {
 	m := newTestModel("hello\nworld\nfoo\n")
 	m.cursor = document.Pos{Line: 0}
 	m.selectLine()
-	if m.sel.Head.Line != 0 {
-		t.Fatalf("first x: Head.Line = %d, want 0", m.sel.Head.Line)
+	if m.sel.Head.Line != 1 {
+		t.Fatalf("first x: Head.Line = %d, want 1 (the start of the next line)", m.sel.Head.Line)
 	}
 	m.selectLine() // second press
-	if m.sel.Head.Line != 1 {
-		t.Errorf("second x: Head.Line = %d, want 1", m.sel.Head.Line)
+	if m.sel.Head.Line != 2 {
+		t.Errorf("second x: Head.Line = %d, want 2", m.sel.Head.Line)
 	}
 	if m.sel.Anchor.Line != 0 {
 		t.Errorf("second x: Anchor.Line = %d, want 0", m.sel.Anchor.Line)
@@ -192,14 +188,14 @@ func TestExtendWordForward(t *testing.T) {
 	if m.sel == nil {
 		t.Fatal("extendWordForward: sel is nil")
 	}
-	// Should extend to end of "foo" (col 2).
-	if m.sel.Head.Col != 2 {
-		t.Errorf("extendWordForward: Head.Col = %d, want 2", m.sel.Head.Col)
+	// Should extend to just past "foo" (col 3).
+	if m.sel.Head.Col != 3 {
+		t.Errorf("extendWordForward: Head.Col = %d, want 3", m.sel.Head.Col)
 	}
 	m.extendWordForward()
-	// Second call extends to end of "bar" (col 6).
-	if m.sel.Head.Col != 6 {
-		t.Errorf("extendWordForward x2: Head.Col = %d, want 6", m.sel.Head.Col)
+	// Second call extends to just past "bar" (col 7).
+	if m.sel.Head.Col != 7 {
+		t.Errorf("extendWordForward x2: Head.Col = %d, want 7", m.sel.Head.Col)
 	}
 }
 

@@ -11,9 +11,9 @@ import (
 // newline / non-selected lines are left untouched.
 func TestSortLinesAscending(t *testing.T) {
 	m := newTestModel("banana\napple\ncherry\nkept\n")
-	m.sel = &Selection{
+	m.sel = &Selection{ // lines 0-2
 		Anchor: document.Pos{Line: 0, Col: 0},
-		Head:   document.Pos{Line: 2, Col: 0},
+		Head:   document.Pos{Line: 3, Col: 0},
 	}
 
 	m2, _ := sortLines(m, false)
@@ -27,8 +27,7 @@ func TestSortLinesAscending(t *testing.T) {
 	}
 	wantSel := Selection{
 		Anchor: document.Pos{Line: 0, Col: 0},
-		Head:   document.Pos{Line: 2, Col: max(0, len("cherry")-1)},
-		IsLine: true,
+		Head:   document.Pos{Line: 3, Col: 0},
 	}
 	if *m2.sel != wantSel {
 		t.Errorf("sel = %+v, want %+v", *m2.sel, wantSel)
@@ -46,8 +45,8 @@ func TestSortLinesAscending(t *testing.T) {
 // existing selection's direction rather than re-deriving a fixed one.
 func TestSortLinesReversedSelectionPreservesDirection(t *testing.T) {
 	m := newTestModel("banana\napple\ncherry\n")
-	m.sel = &Selection{
-		Anchor: document.Pos{Line: 2, Col: 0},
+	m.sel = &Selection{ // lines 0-2, made upward
+		Anchor: document.Pos{Line: 3, Col: 0},
 		Head:   document.Pos{Line: 0, Col: 0},
 	}
 
@@ -61,9 +60,8 @@ func TestSortLinesReversedSelectionPreservesDirection(t *testing.T) {
 		t.Fatal("sel = nil, want the sorted lines still selected")
 	}
 	wantSel := Selection{
-		Anchor: document.Pos{Line: 2, Col: max(0, len("cherry")-1)},
+		Anchor: document.Pos{Line: 3, Col: 0},
 		Head:   document.Pos{Line: 0, Col: 0},
-		IsLine: true,
 	}
 	if *m2.sel != wantSel {
 		t.Errorf("sel = %+v, want %+v (anchor stays at the bottom line)", *m2.sel, wantSel)
@@ -76,9 +74,9 @@ func TestSortLinesReversedSelectionPreservesDirection(t *testing.T) {
 // TestSortLinesDescending verifies descending order.
 func TestSortLinesDescending(t *testing.T) {
 	m := newTestModel("banana\napple\ncherry\n")
-	m.sel = &Selection{
+	m.sel = &Selection{ // lines 0-2
 		Anchor: document.Pos{Line: 0, Col: 0},
-		Head:   document.Pos{Line: 2, Col: 0},
+		Head:   document.Pos{Line: 3, Col: 0},
 	}
 
 	m2, _ := sortLines(m, true)
@@ -87,7 +85,7 @@ func TestSortLinesDescending(t *testing.T) {
 	if got := m2.buf.Content(); got != want {
 		t.Errorf("Content() = %q, want %q", got, want)
 	}
-	if m2.sel == nil || m2.sel.Anchor.Line != 0 || m2.sel.Head.Line != 2 {
+	if m2.sel == nil || m2.sel.Anchor.Line != 0 || m2.sel.Head.Line != 3 {
 		t.Errorf("sel = %+v, want a selection still spanning lines 0-2", m2.sel)
 	}
 }

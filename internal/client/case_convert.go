@@ -212,7 +212,7 @@ func convertCaseAllCursors(m Model, join func([]string) string) (Model, tea.Cmd)
 			}
 			sel = &Selection{
 				Anchor: document.Pos{Line: e.cursor.Line, Col: start},
-				Head:   document.Pos{Line: e.cursor.Line, Col: end},
+				Head:   document.Pos{Line: e.cursor.Line, Col: end + 1}, // findIdentifierAt's end is inclusive
 			}
 		}
 
@@ -229,7 +229,7 @@ func convertCaseAllCursors(m Model, join func([]string) string) (Model, tea.Cmd)
 		if selStart > selEnd {
 			selStart, selEnd = selEnd, selStart
 		}
-		oldLen := selEnd - selStart + 1
+		oldLen := selEnd - selStart
 		newLen := len([]rune(converted))
 		delta := newLen - oldLen
 

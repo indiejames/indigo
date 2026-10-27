@@ -122,13 +122,13 @@ func TestDebugConfigurationsArrivingLate(t *testing.T) {
 	if got := m.handleDebugConfigs(debugConfigsMsg{bufID: 4, configs: cfgs}); len(got.prefixSeq) != 0 {
 		t.Error("another buffer's list opened the menu")
 	}
-	m.mode = ModeInsert
+	m.mode = ModeCommand
 	if got := m.handleDebugConfigs(debugConfigsMsg{bufID: 3, configs: cfgs}); len(got.prefixSeq) != 0 {
-		t.Error("the menu opened in Insert mode")
+		t.Error("the menu opened over the command palette")
 	}
-	m.mode = ModeNormal
-	m.prefixSeq = []string{"g"}
-	if got := m.handleDebugConfigs(debugConfigsMsg{bufID: 3, configs: cfgs}); !reflect.DeepEqual(got.prefixSeq, []string{"g"}) {
+	m.mode = ModeInsert
+	m.prefixSeq = []string{"space"}
+	if got := m.handleDebugConfigs(debugConfigsMsg{bufID: 3, configs: cfgs}); !reflect.DeepEqual(got.prefixSeq, []string{"space"}) {
 		t.Errorf("the menu replaced a prefix in progress: %v", got.prefixSeq)
 	}
 	m.prefixSeq = nil

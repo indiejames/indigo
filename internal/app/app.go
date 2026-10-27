@@ -167,6 +167,10 @@ type App struct {
 	debug     *appDebug
 	refPicker *refPickerState // non-nil when reference picker is open
 
+	// unsaved is non-nil while Ctrl+W or Ctrl+Q waits for an answer about
+	// unsaved changes (see unsaved_prompt.go).
+	unsaved *unsavedPrompt
+
 	// fileChangedIdx is the index of a dirty buffer awaiting user decision after
 	// an external modification. -1 means no prompt is active.
 	// fileChangedSel is 0 for "reload" and 1 for "keep local".
@@ -942,6 +946,13 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case client.QuitAllMsg:
 		return a.handleQuitAll(msg)
 
+	// ---- Ctrl+W / Ctrl+Q with unsaved changes ----
+	case client.ConfirmCloseMsg:
+		return a.handleConfirmClose()
+
+	case client.QuitRequestMsg:
+		return a.handleQuitRequest()
+
 	// ---- buffer navigation ----
 	case client.NextBufferMsg:
 		if len(a.buffers) == 0 {
@@ -1229,6 +1240,16 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Unsaved-changes prompt: intercept ALL keys while it is visible.
+	if a.unsaved != nil {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a.handleUnsavedKey(km)
+		}
+		if _, ok := msg.(tea.PasteMsg); ok {
+			return a, nil
+		}
+	}
+
 	// File-changed overlay: intercept ALL keys while the prompt is visible.
 	if a.fileChangedIdx >= 0 {
 		if km, ok := msg.(tea.KeyMsg); ok {
@@ -1345,7 +1366,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// listing this branch showed an empty browser for ever, since
 				// newDirectoryPicker only marks the load as pending.
 				return a, tea.Batch(a.loadPickerDir(), a.startPickerFileScan(a.workDir), a.filterRecentFiles())
-			case "ctrl+c", "q":
+			case "ctrl+c", "ctrl+q", "q":
 				return a, a.doDisconnectAndQuit()
 			}
 		}

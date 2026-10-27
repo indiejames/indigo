@@ -71,12 +71,11 @@ type substituteMatch struct {
 	replacement       string
 }
 
-// substituteBounds restricts findSubstituteMatches to an inclusive document
-// range — used to scope / search (and search-and-replace) to the active
-// selection instead of the whole buffer. Both charwise and linewise
-// selections store Anchor/Head such that end.Col+1 is the right exclusive
-// bound, so no separate IsLine handling is needed here. A nil
-// *substituteBounds passed to findSubstituteMatches means the whole buffer.
+// substituteBounds restricts findSubstituteMatches to the half-open document
+// range [from, to) — used to scope / search (and search-and-replace) to the
+// active selection instead of the whole buffer, so it has the selection's own
+// shape. A nil *substituteBounds passed to findSubstituteMatches means the
+// whole buffer.
 type substituteBounds struct {
 	from, to document.Pos
 }
@@ -84,7 +83,7 @@ type substituteBounds struct {
 // findSubstituteMatches finds every match of pattern in buf and pairs each
 // with its replacement text, in document order (top to bottom, left to
 // right — the same order findMatches uses). bounds, if non-nil, restricts
-// matches to that inclusive range.
+// matches to that range.
 //
 // Pattern syntax matches findMatches: \expr triggers Go regexp, and
 // replacement may reference captured groups with $1, $2, ${name}, etc.
@@ -111,7 +110,7 @@ func findSubstituteMatches(buf *document.Buffer, pattern, replacement string, bo
 			lo = bounds.from.Col
 		}
 		if l == bounds.to.Line {
-			hi = min(hi, bounds.to.Col+1)
+			hi = min(hi, bounds.to.Col)
 		}
 		return
 	}

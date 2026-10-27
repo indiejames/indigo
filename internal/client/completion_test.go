@@ -45,44 +45,50 @@ func cmdNames(descs []cmdDesc) []string {
 // TestFilteredCmds checks canonical names (cmdNames), one per group of
 // aliases — e.g. "s"/"save"/"w"/"write" are one row (canonical "save"), so
 // a pattern matching only one of those aliases (like "s") still surfaces
-// the whole group's single row, not four separate rows or none at all.
+// the whole group's single row, not four separate rows or none at all. The
+// palette lists every action as well as the ":" commands, so this checks
+// what each pattern must find rather than the whole list.
 func TestFilteredCmds(t *testing.T) {
 	tests := []struct {
 		input string
 		want  []string
 	}{
-		{"", []string{"diagnostics", "extract-rename", "find", "format", "grep", "metrics", "move-to-file", "new", "open", "quit", "quit!", "quit-all", "quit-all!", "rename", "save", "save-as", "set ft=", "wqa", "write-quit"}},
+		{"", []string{"diagnostics", "save", "quit", "write-quit", "copy", "go-to-matching-bracket"}},
 		// "q" is a subsequence of the quit* group's aliases and wqa/write-quit's
 		{"q", []string{"quit", "quit!", "quit-all", "quit-all!", "wqa", "write-quit"}},
 		{"q!", []string{"quit!", "quit-all!"}},
-		// "s" is a subsequence of "diagnostics", "metrics" (last char), the
-		// save group (via its "s"/"save" aliases), the save-as group (via its
-		// "sa" alias), and "set ft="
-		{"s", []string{"diagnostics", "metrics", "save", "save-as", "set ft="}},
+		// the save group via its "s" alias, the save-as group via its "sa"
+		{"s", []string{"save", "save-as", "set ft="}},
 		// "wq" matches wqa directly and the write-quit group via its "wq" alias
 		{"wq", []string{"wqa", "write-quit"}},
-		// "m" matches extract-rename ("rena-m-e"), the format group (via "fmt"/"format"), metrics, move-to-file, and rename
-		{"m", []string{"extract-rename", "format", "metrics", "move-to-file", "rename"}},
-		// "diag" matches the diagnostics group (via its own "diag" alias) — one row, not two
+		{"m", []string{"move-to-file", "go-to-matching-bracket"}},
+		// "diag" matches the diagnostics group (via its own "diag" alias)
 		{"diag", []string{"diagnostics"}},
-		// "extract" is a subsequence of only extract-rename
 		{"extract", []string{"extract-rename"}},
-		{"z", nil},
-		{"123", nil},  // line number — no results
-		{"0abc", nil}, // starts with digit
 	}
 	for _, tt := range tests {
 		got := cmdNames(filteredCmds(tt.input))
-		if len(got) != len(tt.want) {
-			t.Errorf("filteredCmds(%q) = %v, want %v", tt.input, got, tt.want)
-			continue
-		}
-		for i := range got {
-			if got[i] != tt.want[i] {
-				t.Errorf("filteredCmds(%q)[%d] = %q, want %q", tt.input, i, got[i], tt.want[i])
+		for _, w := range tt.want {
+			if n := countOf(got, w); n != 1 {
+				t.Errorf("filteredCmds(%q) lists %q %d times, want once: %v", tt.input, w, n, got)
 			}
 		}
 	}
+	for _, input := range []string{"zzzz", "123", "0abc"} { // nothing; a line number; starts with a digit
+		if got := cmdNames(filteredCmds(input)); len(got) != 0 {
+			t.Errorf("filteredCmds(%q) = %v, want none", input, got)
+		}
+	}
+}
+
+func countOf(names []string, name string) int {
+	n := 0
+	for _, s := range names {
+		if s == name {
+			n++
+		}
+	}
+	return n
 }
 
 func TestFilteredCmdsAlphabetical(t *testing.T) {

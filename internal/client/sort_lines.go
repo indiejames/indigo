@@ -79,11 +79,11 @@ func sortLines(m Model, desc bool) (Model, tea.Cmd) {
 
 	m, cmd := applyBatch(m, []document.Op{delOp, insOp})
 	startPos := document.Pos{Line: startLine, Col: 0}
-	endPos := document.Pos{Line: endLine, Col: max(0, m.buf.LineLen(endLine)-1)}
+	endPos := m.lineSpanEnd(endLine)
 	if anchorAtStart {
-		m.sel = &Selection{Anchor: startPos, Head: endPos, IsLine: true}
+		m.sel = &Selection{Anchor: startPos, Head: endPos}
 	} else {
-		m.sel = &Selection{Anchor: endPos, Head: startPos, IsLine: true}
+		m.sel = &Selection{Anchor: endPos, Head: startPos}
 	}
 	m.cursor = m.sel.Head
 	return m, cmd

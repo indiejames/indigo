@@ -160,6 +160,31 @@ func TestInsertCursorBlinksInSoftware(t *testing.T) {
 		}
 	})
 
+	t.Run("typing holds it solid", func(t *testing.T) {
+		m := cursorTestModel(t, "hello\n", &config.Config{CursorBlink: true})
+		m.mode = ModeInsert
+		m.rpc = &RPC{}
+
+		now = off // an off phase before any key
+		out, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+		m = out.(Model)
+		cell := insertCursorStyle.Render("e") // the cursor moved onto the e
+		for _, d := range []time.Duration{0, cursorSteadyAfterKey / 2, cursorSteadyAfterKey - time.Millisecond} {
+			now = off.Add(d)
+			if !strings.Contains(m.View().Content, cell) {
+				t.Errorf("%v after a key: cursor hidden; it should stay solid while typing", d)
+			}
+		}
+		now = off.Add(cursorSteadyAfterKey)
+		if strings.Contains(m.View().Content, cell) {
+			t.Error("the blink did not resume after the keys stopped")
+		}
+		now = off.Add(cursorSteadyAfterKey + insertBlinkHalfPeriod)
+		if !strings.Contains(m.View().Content, cell) {
+			t.Error("the resumed blink did not come back on")
+		}
+	})
+
 	t.Run("blink disabled stays solid", func(t *testing.T) {
 		m := cursorTestModel(t, "hello\n", &config.Config{})
 		m.mode = ModeInsert

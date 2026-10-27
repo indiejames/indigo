@@ -756,14 +756,13 @@ func (m Model) renderStatusBar() string {
 		return barStyle.Render(string(promptRunes)) + barStyle.Render(" ") + barStyle.Width(padW).Render("")
 	}
 
-	modeLabel := "NORMAL"
-	ms := normalModeStyle
-	if m.mode == ModeInsert {
-		modeLabel = "INSERT"
-		ms = insertModeStyle
+	// There are no modes to name, so the segment that named one says what is
+	// selected instead, and is absent when nothing is.
+	modeSeg := ""
+	if label := m.selectionStatus(); label != "" {
+		modeSeg = insertModeStyle.Render("  " + label + "  ")
 	}
-	modeSeg := ms.Render("  " + modeLabel + "  ")
-	// The debug badge rides with the mode label: both answer "what state is
+	// The debug badge rides with the selection: both answer "what state is
 	// the editor in", and the right-hand group is kept fixed-width on purpose.
 	modeSeg += m.debugStatusBadge()
 	modeW := lipgloss.Width(modeSeg)
@@ -888,4 +887,28 @@ func (m Model) renderStatusBar() string {
 	center := barStyle.Width(centerW).Align(lipgloss.Center).Render(centerContent)
 
 	return left + center + pluginSeg + right
+}
+
+// selectionStatus is the status bar's summary of the selection: the cursor
+// count with several cursors, otherwise the selection's size: in lines when
+// it spans more than one or covers whole lines, else in characters. Empty
+// when nothing is selected.
+func (m Model) selectionStatus() string {
+	if n := len(m.extraCursors); n > 0 {
+		return fmt.Sprintf("%d cursors", n+1)
+	}
+	if m.sel == nil {
+		return ""
+	}
+	if first, last := m.selectedLines(); last > first || m.isLineSelection() {
+		if last == first {
+			return "1 line"
+		}
+		return fmt.Sprintf("%d lines", last-first+1)
+	}
+	n := len([]rune(m.textForSelection(m.sel)))
+	if n == 1 {
+		return "1 char"
+	}
+	return fmt.Sprintf("%d chars", n)
 }

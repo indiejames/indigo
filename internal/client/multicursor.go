@@ -50,7 +50,7 @@ func selectNextOccurrence(m *Model) bool {
 		if sm, ok := searchMatchAtCursor(m); ok {
 			m.sel = &Selection{
 				Anchor: document.Pos{Line: sm.line, Col: sm.col},
-				Head:   document.Pos{Line: sm.line, Col: sm.col + sm.length - 1},
+				Head:   document.Pos{Line: sm.line, Col: sm.col + sm.length},
 			}
 			m.cursor = m.sel.Head
 			*m = m.withClearedSearch()
@@ -77,7 +77,7 @@ func selectNextOccurrence(m *Model) bool {
 		}
 		m.sel = &Selection{
 			Anchor: document.Pos{Line: m.cursor.Line, Col: start},
-			Head:   document.Pos{Line: m.cursor.Line, Col: end},
+			Head:   document.Pos{Line: m.cursor.Line, Col: end + 1}, // the word finders' ends are inclusive
 		}
 		m.cursor = m.sel.Head
 		m.scrollToCursor()
@@ -99,7 +99,7 @@ func selectNextOccurrence(m *Model) bool {
 		if last.sel != nil {
 			_, end := last.sel.ordered()
 			searchLine = end.Line
-			searchCol = end.Col + 1
+			searchCol = end.Col
 		} else {
 			searchLine = last.pos.Line
 			searchCol = last.pos.Col + 1
@@ -107,7 +107,7 @@ func selectNextOccurrence(m *Model) bool {
 	} else {
 		_, end := m.sel.ordered()
 		searchLine = end.Line
-		searchCol = end.Col + 1
+		searchCol = end.Col
 	}
 
 	found, fLine, fCol := findOccurrence(m, textRunes, searchLine, searchCol)
@@ -131,7 +131,7 @@ func selectNextOccurrence(m *Model) bool {
 
 	newSel := &Selection{
 		Anchor: document.Pos{Line: fLine, Col: fCol},
-		Head:   document.Pos{Line: fLine, Col: fCol + n - 1},
+		Head:   document.Pos{Line: fLine, Col: fCol + n},
 	}
 	m.extraCursors = append(m.extraCursors, ExtraCursor{
 		pos:     newSel.Head,
@@ -160,7 +160,7 @@ func selectAllSearchMatches(m *Model) bool {
 		}
 		sel := &Selection{
 			Anchor: document.Pos{Line: mt.line, Col: mt.col},
-			Head:   document.Pos{Line: mt.line, Col: mt.col + mt.length - 1},
+			Head:   document.Pos{Line: mt.line, Col: mt.col + mt.length},
 		}
 		return sel.Head, sel
 	}
@@ -240,23 +240,18 @@ func addCursorBelow(m *Model) {
 	if nextLine >= m.buf.LineCount() {
 		return
 	}
-	lineLen := m.buf.LineLen(nextLine)
-	newCol := refCol
-	if lineLen > 0 && newCol >= lineLen {
-		newCol = lineLen - 1
-	} else if lineLen == 0 {
-		newCol = 0
-	}
+	newCol := min(refCol, m.buf.LineLen(nextLine))
 	m.extraCursors = append(m.extraCursors, ExtraCursor{
 		pos:     document.Pos{Line: nextLine, Col: newCol},
 		goalCol: -1,
 	})
 }
 
-// splitSelectionIntoCursors splits a multi-line primary selection into one cursor
-// per line. Each line gets its own selection spanning the full line content
-// (start of line for intermediate lines; up to end.Col for the last line).
-// Used by Alt+s in Normal mode.
+// splitSelectionIntoCursors splits a multi-line primary selection into one
+// cursor per line, each selecting that line's part of the selection: from the
+// selection's start on its first line, to its end on its last, and whole
+// lines between. A last line the selection only reaches at column 0 gets no
+// cursor, and an empty line gets a bare one. Used by Alt+s in Normal mode.
 func splitSelectionIntoCursors(m *Model) {
 	if m.sel == nil {
 		return
@@ -267,40 +262,29 @@ func splitSelectionIntoCursors(m *Model) {
 	}
 
 	m.extraCursors = nil
-
-	// Primary cursor covers the start line.
-	startLineLen := m.buf.LineLen(start.Line)
-	startLineEnd := max(0, startLineLen-1)
-	m.sel = &Selection{
-		Anchor: document.Pos{Line: start.Line, Col: start.Col},
-		Head:   document.Pos{Line: start.Line, Col: startLineEnd},
-	}
-	m.cursor = m.sel.Head
-
-	// Extra cursors for lines start.Line+1 through end.Line.
-	for l := start.Line + 1; l <= end.Line; l++ {
-		lineLen := m.buf.LineLen(l)
-		var endCol int
+	lineSel := func(l int) (document.Pos, *Selection) {
+		from, to := 0, m.buf.LineLen(l)
+		if l == start.Line {
+			from = start.Col
+		}
 		if l == end.Line {
-			endCol = end.Col
-		} else {
-			endCol = max(0, lineLen-1)
+			to = end.Col
 		}
-		if lineLen == 0 {
-			m.extraCursors = append(m.extraCursors, ExtraCursor{
-				pos:     document.Pos{Line: l, Col: 0},
-				goalCol: -1,
-			})
-		} else {
-			m.extraCursors = append(m.extraCursors, ExtraCursor{
-				pos:     document.Pos{Line: l, Col: endCol},
-				goalCol: -1,
-				sel: &Selection{
-					Anchor: document.Pos{Line: l, Col: 0},
-					Head:   document.Pos{Line: l, Col: endCol},
-				},
-			})
+		sel := &Selection{Anchor: document.Pos{Line: l, Col: from}, Head: document.Pos{Line: l, Col: to}}
+		if sel.empty() {
+			return sel.Head, nil
 		}
+		return sel.Head, sel
+	}
+
+	m.cursor, m.sel = lineSel(start.Line)
+	last := end.Line
+	if end.Col == 0 {
+		last--
+	}
+	for l := start.Line + 1; l <= last; l++ {
+		pos, sel := lineSel(l)
+		m.extraCursors = append(m.extraCursors, ExtraCursor{pos: pos, sel: sel, goalCol: -1})
 	}
 }
 
@@ -493,15 +477,28 @@ func deleteAllCursorSelections(m Model, copyToClipboard bool) (Model, tea.Cmd) {
 	for i, e := range entries {
 		m.cursor = e.cursor
 		m.sel = e.sel
+		start, end := m.deletionRange()
 		var cmd tea.Cmd
 		m, cmd = m.deleteSelectionRaw()
 		cmds = append(cmds, cmd)
 		results[i] = result{m.cursor, e.isPrimary}
+		// The cursors already done come later in the text, so this delete
+		// moves them when it is on their line.
+		if start != end {
+			del := document.Op{Type: document.OpDelete, FromLine: start.Line, FromCol: start.Col, ToLine: end.Line, ToCol: end.Col}
+			for j := range i {
+				results[j].cursor = document.ShiftPos(results[j].cursor, del)
+			}
+		}
 	}
 
-	if openedGroup && len(m.currentGroup) > 0 {
-		m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: snapBefore})
-		cmds = append(cmds, m.groupRecordCmd(m.currentGroup, snapBefore))
+	// Closed even when nothing was deleted (every selection empty), or the
+	// empty group stays open and swallows the next edit's undo entry.
+	if openedGroup {
+		if len(m.currentGroup) > 0 {
+			m.undoStack = append(m.undoStack, undoEntry{ops: m.currentGroup, before: snapBefore})
+			cmds = append(cmds, m.groupRecordCmd(m.currentGroup, snapBefore))
+		}
 		m.currentGroup = nil
 	}
 
@@ -881,8 +878,8 @@ func (m Model) buildExtraCursorOverlays(layout []layoutEntry, cw int) [][]lineOv
 				selVisStart = colMap[start.Col]
 			}
 			selVisEnd := len(expandedRunes)
-			if end.Col+1 <= len(lineRunes) {
-				selVisEnd = colMap[end.Col+1]
+			if end.Col <= len(lineRunes) {
+				selVisEnd = colMap[end.Col]
 			}
 			if selVisStart < selVisEnd {
 				row := screenRowOf(layout, start.Line, selVisStart, cw)
@@ -905,7 +902,12 @@ func (m Model) buildExtraCursorOverlays(layout []layoutEntry, cw int) [][]lineOv
 							text: sb.String(),
 							w:    clipEnd - clipStart,
 						})
-						continue // cursor embedded in selection; no separate cursor overlay
+						// The cursor is drawn inside the selection only when the
+						// head is its start; at its (exclusive) end it is the
+						// cell after, drawn by the overlay below.
+						if curVisCol >= clipStart && curVisCol < clipEnd {
+							continue
+						}
 					}
 				}
 			}

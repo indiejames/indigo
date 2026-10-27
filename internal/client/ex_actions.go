@@ -99,6 +99,13 @@ func executeExQuit(m Model) (tea.Model, tea.Cmd) {
 // default set instead.
 func exActionRegistry() map[string]func(Model) (tea.Model, tea.Cmd) {
 	reg := actionRegistry(defaultPrefixCmds)
+	// The keymap's own actions (copy, close-buffer, ...) too, so the palette
+	// can run every action it lists. Where both have a name the keymap's
+	// version wins: the catalog's paste, for one, is the modal editor's,
+	// which leaves the cursor before what it pasted.
+	for name, fn := range actionRegistry(defaultInsertCmds) {
+		reg[name] = fn
+	}
 	for name, fn := range exOnlyActions {
 		reg[name] = fn
 	}

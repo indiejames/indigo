@@ -10,17 +10,23 @@ import (
 	"github.com/indiejames/indigo/internal/config"
 )
 
-// resetKeybinds restores prefixCmds/insertCmds to their built-in defaults,
-// undoing whatever the test applied. Registered via t.Cleanup so a failed
-// assertion never leaks overridden globals into a later test.
+// resetKeybinds restores insertCmds to its built-in default, undoing
+// whatever the test applied. Registered via t.Cleanup so a failed assertion
+// never leaks overridden globals into a later test.
 func resetKeybinds(t *testing.T) {
 	t.Cleanup(func() { applyKeybindOverrides(nil) })
+}
+
+// pressBound sends key through the keymap, the path a real key takes.
+func pressBound(m Model, key string) (Model, tea.Cmd) {
+	out, cmd := m.handleInsert(fakeKey(key))
+	return out.(Model), cmd
 }
 
 func TestApplyKeybindOverridesRebindsExistingKey(t *testing.T) {
 	resetKeybinds(t)
 	cfg := &config.Config{Keybinds: []config.Keybind{
-		{Mode: "normal", Key: "w", Action: "cursor-up"},
+		{Key: "ctrl+a", Action: "cursor-up"},
 	}}
 	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)
@@ -28,25 +34,22 @@ func TestApplyKeybindOverridesRebindsExistingKey(t *testing.T) {
 
 	m := newTestModel("a\nb\nc\n")
 	m.cursor.Line = 1
-	m2, _ := m.handleNormal(fakeKey("w"))
-	got := m2.(Model)
+	got, _ := pressBound(m, "ctrl+a")
 	if got.cursor.Line != 0 {
-		t.Errorf("w rebound to cursor-up: cursor.Line = %d, want 0", got.cursor.Line)
+		t.Errorf("ctrl+a rebound to cursor-up: cursor.Line = %d, want 0", got.cursor.Line)
 	}
 }
 
 func TestApplyKeybindOverridesAddsNewKey(t *testing.T) {
 	resetKeybinds(t)
 	cfg := &config.Config{Keybinds: []config.Keybind{
-		{Mode: "normal", Key: "ctrl+g", Action: "select-all"},
+		{Key: "ctrl+g", Action: "select-all"},
 	}}
 	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
 
-	m := newTestModel("hello\n")
-	m2, _ := m.handleNormal(fakeKey("ctrl+g"))
-	got := m2.(Model)
+	got, _ := pressBound(newTestModel("hello\n"), "ctrl+g")
 	if got.sel == nil {
 		t.Error("ctrl+g bound to select-all: sel should be set")
 	}
@@ -55,7 +58,7 @@ func TestApplyKeybindOverridesAddsNewKey(t *testing.T) {
 func TestApplyKeybindOverridesUnknownAction(t *testing.T) {
 	resetKeybinds(t)
 	cfg := &config.Config{Keybinds: []config.Keybind{
-		{Mode: "normal", Key: "ctrl+g", Action: "does-not-exist"},
+		{Key: "ctrl+g", Action: "does-not-exist"},
 	}}
 	warnings := applyKeybindOverrides(cfg)
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "unknown action") {
@@ -74,10 +77,48 @@ func TestApplyKeybindOverridesUnknownMode(t *testing.T) {
 	}
 }
 
+// TestApplyKeybindOverridesRefusesNormalMode: a Normal-mode binding is
+// refused rather than bound in the keymap, where its key (usually a letter)
+// would stop being typed. mode = "insert", what the keymap's bindings said
+// before, still works.
+func TestApplyKeybindOverridesRefusesNormalMode(t *testing.T) {
+	resetKeybinds(t)
+	warnings := applyKeybindOverrides(&config.Config{Keybinds: []config.Keybind{
+		{Mode: "normal", Key: "ctrl+g", Action: "select-all"},
+		{Mode: "insert", Key: "ctrl+o", Action: "select-all"},
+	}})
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "Normal mode") {
+		t.Errorf("warnings = %v, want one about Normal mode", warnings)
+	}
+	if _, ok := findIn(insertCmds, []string{"ctrl+g"}); ok {
+		t.Error("a Normal-mode binding was added to the keymap")
+	}
+	if cmd, ok := findIn(insertCmds, []string{"ctrl+o"}); !ok || cmd.name != "select-all" {
+		t.Error(`a mode = "insert" binding was not added to the keymap`)
+	}
+}
+
+// TestApplyKeybindOverridesRefusesATypedKey: binding a character would stop
+// it being typed, so it is refused.
+func TestApplyKeybindOverridesRefusesATypedKey(t *testing.T) {
+	resetKeybinds(t)
+	warnings := applyKeybindOverrides(&config.Config{Keybinds: []config.Keybind{
+		{Key: "w", Action: "cursor-up"},
+		{Key: "space", Action: "cursor-up"},
+	}})
+	if len(warnings) != 2 || !strings.Contains(warnings[0], "types a character") {
+		t.Errorf("warnings = %v, want two saying the keys type characters", warnings)
+	}
+	m := typeText(t, modelessModel("\n"), "w ")
+	if got := m.buf.Content(); got != "w \n" {
+		t.Errorf("content = %q, want the keys still typed", got)
+	}
+}
+
 func TestApplyKeybindOverridesEmptyKey(t *testing.T) {
 	resetKeybinds(t)
 	cfg := &config.Config{Keybinds: []config.Keybind{
-		{Mode: "normal", Key: "", Action: "select-all"},
+		{Key: "", Action: "select-all"},
 	}}
 	warnings := applyKeybindOverrides(cfg)
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "empty key") {
@@ -85,58 +126,22 @@ func TestApplyKeybindOverridesEmptyKey(t *testing.T) {
 	}
 }
 
-func TestApplyKeybindOverridesRefusesPrefixMenuKey(t *testing.T) {
-	resetKeybinds(t)
-	cfg := &config.Config{Keybinds: []config.Keybind{
-		{Mode: "normal", Key: "g", Action: "select-all"},
-	}}
-	warnings := applyKeybindOverrides(cfg)
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "prefix menu") {
-		t.Errorf("warnings = %v, want one containing 'prefix menu'", warnings)
-	}
-	cmd, ok := findCommand([]string{"g"})
-	if !ok || len(cmd.children) == 0 {
-		t.Error("g menu should be untouched after a refused override")
-	}
-}
-
 func TestApplyKeybindOverridesRevertsOnReload(t *testing.T) {
 	resetKeybinds(t)
 	applyKeybindOverrides(&config.Config{Keybinds: []config.Keybind{
-		{Mode: "normal", Key: "0", Action: "cursor-up"},
+		{Key: "ctrl+a", Action: "cursor-up"},
 	}})
 	// Simulate a config reload that drops the override.
 	applyKeybindOverrides(&config.Config{})
 
 	m := newTestModel("a\nb\nc\n")
 	m.cursor.Line = 1
-	m.cursor.Col = 3
-	m2, _ := m.handleNormal(fakeKey("0"))
-	got := m2.(Model)
+	m.cursor.Col = 1
+	got, _ := pressBound(m, "ctrl+a")
 	// go-to-line-start (the default) resets Col to 0 without touching Line;
-	// cursor-up (the dropped override) would instead move Line to 0 and
-	// leave Col at 3 — these are unambiguous, distinguishable outcomes.
+	// cursor-up (the dropped override) would instead move Line to 0.
 	if got.cursor.Line != 1 || got.cursor.Col != 0 {
 		t.Errorf("after reload without override: cursor = %+v, want {Line:1 Col:0} (back to go-to-line-start)", got.cursor)
-	}
-}
-
-func TestApplyKeybindOverridesInsertMode(t *testing.T) {
-	resetKeybinds(t)
-	cfg := &config.Config{Keybinds: []config.Keybind{
-		{Mode: "insert", Key: "ctrl+g", Action: "line-start"},
-	}}
-	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
-		t.Fatalf("unexpected warnings: %v", warnings)
-	}
-
-	m := newTestModel("hello\n")
-	m.mode = ModeInsert
-	m.cursor.Col = 3
-	m2, _ := m.handleInsert(fakeKey("ctrl+g"))
-	got := m2.(Model)
-	if got.cursor.Col != 0 {
-		t.Errorf("ctrl+g bound to line-start: cursor.Col = %d, want 0", got.cursor.Col)
 	}
 }
 
@@ -223,20 +228,21 @@ func TestNoDuplicateActionLabels(t *testing.T) {
 func TestRebindRootUsesCanonicalLabel(t *testing.T) {
 	resetKeybinds(t)
 	cfg := &config.Config{Keybinds: []config.Keybind{
-		{Mode: "normal", Key: "ctrl+g", Action: "go-to-top"},
+		{Key: "ctrl+g", Action: "go-to-top"},
 	}}
 	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
-	cmd, ok := findCommand([]string{"ctrl+g"})
+	cmd, ok := findIn(insertCmds, []string{"ctrl+g"})
 	if !ok {
 		t.Fatal("ctrl+g not found after override")
 	}
 	if cmd.label != "Go to top of file" {
 		t.Errorf("label = %q, want canonical label %q (not the bare action name)", cmd.label, "Go to top of file")
 	}
-	if cmd.category != "Go to (g)" {
-		t.Errorf("category = %q, want %q", cmd.category, "Go to (g)")
+	// The keymap's own binding for it (ctrl+home) decides its category.
+	if cmd.category != "Navigation" {
+		t.Errorf("category = %q, want %q", cmd.category, "Navigation")
 	}
 }
 
@@ -247,7 +253,7 @@ func TestRebindRootUsesCanonicalLabel(t *testing.T) {
 func TestApplyKeybindOverridesReachesFormerlyMenuOnlyAction(t *testing.T) {
 	resetKeybinds(t)
 	cfg := &config.Config{Keybinds: []config.Keybind{
-		{Mode: "normal", Key: "ctrl+g", Action: "go-to-top"},
+		{Key: "ctrl+g", Action: "go-to-top"},
 	}}
 	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)
@@ -255,8 +261,7 @@ func TestApplyKeybindOverridesReachesFormerlyMenuOnlyAction(t *testing.T) {
 
 	m := newTestModel("a\nb\nc\n")
 	m.cursor.Line = 2
-	m2, _ := m.handleNormal(fakeKey("ctrl+g"))
-	got := m2.(Model)
+	got, _ := pressBound(m, "ctrl+g")
 	if got.cursor.Line != 0 {
 		t.Errorf("ctrl+g bound to go-to-top: cursor.Line = %d, want 0", got.cursor.Line)
 	}
@@ -268,16 +273,15 @@ func TestApplyKeybindOverridesReachesFormerlyMenuOnlyAction(t *testing.T) {
 func TestApplyKeybindOverridesExOnlyAction(t *testing.T) {
 	resetKeybinds(t)
 	cfg := &config.Config{Keybinds: []config.Keybind{
-		{Mode: "normal", Key: "ctrl+q", Action: "quit-force"},
+		{Key: "ctrl+o", Action: "quit-force"},
 	}}
 	if warnings := applyKeybindOverrides(cfg); len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
 
-	m := newTestModel("hello\n")
-	_, cmd := m.handleNormal(fakeKey("ctrl+q"))
+	_, cmd := pressBound(newTestModel("hello\n"), "ctrl+o")
 	if cmd == nil {
-		t.Error("ctrl+q bound to quit-force: expected a non-nil cmd (doCloseBuffer)")
+		t.Error("ctrl+o bound to quit-force: expected a non-nil cmd (doCloseBuffer)")
 	}
 }
 

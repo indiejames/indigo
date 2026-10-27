@@ -45,7 +45,7 @@ Also, I wanted to build something real in Go, and to use some of the great proje
 
 ## Install
 
-Indigo is developed and tested on **macOS**, and is regularly exercised on **Linux**
+Indigo is developed and tested on **macOS**, and is regularly used on **Linux**
 (natively and inside [dev containers](docs/dev-containers.md)). Windows is not supported —
 the client/server transport is Unix domain sockets and process handling is POSIX-only.
 

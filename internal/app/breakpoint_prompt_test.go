@@ -75,7 +75,7 @@ func typeText(t *testing.T, a App, text string) App {
 // then adds a log message without losing the condition.
 func TestBreakpointConditionPromptSetsItOnTheServer(t *testing.T) {
 	a, q, rpc, main := promptApp(t)
-	a = pressRun(t, a, "space", "d", "B")
+	a = pressRun(t, a, "ctrl+space", "d", "B")
 	if a.pluginInput == nil || !strings.Contains(a.pluginInput.title, "line 4") {
 		t.Fatalf("no condition prompt for line 4: %+v", a.pluginInput)
 	}
@@ -89,7 +89,7 @@ func TestBreakpointConditionPromptSetsItOnTheServer(t *testing.T) {
 			strings.Contains(strings.Join(activeRows(a), "\n"), "if n > 1")
 	})
 
-	a = pressRun(t, a, "space", "d", "L")
+	a = pressRun(t, a, "ctrl+space", "d", "L")
 	if a.pluginInput == nil || a.pluginInput.text != "" {
 		t.Fatalf("logpoint prompt = %+v, want an empty one", a.pluginInput)
 	}
@@ -106,7 +106,7 @@ func TestBreakpointConditionPromptSetsItOnTheServer(t *testing.T) {
 	}
 
 	// Reopening the condition prompt shows the condition; Esc changes nothing.
-	a = pressRun(t, a, "space", "d", "B")
+	a = pressRun(t, a, "ctrl+space", "d", "B")
 	if a.pluginInput == nil || a.pluginInput.text != "n > 1" {
 		t.Fatalf("condition prompt = %+v, want it pre-filled", a.pluginInput)
 	}
@@ -125,7 +125,7 @@ func TestBreakpointConditionPromptSetsItOnTheServer(t *testing.T) {
 // nothing listens on is attempted, and the failure reported.
 func TestAttachPickerReportsAnUnreachableAddress(t *testing.T) {
 	a, _, _, _ := promptApp(t)
-	a = pressRun(t, a, "space", "d", "a")
+	a = pressRun(t, a, "ctrl+space", "d", "a")
 	if a.procPicker == nil {
 		t.Fatal("Space d a did not open the process picker")
 	}

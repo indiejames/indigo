@@ -21,6 +21,9 @@ type cmdDesc struct {
 	aliases   []string
 	desc      string
 	needsArgs bool // if true, Tab+Enter fills the command line instead of executing immediately
+	// paletteOnly marks an action listed under its own name rather than a
+	// ":" command, so the help popup's command list can leave it out.
+	paletteOnly bool
 }
 
 // displayName is what a popup row shows: every alias for this command
@@ -103,6 +106,16 @@ func generateExCommands() []cmdDesc {
 		c.aliases = []string{c.name}
 		out = append(out, c)
 	}
+	// Every other named action is listed under its own name, which makes this
+	// popup the command palette: anything the editor can do is reachable here
+	// by name or label, whatever key (if any) it is on.
+	actions := mergeDisplayInfo(canonicalDisplayInfo(defaultPrefixCmds), canonicalDisplayInfo(defaultInsertCmds))
+	for name, info := range actions {
+		if _, listed := byAction[name]; listed {
+			continue
+		}
+		out = append(out, cmdDesc{name: name, aliases: []string{name}, desc: info.label, paletteOnly: true})
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
 	return out
 }
@@ -125,15 +138,19 @@ func fuzzyMatch(pattern, s string) bool {
 	return false
 }
 
-// filteredCmds returns cmdDesc entries with at least one alias that
-// fuzzy-matches input, in alphabetical order. Returns nil when input looks
-// like a line number.
+// filteredCmds returns cmdDesc entries whose description or one of whose
+// aliases fuzzy-matches input, in alphabetical order. Returns nil when input
+// looks like a line number.
 func filteredCmds(input string) []cmdDesc {
 	if len(input) > 0 && input[0] >= '0' && input[0] <= '9' {
 		return nil
 	}
 	var out []cmdDesc
 	for _, e := range generateExCommands() {
+		if fuzzyMatch(input, e.desc) {
+			out = append(out, e)
+			continue
+		}
 		for _, a := range e.aliases {
 			if fuzzyMatch(input, a) {
 				out = append(out, e)

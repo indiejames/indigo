@@ -20,26 +20,27 @@ import (
 // tea.KeyboardEnhancements, the breakage would otherwise be silent and
 // bizarre (every command firing twice) rather than a caught regression.
 func TestKeyReleaseDoesNotTriggerBindings(t *testing.T) {
-	// "i" enters insert mode — an unambiguous, cheap-to-observe binding.
-	press := tea.KeyPressMsg{Code: 'i', Text: "i"}
-	release := tea.KeyReleaseMsg{Code: 'i', Text: "i"}
+	// Ctrl+End goes to the end of the file — an unambiguous, cheap-to-observe
+	// binding.
+	press := tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl}
+	release := tea.KeyReleaseMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl}
 
-	t.Run("press enters insert mode", func(t *testing.T) {
-		m := newTestModel("hello\n")
+	t.Run("press runs the binding", func(t *testing.T) {
+		m := newTestModel("hello\nworld\n")
 		got, _ := m.Update(press)
-		if got.(Model).mode != ModeInsert {
-			t.Fatalf("mode after KeyPressMsg 'i' = %v, want ModeInsert — "+
-				"the test's premise (that 'i' is a live binding) no longer holds",
-				got.(Model).mode)
+		if got.(Model).cursor.Line == 0 {
+			t.Fatalf("cursor after KeyPressMsg Ctrl+End = %+v, want it moved — "+
+				"the test's premise (that Ctrl+End is a live binding) no longer holds",
+				got.(Model).cursor)
 		}
 	})
 
 	t.Run("release is ignored", func(t *testing.T) {
-		m := newTestModel("hello\n")
+		m := newTestModel("hello\nworld\n")
 		got, cmd := m.Update(release)
-		if got.(Model).mode != ModeNormal {
-			t.Errorf("mode after KeyReleaseMsg 'i' = %v, want ModeNormal: "+
-				"the release re-ran the 'i' binding", got.(Model).mode)
+		if c := got.(Model).cursor; c.Line != 0 || c.Col != 0 {
+			t.Errorf("cursor after KeyReleaseMsg Ctrl+End = %+v, want unmoved: "+
+				"the release re-ran the binding", c)
 		}
 		if cmd != nil {
 			t.Errorf("KeyReleaseMsg produced a non-nil command; releases should be dropped outright")

@@ -119,7 +119,7 @@ func TestAttachThroughThePicker(t *testing.T) {
 	if _, err := rpc.ToggleBreakpoint(ctx, src, 9); err != nil {
 		t.Fatal(err)
 	}
-	a = pressRun(t, a, "space", "d", "a")
+	a = pressRun(t, a, "ctrl+space", "d", "a")
 	a = typeText(t, a, "example.com/looper")
 	rows := a.procPicker.rows()
 	if len(rows) != 1 || rows[0].proc == nil || rows[0].proc.PID != pid {
@@ -145,7 +145,7 @@ func TestPickProcessConfiguration(t *testing.T) {
 	if _, err := rpc.ToggleBreakpoint(t.Context(), src, 9); err != nil {
 		t.Fatal(err)
 	}
-	a = pressRun(t, a, "space", "d", "l")
+	a = pressRun(t, a, "ctrl+space", "d", "l")
 	a = pressRun(t, a, "1")
 	if a.procPicker == nil || a.procPicker.cfg.Name != "Attach to Go" {
 		t.Fatalf("picker = %+v, want one for the configuration", a.procPicker)

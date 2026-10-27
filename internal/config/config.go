@@ -213,11 +213,11 @@ type FormatterConfig struct {
 	Args       []string `toml:"args,omitempty"`
 }
 
-// Keybind overrides or adds a single key binding. Mode selects which mode's
-// bindings to affect ("normal" or "insert"); Action must name one of the
-// editor's built-in actions (see docs/configuration.md for the full list —
-// e.g. "save", "cursor-left", "delete-selection"). A Key already bound to a
-// multi-key prefix menu (like "g" or "m") can't be overridden this way.
+// Keybind overrides or adds a single key binding in the keymap. Action must
+// name one of the editor's built-in actions (`indigo --dump-keybinds` lists
+// them). Mode is left out: there is one keymap. "insert" is accepted, since
+// that is what keymap bindings used to say; "normal" is refused with a
+// warning. A key that types a character can't be bound.
 type Keybind struct {
 	Mode   string `toml:"mode"`
 	Key    string `toml:"key"`
@@ -227,12 +227,12 @@ type Keybind struct {
 // KeymenuNode is one node in a user-defined [[keymenu]] tree: either a
 // branch (has Children, no Action) or a leaf (has Action, no Children).
 // The same type represents every depth — a top-level [[keymenu]] entry and
-// every nested [[keymenu.child]] entry alike. Normal mode only, matching
-// every built-in menu (g, m, ~, ...); structural validation (a node can't
-// have both Action and Children, no duplicate sibling keys) and collision
-// handling against built-in bindings happen in internal/client, which
-// owns the command tree and action registries this needs — see
-// internal/client/keymenus.go.
+// every nested [[keymenu.child]] entry alike. A top-level entry's key opens
+// the menu from the keymap, so it can't be a key that types a character;
+// structural validation (a node can't have both Action and Children, no
+// duplicate sibling keys) and collision handling against built-in bindings
+// happen in internal/client, which owns the command tree and action
+// registries this needs — see internal/client/keymenus.go.
 type KeymenuNode struct {
 	Key      string        `toml:"key"`
 	Label    string        `toml:"label"`
@@ -447,10 +447,10 @@ type Config struct {
 	// A partial entry (only style or only width) inherits the other field
 	// from the next source down the precedence chain.
 	IndentOverrides map[string]IndentSettings `toml:"indent"`
-	// Keybinds override or add Normal-/Insert-mode key bindings. See the
+	// Keybinds override or add key bindings in the keymap. See the
 	// Keybind type for the shape of each entry.
 	Keybinds []Keybind `toml:"keybind"`
-	// Keymenus define user-authored Normal-mode prefix menus. See the
+	// Keymenus define user-authored menus, opened from the keymap. See the
 	// KeymenuNode type for the shape of each entry.
 	Keymenus []KeymenuNode `toml:"keymenu"`
 	// Linters override or add an external linter for a given set of file

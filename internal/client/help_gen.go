@@ -1,6 +1,7 @@
 package client
 
 import (
+	"slices"
 	"sort"
 	"strings"
 )
@@ -25,7 +26,6 @@ var categoryOrder = []string{
 	"Navigation",
 	"Go to (g)",
 	"Editing",
-	"Insert mode",
 	"Selection",
 	"Match (m)",
 	"Search",
@@ -36,6 +36,7 @@ var categoryOrder = []string{
 	"LSP / Diagnostics",
 	"Debug",
 	"Files & Buffers",
+	"Commands",
 	"Command (space)",
 	"System",
 }
@@ -87,7 +88,11 @@ func collectHelpRows(cmds []command) []*treeHelpRow {
 					order = append(order, c.name)
 				}
 				row.rawKeys = append(row.rawKeys, c.key)
-				row.seqs = append(row.seqs, displaySequence(fullPath))
+				// Two spellings of one key (ctrl+shift+/ and ctrl+?) are
+				// shown once.
+				if seq := displaySequence(fullPath); !slices.Contains(row.seqs, seq) {
+					row.seqs = append(row.seqs, seq)
+				}
 			}
 			if len(c.children) > 0 {
 				walk(c.children, cat, fullPath)
@@ -145,12 +150,17 @@ func displayKey(key string) string {
 	if name, ok := specialKeyNames[key]; ok {
 		return name
 	}
+	if key == "ctrl+shift+/" {
+		return "Ctrl+?" // what is printed on the key, not how it is reported
+	}
 	parts := strings.Split(key, "+")
 	for i, p := range parts {
 		if name, ok := specialKeyNames[p]; ok {
 			parts[i] = name
 		} else if p == "ctrl" || p == "shift" || p == "alt" {
 			parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		} else if p == "meta" {
+			parts[i] = "Cmd" // Ghostty reports Shift+Cmd+arrow with the meta modifier
 		}
 	}
 	return strings.Join(parts, "+")
@@ -163,8 +173,8 @@ func displayKey(key string) string {
 // is rendered by concatenating each key directly with no separator,
 // matching this codebase's existing two-level convention (e.g. "gd", "~s")
 // extended naturally to deeper paths (e.g. "miw") — except the Space-menu
-// prefix, which reads as "SPC " (matching the existing "SPC a" convention)
-// since a bare space concatenated with the next key would be invisible.
+// prefix, which reads as "Ctrl+Space " (the chord that opens that menu) since
+// a bare space concatenated with the next key would be invisible.
 func displaySequence(path []string) string {
 	if len(path) == 1 {
 		return displayKey(path[0])
@@ -175,7 +185,7 @@ func displaySequence(path []string) string {
 		// Key.String() produces), but a user keymenu in config.toml can spell
 		// the same key " " — buildKeymenuCommand passes Key through verbatim.
 		if tok == "space" || tok == " " {
-			b.WriteString("SPC ")
+			b.WriteString("Ctrl+Space ")
 			continue
 		}
 		b.WriteString(tok)
@@ -183,52 +193,24 @@ func displaySequence(path []string) string {
 	return b.String()
 }
 
-// generateHelpEntries builds the ? popup's built-in reference from the live
-// prefixCmds/insertCmds trees and the ":" command table (completion.go's
-// generateExCommands), replacing the old hand-maintained static helpEntries
-// list. It reflects [[keybind]] overrides applied via applyKeybindOverrides
-// (prefixCmds/insertCmds are the live, post-override trees) — a rebound
-// key never shows a stale description, and a new ":" command or Insert-mode
-// binding can never drift out of sync since there's only one place either
-// is declared.
+// generateHelpEntries builds the help popup (F1) from the live keymap
+// (insertCmds, which reflects [[keybind]] overrides), the Command (space)
+// menu, and the ":" command table. The catalog (prefixCmds) is left out: its
+// keys are the modal editor's, which no key reaches any more.
 func generateHelpEntries() []helpEntry {
 	var out []helpEntry
 
 	byCategory := map[string][]*treeHelpRow{}
-	for _, row := range collectHelpRows(prefixCmds) {
+	for _, row := range collectHelpRows(insertCmds) {
 		byCategory[row.category] = append(byCategory[row.category], row)
 	}
-	// "Insert mode" is synthetic — its rows come from a different tree
-	// (insertCmds) entirely — but folding it into the same map lets it
-	// participate in categoryOrder's positioning like any other section,
-	// instead of being hardcoded to always trail at the very end.
-	//
-	// Exclude rows whose own canonical category is "System" first: since
-	// exOnlyActions are merged into both modes' [[keybind]] action sets
-	// (keybinds.go), a user can bind an ex-only System action (e.g.
-	// "toggle-metrics") into insert mode, and rebindRoot correctly stamps
-	// that node's category as "System" via canonicalDisplayInfo — but
-	// unlike the Normal-mode categories below, rows here were being folded
-	// into "Insert mode" unconditionally, ignoring that category entirely.
-	// That let a System action bound into insert mode leak into the popup
-	// even though the same action is deliberately hidden when reached from
-	// Normal mode.
-	if insertRows := collectHelpRows(insertCmds); len(insertRows) > 0 {
-		var visible []*treeHelpRow
-		for _, row := range insertRows {
-			if row.category != "System" {
-				visible = append(visible, row)
-			}
-		}
-		if len(visible) > 0 {
-			byCategory["Insert mode"] = visible
-		}
+	for _, row := range collectHelpRows([]command{commandMenuRoot}) {
+		byCategory[row.category] = append(byCategory[row.category], row)
 	}
-	// "System" (quit-hint, command-mode, show-plugin-bindings) is
-	// meta/self-referential or already a universally-known convention (":"),
-	// not worth a curated reference entry — excluded from the popup only.
-	// DumpKeybindsTOML shares this same categorization but doesn't apply
-	// this exclusion, since these are still legitimate [[keybind]] targets.
+	// "System" (quit-hint, command-mode) is meta, not worth a reference
+	// entry — excluded from the popup only. DumpKeybindsTOML shares this
+	// categorization but doesn't apply the exclusion, since these are still
+	// legitimate [[keybind]] targets.
 	delete(byCategory, "System")
 
 	for _, cat := range orderedCategories(byCategory) {
@@ -239,8 +221,11 @@ func generateHelpEntries() []helpEntry {
 		out = append(out, helpEntry{key: ""})
 	}
 
-	out = append(out, helpEntry{key: "Commands (:)"})
+	out = append(out, helpEntry{key: "Commands (Ctrl+Shift+P)"})
 	for _, c := range generateExCommands() {
+		if c.paletteOnly {
+			continue // an action listed by name, already shown above
+		}
 		out = append(out, helpEntry{key: "  " + c.displayName(), desc: c.desc})
 	}
 

@@ -94,7 +94,7 @@ func TestSelectNextOccurrenceSeedsFromSearchMatch(t *testing.T) {
 	}
 	wantSel := &Selection{
 		Anchor: document.Pos{Line: 0, Col: 0},
-		Head:   document.Pos{Line: 0, Col: 6},
+		Head:   document.Pos{Line: 0, Col: 7},
 	}
 	if m.sel == nil || *m.sel != *wantSel {
 		t.Errorf("m.sel = %+v, want %+v (the full search match, not a word-boundary guess)", m.sel, wantSel)
@@ -139,8 +139,8 @@ func TestSelectNextOccurrenceIgnoresStaleSearchMatchAfterCursorMoves(t *testing.
 	if !selectNextOccurrence(&m) {
 		t.Fatal("selectNextOccurrence returned false")
 	}
-	if m.sel == nil || m.sel.Anchor.Col != 8 || m.sel.Head.Col != 10 {
-		t.Errorf("m.sel = %+v, want the word 'baz' (col 8-10), not the stale search match", m.sel)
+	if m.sel == nil || m.sel.Anchor.Col != 8 || m.sel.Head.Col != 11 {
+		t.Errorf("m.sel = %+v, want the word 'baz' [8,11), not the stale search match", m.sel)
 	}
 	// Stale search state is untouched by the word-boundary path.
 	if len(m.searchMatches) == 0 {
@@ -161,7 +161,7 @@ func TestSelectNextOccurrenceIgnoresZeroLengthSearchMatch(t *testing.T) {
 	if !selectNextOccurrence(&m) {
 		t.Fatal("selectNextOccurrence returned false")
 	}
-	if m.sel == nil || m.sel.Anchor.Col != 0 || m.sel.Head.Col != 2 {
-		t.Errorf("m.sel = %+v, want the whole word 'foo' (col 0-2) via the fallback path", m.sel)
+	if m.sel == nil || m.sel.Anchor.Col != 0 || m.sel.Head.Col != 3 {
+		t.Errorf("m.sel = %+v, want the whole word 'foo' [0,3) via the fallback path", m.sel)
 	}
 }

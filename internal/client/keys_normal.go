@@ -22,23 +22,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Handle active prefix sequence before the main switch.
 	if len(m.prefixSeq) > 0 {
-		if msg.String() == "esc" {
-			m.prefixSeq = nil
-			return m, nil
-		}
-		newSeq := append(append([]string(nil), m.prefixSeq...), msg.String())
-		if cmd, ok := m.resolveCommand(newSeq); ok {
-			if cmd.execute != nil {
-				m.prefixSeq = nil
-				return cmd.execute(m)
-			}
-			if len(cmd.children) > 0 {
-				m.prefixSeq = newSeq
-				return m, nil
-			}
-		}
-		m.prefixSeq = nil
-		return m, nil
+		return m.handlePrefixKey(msg)
 	}
 
 	// A single keypress that matches a root-level command tree entry either
@@ -55,6 +39,30 @@ func (m Model) handleNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	return m, nil
+}
+
+// handlePrefixKey advances an open menu (m.prefixSeq) by one key: a leaf
+// runs, a submenu opens, and anything else, Esc included, closes the menu.
+func (m Model) handlePrefixKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "esc" {
+		m.prefixSeq = nil
+		return m, nil
+	}
+	newSeq := append(append([]string(nil), m.prefixSeq...), msg.String())
+	if cmd, ok := m.resolveCommand(newSeq); ok {
+		if cmd.execute != nil {
+			m.prefixSeq = nil
+			m, endCmd := m.endTyping()
+			model, runCmd := cmd.execute(m)
+			return model, tea.Batch(endCmd, runCmd)
+		}
+		if len(cmd.children) > 0 {
+			m.prefixSeq = newSeq
+			return m, nil
+		}
+	}
+	m.prefixSeq = nil
 	return m, nil
 }
 
@@ -607,20 +615,24 @@ func executeSelectToMark(m Model) (tea.Model, tea.Cmd) {
 }
 
 // executeMacroRecordToggle starts or stops recording into the single macro
-// slot. The q keypress itself is never part of the recorded sequence — see
-// Update's tea.KeyMsg case, which excludes it by comparing macroRecording
-// before and after this call.
+// slot. The keys that do it are never part of the recorded sequence — see
+// Update's tea.KeyMsg case, which excludes the last by comparing
+// macroRecording before and after this call; the menu keys before it are
+// cut here.
 func executeMacroRecordToggle(m Model) (tea.Model, tea.Cmd) {
 	if m.macroRecording {
 		m.macroRecording = false
 		m.lastMacro = m.macroKeys
+		if m.macroInMenu {
+			m.lastMacro = m.macroKeys[:m.macroMenuStart]
+		}
 		m.macroKeys = nil
 		m = m.pushStatus(fmt.Sprintf("macro recorded (%d keys)", len(m.lastMacro)))
 		return m, nil
 	}
 	m.macroRecording = true
 	m.macroKeys = []tea.KeyMsg{}
-	m = m.pushStatus("recording macro... (q to stop)")
+	m = m.pushStatus("recording macro... (Ctrl+Space q to stop)")
 	return m, nil
 }
 
@@ -636,11 +648,11 @@ func executeMacroReplay(m Model) (tea.Model, tea.Cmd) {
 		// replaying the finished macro would re-trigger a (now unblocked)
 		// replay of itself — see macroReplayBlocked's doc comment.
 		m.macroReplayBlocked = true
-		m = m.pushStatus("can't replay while recording (press q to stop)")
+		m = m.pushStatus("can't replay while recording (Ctrl+Space q to stop)")
 		return m, nil
 	}
 	if len(m.lastMacro) == 0 {
-		m = m.pushStatus("no macro recorded (press q to record one)")
+		m = m.pushStatus("no macro recorded (Ctrl+Space q to record one)")
 		return m, nil
 	}
 	cmds := make([]tea.Cmd, len(m.lastMacro))

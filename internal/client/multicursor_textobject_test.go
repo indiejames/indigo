@@ -58,8 +58,8 @@ func TestTextObjectCollapsesCursorsOnOneObject(t *testing.T) {
 	if len(got.extraCursors) != 0 {
 		t.Errorf("got %d extra cursors, want 0 — both resolved to the same word", len(got.extraCursors))
 	}
-	if got.sel == nil || got.sel.Anchor.Col != 0 || got.sel.Head.Col != 4 {
-		t.Errorf("selection = %+v, want alpha (cols 0..4)", got.sel)
+	if got.sel == nil || got.sel.Anchor.Col != 0 || got.sel.Head.Col != 5 {
+		t.Errorf("selection = %+v, want alpha [0,5)", got.sel)
 	}
 }
 
@@ -78,8 +78,8 @@ func TestTextObjectKeepsCursorsOnDistinctObjects(t *testing.T) {
 	if got.extraCursors[0].sel == nil {
 		t.Fatal("extra cursor has no selection")
 	}
-	if got.extraCursors[0].sel.Anchor.Col != 6 || got.extraCursors[0].sel.Head.Col != 9 {
-		t.Errorf("extra selection = %+v, want beta (cols 6..9)", got.extraCursors[0].sel)
+	if got.extraCursors[0].sel.Anchor.Col != 6 || got.extraCursors[0].sel.Head.Col != 10 {
+		t.Errorf("extra selection = %+v, want beta [6,10)", got.extraCursors[0].sel)
 	}
 }
 

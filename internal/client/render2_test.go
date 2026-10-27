@@ -185,13 +185,12 @@ func TestRenderLineRunesTrailingOverlayPaddingSplitsAtSelectionBoundary(t *testi
 	}
 }
 
+// TestRenderLineChunkTrailingEmptyLineReverseSelection: "a\nb\n" has a
+// trailing phantom empty line (index 2) that isn't part of displayLineCount.
+// A selection that ends there, even a reversed one with the cursor back on
+// line 0, covers nothing on it — no characters and no line break — so it
+// still renders as the plain "~".
 func TestRenderLineChunkTrailingEmptyLineReverseSelection(t *testing.T) {
-	// "a\nb\n" has a trailing phantom empty line (index 2) that isn't part
-	// of displayLineCount. Select from line 0 through that phantom line,
-	// then simulate a flipped/reverse selection where the cursor sits back
-	// on line 0 — the phantom line is still selected but no longer holds
-	// the cursor, so it must fall through to the selection-padding branch
-	// instead of the plain "~" shortcut.
 	m := newTestModel("a\nb\n")
 	m.sel = &Selection{
 		Anchor: document.Pos{Line: 2, Col: 0},
@@ -203,8 +202,8 @@ func TestRenderLineChunkTrailingEmptyLineReverseSelection(t *testing.T) {
 	layout := m.buildScreenLayout(3, cw)
 	rendered := m.renderLineChunk(layout[2], cw, nil, -1, -1, false)
 
-	if strings.Contains(rendered, "~") {
-		t.Errorf("trailing empty line included in selection should not render as a bare tilde, got %q", rendered)
+	if !strings.Contains(rendered, "~") {
+		t.Errorf("the phantom line holds nothing selected and should render as \"~\", got %q", rendered)
 	}
 }
 
@@ -382,29 +381,46 @@ func TestRenderLineWithTabs(t *testing.T) {
 
 // --- renderStatusBar ---
 
-func TestRenderStatusBarNormalMode(t *testing.T) {
-	m := newTestModel("hello\n")
+// TestRenderStatusBarShowsTheSelection: with no modes to name, the bar's left
+// segment says what is selected, and is absent when nothing is.
+func TestRenderStatusBarShowsTheSelection(t *testing.T) {
+	m := newTestModel("hello\nworld\nagain\n")
 	m.filePath = "test.go"
-	bar := m.renderStatusBar()
-	w := lipgloss.Width(bar)
-	if w != m.width {
-		t.Errorf("statusBar width = %d, want %d", w, m.width)
+	check := func(name, want string) {
+		t.Helper()
+		bar := m.renderStatusBar()
+		if w := lipgloss.Width(bar); w != m.width {
+			t.Errorf("%s: statusBar width = %d, want %d", name, w, m.width)
+		}
+		stripped := ansiStrip(bar)
+		for _, gone := range []string{"NORMAL", "INSERT"} {
+			if strings.Contains(stripped, gone) {
+				t.Errorf("%s: bar still names a mode: %q", name, stripped)
+			}
+		}
+		if want != "" && !strings.Contains(stripped, want) {
+			t.Errorf("%s: bar = %q, want it to contain %q", name, stripped, want)
+		}
 	}
-	// Should contain mode label
-	stripped := ansiStrip(bar)
-	if !strings.Contains(stripped, "NORMAL") {
-		t.Errorf("normal mode bar should contain 'NORMAL': %q", stripped)
+	check("no selection", "")
+	if got := m.selectionStatus(); got != "" {
+		t.Errorf("selectionStatus with nothing selected = %q, want empty", got)
 	}
-}
 
-func TestRenderStatusBarInsertMode(t *testing.T) {
-	m := newTestModel("hello\n")
-	m.mode = ModeInsert
-	bar := m.renderStatusBar()
-	stripped := ansiStrip(bar)
-	if !strings.Contains(stripped, "INSERT") {
-		t.Errorf("insert mode bar should contain 'INSERT': %q", stripped)
-	}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 4}}
+	check("within a line", "3 chars")
+
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 1, Col: 2}}
+	check("across lines", "2 lines")
+
+	// A whole-line selection ends at column 0 of the next line, which is not
+	// one of the selected lines.
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 1, Col: 0}}
+	check("one whole line", "1 line")
+
+	m.sel = nil
+	m.extraCursors = []ExtraCursor{{pos: document.Pos{Line: 1}, goalCol: -1}}
+	check("multi-cursor", "2 cursors")
 }
 
 func TestRenderStatusBarCommandMode(t *testing.T) {
@@ -525,10 +541,14 @@ func TestHandleKeyDispatchesToInsert(t *testing.T) {
 	m := newTestModel("hello\n")
 	m.mode = ModeInsert
 	m.cursor.Col = 2
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 2}}
 	m2, _ := m.handleKey(fakeKey("esc"))
 	got := m2.(Model)
-	if got.mode != ModeNormal {
-		t.Errorf("handleKey insert 'esc': mode = %v, want ModeNormal", got.mode)
+	if got.sel != nil {
+		t.Errorf("handleKey insert 'esc': sel = %+v, want it cleared", *got.sel)
+	}
+	if got.mode != ModeInsert {
+		t.Errorf("handleKey insert 'esc': mode = %v, want ModeInsert", got.mode)
 	}
 }
 
@@ -612,18 +632,16 @@ func TestCursorShapeConfigSelectsUnderline(t *testing.T) {
 		}
 	})
 
-	t.Run("underline in insert mode keeps the mode color", func(t *testing.T) {
+	t.Run("underline in insert mode uses the cursor color", func(t *testing.T) {
+		applyDefaultDark()
 		m.cfg = &config.Config{CursorShape: "underline"}
 		m.mode = ModeInsert
 		insert := m.cursorStyleForMode()
 		if !insert.GetUnderline() {
 			t.Error("insert mode: want an underlined cursor")
 		}
-		m.mode = ModeNormal
-		normal := m.cursorStyleForMode()
-		if insert.GetForeground() == normal.GetForeground() {
-			t.Errorf("insert and normal underline cursors share foreground %v; the shape must not "+
-				"collapse the per-mode color distinction", insert.GetForeground())
+		if want := lipgloss.Color(insertAccentColor); insert.GetForeground() != want {
+			t.Errorf("insert underline cursor foreground = %v, want the cursor color %v", insert.GetForeground(), want)
 		}
 	})
 }

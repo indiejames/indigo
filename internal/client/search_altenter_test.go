@@ -27,8 +27,8 @@ func TestHandleSearchAltEnterSelectsAllMatches(t *testing.T) {
 	}
 	m2 := res.(Model)
 
-	if m2.mode != ModeNormal {
-		t.Errorf("mode = %v, want ModeNormal", m2.mode)
+	if m2.mode != ModeInsert {
+		t.Errorf("mode = %v, want ModeInsert", m2.mode)
 	}
 	if m2.searchQuery != "" || len(m2.searchMatches) != 0 {
 		t.Errorf("search state not cleared: searchQuery=%q searchMatches=%v", m2.searchQuery, m2.searchMatches)

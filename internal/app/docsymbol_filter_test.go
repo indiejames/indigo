@@ -127,6 +127,8 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyPressMsg{Code: tea.KeyF5, Mod: tea.ModShift}
 	case "space":
 		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
+	case "ctrl+space": // opens the Command menu
+		return tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModCtrl}
 	case "enter":
 		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":

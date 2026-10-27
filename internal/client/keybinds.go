@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -118,26 +119,23 @@ func rebindRoot(cmds []command, key, name string, fn func(Model) (tea.Model, tea
 	return append(cmds, command{key: key, name: name, label: label, category: category, execute: fn}), ""
 }
 
-// applyKeybindOverrides rebuilds prefixCmds and insertCmds from their
-// pristine defaults plus cfg's [[keybind]] entries, returning a
-// human-readable warning per entry that names an unknown mode/action or an
-// empty key. Called from Model.New and Model.WithConfig so both initial load
-// and config hot-reload pick up changes.
+// applyKeybindOverrides rebuilds insertCmds, the keymap, from its pristine
+// default plus cfg's [[keybind]] and [[keymenu]] entries, returning a
+// human-readable warning per entry it could not apply. Called from Model.New
+// and Model.WithConfig so both initial load and config hot-reload pick up
+// changes.
+//
+// There is one keymap, so a [[keybind]] leaves mode out (or says "insert",
+// what it had to say before). One that says "normal" is refused with a
+// warning rather than bound, because a Normal-mode key is usually a letter,
+// and bound in the keymap it would stop that letter being typed. A [[keymenu]]
+// becomes a menu in the keymap, opened by its key.
 func applyKeybindOverrides(cfg *config.Config) []string {
-	normal := append([]command(nil), defaultPrefixCmds...)
-	insert := append([]command(nil), defaultInsertCmds...)
-	normalActions := actionRegistry(defaultPrefixCmds)
-	insertActions := actionRegistry(defaultInsertCmds)
-	// Ex-only actions (no keypress/menu equivalent — see ex_actions.go) are
-	// valid [[keybind]] targets too, in both modes, for the same reason a
-	// tree-derived action is: there's no structural reason to forbid e.g.
-	// binding "quit-force" to a key from Insert mode.
-	for name, fn := range exOnlyActions {
-		normalActions[name] = fn
-		insertActions[name] = fn
-	}
-	normalDisplay := mergeDisplayInfo(canonicalDisplayInfo(defaultPrefixCmds), exOnlyDisplay)
-	insertDisplay := mergeDisplayInfo(canonicalDisplayInfo(defaultInsertCmds), exOnlyDisplay)
+	keymap := append([]command(nil), defaultInsertCmds...)
+	// Any action can be bound, wherever it is otherwise reached: the keymap,
+	// a menu, the palette.
+	actions := exActionRegistry()
+	display := mergeDisplayInfo(mergeDisplayInfo(canonicalDisplayInfo(defaultPrefixCmds), canonicalDisplayInfo(defaultInsertCmds)), exOnlyDisplay)
 
 	var warnings []string
 	if cfg != nil {
@@ -146,45 +144,54 @@ func applyKeybindOverrides(cfg *config.Config) []string {
 				warnings = append(warnings, fmt.Sprintf("keybind: empty key for action %q", kb.Action))
 				continue
 			}
-			var (
-				target    *[]command
-				actions   map[string]func(Model) (tea.Model, tea.Cmd)
-				display   map[string]displayInfo
-				modeLabel string
-			)
 			switch kb.Mode {
+			case "", "insert":
 			case "normal":
-				target, actions, display, modeLabel = &normal, normalActions, normalDisplay, "normal"
-			case "insert":
-				target, actions, display, modeLabel = &insert, insertActions, insertDisplay, "insert"
+				warnings = append(warnings, fmt.Sprintf("keybind: %q is for Normal mode, which no longer exists; leave mode out to bind it in the keymap", kb.Key))
+				continue
 			default:
-				warnings = append(warnings, fmt.Sprintf("keybind: unknown mode %q (must be \"normal\" or \"insert\")", kb.Mode))
+				warnings = append(warnings, fmt.Sprintf("keybind: unknown mode %q (leave it out)", kb.Mode))
+				continue
+			}
+			if typedKey(kb.Key) {
+				warnings = append(warnings, fmt.Sprintf("keybind: %q types a character, so it can't be bound to an action", kb.Key))
 				continue
 			}
 			fn, ok := actions[kb.Action]
 			if !ok {
-				warnings = append(warnings, fmt.Sprintf("keybind: unknown action %q for mode %q", kb.Action, modeLabel))
+				warnings = append(warnings, fmt.Sprintf("keybind: unknown action %q", kb.Action))
 				continue
 			}
 			var warn string
-			*target, warn = rebindRoot(*target, kb.Key, kb.Action, fn, display)
+			keymap, warn = rebindRoot(keymap, kb.Key, kb.Action, fn, display)
 			if warn != "" {
 				warnings = append(warnings, warn)
 			}
 		}
 	}
 
-	// [[keymenu]] is applied after [[keybind]] finishes mutating normal, so
-	// a keymenu leaf's action can reference either a built-in action or one
-	// a [[keybind]] override just renamed/introduced — one consistent
-	// ordering. Normal mode only: Insert mode has no menu concept today.
+	// [[keymenu]] is applied after [[keybind]], so a menu leaf can name an
+	// action a [[keybind]] just bound as well as a built-in one.
 	if cfg != nil {
+		var menus []config.KeymenuNode
+		for _, km := range cfg.Keymenus {
+			if typedKey(km.Key) {
+				warnings = append(warnings, fmt.Sprintf("keymenu: %q types a character, so it can't open a menu", km.Key))
+				continue
+			}
+			menus = append(menus, km)
+		}
 		var kwarn []string
-		normal, kwarn = applyKeymenus(normal, cfg.Keymenus, normalDisplay, normalActions)
+		keymap, kwarn = applyKeymenus(keymap, menus, display, actions)
 		warnings = append(warnings, kwarn...)
 	}
 
-	prefixCmds = normal
-	insertCmds = insert
+	insertCmds = keymap
 	return warnings
+}
+
+// typedKey reports whether key, as Bubble Tea names it, types a character
+// rather than being a chord or a named key: a single character, or space.
+func typedKey(key string) bool {
+	return key == "space" || utf8.RuneCountInString(key) == 1
 }

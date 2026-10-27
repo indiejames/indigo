@@ -104,6 +104,9 @@ func (a App) renderBaseFrame() (string, *tea.Cursor) {
 	sb.WriteString(bufView.Content)
 	base := sb.String()
 
+	if a.unsaved != nil {
+		return overlayCenter(base, renderUnsavedPrompt(a.unsaved, a.width), a.width, a.height), nil
+	}
 	if a.fileChangedIdx >= 0 {
 		return overlayCenter(base, renderFileChangedPrompt(a.width, a.fileChangedSel), a.width, a.height), nil
 	}

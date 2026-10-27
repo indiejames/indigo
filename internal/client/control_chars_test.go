@@ -24,8 +24,10 @@ func TestControlCharactersAreDrawnVisibly(t *testing.T) {
 	if strings.Contains(out, "\x1b[2J") {
 		t.Error("an escape sequence from the file reached the terminal (it would clear the screen)")
 	}
+	// Styling stripped: the cursor's cell is styled, which splits the text.
+	text := ansiStrip(out)
 	for _, want := range []string{"before␍after", "clear␛[2Jscreen"} {
-		if !strings.Contains(out, want) {
+		if !strings.Contains(text, want) {
 			t.Errorf("rendered output lacks %q", want)
 		}
 	}

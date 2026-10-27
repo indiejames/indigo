@@ -37,17 +37,35 @@ import (
 // tick. It's also close to the ~530ms terminals themselves use.
 const insertBlinkHalfPeriod = 480 * time.Millisecond
 
+// cursorSteadyAfterKey is how long the cursor stays solid after a key press:
+// a cursor blinking while you type is hard to follow. Typing keeps it solid,
+// and it starts blinking again once the keys stop.
+const cursorSteadyAfterKey = time.Second
+
 // nowFunc is a seam for tests to pin the blink phase, in the same spirit as
 // clipboardWriter in clipboard.go.
 var nowFunc = time.Now
 
 // insertCursorOn reports whether the painted insert cursor is in its visible
-// phase. Always true when blinking is off.
+// phase. Always true when blinking is off, and for cursorSteadyAfterKey after
+// a key press; the blink then starts from there, with the cursor going off.
 func (m Model) insertCursorOn() bool {
 	if !m.cursorBlinks() {
 		return true
 	}
-	return (nowFunc().UnixNano()/int64(insertBlinkHalfPeriod))%2 == 0
+	now := nowFunc()
+	// Before any key, from the clock: on at the epoch, as it always was. A
+	// zero lastKeyAt is too long ago for Sub, which would stop at its maximum
+	// and freeze the blink.
+	elapsed := time.Duration(now.UnixNano()) + insertBlinkHalfPeriod
+	if !m.lastKeyAt.IsZero() {
+		since := now.Sub(m.lastKeyAt)
+		if since < cursorSteadyAfterKey {
+			return true
+		}
+		elapsed = since - cursorSteadyAfterKey
+	}
+	return (elapsed/insertBlinkHalfPeriod)%2 == 1
 }
 
 // paintsBufferCursor reports whether the buffer cursor is drawn as a styled

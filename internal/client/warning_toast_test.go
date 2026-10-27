@@ -22,8 +22,8 @@ func press(m Model, code rune, text string) Model {
 // key, as before.
 func TestWarningSurvivesKeys(t *testing.T) {
 	m := newTestModel("a\nb\nc\n").pushStatus(longWarning)
-	m = press(m, 'j', "j")
-	m = press(m, 'k', "k")
+	m = press(m, tea.KeyDown, "")
+	m = press(m, tea.KeyUp, "")
 	if m.status != longWarning {
 		t.Errorf("after moving: status = %q, want the warning kept", m.status)
 	}
@@ -32,7 +32,7 @@ func TestWarningSurvivesKeys(t *testing.T) {
 		t.Errorf("after Esc: status = %q, want it dismissed", m.status)
 	}
 	m = m.pushStatus("E: something failed")
-	if m = press(m, 'j', "j"); m.status != "" {
+	if m = press(m, tea.KeyDown, ""); m.status != "" {
 		t.Errorf("an error should still clear on a key: %q", m.status)
 	}
 }
@@ -62,7 +62,7 @@ func TestWarningLifetime(t *testing.T) {
 	// Past its lifetime, a key clears it like any other status.
 	m = m.pushStatus(longWarning)
 	m.statusAt = time.Now().Add(-time.Hour)
-	if m = press(m, 'j', "j"); m.status != "" {
+	if m = press(m, tea.KeyDown, ""); m.status != "" {
 		t.Error("an expired warning survived a key")
 	}
 }

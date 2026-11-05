@@ -1,9 +1,11 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/indiejames/indigo/internal/client"
 	"github.com/indiejames/indigo/internal/config"
@@ -126,3 +128,16 @@ func TestAKeyPressClearsTheTabBarStatus(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// TestThePromptIsDrawnOverAFullScreenView: the prompt takes keys before the
+// file picker, grep and diagnostics views do, so it must be drawn over them
+// too, or Enter would reload a file the user was never asked about.
+func TestThePromptIsDrawnOverAFullScreenView(t *testing.T) {
+	a := twoTabApp()
+	a.grep = &grepPicker{width: 80, height: 24}
+	updated, _ := a.Update(reloadConflictMsg{bufID: 2})
+	frame, _ := updated.(App).renderFrame()
+	if !strings.Contains(ansi.Strip(frame), "b.go changed on disk") {
+		t.Errorf("the prompt is not drawn over the grep view; frame:\n%s", ansi.Strip(frame))
+	}
+}

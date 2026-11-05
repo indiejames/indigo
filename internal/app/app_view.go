@@ -81,14 +81,14 @@ func (a App) renderFrame() (string, *tea.Cursor) {
 
 // renderBaseFrame is renderFrame without the stale-server prompt.
 func (a App) renderBaseFrame() (string, *tea.Cursor) {
-	if a.picker != nil {
-		return a.picker.View(), nil
-	}
-	if a.grep != nil {
-		return a.grep.View(), nil
-	}
-	if a.diagBrowser != nil {
-		return a.diagBrowser.View(), nil
+	// The file-changed prompt takes keys before these full-screen views do
+	// (Update), so it is drawn over them too: hidden, it would still answer
+	// the user's Enter with a reload they never saw offered.
+	if full, ok := a.fullScreenView(); ok {
+		if a.fileChangedIdx >= 0 {
+			full = overlayCenter(full, renderFileChangedPrompt(a.width, a.fileChangedSel, a.fileChangedName()), a.width, a.height)
+		}
+		return full, nil
 	}
 	if len(a.buffers) == 0 {
 		return "No buffer open. Press ctrl+p to open a file.", nil
@@ -153,6 +153,20 @@ func (a App) renderBaseFrame() (string, *tea.Cursor) {
 		cur = &c
 	}
 	return base, cur
+}
+
+// fullScreenView is the picker, grep or diagnostics view that replaces the
+// buffer view outright, if one is open.
+func (a App) fullScreenView() (string, bool) {
+	switch {
+	case a.picker != nil:
+		return a.picker.View(), true
+	case a.grep != nil:
+		return a.grep.View(), true
+	case a.diagBrowser != nil:
+		return a.diagBrowser.View(), true
+	}
+	return "", false
 }
 
 const pluginPopupMaxVisible = 14

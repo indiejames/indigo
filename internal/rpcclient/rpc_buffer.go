@@ -2,6 +2,7 @@ package rpcclient
 
 import (
 	"context"
+	"strings"
 
 	"github.com/indiejames/indigo/internal/document"
 	proto "github.com/indiejames/indigo/internal/proto"
@@ -283,6 +284,15 @@ func (r *RPC) ReloadBuffer(ctx context.Context, bufID uint32) (content string, v
 		return "", 0, 0, err
 	}
 	return content, res.Version(), res.Generation(), nil
+}
+
+// IsReloadConflict reports whether a ReloadBuffer error means an edit reached
+// the buffer while the server was reading the file, so it kept the edit and
+// did not reload. The buffer then holds changes the file does not, which is a
+// question for the user rather than an error. The error crosses the wire as
+// text, so this matches the server's message (ReloadBuffer, server_buffer.go).
+func IsReloadConflict(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "changed while reloading")
 }
 
 // BufferSyncState is one buffer's synchronization bookkeeping as the server

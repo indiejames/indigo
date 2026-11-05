@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/client"
+	"github.com/indiejames/indigo/internal/rpcclient"
 )
 
 // ---- async commands ----
@@ -372,6 +373,9 @@ func (a App) doReloadBuffer(idx int) tea.Cmd {
 		content, version, generation, err := rpc.ReloadBuffer(ctx, bufID)
 		if err != nil {
 			appLog("doReloadBuffer: ReloadBuffer error: %v", err)
+			if rpcclient.IsReloadConflict(err) {
+				return reloadConflictMsg{idx: idx, bufID: bufID}
+			}
 			return errorOpenMsg{err}
 		}
 		appLog("doReloadBuffer: reloaded bufID=%d contentLen=%d generation=%d", bufID, len(content), generation)

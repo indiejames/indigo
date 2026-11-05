@@ -76,6 +76,16 @@ type bufferReloadedMsg struct {
 	model    client.Model
 }
 
+// reloadConflictMsg reports a reload the server declined because an edit
+// reached the buffer while it was reading the file. The buffer now holds
+// changes the file on disk does not, which is the same situation as a file
+// changing under unsaved edits, so it gets the same prompt. idx and bufID are
+// checked together on arrival, as for bufferReloadedMsg.
+type reloadConflictMsg struct {
+	idx   int
+	bufID uint32
+}
+
 type App struct {
 	rpc     *client.RPC
 	cfg     *config.Config
@@ -1044,6 +1054,13 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.fileChangedIdx = idx
 		return a, nil
 
+	case reloadConflictMsg:
+		if msg.idx < 0 || msg.idx >= len(a.buffers) || a.buffers[msg.idx].BufID() != msg.bufID {
+			return a, nil
+		}
+		a.fileChangedIdx = msg.idx
+		return a, nil
+
 	case bufferReloadedMsg:
 		if msg.idx < 0 || msg.idx >= len(a.buffers) || a.buffers[msg.idx].BufID() != msg.oldBufID {
 			// The tab at idx closed, or tabs shifted (e.g. an earlier tab
@@ -1211,6 +1228,15 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if blocked, cmd, ok := a.blockedWhileReconnecting(msg); ok {
 		return blocked, cmd
+	}
+
+	// The App's status is drawn on the tab bar, and a key press dismisses it,
+	// as it does a buffer's status line. Nothing else did except a tab click
+	// or a group switch, so an error stayed on the tab bar for the rest of the
+	// session. Cleared after the reconnect check, so "reconnecting…" stays up
+	// while keys are refused; the key itself still goes on to its handler.
+	if _, ok := msg.(tea.KeyPressMsg); ok {
+		a.status = ""
 	}
 
 	// Each picker intercepts key input only. Non-key messages (tickMsg, diagnosticsMsg,

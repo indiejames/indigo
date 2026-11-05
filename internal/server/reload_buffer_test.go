@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/indiejames/indigo/internal/lsp"
 	"github.com/indiejames/indigo/internal/plugin"
 	proto "github.com/indiejames/indigo/internal/proto"
+	"github.com/indiejames/indigo/internal/rpcclient"
 )
 
 // newReloadTestService builds a service holding one buffer for path with the
@@ -174,8 +174,10 @@ func TestReloadBufferRejectsConcurrentEdit(t *testing.T) {
 	if err == nil {
 		t.Fatal("ReloadBuffer succeeded despite a concurrent edit; that edit would be silently discarded")
 	}
-	if !strings.Contains(err.Error(), "changed while reloading") {
-		t.Errorf("error = %q, want it to mention the buffer changing while reloading", err)
+	// The window tells this case apart by the error's text, so check it with
+	// the function the window uses.
+	if !rpcclient.IsReloadConflict(err) {
+		t.Errorf("error = %q, which rpcclient.IsReloadConflict does not recognize", err)
 	}
 
 	s.mu.Lock()
@@ -187,5 +189,114 @@ func TestReloadBufferRejectsConcurrentEdit(t *testing.T) {
 	}
 	if gen != 0 {
 		t.Errorf("generation = %d, want 0 — a rejected reload must not bump it", gen)
+	}
+}
+
+// parkReloadInRead starts a ReloadBuffer on a FIFO and returns once the
+// handler is parked inside its read, with the FIFO's write end. See
+// TestReloadBufferRejectsConcurrentEdit for why this is deterministic.
+func parkReloadInRead(t *testing.T, path string, cl proto.EditorService) (*os.File, chan reloadResult) {
+	t.Helper()
+	done := make(chan reloadResult, 1)
+	go func() {
+		var r reloadResult
+		r.content, r.version, r.generation, r.err = callReload(t, cl)
+		done <- r
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		f, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+		if err == nil {
+			return f, done
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("ReloadBuffer never reached its read: %v", err)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+type reloadResult struct {
+	content             string
+	version, generation uint64
+	err                 error
+}
+
+// TestReloadBufferSucceedsWhenAnotherReloadGotThereFirst is the regression
+// test for "buffer N changed while reloading; try again" stuck on the tab bar.
+// An external write makes every window holding the file reload it, so two
+// reloads overlap and the second finds the buffer already swapped. The file
+// was reloaded, so that is success, not a conflict.
+func TestReloadBufferSucceedsWhenAnotherReloadGotThereFirst(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.go")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Skipf("mkfifo unavailable on this platform: %v", err)
+	}
+	s, cl := newReloadTestService(t, path, "stale in memory\n", 1, 2)
+
+	w, done := parkReloadInRead(t, path, cl)
+
+	// The other window's reload lands first, with the same disk content.
+	s.mu.Lock()
+	s.buffers[1].buf = document.New(path, "from disk\n")
+	s.buffers[1].generation++
+	s.mu.Unlock()
+
+	if _, err := w.WriteString("from disk\n"); err != nil {
+		t.Fatalf("writing to the FIFO: %v", err)
+	}
+	w.Close() //nolint:errcheck
+
+	r := <-done
+	if r.err != nil {
+		t.Fatalf("ReloadBuffer errored after another reload had already done its work: %v", r.err)
+	}
+	if r.content != "from disk\n" {
+		t.Errorf("content = %q, want %q", r.content, "from disk\n")
+	}
+	s.mu.Lock()
+	gen := s.buffers[1].generation
+	s.mu.Unlock()
+	if r.generation != 1 || gen != 1 {
+		t.Errorf("generation = %d (returned %d), want 1: the other reload's swap, not a second one",
+			gen, r.generation)
+	}
+}
+
+// TestReloadBufferStillRejectsAnEditAfterAnotherReload covers the other half:
+// a buffer swapped by another reload and then edited holds changes the file
+// does not, so this reload must still refuse rather than discard them.
+func TestReloadBufferStillRejectsAnEditAfterAnotherReload(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.go")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Skipf("mkfifo unavailable on this platform: %v", err)
+	}
+	s, cl := newReloadTestService(t, path, "stale in memory\n", 1, 2)
+
+	w, done := parkReloadInRead(t, path, cl)
+
+	s.mu.Lock()
+	buf := document.New(path, "from disk\n")
+	s.buffers[1].buf = buf
+	s.buffers[1].generation++
+	s.mu.Unlock()
+	buf.Apply(document.Op{Type: document.OpInsert, InsertLine: 0, InsertCol: 0, InsertText: "x"})
+
+	if _, err := w.WriteString("from disk\n"); err != nil {
+		t.Fatalf("writing to the FIFO: %v", err)
+	}
+	w.Close() //nolint:errcheck
+
+	r := <-done
+	if !rpcclient.IsReloadConflict(r.err) {
+		t.Fatalf("err = %v, want a reload conflict: the edit would be discarded", r.err)
+	}
+	s.mu.Lock()
+	got := s.buffers[1].buf.Content()
+	s.mu.Unlock()
+	if got != "xfrom disk\n" {
+		t.Errorf("buffer content = %q, want %q: the edit must survive", got, "xfrom disk\n")
 	}
 }

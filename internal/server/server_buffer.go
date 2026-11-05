@@ -330,8 +330,9 @@ func (s *editorService) ReloadBuffer(_ context.Context, call proto.EditorService
 		// there first: every window with the file open reloads on the same
 		// external write, and an agent's quick run of writes overlaps its
 		// own reloads. That is this reload's result, so report it rather
-		// than an error that only says the work was already done.
-		if cur := entry.buf; !cur.Dirty() && cur.Content() == content {
+		// than an error that only says the work was already done. The path
+		// must match too: a SaveAs in between makes it another file.
+		if cur := entry.buf; cur.Path() == path && !cur.Dirty() && cur.Content() == content {
 			version, generation := cur.Version(), entry.generation
 			s.mu.Unlock()
 			res, err := call.AllocResults()

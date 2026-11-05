@@ -237,9 +237,14 @@ func TestReloadBufferSucceedsWhenAnotherReloadGotThereFirst(t *testing.T) {
 
 	w, done := parkReloadInRead(t, path, cl)
 
-	// The other window's reload lands first, with the same disk content.
+	// The other window's reload lands first, with the same disk content. Its
+	// buffer is clean but not at version 0, so the test can tell the version
+	// reported is the current buffer's rather than a fresh one's.
+	other := document.New(path, "from disk")
+	other.Apply(document.Op{Type: document.OpInsert, InsertLine: 0, InsertCol: 9, InsertText: "\n"})
+	other.SetClean()
 	s.mu.Lock()
-	s.buffers[1].buf = document.New(path, "from disk\n")
+	s.buffers[1].buf = other
 	s.buffers[1].generation++
 	s.mu.Unlock()
 
@@ -254,6 +259,9 @@ func TestReloadBufferSucceedsWhenAnotherReloadGotThereFirst(t *testing.T) {
 	}
 	if r.content != "from disk\n" {
 		t.Errorf("content = %q, want %q", r.content, "from disk\n")
+	}
+	if want := other.Version(); want == 0 || r.version != want {
+		t.Errorf("version = %d, want the current buffer's %d", r.version, want)
 	}
 	s.mu.Lock()
 	gen := s.buffers[1].generation
@@ -298,5 +306,34 @@ func TestReloadBufferStillRejectsAnEditAfterAnotherReload(t *testing.T) {
 	s.mu.Unlock()
 	if got != "xfrom disk\n" {
 		t.Errorf("buffer content = %q, want %q: the edit must survive", got, "xfrom disk\n")
+	}
+}
+
+// TestReloadBufferAfterASaveAsIsAConflict: a SaveAs in between points the
+// buffer at another file, so matching content is no sign this reload's file
+// was loaded, and the shortcut must not report success.
+func TestReloadBufferAfterASaveAsIsAConflict(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.go")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Skipf("mkfifo unavailable on this platform: %v", err)
+	}
+	s, cl := newReloadTestService(t, path, "stale in memory\n", 1)
+
+	w, done := parkReloadInRead(t, path, cl)
+
+	moved := document.New(filepath.Join(dir, "b.go"), "from disk\n")
+	s.mu.Lock()
+	s.buffers[1].buf = moved
+	s.buffers[1].generation++
+	s.mu.Unlock()
+
+	if _, err := w.WriteString("from disk\n"); err != nil {
+		t.Fatalf("writing to the FIFO: %v", err)
+	}
+	w.Close() //nolint:errcheck
+
+	if r := <-done; !rpcclient.IsReloadConflict(r.err) {
+		t.Fatalf("err = %v, want a reload conflict for a buffer now saved as another file", r.err)
 	}
 }

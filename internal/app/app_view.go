@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -105,7 +106,7 @@ func (a App) renderBaseFrame() (string, *tea.Cursor) {
 	base := sb.String()
 
 	if a.fileChangedIdx >= 0 {
-		return overlayCenter(base, renderFileChangedPrompt(a.width, a.fileChangedSel), a.width, a.height), nil
+		return overlayCenter(base, renderFileChangedPrompt(a.width, a.fileChangedSel, a.fileChangedName()), a.width, a.height), nil
 	}
 	if a.procPicker != nil {
 		return overlayCenter(base, a.procPicker.render(), a.width, a.height), nil
@@ -334,7 +335,31 @@ func renderNewFileMkdirConfirm(dir string, w int) string {
 	return borderStyle.Render(strings.Join(rows, "\n"))
 }
 
-func renderFileChangedPrompt(w, sel int) string {
+// fileChangedName is the file the prompt is about, which is not always the
+// active tab's: a background buffer can change on disk too.
+func (a App) fileChangedName() string {
+	if a.fileChangedIdx < 0 || a.fileChangedIdx >= len(a.buffers) {
+		return ""
+	}
+	return filepath.Base(a.buffers[a.fileChangedIdx].FilePath())
+}
+
+// fileChangedTitle names the file in the prompt's title, shortening a long
+// name so the title stays on one line of a box width cells wide.
+func fileChangedTitle(name string, width int) string {
+	const prefix, suffix = "⚠  ", " changed on disk"
+	name = cmp.Or(name, "File")
+	room := width - lipgloss.Width(prefix+suffix)
+	if r := []rune(name); lipgloss.Width(name) > room && room > 1 {
+		for lipgloss.Width(string(r)) > room-1 {
+			r = r[:len(r)-1]
+		}
+		name = string(r) + "…"
+	}
+	return prefix + name + suffix
+}
+
+func renderFileChangedPrompt(w, sel int, name string) string {
 	innerW := 40
 	if w > 0 && w*2/3 < innerW {
 		innerW = w * 2 / 3
@@ -372,7 +397,7 @@ func renderFileChangedPrompt(w, sel int) string {
 	}
 
 	rows := []string{
-		titleStyle.Width(innerW).Render("⚠  File changed on disk"),
+		titleStyle.Width(innerW).Render(fileChangedTitle(name, innerW-2)),
 		divStyle.Render(strings.Repeat("─", innerW)),
 		style(0, "  Reload  (discard local changes)"),
 		style(1, "  Keep local version"),

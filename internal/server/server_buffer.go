@@ -325,9 +325,28 @@ func (s *editorService) ReloadBuffer(_ context.Context, call proto.EditorService
 		return fmt.Errorf("unknown buffer %d", bufID)
 	}
 	if entry.buf != baseBuf || entry.buf.Version() != baseVersion {
-		// An edit landed while we were reading, so swapping in the disk
-		// content now would discard it. Reject rather than clobber; the caller
-		// can retry. Same compare-and-swap as DiscardRecovery/Save/SaveAs, and
+		// Something changed the buffer while we were reading. If it is
+		// already clean and holds exactly what we read, another reload got
+		// there first: every window with the file open reloads on the same
+		// external write, and an agent's quick run of writes overlaps its
+		// own reloads. That is this reload's result, so report it rather
+		// than an error that only says the work was already done. The path
+		// must match too: a SaveAs in between makes it another file.
+		if cur := entry.buf; cur.Path() == path && !cur.Dirty() && cur.Content() == content {
+			version, generation := cur.Version(), entry.generation
+			s.mu.Unlock()
+			res, err := call.AllocResults()
+			if err != nil {
+				return err
+			}
+			res.SetVersion(version)
+			res.SetGeneration(generation)
+			return res.SetContent(content)
+		}
+		// Otherwise an edit landed while we were reading, so swapping in the
+		// disk content now would discard it. Reject rather than clobber; the
+		// caller asks the user (rpcclient.IsReloadConflict matches this
+		// text). Same compare-and-swap as DiscardRecovery/Save/SaveAs, and
 		// both halves matter: document.New always starts at version 0, so a
 		// buffer swapped in by something else could match baseVersion by
 		// coincidence while being a different object entirely.

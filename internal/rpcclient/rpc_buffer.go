@@ -2,6 +2,7 @@ package rpcclient
 
 import (
 	"context"
+	"regexp"
 
 	"github.com/indiejames/indigo/internal/document"
 	proto "github.com/indiejames/indigo/internal/proto"
@@ -284,6 +285,19 @@ func (r *RPC) ReloadBuffer(ctx context.Context, bufID uint32) (content string, v
 	}
 	return content, res.Version(), res.Generation(), nil
 }
+
+// IsReloadConflict reports whether a ReloadBuffer error means an edit reached
+// the buffer while the server was reading the file, so it kept the edit and
+// did not reload. The buffer then holds changes the file does not, which is a
+// question for the user rather than an error. The error crosses the wire as
+// text, so this matches the server's whole message (ReloadBuffer,
+// server_buffer.go) at the end of it. A read error names the file's path,
+// which could contain the same words, but it ends with the OS's reason.
+func IsReloadConflict(err error) bool {
+	return err != nil && reloadConflictRE.MatchString(err.Error())
+}
+
+var reloadConflictRE = regexp.MustCompile(`buffer \d+ changed while reloading; try again$`)
 
 // BufferSyncState is one buffer's synchronization bookkeeping as the server
 // sees it. Content appears only as a hash and a length, never as text.

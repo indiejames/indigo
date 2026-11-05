@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/indiejames/indigo/internal/client"
+	"github.com/indiejames/indigo/internal/rpcclient"
 )
 
 // ---- async commands ----
@@ -372,7 +373,7 @@ func (a App) doReloadBuffer(idx int) tea.Cmd {
 		content, version, generation, err := rpc.ReloadBuffer(ctx, bufID)
 		if err != nil {
 			appLog("doReloadBuffer: ReloadBuffer error: %v", err)
-			return errorOpenMsg{err}
+			return reloadErrorMsg(bufID, err)
 		}
 		appLog("doReloadBuffer: reloaded bufID=%d contentLen=%d generation=%d", bufID, len(content), generation)
 		// fromRecovery is false: this content came from the file itself, and
@@ -462,4 +463,13 @@ func (a App) createNewFileParent(path string) tea.Cmd {
 		defer cancel()
 		return newFileDirCreatedMsg{path: path, err: rpc.CreateDir(ctx, parent)}
 	}
+}
+
+// reloadErrorMsg turns a failed ReloadBuffer into the message the App acts on:
+// a conflict asks the user, anything else is reported.
+func reloadErrorMsg(bufID uint32, err error) tea.Msg {
+	if rpcclient.IsReloadConflict(err) {
+		return reloadConflictMsg{bufID: bufID}
+	}
+	return errorOpenMsg{err}
 }

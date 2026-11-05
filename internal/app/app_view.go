@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -80,14 +81,14 @@ func (a App) renderFrame() (string, *tea.Cursor) {
 
 // renderBaseFrame is renderFrame without the stale-server prompt.
 func (a App) renderBaseFrame() (string, *tea.Cursor) {
-	if a.picker != nil {
-		return a.picker.View(), nil
-	}
-	if a.grep != nil {
-		return a.grep.View(), nil
-	}
-	if a.diagBrowser != nil {
-		return a.diagBrowser.View(), nil
+	// The file-changed prompt takes keys before these full-screen views do
+	// (Update), so it is drawn over them too: hidden, it would still answer
+	// the user's Enter with a reload they never saw offered.
+	if full, ok := a.fullScreenView(); ok {
+		if a.fileChangedIdx >= 0 {
+			full = overlayCenter(full, renderFileChangedPrompt(a.width, a.fileChangedSel, a.fileChangedName()), a.width, a.height)
+		}
+		return full, nil
 	}
 	if len(a.buffers) == 0 {
 		return "No buffer open. Press ctrl+p to open a file.", nil
@@ -105,7 +106,7 @@ func (a App) renderBaseFrame() (string, *tea.Cursor) {
 	base := sb.String()
 
 	if a.fileChangedIdx >= 0 {
-		return overlayCenter(base, renderFileChangedPrompt(a.width, a.fileChangedSel), a.width, a.height), nil
+		return overlayCenter(base, renderFileChangedPrompt(a.width, a.fileChangedSel, a.fileChangedName()), a.width, a.height), nil
 	}
 	if a.procPicker != nil {
 		return overlayCenter(base, a.procPicker.render(), a.width, a.height), nil
@@ -152,6 +153,20 @@ func (a App) renderBaseFrame() (string, *tea.Cursor) {
 		cur = &c
 	}
 	return base, cur
+}
+
+// fullScreenView is the picker, grep or diagnostics view that replaces the
+// buffer view outright, if one is open.
+func (a App) fullScreenView() (string, bool) {
+	switch {
+	case a.picker != nil:
+		return a.picker.View(), true
+	case a.grep != nil:
+		return a.grep.View(), true
+	case a.diagBrowser != nil:
+		return a.diagBrowser.View(), true
+	}
+	return "", false
 }
 
 const pluginPopupMaxVisible = 14
@@ -334,7 +349,31 @@ func renderNewFileMkdirConfirm(dir string, w int) string {
 	return borderStyle.Render(strings.Join(rows, "\n"))
 }
 
-func renderFileChangedPrompt(w, sel int) string {
+// fileChangedName is the file the prompt is about, which is not always the
+// active tab's: a background buffer can change on disk too.
+func (a App) fileChangedName() string {
+	if a.fileChangedIdx < 0 || a.fileChangedIdx >= len(a.buffers) {
+		return ""
+	}
+	return filepath.Base(a.buffers[a.fileChangedIdx].FilePath())
+}
+
+// fileChangedTitle names the file in the prompt's title, shortening a long
+// name so the title stays on one line of a box width cells wide.
+func fileChangedTitle(name string, width int) string {
+	const prefix, suffix = "⚠  ", " changed on disk"
+	name = cmp.Or(name, "File")
+	room := width - lipgloss.Width(prefix+suffix)
+	if r := []rune(name); lipgloss.Width(name) > room && room > 1 {
+		for lipgloss.Width(string(r)) > room-1 {
+			r = r[:len(r)-1]
+		}
+		name = string(r) + "…"
+	}
+	return prefix + name + suffix
+}
+
+func renderFileChangedPrompt(w, sel int, name string) string {
 	innerW := 40
 	if w > 0 && w*2/3 < innerW {
 		innerW = w * 2 / 3
@@ -372,7 +411,7 @@ func renderFileChangedPrompt(w, sel int) string {
 	}
 
 	rows := []string{
-		titleStyle.Width(innerW).Render("⚠  File changed on disk"),
+		titleStyle.Width(innerW).Render(fileChangedTitle(name, innerW-2)),
 		divStyle.Render(strings.Repeat("─", innerW)),
 		style(0, "  Reload  (discard local changes)"),
 		style(1, "  Keep local version"),

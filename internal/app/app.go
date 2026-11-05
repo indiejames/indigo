@@ -76,6 +76,15 @@ type bufferReloadedMsg struct {
 	model    client.Model
 }
 
+// reloadConflictMsg reports a reload the server declined because an edit
+// reached the buffer while it was reading the file. The buffer now holds
+// changes the file on disk does not, which is the same situation as a file
+// changing under unsaved edits, so it gets the same prompt. It names the
+// buffer by BufID alone: a tab closed during the round trip shifts indexes.
+type reloadConflictMsg struct {
+	bufID uint32
+}
+
 type App struct {
 	rpc     *client.RPC
 	cfg     *config.Config
@@ -172,6 +181,10 @@ type App struct {
 	// fileChangedSel is 0 for "reload" and 1 for "keep local".
 	fileChangedIdx int
 	fileChangedSel int
+	// fileChangedQueue holds buffers waiting for the prompt while it is open
+	// for another one, by BufID so a tab closing meanwhile cannot re-point an
+	// entry at the wrong buffer. See askFileChanged.
+	fileChangedQueue []uint32
 
 	// staleServer is non-nil while the "server is running an older build"
 	// prompt is showing (internal/staleprompt). Set at construction from what
@@ -1041,8 +1054,12 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.doReloadBuffer(idx)
 		}
 		// Buffer has unsaved edits — show the overlay prompt.
-		a.fileChangedIdx = idx
-		return a, nil
+		return a.askFileChanged(msg.BufID), nil
+
+	case reloadConflictMsg:
+		// By BufID, not msg.idx: a tab closed during the round trip shifts the
+		// indexes, and the conflict is still about the same buffer.
+		return a.askFileChanged(msg.bufID), nil
 
 	case bufferReloadedMsg:
 		if msg.idx < 0 || msg.idx >= len(a.buffers) || a.buffers[msg.idx].BufID() != msg.oldBufID {
@@ -1213,6 +1230,15 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return blocked, cmd
 	}
 
+	// The App's status is drawn on the tab bar, and a key press dismisses it,
+	// as it does a buffer's status line. Nothing else did except a tab click
+	// or a group switch, so an error stayed on the tab bar for the rest of the
+	// session. Cleared after the reconnect check, so "reconnecting…" stays up
+	// while keys are refused; the key itself still goes on to its handler.
+	if _, ok := msg.(tea.KeyPressMsg); ok {
+		a.status = ""
+	}
+
 	// Each picker intercepts key input only. Non-key messages (tickMsg, diagnosticsMsg,
 	// decorationsMsg, etc.) fall through to the active buffer so the tick chain and
 	// async fetch loops keep running while any picker is open.
@@ -1240,16 +1266,19 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				idx := a.fileChangedIdx
 				sel := a.fileChangedSel
-				a.fileChangedIdx = -1
-				a.fileChangedSel = 0
+				a = a.nextFileChanged()
 				if sel == 0 {
 					return a, a.doReloadBuffer(idx)
 				}
 			case "esc":
-				a.fileChangedIdx = -1
-				a.fileChangedSel = 0
+				a = a.nextFileChanged()
 			}
 			return a, nil // swallow all keys while overlay is open
+		}
+		// A paste would otherwise reach the buffer behind the prompt, as the
+		// stale-server prompt above notes.
+		if _, ok := msg.(tea.PasteMsg); ok {
+			return a, nil
 		}
 	}
 
@@ -1385,6 +1414,41 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	updated, cmd := a.buffers[a.active].Update(msg)
 	a.buffers[a.active] = updated.(client.Model)
 	return a, cmd
+}
+
+// askFileChanged shows the file-changed prompt for the buffer bufID, or queues
+// it while the prompt is open for another buffer. Retargeting an open prompt
+// would make Enter reload a different buffer from the one the user read the
+// prompt about. A buffer no longer open is ignored.
+func (a App) askFileChanged(bufID uint32) App {
+	idx := a.bufIndex(bufID)
+	if idx < 0 {
+		return a
+	}
+	if a.fileChangedIdx < 0 {
+		a.fileChangedIdx, a.fileChangedSel = idx, 0
+		return a
+	}
+	if a.fileChangedIdx == idx || slices.Contains(a.fileChangedQueue, bufID) {
+		return a
+	}
+	a.fileChangedQueue = append(slices.Clone(a.fileChangedQueue), bufID)
+	return a
+}
+
+// nextFileChanged closes the file-changed prompt and opens it for the next
+// queued buffer that is still open, if any.
+func (a App) nextFileChanged() App {
+	a.fileChangedIdx, a.fileChangedSel = -1, 0
+	for len(a.fileChangedQueue) > 0 {
+		bufID := a.fileChangedQueue[0]
+		a.fileChangedQueue = a.fileChangedQueue[1:]
+		if idx := a.bufIndex(bufID); idx >= 0 {
+			a.fileChangedIdx = idx
+			break
+		}
+	}
+	return a
 }
 
 // resizeAllBuffers sends the current effective height to every buffer.

@@ -30,9 +30,9 @@ func TestTabAtColumn(t *testing.T) {
 	a := newTabClickTestApp()
 
 	// "  1 a.go  " is 10 columns wide; three identical-width tabs in a row.
-	_, w := a.tabLabel(0)
+	_, w := a.tabLabel(0, 1)
 	if w != 10 {
-		t.Fatalf("tabLabel(0) width = %d, want 10 (test assumes this to compute expected boundaries)", w)
+		t.Fatalf("tabLabel(0, 1) width = %d, want 10 (test assumes this to compute expected boundaries)", w)
 	}
 
 	cases := []struct {

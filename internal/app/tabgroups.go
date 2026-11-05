@@ -235,15 +235,14 @@ func (a App) tabByNumber(n int) int {
 	return tabs[n-1]
 }
 
-// tabNumber is the digit that selects buffer i's tab (tabByNumber), or 0 when
-// none does: tabs between the eighth and the last have no number.
-func (a App) tabNumber(i int) int {
-	tabs := a.groupTabs()
-	pos := slices.Index(tabs, i)
+// tabNumberAt is the digit that selects the tab at position pos of a group
+// of count tabs (tabByNumber), or 0 when none does: tabs between the eighth
+// and the last have no number.
+func tabNumberAt(pos, count int) int {
 	switch {
-	case pos < 0:
+	case pos < 0 || pos >= count:
 		return 0
-	case pos == len(tabs)-1 && pos >= maxTabNumber-1:
+	case pos == count-1 && pos >= maxTabNumber-1:
 		return maxTabNumber
 	case pos < maxTabNumber-1:
 		return pos + 1

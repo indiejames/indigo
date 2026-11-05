@@ -46,9 +46,11 @@ func TestNineIsTheLastTabPastNine(t *testing.T) {
 	if got := activeID(a); got != 8 {
 		t.Errorf("8 selected buffer %d, want 8", got)
 	}
+	a.width = 0 // lay out every tab, none hidden for room
+	slots, _ := a.tabLayout()
 	want := map[int]string{0: "  1 f1.go  ", 7: "  8 f8.go  ", 8: "  f9.go  ", 10: "  f11.go  ", 11: "  9 f12.go  "}
 	for i, label := range want {
-		if got, _ := a.tabLabel(i); got != label {
+		if got := slots[i].label; got != label {
 			t.Errorf("tab %d label = %q, want %q", i+1, got, label)
 		}
 	}

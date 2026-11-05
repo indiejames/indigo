@@ -577,7 +577,8 @@ An unknown `mode` or `action` is likewise reported as a warning rather than sile
 | `cut-selection` | `v` | `macro-record-toggle` | `q` |
 | `macro-replay` | `@` | `prev-buffer` | `ctrl+h`, `ctrl+shift+left` |
 | `next-buffer` | `ctrl+l`, `ctrl+shift+right` | `next-tab-group` | `ctrl+shift+down` |
-| `prev-tab-group` | `ctrl+shift+up` | | |
+| `prev-tab-group` | `ctrl+shift+up` | `go-to-tab-1` … `go-to-tab-8` | `1` … `8` |
+| `go-to-last-tab` | `9` | | |
 
 Multi-key sequences (the `g`, `m`, `M`, `s`, `~`, and Space menus, plus any
 others added later) aren't individually overridable — only the single-key
@@ -651,7 +652,10 @@ group's tabs, after the list of group names, so related files can be kept
 together and the bar kept short. Every buffer is in one group, and a file
 you open joins the current one. Buffers you never move are in
 "ungrouped". Next and previous buffer (`ctrl+l`/`ctrl+h`) stay inside the
-group; `ctrl+shift+down`/`ctrl+shift+up` switch groups, as does clicking a
+group, and so do the digit keys: in Normal mode `1` to `8` go to that tab,
+counted from the left as the tab bar numbers them, and `9` goes to the last
+tab however many there are. They work with the tab bar hidden too.
+`ctrl+shift+down`/`ctrl+shift+up` switch groups, as does clicking a
 group's name. Jumping to a file that is open in another group switches to
 that group. The buffer picker (`g b`) lists every buffer, with its group.
 Closing a group's last buffer deletes the group, and closing a group refuses

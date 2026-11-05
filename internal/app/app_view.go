@@ -466,6 +466,8 @@ func overlayCenter(base, popup string, termW, termH int) string {
 // and its rendered width — shared between renderTabBar and tabAtColumn so
 // the two can never drift apart. None of tabActiveStyle/tabInactiveStyle
 // add padding/borders, so the label's own width equals the styled width.
+//
+// A tab the digit keys reach starts with its number (tabNumber).
 func (a App) tabLabel(i int) (label string, width int) {
 	m := a.buffers[i]
 	name := filepath.Base(m.FilePath())
@@ -473,7 +475,11 @@ func (a App) tabLabel(i int) (label string, width int) {
 	if m.Dirty() {
 		dirty = tabDirtyMark
 	}
-	label = fmt.Sprintf("  %s%s  ", dirty, name)
+	num := ""
+	if n := a.tabNumber(i); n > 0 {
+		num = fmt.Sprintf("%d ", n)
+	}
+	label = fmt.Sprintf("  %s%s%s  ", num, dirty, name)
 	return label, lipgloss.Width(label)
 }
 

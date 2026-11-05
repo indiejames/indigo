@@ -970,6 +970,13 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a = a.cycleBuffer(-1)
 		return a, a.buffers[a.active].ReportActiveContextCmd()
 
+	case client.GoToTabMsg:
+		if len(a.buffers) == 0 {
+			return a, nil
+		}
+		a = a.goToTab(msg.N)
+		return a, a.buffers[a.active].ReportActiveContextCmd()
+
 	// ---- tab groups ----
 	case client.TabGroupMsg:
 		return a.handleTabGroup(msg)

@@ -49,6 +49,18 @@ func executeNextBuffer(m Model) (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg { return NextBufferMsg{} }
 }
 
+// GoToTabMsg asks the App to show the current tab group's tab numbered N:
+// 1 to 8 count from the left, and 9 is the last tab.
+type GoToTabMsg struct{ N int }
+
+// goToTabCmd is the digit key n's action. Digits are free in Normal mode,
+// which has no count prefix, apart from 0 (go to line start).
+func goToTabCmd(n int) func(Model) (tea.Model, tea.Cmd) {
+	return func(m Model) (tea.Model, tea.Cmd) {
+		return m, func() tea.Msg { return GoToTabMsg{N: n} }
+	}
+}
+
 func executeOpenSymbolPicker(m Model) (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg { return OpenSymbolPickerMsg{BufID: m.bufID} }
 }
@@ -124,6 +136,15 @@ var prefixCmds = []command{
 	// this was added.
 	{key: "ctrl+shift+left", name: "prev-buffer", category: "Files & Buffers", label: "Previous buffer", execute: executePrevBuffer},
 	{key: "ctrl+shift+right", name: "next-buffer", category: "Files & Buffers", label: "Next buffer", execute: executeNextBuffer},
+	{key: "1", name: "go-to-tab-1", category: "Files & Buffers", label: "Go to tab 1", execute: goToTabCmd(1)},
+	{key: "2", name: "go-to-tab-2", category: "Files & Buffers", label: "Go to tab 2", execute: goToTabCmd(2)},
+	{key: "3", name: "go-to-tab-3", category: "Files & Buffers", label: "Go to tab 3", execute: goToTabCmd(3)},
+	{key: "4", name: "go-to-tab-4", category: "Files & Buffers", label: "Go to tab 4", execute: goToTabCmd(4)},
+	{key: "5", name: "go-to-tab-5", category: "Files & Buffers", label: "Go to tab 5", execute: goToTabCmd(5)},
+	{key: "6", name: "go-to-tab-6", category: "Files & Buffers", label: "Go to tab 6", execute: goToTabCmd(6)},
+	{key: "7", name: "go-to-tab-7", category: "Files & Buffers", label: "Go to tab 7", execute: goToTabCmd(7)},
+	{key: "8", name: "go-to-tab-8", category: "Files & Buffers", label: "Go to tab 8", execute: goToTabCmd(8)},
+	{key: "9", name: "go-to-last-tab", category: "Files & Buffers", label: "Go to last tab", execute: goToTabCmd(9)},
 	{key: "ctrl+shift+down", name: "next-tab-group", category: "Files & Buffers", label: "Next tab group", execute: executeNextTabGroup},
 	{key: "ctrl+shift+up", name: "prev-tab-group", category: "Files & Buffers", label: "Previous tab group", execute: executePrevTabGroup},
 	{key: ":", name: "command-mode", category: "System", label: "Command mode", execute: executeEnterCommandMode},

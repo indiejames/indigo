@@ -24,15 +24,15 @@ func newTabClickTestApp() App {
 }
 
 // TestTabAtColumn verifies column-to-tab-index mapping matches the labels
-// renderTabBar actually produces ("  name  ", 2-space padding each side,
-// no dirty mark on a clean buffer).
+// renderTabBar actually produces ("  N name  ", 2-space padding each side,
+// the tab's number, no dirty mark on a clean buffer).
 func TestTabAtColumn(t *testing.T) {
 	a := newTabClickTestApp()
 
-	// "  a.go  " is 8 columns wide; three identical-width tabs in a row.
-	_, w := a.tabLabel(0)
-	if w != 8 {
-		t.Fatalf("tabLabel(0) width = %d, want 8 (test assumes this to compute expected boundaries)", w)
+	// "  1 a.go  " is 10 columns wide; three identical-width tabs in a row.
+	_, w := a.tabLabel(0, 1)
+	if w != 10 {
+		t.Fatalf("tabLabel(0, 1) width = %d, want 10 (test assumes this to compute expected boundaries)", w)
 	}
 
 	cases := []struct {
@@ -42,12 +42,12 @@ func TestTabAtColumn(t *testing.T) {
 		comment string
 	}{
 		{0, 0, true, "first column of tab 0"},
-		{7, 0, true, "last column of tab 0"},
-		{8, 1, true, "first column of tab 1"},
-		{15, 1, true, "last column of tab 1"},
-		{16, 2, true, "first column of tab 2"},
-		{23, 2, true, "last column of tab 2"},
-		{24, -1, false, "past the last tab, in the fill area"},
+		{9, 0, true, "last column of tab 0"},
+		{10, 1, true, "first column of tab 1"},
+		{19, 1, true, "last column of tab 1"},
+		{20, 2, true, "first column of tab 2"},
+		{29, 2, true, "last column of tab 2"},
+		{30, -1, false, "past the last tab, in the fill area"},
 		{79, -1, false, "far right edge, in the fill area"},
 	}
 	for _, c := range cases {
@@ -63,8 +63,8 @@ func TestTabAtColumn(t *testing.T) {
 func TestMouseClickOnTabSwitchesActiveBuffer(t *testing.T) {
 	a := newTabClickTestApp()
 
-	// Column 8 is the first column of tab 1 (see TestTabAtColumn).
-	msg := tea.MouseClickMsg{Button: tea.MouseLeft, X: 8, Y: 0}
+	// Column 10 is the first column of tab 1 (see TestTabAtColumn).
+	msg := tea.MouseClickMsg{Button: tea.MouseLeft, X: 10, Y: 0}
 	updated, cmd := a.Update(msg)
 	a2 := updated.(App)
 

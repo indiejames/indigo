@@ -94,7 +94,7 @@ func TestWithoutGroupsTheBarIsUnchanged(t *testing.T) {
 	if a.showGroupStrip() {
 		t.Error("the strip is shown with no named group")
 	}
-	if !strings.HasPrefix(ansi.Strip(a.renderTabBar()), "  a.go  ") {
+	if !strings.HasPrefix(ansi.Strip(a.renderTabBar()), "  1 a.go  ") {
 		t.Errorf("bar = %q, want it to start with the first tab", ansi.Strip(a.renderTabBar()))
 	}
 	one := newGroupApp("a.go")
@@ -118,7 +118,7 @@ func TestNewGroupMovesTheBufferAndShowsOnlyItsTabs(t *testing.T) {
 		t.Errorf("tabs shown = %v, want only api's", got)
 	}
 	bar := ansi.Strip(a.renderTabBar())
-	if !strings.HasPrefix(bar, " ungrouped  api │  b.go  ") {
+	if !strings.HasPrefix(bar, " ungrouped  api │  1 b.go  ") {
 		t.Errorf("bar = %q", bar)
 	}
 	// A single buffer in a named group still shows its group.

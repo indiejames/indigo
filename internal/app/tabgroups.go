@@ -214,6 +214,51 @@ func (a App) cycleBuffer(delta int) App {
 	return a
 }
 
+// maxTabNumber is the highest digit that selects a tab. It always selects the
+// group's last tab, as in a browser, so every tab past the eighth is reached
+// some other way and the last is always one key away.
+const maxTabNumber = 9
+
+// tabByNumber returns the index in a.buffers of the active group's tab
+// numbered n, or -1 when there is none: 1 to 8 count from the left, and
+// maxTabNumber is the last tab however many there are.
+func (a App) tabByNumber(n int) int {
+	tabs := a.groupTabs()
+	switch {
+	case len(tabs) == 0 || n < 1 || n > maxTabNumber:
+		return -1
+	case n == maxTabNumber:
+		return tabs[len(tabs)-1]
+	case n > len(tabs):
+		return -1
+	}
+	return tabs[n-1]
+}
+
+// tabNumberAt is the digit that selects the tab at position pos of a group
+// of count tabs (tabByNumber), or 0 when none does: tabs between the eighth
+// and the last have no number.
+func tabNumberAt(pos, count int) int {
+	switch {
+	case pos < 0 || pos >= count:
+		return 0
+	case pos == count-1 && pos >= maxTabNumber-1:
+		return maxTabNumber
+	case pos < maxTabNumber-1:
+		return pos + 1
+	}
+	return 0
+}
+
+// goToTab makes the active group's tab numbered n current, if there is one.
+func (a App) goToTab(n int) App {
+	if i := a.tabByNumber(n); i >= 0 {
+		a.active = i
+		a.status = ""
+	}
+	return a
+}
+
 // mostRecentIn returns the index in a.buffers of the most recently active of
 // ids, or -1 when none is open. A buffer never focused counts as oldest, and
 // ties go to the earlier id, so the answer is deterministic.

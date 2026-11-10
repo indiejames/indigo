@@ -35,7 +35,7 @@ func newOverflowApp(n, width int) App {
 // buffer switch does via Update → stampActiveTab.
 func (a *App) visit(idx int) {
 	a.active = idx
-	*a = a.stampActiveTab()
+	*a = a.stampActiveTab().scrollTabs()
 }
 
 func slotIndices(slots []tabSlot) []int {
@@ -58,45 +58,24 @@ func TestTabLayoutShowsEveryTabWhenTheyFit(t *testing.T) {
 	}
 }
 
-// TestTabLayoutKeepsMostRecentTabs is the reported bug: with more buffers than
-// fit, the bar used to emit all of them and let the terminal cut off whatever
-// ran past the edge — so the tabs you were actually using could be the ones
-// off-screen. Recency decides who stays.
-func TestTabLayoutKeepsMostRecentTabs(t *testing.T) {
-	a := newOverflowApp(10, 40) // room for 4 tabs, minus the overflow marker
-	for _, idx := range []int{9, 7, 3} {
-		a.visit(idx)
-	}
+// TestTabLayoutShowsAContiguousRun: with more buffers than fit, the bar used
+// to emit all of them and let the terminal cut off whatever ran past the edge.
+// It shows a run of neighbouring tabs that includes the active one.
+func TestTabLayoutShowsAContiguousRun(t *testing.T) {
+	a := newOverflowApp(10, 40)
+	a.visit(7)
 
 	slots, hidden := a.tabLayout()
 	got := slotIndices(slots)
 	if hidden != len(a.buffers)-len(slots) {
 		t.Errorf("hidden = %d, want %d", hidden, len(a.buffers)-len(slots))
 	}
-	for _, want := range []int{3, 7, 9} {
-		if !containsInt(got, want) {
-			t.Errorf("tab %d (recently visited) missing from %v", want, got)
-		}
+	if !containsInt(got, 7) {
+		t.Errorf("active tab 7 missing from %v", got)
 	}
-	// Tab 5 was never visited and there isn't room for everyone.
-	if containsInt(got, 5) && !containsInt(got, 9) {
-		t.Errorf("never-visited tab 5 kept while recent tab 9 was dropped: %v", got)
-	}
-}
-
-// TestTabLayoutRendersInBufferOrder: recency chooses *which* tabs survive, but
-// they must stay in buffer order — a bar that reorders itself on every switch
-// would move tabs out from under the pointer.
-func TestTabLayoutRendersInBufferOrder(t *testing.T) {
-	a := newOverflowApp(10, 40)
-	for _, idx := range []int{9, 2, 7, 4} {
-		a.visit(idx)
-	}
-
-	got := slotIndices(mustSlots(t, a))
 	for i := 1; i < len(got); i++ {
-		if got[i-1] >= got[i] {
-			t.Fatalf("tabs not in buffer order: %v", got)
+		if got[i] != got[i-1]+1 {
+			t.Fatalf("tabs not a contiguous run in buffer order: %v", got)
 		}
 	}
 }
@@ -177,7 +156,7 @@ func TestRenderTabBarShowsOverflowCount(t *testing.T) {
 		t.Fatalf("test setup: expected tabs to overflow, %d slots fit", len(slots))
 	}
 
-	if want := fmt.Sprintf("+%d", hidden); !strings.Contains(a.renderTabBar(), want) {
+	if want := fmt.Sprintf("%d›", hidden); !strings.Contains(a.renderTabBar(), want) {
 		t.Errorf("tab bar does not show %q", want)
 	}
 }
@@ -191,6 +170,9 @@ func TestTabAtColumnMatchesVisibleTabs(t *testing.T) {
 	}
 
 	col := 0
+	if r := a.tabRowLayout(); r.left > 0 {
+		col = lipgloss.Width(tabOverflowLeft(r.left))
+	}
 	for _, want := range mustSlots(t, a) {
 		got, ok := a.tabAtColumn(col)
 		if !ok || got != want.idx {

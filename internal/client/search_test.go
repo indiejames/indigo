@@ -239,7 +239,7 @@ func TestFindSubstituteMatchesLiteralHasNoBackreferences(t *testing.T) {
 
 func TestFindSubstituteMatchesBoundedToOneLine(t *testing.T) {
 	buf := document.New("", "foo\nfoo\nfoo\n")
-	bounds := &substituteBounds{from: document.Pos{Line: 1, Col: 0}, to: document.Pos{Line: 1, Col: 2}}
+	bounds := &substituteBounds{from: document.Pos{Line: 1, Col: 0}, to: document.Pos{Line: 1, Col: 3}}
 	matches, err := findSubstituteMatches(buf, "foo", "bar", bounds)
 	if err != nil {
 		t.Fatal(err)
@@ -252,7 +252,7 @@ func TestFindSubstituteMatchesBoundedToOneLine(t *testing.T) {
 func TestFindSubstituteMatchesBoundedPartialLine(t *testing.T) {
 	// Bounds cover only "foo foo" — up to but not including the third foo.
 	buf := document.New("", "foo foo foo\n")
-	bounds := &substituteBounds{from: document.Pos{Line: 0, Col: 0}, to: document.Pos{Line: 0, Col: 6}}
+	bounds := &substituteBounds{from: document.Pos{Line: 0, Col: 0}, to: document.Pos{Line: 0, Col: 7}}
 	matches, err := findSubstituteMatches(buf, "foo", "x", bounds)
 	if err != nil {
 		t.Fatal(err)

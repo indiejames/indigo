@@ -83,7 +83,7 @@ func executeEnterSearchMode(m Model) (tea.Model, tea.Cmd) {
 
 func executeEscNormal(m Model) (tea.Model, tea.Cmd) {
 	m.extraCursors = nil
-	m.sel = nil
+	m.collapseToCell()
 	m.mark = nil
 	m = m.withClearedSearch()
 	return m, nil
@@ -91,18 +91,18 @@ func executeEscNormal(m Model) (tea.Model, tea.Cmd) {
 
 func executeAppendAfterCursor(m Model) (tea.Model, tea.Cmd) {
 	m = m.withClearedSearch()
-	m.sel = nil
+	m.collapseToCell()
 	m.currentGroup = []document.Op{}
 	m.groupBefore = m.cursorSnap()
 	m.insertLineCount = m.buf.LineCount()
 	m.mode = ModeInsert
-	m.cursor.Col++
+	m.cursor.Col = min(m.cursor.Col+1, m.buf.LineLen(m.cursor.Line))
 	return m, nil
 }
 
 func executeAppendLineEnd(m Model) (tea.Model, tea.Cmd) {
 	m = m.withClearedSearch()
-	m.sel = nil
+	m.collapseToCell()
 	m.currentGroup = []document.Op{}
 	m.groupBefore = m.cursorSnap()
 	m.insertLineCount = m.buf.LineCount()
@@ -113,7 +113,7 @@ func executeAppendLineEnd(m Model) (tea.Model, tea.Cmd) {
 
 func executeOpenLineBelow(m Model) (tea.Model, tea.Cmd) {
 	m = m.withClearedSearch()
-	m.sel = nil
+	m.collapseToCell()
 	m.currentGroup = []document.Op{}
 	m.groupBefore = m.cursorSnap()
 	m.insertLineCount = m.buf.LineCount()
@@ -134,7 +134,7 @@ func executeOpenLineBelow(m Model) (tea.Model, tea.Cmd) {
 
 func executeOpenLineAbove(m Model) (tea.Model, tea.Cmd) {
 	m = m.withClearedSearch()
-	m.sel = nil
+	m.collapseToCell()
 	m.currentGroup = []document.Op{}
 	m.groupBefore = m.cursorSnap()
 	m.insertLineCount = m.buf.LineCount()
@@ -350,10 +350,7 @@ func executeSelectAll(m Model) (tea.Model, tea.Cmd) {
 }
 
 func executeClearSelections(m Model) (tea.Model, tea.Cmd) {
-	m.sel = nil
-	for i := range m.extraCursors {
-		m.extraCursors[i].sel = nil
-	}
+	m.applyToAllCursors(func(m *Model) { m.collapseToCell() })
 	return m, nil
 }
 
@@ -415,14 +412,14 @@ func executeYank(m Model) (tea.Model, tea.Cmd) {
 		} else {
 			m = m.pushStatus("copied")
 		}
-		m.sel = nil
+		m.collapseToCell()
 	}
 	return m, nil
 }
 
 func executeCursorLeft(m Model) (tea.Model, tea.Cmd) {
 	m.applyToAllCursors(func(m *Model) {
-		m.sel = nil
+		m.collapseToCell()
 		m.moveCursorChar(-1)
 	})
 	return m, nil
@@ -430,7 +427,7 @@ func executeCursorLeft(m Model) (tea.Model, tea.Cmd) {
 
 func executeCursorRight(m Model) (tea.Model, tea.Cmd) {
 	m.applyToAllCursors(func(m *Model) {
-		m.sel = nil
+		m.collapseToCell()
 		m.moveCursorChar(1)
 	})
 	return m, nil
@@ -438,7 +435,7 @@ func executeCursorRight(m Model) (tea.Model, tea.Cmd) {
 
 func executeCursorDown(m Model) (tea.Model, tea.Cmd) {
 	m.applyToAllCursors(func(m *Model) {
-		m.sel = nil
+		m.collapseToCell()
 		m.moveCursor(1, 0)
 	})
 	return m, nil
@@ -446,7 +443,7 @@ func executeCursorDown(m Model) (tea.Model, tea.Cmd) {
 
 func executeCursorUp(m Model) (tea.Model, tea.Cmd) {
 	m.applyToAllCursors(func(m *Model) {
-		m.sel = nil
+		m.collapseToCell()
 		m.moveCursor(-1, 0)
 	})
 	return m, nil
@@ -455,7 +452,7 @@ func executeCursorUp(m Model) (tea.Model, tea.Cmd) {
 func executePageDown(m Model) (tea.Model, tea.Cmd) {
 	vis := m.visibleLines()
 	m.applyToAllCursors(func(m *Model) {
-		m.sel = nil
+		m.collapseToCell()
 		m.moveCursor(vis, 0)
 	})
 	return m, nil
@@ -464,7 +461,7 @@ func executePageDown(m Model) (tea.Model, tea.Cmd) {
 func executePageUp(m Model) (tea.Model, tea.Cmd) {
 	vis := m.visibleLines()
 	m.applyToAllCursors(func(m *Model) {
-		m.sel = nil
+		m.collapseToCell()
 		m.moveCursor(-vis, 0)
 	})
 	return m, nil
@@ -473,7 +470,7 @@ func executePageUp(m Model) (tea.Model, tea.Cmd) {
 func executeGoToLastLine(m Model) (tea.Model, tea.Cmd) {
 	last := max(0, m.buf.LineCount()-1)
 	m.applyToAllCursors(func(m *Model) {
-		m.sel = nil
+		m.collapseToCell()
 		m.cursor = document.Pos{Line: last, Col: 0}
 		m.scrollToCursor()
 		m.scrollToShowLineTail(last)
@@ -483,7 +480,7 @@ func executeGoToLastLine(m Model) (tea.Model, tea.Cmd) {
 
 func executeFirstNonBlank(m Model) (tea.Model, tea.Cmd) {
 	m.applyToAllCursors(func(m *Model) {
-		m.sel = nil
+		m.collapseToCell()
 		runes := []rune(m.buf.Line(m.cursor.Line))
 		i := 0
 		for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t') {
@@ -496,7 +493,7 @@ func executeFirstNonBlank(m Model) (tea.Model, tea.Cmd) {
 
 func executeNextWordStart(m Model) (tea.Model, tea.Cmd) {
 	m.applyToAllCursors(func(m *Model) {
-		m.sel = nil
+		m.collapseToCell()
 		m.moveToNextWordStart()
 	})
 	return m, nil
@@ -504,7 +501,7 @@ func executeNextWordStart(m Model) (tea.Model, tea.Cmd) {
 
 func executePrevWordStart(m Model) (tea.Model, tea.Cmd) {
 	m.applyToAllCursors(func(m *Model) {
-		m.sel = nil
+		m.collapseToCell()
 		m.moveToPrevWordStart()
 	})
 	return m, nil
@@ -512,7 +509,7 @@ func executePrevWordStart(m Model) (tea.Model, tea.Cmd) {
 
 func executeWordEnd(m Model) (tea.Model, tea.Cmd) {
 	m.applyToAllCursors(func(m *Model) {
-		m.sel = nil
+		m.collapseToCell()
 		m.moveToWordEnd()
 	})
 	return m, nil
@@ -527,6 +524,9 @@ func executePaste(m Model) (tea.Model, tea.Cmd) {
 	// Before the single-cursor paths below, both of which only ever touch the
 	// primary cursor — insertPastedText in particular is single-cursor by
 	// construction.
+	// Pasted before the character each cursor is drawn on, as with no
+	// selection.
+	m.applyToAllCursors(func(m *Model) { m.collapseToCell() })
 	if len(m.extraCursors) > 0 {
 		if text == "" {
 			return m, nil
@@ -581,7 +581,7 @@ func executeSplitSelectionIntoCursors(m Model) (tea.Model, tea.Cmd) {
 		m = m.pushStatus("alt+s: select multiple lines first (x to select, X to extend)")
 		return m, nil
 	}
-	if start, end := m.sel.ordered(); start.Line == end.Line {
+	if first, last := m.selectedLines(); first == last {
 		m = m.pushStatus("alt+s: selection must span multiple lines")
 		return m, nil
 	}
@@ -590,7 +590,7 @@ func executeSplitSelectionIntoCursors(m Model) (tea.Model, tea.Cmd) {
 }
 
 func executeSetMark(m Model) (tea.Model, tea.Cmd) {
-	pos := m.cursor
+	pos := m.cursorCell()
 	m.mark = &pos
 	m = m.pushStatus("mark set")
 	return m, nil
@@ -601,7 +601,7 @@ func executeSelectToMark(m Model) (tea.Model, tea.Cmd) {
 		m = m.pushStatus("no mark set (press z to set mark)")
 		return m, nil
 	}
-	m.sel = &Selection{Anchor: *m.mark, Head: m.cursor}
+	m.selectCells(*m.mark, m.cursorCell())
 	m = m.pushStatus("")
 	return m, nil
 }

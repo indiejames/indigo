@@ -236,9 +236,12 @@ motions that clear any selection; `W`, `B` and `E` move the *selection head* ins
 selection at the cursor if there isn't one. So `w` jumps to the next word and `E` selects up to the end
 of one.
 
-A selection is **inclusive at both ends** — the cursor sits on its last selected character, not just
-past it. That is why `E` with the cursor on the `a` of `alpha` selects exactly `alpha`, and why `W`,
-which extends to the *start* of the next word, includes that first character (`alpha b`).
+The cursor sits **between characters**, and the block is drawn on the character after it — the one
+`d` deletes when nothing is selected. A selection covers the characters between where it started and
+the cursor, so the first `Shift+→` selects exactly the character under the block, and moving back to
+where it started selects nothing. While a selection runs forward the block is drawn on its last
+character, so it stays inside what is selected. That is why `E` from the `a` of `alpha` selects
+exactly `alpha`, and `W` selects up to the next word, ending on the space before it (`alpha `).
 
 To select a word you are already inside, rather than from the cursor onward, use the text-object
 menu: `mi w` selects the word under the cursor wherever in it you are. `Ctrl+D` also selects the word
@@ -281,14 +284,14 @@ The practical result is that multiple `indigo` windows on the same workspace sha
 | `gS`                | Go to symbol in project                         |
 | `gd`                | Go to definition (LSP)                          |
 
-**Selection** — each of these moves the selection head, starting a selection at the cursor if there isn't one. The cursor is always on the selection's last included character.
+**Selection** — each of these moves the selection head, starting a selection at the cursor if there isn't one. Motions that clear a selection move from the character the block is drawn on.
 
 | Key      | Action                                                           |
 |----------|------------------------------------------------------------------|
 | `E`      | Extend to the end of the current word, or the next word's end if already there |
-| `W`      | Extend to the *start* of the next word — which, being inclusive, includes that character |
+| `W`      | Extend up to the start of the next word (the next word itself is not selected) |
 | `B`      | Extend backward to the start of the previous word                |
-| `Shift+→` / `Shift+←` | Extend one character; shrinking past the anchor flips direction |
+| `Shift+→` / `Shift+←` | Extend one character: the first press selects the character under the block, or the one before it; going back past where it started flips direction |
 | `Shift+Home` / `Shift+End` | Extend to the start / end of the line                |
 | `x`      | Select the current line (including its newline); repeat to extend to the next line |
 | `X`      | Extend a line selection to include the previous line; with no line selection, selects the current line first |

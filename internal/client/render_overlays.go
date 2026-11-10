@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -800,17 +801,28 @@ func (m Model) buildIndentGuideOverlays(layout []layoutEntry, cw int) [][]lineOv
 // advance that bookkeeping) — so a later overlay computed from buffer
 // columns, like the ruler, silently rendered further right on the terminal
 // than intended, by exactly the hint's rendered width.
+//
+// The line is drawn on every row: wrapped continuations, virtual rows and the
+// rows past the end of the buffer included, since skipping them broke the
+// line into segments. A window narrower than the ruler shows none, rather
+// than a piece of it on the continuation rows only.
 func (m Model) applyRulerColumn(lines []string, layout []layoutEntry, cw int) {
 	if m.cfg == nil || m.cfg.RulerColumn <= 0 {
 		return
 	}
 	rulerCol := m.cfg.RulerColumn - 1
+	if rulerCol >= cw {
+		return
+	}
 	gutterW := m.gutterWidth()
 
-	// Collect every cursor's visual column, keyed by buffer line, so the
-	// ruler skips an extra cursor's cell too — not just the primary
-	// cursor's — whenever one sits on the ruler column.
-	cursorVisCols := make(map[int][]int)
+	// The visual columns of the cursors painted into a row, keyed by buffer
+	// line, so the ruler never draws over one: it would vanish under the
+	// ruler's background. Only painted cursors count. The terminal's own
+	// cursor (Normal mode, and Insert's when not painted) is drawn over the
+	// ruler anyway, and skipping its cell left a gap wherever it was hidden,
+	// blinking or moved off the block.
+	painted := make(map[int][]int)
 	addCursor := func(pos document.Pos) {
 		if pos.Line >= m.buf.LineCount() {
 			return
@@ -818,49 +830,52 @@ func (m Model) applyRulerColumn(lines []string, layout []layoutEntry, cw int) {
 		runes := []rune(m.buf.Line(pos.Line))
 		_, colMap := expandTabsRemap(runes)
 		if pos.Col < len(colMap) {
-			cursorVisCols[pos.Line] = append(cursorVisCols[pos.Line], colMap[pos.Col])
+			painted[pos.Line] = append(painted[pos.Line], colMap[pos.Col])
 		}
 	}
-	addCursor(m.cursor)
+	if m.paintsBufferCursor() {
+		addCursor(m.cursorCell())
+	}
 	for _, ec := range m.extraCursors {
-		addCursor(ec.pos)
+		addCursor(m.cellOf(ec.pos, ec.sel))
 	}
 
 	for row, entry := range layout {
-		if entry.bufLine >= m.buf.LineCount() ||
-			rulerCol < entry.chunkStart || rulerCol >= entry.chunkStart+cw {
+		if row >= len(lines) {
+			break
+		}
+		if !entry.isVirtual && slices.Contains(painted[entry.bufLine], entry.chunkStart+rulerCol) {
 			continue
 		}
-		// Never draw over a cursor's own cell — it would otherwise vanish
-		// under the ruler's fixed background whenever they coincide.
-		skip := false
-		for _, c := range cursorVisCols[entry.bufLine] {
-			if c == rulerCol {
-				skip = true
-				break
-			}
-		}
-		if skip {
-			continue
-		}
-		lines[row] = overlayRulerColumn(lines[row], gutterW+rulerCol-entry.chunkStart)
+		lines[row] = overlayRulerColumn(lines[row], gutterW+rulerCol)
 	}
 }
 
 // overlayRulerColumn tints a single ANSI-aware visual column of an
 // already-rendered row, replacing whatever glyph (real character, inlay
 // hint, decoration, ...) is actually there — or padding with the ruler's
-// blank glyph if the row's real content doesn't reach that far.
+// blank glyph if the row's real content doesn't reach that far. A wide
+// character covering the column is tinted whole, not cut in half and lost.
 func overlayRulerColumn(line string, col int) string {
 	before := ansi.Truncate(line, col, "")
-	if bw := lipgloss.Width(before); bw < col {
-		before += strings.Repeat(" ", col-bw)
+	start := lipgloss.Width(before)
+	lineW := lipgloss.Width(line)
+	if start < col && lineW <= col {
+		before += strings.Repeat(" ", col-start)
+		start = col
 	}
-	glyph := ansi.Strip(ansi.Cut(line, col, col+1))
+	// start < col here only when a wide character starts at start and
+	// covers col; take it whole.
+	end := start + 1
+	glyph := ansi.Strip(ansi.Cut(line, start, end))
+	if start < col || (glyph == "" && lineW > start) {
+		end = start + 2
+		glyph = ansi.Strip(ansi.Cut(line, start, end))
+	}
 	if glyph == "" {
 		glyph = " "
 	}
-	after := ansi.TruncateLeft(line, col+1, "")
+	after := ansi.TruncateLeft(line, end, "")
 	return before + rulerStyle.Render(glyph) + after
 }
 

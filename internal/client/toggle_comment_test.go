@@ -32,8 +32,9 @@ func newTSXModel(t *testing.T, content string) Model {
 }
 
 func toggleLines(m Model, from, to int) Model {
-	m.cursor = document.Pos{Line: to}
-	m.sel = &Selection{Anchor: document.Pos{Line: from}, Head: document.Pos{Line: to}}
+	// Lines from..to, through the break after to.
+	m.cursor = document.Pos{Line: to + 1}
+	m.sel = &Selection{Anchor: document.Pos{Line: from}, Head: document.Pos{Line: to + 1}}
 	got, _ := executeToggleComment(m)
 	return got.(Model)
 }

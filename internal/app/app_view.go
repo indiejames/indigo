@@ -4,7 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -492,86 +492,145 @@ type tabSlot struct {
 	width int
 }
 
-// tabLayout decides which tabs fit on the bar and in what order they render.
-//
-// Tabs used to be emitted unconditionally, so past roughly ten buffers the row
-// overflowed the terminal width and the tabs beyond it were simply cut off —
-// including, quite often, the active one, leaving no indication of which
-// buffer you were actually in. Making every tab narrower instead trades that
-// for filenames too truncated to tell apart, which is not obviously better.
-//
-// So when they no longer all fit, tabs age off by recency: the ones admitted
-// are the most recently active (a.tabUse), the active tab first and therefore
-// always present. They are then rendered in buffer order, not recency order —
-// which tab is where must stay stable, or every buffer switch would reshuffle
-// the bar under the user's cursor. The ones left out are counted in an
-// overflow marker at the right end.
-//
-// Nothing becomes unreachable: switching to a hidden buffer (ctrl+tab, the
-// buffer picker, a jump) makes it the most recent, so it appears immediately.
+// tabRow is the tab bar's layout: the tabs it shows, left to right, and how
+// many of the group's tabs are hidden on either side of them.
+type tabRow struct {
+	slots       []tabSlot
+	left, right int
+}
+
+// tabLayout decides which tabs fit on the bar.
 //
 // Only the active tab group's tabs are laid out (groupTabs), in the group's
-// order, in the room the group strip leaves.
+// order, in the room the group strip leaves. When they don't all fit, the bar
+// shows a contiguous run of them, a window that scrolls only as far as it
+// must to keep the active tab in view (tabWindow), and counts the tabs hidden
+// on each side in a marker at that end.
+//
+// The window used to be chosen by recency, which kept recent tabs but made
+// the bar unpredictable: the next tab in order was often a hidden one, so
+// moving to it swapped a different file into the bar, and the visible tabs'
+// positions changed under the user. A window changes only at its edges.
+//
+// The digit keys count the tabs shown, so the leftmost is always 1 (tabNumberAt).
 func (a App) tabLayout() (slots []tabSlot, hidden int) {
+	r := a.tabRowLayout()
+	return r.slots, r.left + r.right
+}
+
+func (a App) tabRowLayout() tabRow {
 	tabs := a.groupTabs()
-	all := make([]tabSlot, len(tabs))
-	pos := make(map[int]int, len(tabs)) // buffer index → position in all
-	total := 0
-	for p, i := range tabs {
-		label, w := a.tabLabel(i, tabNumberAt(p, len(tabs)))
-		all[p] = tabSlot{idx: i, label: label, width: w}
-		pos[i] = p
-		total += w
+	first, end := a.tabWindow()
+	var r tabRow
+	n := end - first
+	for q, i := range tabs[first:end] {
+		label, w := a.tabLabel(i, tabNumberAt(q, n))
+		r.slots = append(r.slots, tabSlot{idx: i, label: label, width: w})
 	}
+	r.left, r.right = first, len(tabs)-end
 
-	_, stripW := a.groupStrip()
-	budget := a.tabBudget() - stripW
-	if a.width <= 0 || total <= budget {
-		return all, 0
-	}
-
-	// Reserve room for the widest marker this bar could end up showing, so
-	// admitting one more tab can't widen the marker and overflow the row.
-	marker := tabOverflowLabel(len(tabs) - 1)
-	room := budget - lipgloss.Width(marker)
-	if room < 0 {
-		room = 0
-	}
-
-	admitted := make(map[int]bool, len(all)) // keyed by position in all
-	used := 0
-	for _, i := range a.tabsByRecency() {
-		p, ok := pos[i]
-		if !ok {
-			continue // in another group
-		}
-		if used+all[p].width <= room {
-			admitted[p] = true
-			used += all[p].width
-			continue
-		}
-		// Keep scanning rather than stopping at the first tab that doesn't
-		// fit: a narrower, more recent tab further down the list should still
-		// get a slot.
-	}
-
-	// The active tab is guaranteed a slot even when it alone is wider than the
-	// whole bar — truncated to fit rather than dropped, since a tab bar that
-	// can't show where you are is the failure being fixed here.
-	if p, ok := pos[a.active]; ok && !admitted[p] {
-		t := all[p]
-		t.label = ansi.Truncate(t.label, room, "")
+	// The active tab is shown even when it alone is wider than the room the
+	// bar has, truncated rather than dropped, since a tab bar that can't show
+	// where you are is no use.
+	if room := a.tabRoom(len(tabs)); a.width > 0 && len(r.slots) == 1 && r.slots[0].width > room {
+		t := r.slots[0]
+		t.label = ansi.Truncate(t.label, max(room, 0), "")
 		t.width = lipgloss.Width(t.label)
-		all[p] = t
-		admitted[p] = true
+		r.slots[0] = t
 	}
+	return r
+}
 
-	for p := range all {
-		if admitted[p] {
-			slots = append(slots, all[p])
+// tabFitWidth is the width tab i takes on the bar when it carries a number.
+// The window is chosen with every tab numbered, since which ones get a number
+// depends on the window; a tab without one is only narrower.
+func (a App) tabFitWidth(i int) int {
+	_, w := a.tabLabel(i, 1)
+	return w
+}
+
+// tabRoom is the width the tabs have when a group of count tabs doesn't fit
+// whole: the bar less the group strip and room for both overflow markers at
+// their widest, so showing one more tab can't widen a marker past the edge.
+func (a App) tabRoom(count int) int {
+	_, stripW := a.groupStrip()
+	marker := lipgloss.Width(tabOverflowLeft(count-1)) + lipgloss.Width(tabOverflowRight(count-1))
+	return a.tabBudget() - stripW - marker
+}
+
+// tabWindow returns the positions in groupTabs of the first tab the bar shows
+// and one past the last. It starts from where the bar last began (tabFirst)
+// and moves only as far as it must to show the active tab, then widens to
+// fill any room left, so a resize or a closed tab doesn't leave a gap.
+func (a App) tabWindow() (first, end int) {
+	tabs := a.groupTabs()
+	n := len(tabs)
+	if n == 0 {
+		return 0, 0
+	}
+	total := 0
+	for _, i := range tabs {
+		total += a.tabFitWidth(i)
+	}
+	_, stripW := a.groupStrip()
+	if a.width <= 0 || total <= a.tabBudget()-stripW {
+		return 0, n
+	}
+	room := a.tabRoom(n)
+	w := func(p int) int { return a.tabFitWidth(tabs[p]) }
+
+	act := slices.Index(tabs, a.active)
+	first = 0
+	if a.tabFirst != 0 {
+		if p := slices.IndexFunc(tabs, func(i int) bool { return a.buffers[i].BufID() == a.tabFirst }); p >= 0 {
+			first = p
 		}
 	}
-	return slots, len(all) - len(slots)
+	if act >= 0 && act < first {
+		first = act
+	}
+	end, used := first, 0
+	for end < n && used+w(end) <= room {
+		used += w(end)
+		end++
+	}
+	if act >= end {
+		// Scroll right just far enough that the active tab is the last shown.
+		first, end, used = act, act+1, w(act)
+		for first > 0 && used+w(first-1) <= room {
+			first--
+			used += w(first)
+		}
+	}
+	// Fill room left at either end: backward first, so the window keeps its
+	// right edge when tabs to its right close.
+	for first > 0 && used+w(first-1) <= room {
+		first--
+		used += w(first)
+	}
+	for end < n && used+w(end) <= room {
+		used += w(end)
+		end++
+	}
+	if end == first { // nothing fits: the active tab alone, truncated
+		if act < 0 {
+			act = 0
+		}
+		first, end = act, act+1
+	}
+	return first, end
+}
+
+// scrollTabs records where the tab bar now begins, so the next layout
+// scrolls from there rather than jumping. Called once per Update, after the
+// active tab may have changed.
+func (a App) scrollTabs() App {
+	tabs := a.groupTabs()
+	first, end := a.tabWindow()
+	if first < end {
+		a.tabFirst = a.buffers[tabs[first]].BufID()
+	}
+	return a
 }
 
 // groupSlot is one tab group name on the bar's group strip.
@@ -669,24 +728,14 @@ func (a App) tabBudget() int {
 	return budget
 }
 
-// tabsByRecency returns buffer indices most-recently-active first. Buffers
-// never recorded in tabUse (opened but never focused) sort last, in buffer
-// order, so the result is deterministic rather than map-iteration order.
-func (a App) tabsByRecency() []int {
-	order := make([]int, len(a.buffers))
-	for i := range order {
-		order[i] = i
-	}
-	sort.SliceStable(order, func(x, y int) bool {
-		return a.tabUse[a.buffers[order[x]].BufID()] > a.tabUse[a.buffers[order[y]].BufID()]
-	})
-	return order
+// tabOverflowLeft and tabOverflowRight are the markers at each end of a bar
+// hiding tabs on that side, sized to match the tab padding around them.
+func tabOverflowLeft(hidden int) string {
+	return fmt.Sprintf("  ‹%d  ", hidden)
 }
 
-// tabOverflowLabel is the marker shown at the right end of a bar that is
-// hiding tabs, sized to match the tab padding around it.
-func tabOverflowLabel(hidden int) string {
-	return fmt.Sprintf("  +%d  ", hidden)
+func tabOverflowRight(hidden int) string {
+	return fmt.Sprintf("  %d›  ", hidden)
 }
 
 // tabAtColumn returns the index of the buffer whose tab covers column x in
@@ -696,12 +745,15 @@ func tabOverflowLabel(hidden int) string {
 // Shares tabLayout with renderTabBar so a click can never land on a buffer
 // other than the one drawn there.
 func (a App) tabAtColumn(x int) (int, bool) {
-	slots, _ := a.tabLayout()
+	r := a.tabRowLayout()
 	_, col := a.groupStrip()
+	if r.left > 0 {
+		col += lipgloss.Width(tabOverflowLeft(r.left))
+	}
 	if x < col {
 		return -1, false
 	}
-	for _, t := range slots {
+	for _, t := range r.slots {
 		if x < col+t.width {
 			return t.idx, true
 		}
@@ -725,8 +777,14 @@ func (a App) renderTabBar() string {
 		sb.WriteString(groupSeparatorStyle.Render(groupSeparator))
 		used += stripW
 	}
-	slots, hidden := a.tabLayout()
-	for _, t := range slots {
+	r := a.tabRowLayout()
+	if r.left > 0 {
+		if marker := ansi.Truncate(tabOverflowLeft(r.left), max(0, a.tabBudget()-used), ""); marker != "" {
+			sb.WriteString(tabOverflowStyle.Render(marker))
+			used += lipgloss.Width(marker)
+		}
+	}
+	for _, t := range r.slots {
 		var rendered string
 		if t.idx == a.active {
 			rendered = tabActiveStyle.Render(t.label)
@@ -736,7 +794,7 @@ func (a App) renderTabBar() string {
 		sb.WriteString(rendered)
 		used += t.width
 	}
-	if hidden > 0 {
+	if r.right > 0 {
 		// The marker is what's left over, not a reservation that must be
 		// honoured: with a long enough status message the budget can be
 		// narrower than the marker itself, and printing it whole would push
@@ -744,7 +802,7 @@ func (a App) renderTabBar() string {
 		// beats showing how many tabs you can't see, so the truncated active
 		// tab keeps its columns and the marker takes what remains — down to
 		// nothing.
-		if marker := ansi.Truncate(tabOverflowLabel(hidden), max(0, a.tabBudget()-used), ""); marker != "" {
+		if marker := ansi.Truncate(tabOverflowRight(r.right), max(0, a.tabBudget()-used), ""); marker != "" {
 			sb.WriteString(tabOverflowStyle.Render(marker))
 			used += lipgloss.Width(marker)
 		}

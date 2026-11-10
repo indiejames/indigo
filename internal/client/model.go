@@ -842,13 +842,18 @@ func applyDefaultDark() {
 	bdrLipgloss = lipgloss.RoundedBorder()
 }
 
-// Selection tracks the selected range in the buffer.
-// [Anchor, Head] is inclusive on both ends for display purposes.
-// IsLine marks a linewise selection (x) which deletes the entire line + newline.
+// Selection tracks the selected range in the buffer: the half-open range
+// between Anchor and Head in document order. Positions sit between characters,
+// the cursor always equals Head, and an empty selection is represented as no
+// selection (nil). A whole-line selection runs from a line's start to the
+// next line's start; nothing marks it specially.
+//
+// Normal mode still draws a block on a character (cursorCell): the one after
+// the cursor, except at the end of a forward selection, where it is the last
+// character selected, so the block stays inside what is selected.
 type Selection struct {
 	Anchor document.Pos
 	Head   document.Pos
-	IsLine bool
 }
 
 // ExtraCursor represents a secondary cursor with an optional selection.
@@ -924,6 +929,7 @@ type Model struct {
 	severeErr            string // non-empty = must-dismiss error modal is visible (see handleKey); state-affecting failures only
 	sel                  *Selection
 	dragging             bool
+	dragAnchor           document.Pos // where a mouse drag started; the selection's anchor once it moves
 	lastClickAt          time.Time
 	lastClickPos         document.Pos
 	undoStack            []undoEntry    // each entry is inverse ops + pre-edit cursor snapshot
@@ -1357,11 +1363,12 @@ func (m Model) AtMatch(line, col, matchLen, bufHeight int) Model {
 	m.topLine = max(0, line-quarter)
 	m.topChunk = 0
 	if matchLen > 0 {
-		endCol := min(col+matchLen-1, max(0, lineLen-1))
-		if endCol >= col {
+		// Anchored at the match's end, so the head — and the cursor, which
+		// always equals it — is at the start.
+		if endCol := min(col+matchLen, lineLen); endCol > col {
 			m.sel = &Selection{
-				Anchor: document.Pos{Line: line, Col: col},
-				Head:   document.Pos{Line: line, Col: endCol},
+				Anchor: document.Pos{Line: line, Col: endCol},
+				Head:   document.Pos{Line: line, Col: col},
 			}
 		}
 	}
@@ -2149,10 +2156,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.MouseReleaseMsg:
 			if mouse.Button == tea.MouseLeft {
 				m.dragging = false
-				// A press+release on the same spot is just a cursor move; clear selection.
-				if m.sel != nil && m.sel.Anchor == m.sel.Head {
-					m.sel = nil
-				}
 			}
 		}
 		var cmds []tea.Cmd

@@ -1,7 +1,6 @@
 package client
 
 import (
-	"strings"
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
@@ -35,37 +34,7 @@ func (m *Model) charUnderCursor() string {
 // textForSelection returns the text covered by sel, which need not be m.sel.
 func (m *Model) textForSelection(sel *Selection) string {
 	start, end := sel.ordered()
-	if sel.IsLine {
-		var sb strings.Builder
-		for l := start.Line; l <= end.Line; l++ {
-			sb.WriteString(m.buf.Line(l))
-			sb.WriteByte('\n')
-		}
-		return sb.String()
-	}
-	if start.Line == end.Line {
-		runes := []rune(m.buf.Line(start.Line))
-		hi := min(end.Col+1, len(runes))
-		lo := min(start.Col, hi)
-		return string(runes[lo:hi])
-	}
-	var sb strings.Builder
-	// First line: from start.Col to end of line.
-	firstRunes := []rune(m.buf.Line(start.Line))
-	if start.Col < len(firstRunes) {
-		sb.WriteString(string(firstRunes[start.Col:]))
-	}
-	sb.WriteByte('\n')
-	// Middle lines (complete).
-	for l := start.Line + 1; l < end.Line; l++ {
-		sb.WriteString(m.buf.Line(l))
-		sb.WriteByte('\n')
-	}
-	// Last line: from 0 to end.Col+1.
-	lastRunes := []rune(m.buf.Line(end.Line))
-	hi := min(end.Col+1, len(lastRunes))
-	sb.WriteString(string(lastRunes[:hi]))
-	return sb.String()
+	return m.buf.Text(start, end)
 }
 
 // copySel returns an independent copy of s. Selection handlers mutate the
@@ -86,7 +55,9 @@ func selEqual(a, b *Selection) bool {
 	return *a == *b
 }
 
-// ordered returns (start, end) in document order (start <= end).
+// ordered returns (start, end) in document order (start <= end). The
+// selection is the half-open range [start, end): positions sit between
+// characters, so end is the first character not selected.
 func (s *Selection) ordered() (start, end document.Pos) {
 	if s.Anchor.Line < s.Head.Line ||
 		(s.Anchor.Line == s.Head.Line && s.Anchor.Col <= s.Head.Col) {
@@ -95,11 +66,132 @@ func (s *Selection) ordered() (start, end document.Pos) {
 	return s.Head, s.Anchor
 }
 
+// empty reports whether the selection covers nothing.
+func (s *Selection) empty() bool { return s.Anchor == s.Head }
+
+// dropEmptySelection clears a selection that covers nothing, so that "no
+// selection" has one representation.
+func (m *Model) dropEmptySelection() {
+	if m.sel != nil && m.sel.empty() {
+		m.sel = nil
+	}
+}
+
+// bufferEnd is the position after the last character.
+func (m *Model) bufferEnd() document.Pos {
+	last := max(0, m.buf.LineCount()-1)
+	return document.Pos{Line: last, Col: m.buf.LineLen(last)}
+}
+
+// lineSpanEnd is where a whole-line selection of line ends: the start of the
+// next line, or the end of the buffer on the last line.
+func (m *Model) lineSpanEnd(line int) document.Pos {
+	if line+1 < m.buf.LineCount() {
+		return document.Pos{Line: line + 1}
+	}
+	return document.Pos{Line: line, Col: m.buf.LineLen(line)}
+}
+
+// isLineSelection reports whether the selection covers whole lines: it starts
+// at a line start and ends at one (or at the end of the buffer).
+func (m *Model) isLineSelection() bool {
+	if m.sel == nil {
+		return false
+	}
+	start, end := m.sel.ordered()
+	if start.Col != 0 || start == end {
+		return false
+	}
+	return end.Col == 0 || end == m.bufferEnd()
+}
+
+// selectedLines returns the lines a line-wise command (indent, comment, move)
+// should act on: the cursor's line with no selection, and otherwise every line
+// the selection touches — except a last line it only reaches at column 0, as
+// GUI editors do, since selecting down to the start of a line selects none of
+// it.
+func (m *Model) selectedLines() (first, last int) {
+	if m.sel == nil {
+		return m.cursor.Line, m.cursor.Line
+	}
+	start, end := m.sel.ordered()
+	if end.Col == 0 && end.Line > start.Line {
+		return start.Line, end.Line - 1
+	}
+	return start.Line, end.Line
+}
+
+// posLess reports whether a comes before b in the document.
+func posLess(a, b document.Pos) bool {
+	return a.Line < b.Line || (a.Line == b.Line && a.Col < b.Col)
+}
+
+// cellAfter is the position just after the character at p, a line break
+// counting as a character. At the end of the buffer it is p.
+func (m *Model) cellAfter(p document.Pos) document.Pos {
+	switch {
+	case p.Col < m.buf.LineLen(p.Line):
+		return document.Pos{Line: p.Line, Col: p.Col + 1}
+	case p.Line < m.buf.LineCount()-1:
+		return document.Pos{Line: p.Line + 1}
+	}
+	return p
+}
+
+// cellBefore is the position of the character just before p, which is the
+// previous line's line break at the start of a line. At the start of the
+// buffer it is p.
+func (m *Model) cellBefore(p document.Pos) document.Pos {
+	switch {
+	case p.Col > 0:
+		return document.Pos{Line: p.Line, Col: min(p.Col, m.buf.LineLen(p.Line)) - 1}
+	case p.Line > 0:
+		return document.Pos{Line: p.Line - 1, Col: m.buf.LineLen(p.Line - 1)}
+	}
+	return p
+}
+
+// cellOf is the character a cursor at pos with selection sel is drawn on in
+// Normal mode: the one after pos, except at the end of a forward selection,
+// where pos is past the last character selected and the block is drawn on
+// that character instead, so it stays inside the selection.
+func (m *Model) cellOf(pos document.Pos, sel *Selection) document.Pos {
+	if sel != nil && posLess(sel.Anchor, sel.Head) {
+		return m.cellBefore(sel.Head)
+	}
+	return pos
+}
+
+// cursorCell is the character the primary cursor is drawn on (cellOf).
+func (m *Model) cursorCell() document.Pos { return m.cellOf(m.cursor, m.sel) }
+
+// collapseToCell drops the selection and leaves the cursor on the character
+// it was drawn on, so a motion that clears the selection moves from where
+// the user sees the cursor.
+func (m *Model) collapseToCell() {
+	m.cursor = m.cursorCell()
+	m.sel = nil
+}
+
+// selectCells selects the characters from cell a to cell b, both included,
+// in either order, as a mouse drag or mark-to-cursor reads: the head is at
+// b's end of the range.
+func (m *Model) selectCells(a, b document.Pos) {
+	if posLess(b, a) {
+		m.sel = &Selection{Anchor: m.cellAfter(a), Head: b}
+	} else {
+		m.sel = &Selection{Anchor: a, Head: m.cellAfter(b)}
+	}
+	m.cursor = m.sel.Head
+	m.dropEmptySelection()
+	m.scrollToCursor()
+}
+
 // selectWord selects the word at the cursor. If a word is already selected,
 // advances to the next word, crossing line boundaries if needed.
 func (m *Model) selectWord() {
 	totalLines := m.buf.LineCount()
-	if m.sel != nil && !m.sel.IsLine {
+	if m.sel != nil {
 		_, end := m.sel.ordered()
 		// Try advancing from end.Col on end.Line, then subsequent lines.
 		for l := end.Line; l < totalLines; l++ {
@@ -107,14 +199,14 @@ func (m *Model) selectWord() {
 			var s, e int
 			var ok bool
 			if l == end.Line {
-				s, e, ok = findNextWordFrom(runes, end.Col)
+				s, e, ok = findNextWordFrom(runes, end.Col-1)
 			} else {
 				s, e, ok = findWordAt(runes, 0)
 			}
 			if ok {
 				m.sel = &Selection{
 					Anchor: document.Pos{Line: l, Col: s},
-					Head:   document.Pos{Line: l, Col: e},
+					Head:   document.Pos{Line: l, Col: e + 1},
 				}
 				m.cursor = m.sel.Head
 				m.scrollToCursor()
@@ -134,7 +226,7 @@ func (m *Model) selectWord() {
 		if ok {
 			m.sel = &Selection{
 				Anchor: document.Pos{Line: l, Col: s},
-				Head:   document.Pos{Line: l, Col: e},
+				Head:   document.Pos{Line: l, Col: e + 1},
 			}
 			m.cursor = m.sel.Head
 			m.scrollToCursor()
@@ -143,53 +235,39 @@ func (m *Model) selectWord() {
 	}
 }
 
-// selectLine selects the entire current line. If a line selection already
-// exists, it extends the selection forward to the next line.
+// selectLine selects the entire current line, line break included. If whole
+// lines are already selected, it extends the selection by the next line.
 func (m *Model) selectLine() {
-	if m.sel != nil && m.sel.IsLine {
-		_, end := m.sel.ordered()
-		next := end.Line + 1
-		if next >= m.buf.LineCount() {
+	if m.isLineSelection() {
+		start, end := m.sel.ordered()
+		if end == m.bufferEnd() {
 			return
 		}
-		nextLen := m.buf.LineLen(next)
-		// Extend whichever endpoint is at the forward line.
-		if m.sel.Head.Line >= m.sel.Anchor.Line {
-			m.sel.Head = document.Pos{Line: next, Col: max(0, nextLen-1)}
-		} else {
-			m.sel.Anchor = document.Pos{Line: next, Col: max(0, nextLen-1)}
-		}
+		m.sel = &Selection{Anchor: start, Head: m.lineSpanEnd(end.Line)}
 		m.cursor = m.sel.Head
 		m.scrollToCursor()
 		return
 	}
 	line := m.cursor.Line
-	lineLen := m.buf.LineLen(line)
-	m.sel = &Selection{
-		Anchor: document.Pos{Line: line, Col: 0},
-		Head:   document.Pos{Line: line, Col: max(0, lineLen-1)},
-		IsLine: true,
-	}
-	m.cursor = m.sel.Head
+	m.sel = &Selection{Anchor: document.Pos{Line: line}, Head: m.lineSpanEnd(line)}
+	m.dropEmptySelection()
+	m.cursor = m.lineSpanEnd(line)
 }
 
 // extendLineBackward extends a line selection to include the previous line.
 // If there is no line selection, selects the current line then extends up.
 func (m *Model) extendLineBackward() {
-	if m.sel == nil || !m.sel.IsLine {
+	if !m.isLineSelection() {
 		m.selectLine()
 	}
-	start, _ := m.sel.ordered()
-	prev := start.Line - 1
-	if prev < 0 {
+	if m.sel == nil {
 		return
 	}
-	// Move whichever endpoint is at the top backward.
-	if m.sel.Anchor.Line <= m.sel.Head.Line {
-		m.sel.Anchor = document.Pos{Line: prev, Col: 0}
-	} else {
-		m.sel.Head = document.Pos{Line: prev, Col: 0}
+	start, end := m.sel.ordered()
+	if start.Line == 0 {
+		return
 	}
+	m.sel = &Selection{Anchor: end, Head: document.Pos{Line: start.Line - 1}}
 	m.cursor = m.sel.Head
 	m.scrollToCursor()
 }
@@ -233,67 +311,38 @@ func (m Model) cutText() (string, bool) {
 
 // deleteSelectionRaw performs the deletion cutText describes, without
 // touching the clipboard — callers are responsible for that (see
-// cutSelection and deleteAllCursorSelections). d/c (plain delete/change) call
-// this directly; only the explicit cut command and its multicursor
-// equivalent go through the clipboard-writing wrappers.
+// cutSelection and deleteAllCursorSelections). With no selection it deletes
+// the character after the cursor, joining lines at a line end.
 func (m Model) deleteSelectionRaw() (Model, tea.Cmd) {
-	if m.sel == nil {
-		lineLen := m.buf.LineLen(m.cursor.Line)
-		if m.cursor.Col >= lineLen {
-			// Cursor rests on the line break itself: delete it like any other
-			// character, joining this line with the next.
-			if m.cursor.Line >= m.buf.LineCount()-1 {
-				return m, nil
-			}
-			op := document.Op{
-				ClientID: m.clientID(),
-				Type:     document.OpDelete,
-				FromLine: m.cursor.Line, FromCol: lineLen,
-				ToLine: m.cursor.Line + 1, ToCol: 0,
-			}
-			return applyOp(m, op)
-		}
-		col := m.cursor.Col
-		m.sel = &Selection{
-			Anchor: document.Pos{Line: m.cursor.Line, Col: col},
-			Head:   document.Pos{Line: m.cursor.Line, Col: col},
-		}
+	start, end := m.deletionRange()
+	m.sel = nil
+	if start == end {
+		return m, nil
 	}
-	start, end := m.sel.ordered()
 	op := document.Op{
-		ClientID: m.rpc.ClientID(),
+		ClientID: m.clientID(),
 		Type:     document.OpDelete,
-		FromLine: start.Line,
-		FromCol:  start.Col,
-	}
-	if m.sel.IsLine {
-		lc := m.buf.LineCount()
-		if end.Line+1 < lc {
-			op.ToLine = end.Line + 1
-			op.ToCol = 0
-		} else {
-			op.ToLine = end.Line
-			op.ToCol = m.buf.LineLen(end.Line)
-		}
-	} else {
-		lineLen := m.buf.LineLen(end.Line)
-		if end.Col+1 <= lineLen {
-			op.ToLine = end.Line
-			op.ToCol = end.Col + 1
-		} else {
-			lc := m.buf.LineCount()
-			if end.Line+1 < lc {
-				op.ToLine = end.Line + 1
-				op.ToCol = 0
-			} else {
-				op.ToLine = end.Line
-				op.ToCol = lineLen
-			}
-		}
+		FromLine: start.Line, FromCol: start.Col,
+		ToLine: end.Line, ToCol: end.Col,
 	}
 	m.cursor = start
-	m.sel = nil
 	return applyOp(m, op)
+}
+
+// deletionRange is the range deleteSelectionRaw deletes: the selection, or
+// the character after the cursor. start == end means nothing.
+func (m Model) deletionRange() (start, end document.Pos) {
+	if m.sel != nil {
+		return m.sel.ordered()
+	}
+	start = m.cursor
+	switch {
+	case m.cursor.Col < m.buf.LineLen(m.cursor.Line):
+		return start, document.Pos{Line: m.cursor.Line, Col: m.cursor.Col + 1}
+	case m.cursor.Line < m.buf.LineCount()-1:
+		return start, document.Pos{Line: m.cursor.Line + 1}
+	}
+	return start, start
 }
 
 func isWordChar(r rune) bool {
@@ -473,13 +522,63 @@ func (m *Model) moveToNextWordStart() {
 	}
 }
 
+// extendSelectionTo moves the selection's head to p, starting a selection at
+// the cursor if there is none, and leaves the cursor at the new head. Every
+// extend command goes through it, so the cursor always equals the head and an
+// empty selection is always dropped.
+func (m *Model) extendSelectionTo(p document.Pos) {
+	if m.sel == nil {
+		m.sel = &Selection{Anchor: m.cursor}
+	}
+	m.sel.Head = p
+	m.cursor = p
+	m.dropEmptySelection()
+	m.scrollToCursor()
+}
+
+// wordEndAfter is the end of the next word at or after p: past any non-word
+// characters, then past the word. It crosses lines, and stops at the end of
+// the buffer.
+func (m *Model) wordEndAfter(p document.Pos) document.Pos {
+	for l := p.Line; l < m.buf.LineCount(); l++ {
+		runes := []rune(m.buf.Line(l))
+		i := 0
+		if l == p.Line {
+			i = p.Col
+		}
+		for i < len(runes) && !isWordChar(runes[i]) {
+			i++
+		}
+		if i < len(runes) {
+			for i < len(runes) && isWordChar(runes[i]) {
+				i++
+			}
+			return document.Pos{Line: l, Col: i}
+		}
+	}
+	return m.bufferEnd()
+}
+
+// wordStartBefore is the start of the word before p, crossing lines, or the
+// start of the buffer.
+func (m *Model) wordStartBefore(p document.Pos) document.Pos {
+	for l := p.Line; l >= 0; l-- {
+		runes := []rune(m.buf.Line(l))
+		col := len(runes)
+		if l == p.Line {
+			col = p.Col
+		}
+		if s, ok := findPrevWordStart(runes, col); ok {
+			return document.Pos{Line: l, Col: s}
+		}
+	}
+	return document.Pos{}
+}
+
 // extendToNextWordStart moves the selection head forward to the start of the
 // next word. If there is no selection, starts one at the cursor.
 func (m *Model) extendToNextWordStart() {
 	head := m.cursor
-	if m.sel != nil {
-		head = m.sel.Head
-	}
 	totalLines := m.buf.LineCount()
 	for l := head.Line; l < totalLines; l++ {
 		runes := []rune(m.buf.Line(l))
@@ -488,14 +587,7 @@ func (m *Model) extendToNextWordStart() {
 			col = head.Col
 		}
 		if s, ok := findNextWordStart(runes, col); ok {
-			newHead := document.Pos{Line: l, Col: s}
-			if m.sel == nil {
-				m.sel = &Selection{Anchor: m.cursor, Head: newHead}
-			} else {
-				m.sel.Head = newHead
-			}
-			m.cursor = newHead
-			m.scrollToCursor()
+			m.extendSelectionTo(document.Pos{Line: l, Col: s})
 			return
 		}
 	}
@@ -519,131 +611,68 @@ func (m *Model) moveToWordEnd() {
 	}
 }
 
-// extendWordForward moves the selection head forward to the end of the next
-// word. If there is no selection, starts one at the cursor.
+// extendWordForward moves the selection head to the end of the next word. If
+// there is no selection, starts one at the cursor.
+//
+// With the block on a word's last letter and nothing selected, it takes that
+// letter and the next word, as E always has: stopping after the one letter
+// would make the first press look like it did nothing.
 func (m *Model) extendWordForward() {
-	head := m.cursor
-	if m.sel != nil {
-		head = m.sel.Head
+	from := m.cursor
+	if m.sel == nil && m.atWordEnd(from) {
+		from = m.cellAfter(from)
 	}
-	totalLines := m.buf.LineCount()
-	for l := head.Line; l < totalLines; l++ {
-		runes := []rune(m.buf.Line(l))
-		col := 0
-		if l == head.Line {
-			col = head.Col
-		}
-		if e, ok := findWordEnd(runes, col); ok {
-			newHead := document.Pos{Line: l, Col: e}
-			if m.sel == nil {
-				m.sel = &Selection{Anchor: m.cursor, Head: newHead}
-			} else {
-				m.sel.Head = newHead
-			}
-			m.cursor = newHead
-			m.scrollToCursor()
-			return
-		}
-	}
+	m.extendSelectionTo(m.wordEndAfter(from))
 }
 
-// extendWordBackward moves the selection head backward to the start of the
+// atWordEnd reports whether the character at p is a word's last letter.
+func (m *Model) atWordEnd(p document.Pos) bool {
+	runes := []rune(m.buf.Line(p.Line))
+	return p.Col < len(runes) && isWordChar(runes[p.Col]) &&
+		(p.Col+1 == len(runes) || !isWordChar(runes[p.Col+1]))
+}
+
+// extendWordBackward moves the selection head back to the start of the
 // previous word. If there is no selection, starts one at the cursor.
 func (m *Model) extendWordBackward() {
-	head := m.cursor
-	if m.sel != nil {
-		head = m.sel.Head
-	}
-	for l := head.Line; l >= 0; l-- {
-		runes := []rune(m.buf.Line(l))
-		col := head.Col
-		if l < head.Line {
-			col = len(runes)
-		}
-		if s, ok := findPrevWordStart(runes, col); ok {
-			newHead := document.Pos{Line: l, Col: s}
-			if m.sel == nil {
-				m.sel = &Selection{Anchor: m.cursor, Head: newHead}
-			} else {
-				m.sel.Head = newHead
-			}
-			m.cursor = newHead
-			m.scrollToCursor()
-			return
-		}
-	}
+	m.extendSelectionTo(m.wordStartBefore(m.cursor))
 }
 
-// extendToLineEnd extends the selection head to the end of the current line
-// (the last character, inclusive — matching selectLine's convention). If
-// there is no selection, starts one at the cursor.
+// extendToLineEnd extends the selection head to the end of the current line.
+// If there is no selection, starts one at the cursor.
 func (m *Model) extendToLineEnd() {
-	head := m.cursor
-	if m.sel != nil {
-		head = m.sel.Head
-	}
-	lineLen := m.buf.LineLen(head.Line)
-	newHead := document.Pos{Line: head.Line, Col: max(0, lineLen-1)}
-	if m.sel == nil {
-		m.sel = &Selection{Anchor: m.cursor, Head: newHead}
-	} else {
-		m.sel.Head = newHead
-	}
-	m.cursor = newHead
-	m.scrollToCursor()
+	line := m.cursor.Line
+	m.extendSelectionTo(document.Pos{Line: line, Col: m.buf.LineLen(line)})
 }
 
 // extendToLineStart extends the selection head to the start of the current
 // line. If there is no selection, starts one at the cursor.
 func (m *Model) extendToLineStart() {
-	head := m.cursor
-	if m.sel != nil {
-		head = m.sel.Head
-	}
-	newHead := document.Pos{Line: head.Line, Col: 0}
-	if m.sel == nil {
-		m.sel = &Selection{Anchor: m.cursor, Head: newHead}
-	} else {
-		m.sel.Head = newHead
-	}
-	m.cursor = newHead
-	m.scrollToCursor()
+	m.extendSelectionTo(document.Pos{Line: m.cursor.Line})
 }
 
 // extendCharForward extends the selection head one character forward,
-// crossing line breaks the same way moveCursorChar does (including resting
-// on the line break itself). If there is no selection, starts one at the
-// cursor so the character under it becomes selected before advancing.
+// crossing a line break as one character. If there is no selection, starts
+// one at the cursor, so the first press selects the character under the
+// block. It steps by position, not by moveCursorChar, because a selection can
+// end after the buffer's last character, where the Normal-mode cursor cannot
+// rest.
 func (m *Model) extendCharForward() {
-	if m.sel == nil {
-		m.sel = &Selection{Anchor: m.cursor, Head: m.cursor}
-	}
-	m.cursor = m.sel.Head
-	m.moveCursorChar(1)
-	m.sel.Head = m.cursor
+	m.extendSelectionTo(m.cellAfter(m.cursor))
 }
 
 // extendCharBackward extends the selection head one character backward,
-// mirroring extendCharForward. If there is no selection, starts one at the
-// cursor.
+// mirroring extendCharForward: the first press selects the character before
+// the block.
 func (m *Model) extendCharBackward() {
-	if m.sel == nil {
-		m.sel = &Selection{Anchor: m.cursor, Head: m.cursor}
-	}
-	m.cursor = m.sel.Head
-	m.moveCursorChar(-1)
-	m.sel.Head = m.cursor
+	m.extendSelectionTo(m.cellBefore(m.cursor))
 }
 
 // selectAll selects the entire buffer contents.
 func (m *Model) selectAll() {
-	lastLine := max(0, m.buf.LineCount()-1)
-	lastCol := max(0, m.buf.LineLen(lastLine)-1)
-	m.sel = &Selection{
-		Anchor: document.Pos{Line: 0, Col: 0},
-		Head:   document.Pos{Line: lastLine, Col: lastCol},
-	}
+	m.sel = &Selection{Head: m.bufferEnd()}
 	m.cursor = m.sel.Head
+	m.dropEmptySelection()
 	m.scrollToCursor()
 }
 

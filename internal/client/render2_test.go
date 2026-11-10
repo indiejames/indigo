@@ -185,13 +185,12 @@ func TestRenderLineRunesTrailingOverlayPaddingSplitsAtSelectionBoundary(t *testi
 	}
 }
 
+// TestRenderLineChunkTrailingEmptyLineReverseSelection: "a\nb\n" has a
+// trailing phantom empty line (index 2) that isn't part of displayLineCount.
+// A selection that ends there, even a reversed one with the cursor back on
+// line 0, covers nothing on it — no characters and no line break — so it
+// still renders as the plain "~".
 func TestRenderLineChunkTrailingEmptyLineReverseSelection(t *testing.T) {
-	// "a\nb\n" has a trailing phantom empty line (index 2) that isn't part
-	// of displayLineCount. Select from line 0 through that phantom line,
-	// then simulate a flipped/reverse selection where the cursor sits back
-	// on line 0 — the phantom line is still selected but no longer holds
-	// the cursor, so it must fall through to the selection-padding branch
-	// instead of the plain "~" shortcut.
 	m := newTestModel("a\nb\n")
 	m.sel = &Selection{
 		Anchor: document.Pos{Line: 2, Col: 0},
@@ -203,8 +202,8 @@ func TestRenderLineChunkTrailingEmptyLineReverseSelection(t *testing.T) {
 	layout := m.buildScreenLayout(3, cw)
 	rendered := m.renderLineChunk(layout[2], cw, nil, -1, -1, false)
 
-	if strings.Contains(rendered, "~") {
-		t.Errorf("trailing empty line included in selection should not render as a bare tilde, got %q", rendered)
+	if !strings.Contains(rendered, "~") {
+		t.Errorf("the phantom line holds nothing selected and should render as \"~\", got %q", rendered)
 	}
 }
 

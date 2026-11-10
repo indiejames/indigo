@@ -135,18 +135,18 @@ func TestAddCursorBelowUsesLastExtraCursorAsReference(t *testing.T) {
 	if len(m.extraCursors) != 1 || m.extraCursors[0].pos.Line != 1 {
 		t.Fatalf("after first addCursorBelow: extraCursors = %+v", m.extraCursors)
 	}
-	// Line 1 ("bb") is shorter than col 3, so the cursor clamps to its last column.
-	if m.extraCursors[0].pos.Col != 1 {
-		t.Errorf("clamped col = %d, want 1 (last index of \"bb\")", m.extraCursors[0].pos.Col)
+	// Line 1 ("bb") is shorter than col 3, so the cursor clamps to its end.
+	if m.extraCursors[0].pos.Col != 2 {
+		t.Errorf("clamped col = %d, want 2 (the end of \"bb\")", m.extraCursors[0].pos.Col)
 	}
 
 	addCursorBelow(&m)
 	if len(m.extraCursors) != 2 || m.extraCursors[1].pos.Line != 2 {
 		t.Fatalf("after second addCursorBelow: extraCursors = %+v", m.extraCursors)
 	}
-	// Reference column carries forward from the clamped col 1, not the original 3.
-	if m.extraCursors[1].pos.Col != 1 {
-		t.Errorf("second cursor col = %d, want 1 (carried from clamped reference)", m.extraCursors[1].pos.Col)
+	// Reference column carries forward from the clamped col 2, not the original 3.
+	if m.extraCursors[1].pos.Col != 2 {
+		t.Errorf("second cursor col = %d, want 2 (carried from clamped reference)", m.extraCursors[1].pos.Col)
 	}
 }
 
@@ -198,13 +198,13 @@ func TestSplitSelectionIntoCursorsMultiLine(t *testing.T) {
 	if len(m.extraCursors) != 2 {
 		t.Fatalf("extraCursors = %+v, want 2 (one per remaining line)", m.extraCursors)
 	}
-	// Primary cursor covers line 0, from col 1 to end of line ("aaaa" → idx 3).
-	if m.cursor != (document.Pos{Line: 0, Col: 3}) {
-		t.Errorf("cursor = %+v, want {0,3} (end of line 0)", m.cursor)
+	// Primary cursor covers line 0, from col 1 to the end of the line.
+	if m.cursor != (document.Pos{Line: 0, Col: 4}) {
+		t.Errorf("cursor = %+v, want {0,4} (end of line 0)", m.cursor)
 	}
 	// Line 1 ("bb") extra cursor spans the whole short line.
 	ec0 := m.extraCursors[0]
-	if ec0.pos != (document.Pos{Line: 1, Col: 1}) || ec0.sel == nil || ec0.sel.Anchor.Col != 0 {
+	if ec0.pos != (document.Pos{Line: 1, Col: 2}) || ec0.sel == nil || ec0.sel.Anchor.Col != 0 {
 		t.Errorf("extraCursors[0] = %+v, want full-line selection on line 1", ec0)
 	}
 	// Line 2 ("cccccc") extra cursor stops at the original selection's end.Col (3).
@@ -239,10 +239,10 @@ func TestDeleteAllCursorSelectionsDeletesEachSelectionOnce(t *testing.T) {
 	m := newTestModel("aXXXb\nc\ndYYYe\n")
 	m.rpc = &RPC{}
 	m.cursor = document.Pos{Line: 0, Col: 1}
-	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 3}}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 4}}
 	m.extraCursors = []ExtraCursor{{
 		pos: document.Pos{Line: 2, Col: 1},
-		sel: &Selection{Anchor: document.Pos{Line: 2, Col: 1}, Head: document.Pos{Line: 2, Col: 3}},
+		sel: &Selection{Anchor: document.Pos{Line: 2, Col: 1}, Head: document.Pos{Line: 2, Col: 4}},
 	}}
 
 	m2, cmd := deleteAllCursorSelections(m, false)
@@ -272,7 +272,7 @@ func TestDeleteAllCursorSelectionsOpensOwnUndoGroupWhenNoneActive(t *testing.T) 
 	m := newTestModel("aXb\ncYd\n")
 	m.rpc = &RPC{}
 	m.cursor = document.Pos{Line: 0, Col: 1}
-	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 1}}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 2}} // "X"
 
 	m2, _ := deleteAllCursorSelections(m, false)
 
@@ -297,10 +297,10 @@ func TestDeleteAllCursorSelectionsCombinesClipboardText(t *testing.T) {
 	m := newTestModel("aXXXb\nc\ndYYYe\n")
 	m.rpc = &RPC{}
 	m.cursor = document.Pos{Line: 0, Col: 1}
-	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 3}}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 4}}
 	m.extraCursors = []ExtraCursor{{
 		pos: document.Pos{Line: 2, Col: 1},
-		sel: &Selection{Anchor: document.Pos{Line: 2, Col: 1}, Head: document.Pos{Line: 2, Col: 3}},
+		sel: &Selection{Anchor: document.Pos{Line: 2, Col: 1}, Head: document.Pos{Line: 2, Col: 4}},
 	}}
 
 	deleteAllCursorSelections(m, true)
@@ -344,10 +344,10 @@ func TestExecuteChangeSelectionMultiCursorDoesNotTouchClipboard(t *testing.T) {
 	m := newTestModel("aXXXb\nc\ndYYYe\n")
 	m.rpc = &RPC{}
 	m.cursor = document.Pos{Line: 0, Col: 1}
-	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 3}}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 4}}
 	m.extraCursors = []ExtraCursor{{
 		pos: document.Pos{Line: 2, Col: 1},
-		sel: &Selection{Anchor: document.Pos{Line: 2, Col: 1}, Head: document.Pos{Line: 2, Col: 3}},
+		sel: &Selection{Anchor: document.Pos{Line: 2, Col: 1}, Head: document.Pos{Line: 2, Col: 4}},
 	}}
 
 	executeChangeSelection(m)
@@ -366,10 +366,10 @@ func TestExecuteCutSelectionMultiCursorCombinesClipboardText(t *testing.T) {
 	m := newTestModel("aXXXb\nc\ndYYYe\n")
 	m.rpc = &RPC{}
 	m.cursor = document.Pos{Line: 0, Col: 1}
-	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 3}}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 1}, Head: document.Pos{Line: 0, Col: 4}}
 	m.extraCursors = []ExtraCursor{{
 		pos: document.Pos{Line: 2, Col: 1},
-		sel: &Selection{Anchor: document.Pos{Line: 2, Col: 1}, Head: document.Pos{Line: 2, Col: 3}},
+		sel: &Selection{Anchor: document.Pos{Line: 2, Col: 1}, Head: document.Pos{Line: 2, Col: 4}},
 	}}
 
 	executeCutSelection(m)
@@ -597,8 +597,8 @@ func TestSelectAllSearchMatchesCreatesOneCursorPerMatch(t *testing.T) {
 	if m.sel == nil {
 		t.Fatal("m.sel is nil, want a selection covering the first match")
 	}
-	if m.sel.Anchor != (document.Pos{Line: 0, Col: 0}) || m.sel.Head != (document.Pos{Line: 0, Col: 2}) {
-		t.Errorf("primary selection = %+v, want anchor (0,0) head (0,2)", m.sel)
+	if m.sel.Anchor != (document.Pos{Line: 0, Col: 0}) || m.sel.Head != (document.Pos{Line: 0, Col: 3}) {
+		t.Errorf("primary selection = %+v, want anchor (0,0) head (0,3)", m.sel)
 	}
 	if m.cursor != m.sel.Head {
 		t.Errorf("cursor = %+v, want %+v (== primary selection head)", m.cursor, m.sel.Head)
@@ -613,7 +613,7 @@ func TestSelectAllSearchMatchesCreatesOneCursorPerMatch(t *testing.T) {
 			t.Fatalf("extraCursors[%d].sel is nil, want a selection", i)
 		}
 		wantAnchor := document.Pos{Line: 0, Col: wantCols[i]}
-		wantHead := document.Pos{Line: 0, Col: wantCols[i] + 2}
+		wantHead := document.Pos{Line: 0, Col: wantCols[i] + 3}
 		if ec.sel.Anchor != wantAnchor || ec.sel.Head != wantHead {
 			t.Errorf("extraCursors[%d].sel = %+v, want anchor %+v head %+v", i, ec.sel, wantAnchor, wantHead)
 		}
@@ -670,7 +670,7 @@ func TestSelectAllSearchMatchesResetsPreviousExtraCursors(t *testing.T) {
 	if len(m.extraCursors) != 1 {
 		t.Fatalf("len(extraCursors) = %d, want 1 (stale cursor must be replaced)", len(m.extraCursors))
 	}
-	if m.extraCursors[0].pos.Col != 6 {
-		t.Errorf("extraCursors[0].pos.Col = %d, want 6 (second 'foo')", m.extraCursors[0].pos.Col)
+	if m.extraCursors[0].pos.Col != 7 {
+		t.Errorf("extraCursors[0].pos.Col = %d, want 7 (after the second 'foo')", m.extraCursors[0].pos.Col)
 	}
 }

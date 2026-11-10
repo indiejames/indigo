@@ -12,10 +12,10 @@ import (
 func twoCursorSelections() Model {
 	m := newTestModel("alpha beta\ngamma delta\n")
 	m.cursor = document.Pos{Line: 1, Col: 4}
-	m.sel = &Selection{Anchor: document.Pos{Line: 1, Col: 0}, Head: document.Pos{Line: 1, Col: 4}}
+	m.sel = &Selection{Anchor: document.Pos{Line: 1, Col: 0}, Head: document.Pos{Line: 1, Col: 5}}
 	m.extraCursors = []ExtraCursor{{
 		pos:     document.Pos{Line: 0, Col: 4},
-		sel:     &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 4}},
+		sel:     &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 5}},
 		goalCol: -1,
 	}}
 	return m

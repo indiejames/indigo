@@ -97,8 +97,8 @@ type App struct {
 	status  string // app-level transient message (e.g. ":qa" error)
 
 	// tabUse maps a buffer's BufID to the value tabSeq had when that buffer
-	// was last the active tab, which is what decides who keeps a tab when
-	// they no longer all fit (see tabLayout). Keyed by BufID rather than by
+	// was last the active tab, which decides the buffer a group switch lands
+	// on (mostRecentIn). Keyed by BufID rather than by
 	// index because opening and closing buffers renumbers indices, and a
 	// recency order that silently re-points at a different buffer is worse
 	// than none. Stamped once per Update from a single place, so no call site
@@ -110,6 +110,12 @@ type App struct {
 	// correctness — a BufID is never reused by the server within a session.
 	tabUse map[uint32]uint64
 	tabSeq uint64
+
+	// tabFirst is the BufID of the leftmost tab the bar showed, so the bar
+	// scrolls from there when its tabs don't all fit (tabWindow); 0 before
+	// it has ever overflowed. Kept by BufID so opening or closing a buffer
+	// doesn't move the window.
+	tabFirst uint32
 
 	// groups are the tab groups, in the order the bar lists them; see
 	// tabgroups.go. groupName is the current group's, which a buffer that
@@ -397,7 +403,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 	updated.stopOrphanScan()
-	return updated.syncGroups().stampActiveTab().saveSessionIfChanged().ensureActiveSized().ensureActiveDebugView().ensureStatusShown(), cmd
+	return updated.syncGroups().stampActiveTab().scrollTabs().saveSessionIfChanged().ensureActiveSized().ensureActiveDebugView().ensureStatusShown(), cmd
 }
 
 // ensureActiveSized gives the active buffer the window size if it has never had

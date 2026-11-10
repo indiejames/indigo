@@ -123,7 +123,7 @@ func TestExecuteDeleteSelectionDoesNotTouchClipboard(t *testing.T) {
 	fakeClipboardContent = "unchanged"
 	m := newTestModel("hello world\n")
 	m.rpc = &RPC{} // zero-value RPC is safe: ClientID() just reads a field, no dial
-	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 4}}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 5}}
 
 	m2, _ := executeDeleteSelection(m)
 	got := m2.(Model)
@@ -143,7 +143,7 @@ func TestExecuteCutSelectionCopiesToClipboard(t *testing.T) {
 	fakeClipboardContent = ""
 	m := newTestModel("hello world\n")
 	m.rpc = &RPC{}
-	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 4}}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 5}}
 
 	m2, _ := executeCutSelection(m)
 	got := m2.(Model)
@@ -188,7 +188,7 @@ func TestExecuteChangeSelectionDoesNotTouchClipboard(t *testing.T) {
 	fakeClipboardContent = "unchanged"
 	m := newTestModel("hello world\n")
 	m.rpc = &RPC{}
-	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 4}}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 5}}
 
 	m2, _ := executeChangeSelection(m)
 	got := m2.(Model)

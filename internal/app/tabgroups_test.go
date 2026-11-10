@@ -23,7 +23,7 @@ func newGroupApp(names ...string) App {
 		buffers[i] = newReloadTestModel(uint32(i+1), "/tmp/"+n)
 	}
 	a := App{buffers: buffers, width: 120, height: 24, cfg: &config.Config{}, tabUse: map[uint32]uint64{}, fileChangedIdx: -1}
-	return a.syncGroups().stampActiveTab()
+	return a.syncGroups().stampActiveTab().scrollTabs()
 }
 
 func step(t *testing.T, a App, msg tea.Msg) (App, tea.Cmd) {

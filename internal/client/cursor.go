@@ -126,14 +126,15 @@ func (m Model) newCursor(x, y int) *tea.Cursor {
 // that layout. ok is false when the cursor isn't on screen at all, in which
 // case no cursor should be shown.
 func (m Model) bufferCursorPos(layout []layoutEntry, cw, vis int) (x, y int, ok bool) {
-	visCol := m.cursor.Col
-	if line := m.buf.Line(m.cursor.Line); len(line) > 0 {
-		if _, colMap := expandTabsRemap([]rune(line)); m.cursor.Col < len(colMap) {
-			visCol = colMap[m.cursor.Col]
+	cell := m.cursorCell() // inside a forward selection, not after it
+	visCol := cell.Col
+	if line := m.buf.Line(cell.Line); len(line) > 0 {
+		if _, colMap := expandTabsRemap([]rune(line)); cell.Col < len(colMap) {
+			visCol = colMap[cell.Col]
 		}
 	}
 
-	row := screenRowOf(layout, m.cursor.Line, visCol, cw)
+	row := screenRowOf(layout, cell.Line, visCol, cw)
 	if row < 0 {
 		row = m.cursorVisualRowFromTop(cw)
 	}

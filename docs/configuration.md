@@ -654,7 +654,11 @@ you open joins the current one. Buffers you never move are in
 "ungrouped". Next and previous buffer (`ctrl+l`/`ctrl+h`) stay inside the
 group, and so do the digit keys: in Normal mode `1` to `8` go to that tab,
 counted from the left as the tab bar numbers them, and `9` goes to the last
-tab however many there are. They work with the tab bar hidden too.
+tab the bar shows. The numbers belong to the bar's positions, not to
+buffers: when a group has more tabs than fit, the bar shows a run of them
+that scrolls only when you move past either end, the hidden tabs are counted
+at that end (`‹2`, `4›`), and the leftmost tab shown is always `1`. The keys
+work with the tab bar hidden too.
 `ctrl+shift+down`/`ctrl+shift+up` switch groups, as does clicking a
 group's name. Jumping to a file that is open in another group switches to
 that group. The buffer picker (`g b`) lists every buffer, with its group.

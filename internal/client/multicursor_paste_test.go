@@ -33,9 +33,9 @@ func threeCursors() Model {
 func TestPasteDistributesAMatchingMultiCursorYank(t *testing.T) {
 	withFakeClipboard(t, "")
 	m := threeCursors()
-	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 0}}
-	m.extraCursors[0].sel = &Selection{Anchor: document.Pos{Line: 1, Col: 0}, Head: document.Pos{Line: 1, Col: 0}}
-	m.extraCursors[1].sel = &Selection{Anchor: document.Pos{Line: 2, Col: 0}, Head: document.Pos{Line: 2, Col: 0}}
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 0}, Head: document.Pos{Line: 0, Col: 1}}
+	m.extraCursors[0].sel = &Selection{Anchor: document.Pos{Line: 1, Col: 0}, Head: document.Pos{Line: 1, Col: 1}}
+	m.extraCursors[1].sel = &Selection{Anchor: document.Pos{Line: 2, Col: 0}, Head: document.Pos{Line: 2, Col: 1}}
 
 	y, _ := executeYank(m)
 	m = y.(Model)

@@ -66,13 +66,16 @@ func TestSnippetModeArgPlaceholders(t *testing.T) {
 	if m.buf.Line(0) != "greet(name, times)" {
 		t.Fatalf("inserted line = %q, want greet(name, times)", m.buf.Line(0))
 	}
-	if m.sel == nil || m.sel.Anchor.Col != 6 || m.sel.Head.Col != 9 {
+	// Selected backward, so the cursor (the head) is at the placeholder's
+	// start, where typing replaces it.
+	if m.sel == nil || m.sel.Anchor.Col != 10 || m.sel.Head.Col != 6 || m.cursor.Col != 6 {
 		t.Fatalf("first placeholder not selected: sel=%+v", m.sel)
 	}
 
-	// Tab selects the second placeholder ("times" at cols 12..16 inclusive).
+	// Tab selects the second placeholder ("times", columns 12 to 17), backward
+	// like the first.
 	m2 := m.snippetJump(1).(Model)
-	if m2.sel == nil || m2.sel.Anchor.Col != 12 || m2.sel.Head.Col != 16 {
+	if m2.sel == nil || m2.sel.Anchor.Col != 17 || m2.sel.Head.Col != 12 {
 		t.Fatalf("second placeholder not selected after Tab: sel=%+v", m2.sel)
 	}
 
@@ -164,12 +167,10 @@ func TestMouseClickDuringSnippetExitsSnippetMode(t *testing.T) {
 		t.Error("snippet mode should be exited by a mouse click elsewhere")
 	}
 	want := document.Pos{Line: 1, Col: 0}
-	// The click sets its own fresh single-point selection (normal click
-	// behavior) — the bug is a stale *placeholder* selection surviving, not
-	// selection-in-general, so assert the selection is anchored at the click,
-	// not left over from the snippet.
-	if m.sel == nil || m.sel.Anchor != want || m.sel.Head != want {
-		t.Errorf("sel = %+v, want a fresh point selection at %v (not the stale placeholder)", m.sel, want)
+	// A click alone selects nothing; the bug was a stale placeholder
+	// selection surviving it.
+	if m.sel != nil {
+		t.Errorf("sel = %+v, want none after a click (not the stale placeholder)", m.sel)
 	}
 	if m.cursor != want {
 		t.Errorf("cursor = %v, want %v (the clicked position, not snapped back to the snippet)", m.cursor, want)

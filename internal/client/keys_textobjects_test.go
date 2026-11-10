@@ -88,15 +88,10 @@ func TestExecuteSelectInsideCharEmptyQuotes(t *testing.T) {
 	got, _ := executeSelectInsideChar(m)
 	m2 := got.(Model)
 
-	if m2.sel == nil {
-		t.Fatal("executeSelectInsideChar: sel is nil")
-	}
-	start, end := m2.sel.ordered()
-	if start.Col > end.Col {
-		t.Errorf("selection inverted: start=%v end=%v", start, end)
-	}
-	if text := m2.selectedText(); text == `""` {
-		t.Errorf("selectedText() = %q, want it not to include both delimiters", text)
+	// Nothing is inside, so nothing is selected, and the cursor sits
+	// between the quotes.
+	if m2.sel != nil || m2.cursor != (document.Pos{Line: 0, Col: 9}) {
+		t.Errorf("sel = %v cursor = %+v, want no selection and the cursor between the quotes", m2.sel, m2.cursor)
 	}
 }
 
@@ -161,8 +156,8 @@ func TestExecuteSelectInsideBracketsMultiLine(t *testing.T) {
 	if m2.sel == nil {
 		t.Fatal("executeSelectInsideBrackets: sel is nil")
 	}
-	if text := m2.selectedText(); text != "\n  foo" {
-		t.Errorf("selectedText() = %q, want %q", text, "\n  foo")
+	if text := m2.selectedText(); text != "\n  foo\n" {
+		t.Errorf("selectedText() = %q, want %q", text, "\n  foo\n")
 	}
 }
 
@@ -175,15 +170,10 @@ func TestExecuteSelectInsideBracketsEmpty(t *testing.T) {
 	got, _ := executeSelectInsideBrackets(m)
 	m2 := got.(Model)
 
-	if m2.sel == nil {
-		t.Fatal("executeSelectInsideBrackets: sel is nil")
-	}
-	start, end := m2.sel.ordered()
-	if start.Col > end.Col {
-		t.Errorf("selection inverted: start=%v end=%v", start, end)
-	}
-	if text := m2.selectedText(); text == "()" {
-		t.Errorf("selectedText() = %q, want it not to include both brackets", text)
+	// Nothing is inside, so nothing is selected, and the cursor sits
+	// between the brackets.
+	if m2.sel != nil || m2.cursor != (document.Pos{Line: 0, Col: 9}) {
+		t.Errorf("sel = %v cursor = %+v, want no selection and the cursor between the brackets", m2.sel, m2.cursor)
 	}
 }
 
@@ -451,8 +441,7 @@ func TestExecuteMoveLineDownMovesWholeSelection(t *testing.T) {
 	m.cursor = document.Pos{Line: 1, Col: 0}
 	m.sel = &Selection{
 		Anchor: document.Pos{Line: 0, Col: 0},
-		Head:   document.Pos{Line: 1, Col: 0},
-		IsLine: true,
+		Head:   document.Pos{Line: 2, Col: 0}, // lines 0 and 1
 	}
 
 	got, _ := executeMoveLineDown(m)
@@ -470,8 +459,8 @@ func TestExecuteMoveLineDownMovesWholeSelection(t *testing.T) {
 	if line := m2.buf.Line(3); line != "qux" {
 		t.Errorf("Line(3) = %q, want %q", line, "qux")
 	}
-	if m2.sel == nil || m2.sel.Anchor.Line != 1 || m2.sel.Head.Line != 2 {
-		t.Errorf("sel = %+v, want Anchor.Line=1 Head.Line=2", m2.sel)
+	if m2.sel == nil || m2.sel.Anchor.Line != 1 || m2.sel.Head.Line != 3 {
+		t.Errorf("sel = %+v, want lines 1 and 2 (Anchor.Line=1, Head at the start of line 3)", m2.sel)
 	}
 }
 
@@ -524,8 +513,7 @@ func TestExecuteMoveLineDownPreservesRelativeIndentWithinBlock(t *testing.T) {
 	m.cursor = document.Pos{Line: 0, Col: 0}
 	m.sel = &Selection{
 		Anchor: document.Pos{Line: 0, Col: 0},
-		Head:   document.Pos{Line: 1, Col: 0},
-		IsLine: true,
+		Head:   document.Pos{Line: 2, Col: 0}, // lines 0 and 1
 	}
 
 	got, _ := executeMoveLineDown(m)
@@ -577,8 +565,7 @@ func TestExecuteMoveLineUpIndentsImmediatelyWithSiblingInBlock(t *testing.T) {
 	m.cursor = document.Pos{Line: 3, Col: 0}
 	m.sel = &Selection{
 		Anchor: document.Pos{Line: 3, Col: 0},
-		Head:   document.Pos{Line: 4, Col: 0},
-		IsLine: true,
+		Head:   document.Pos{Line: 5, Col: 0}, // lines 3 and 4
 	}
 
 	got, _ := executeMoveLineUp(m)
@@ -626,7 +613,6 @@ func TestExecuteMoveLineUpAdjustsSelectionColumns(t *testing.T) {
 	m.sel = &Selection{
 		Anchor: document.Pos{Line: 1, Col: 2}, // on 'o' in "\tfoo"
 		Head:   document.Pos{Line: 2, Col: 4}, // on 'r' in "\tbar"
-		IsLine: true,
 	}
 
 	got, _ := executeMoveLineUp(m)

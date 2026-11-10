@@ -85,11 +85,13 @@ func (m Model) selectSnippetStop(idx int) Model {
 	m.snippetIdx = idx
 	s := m.snippetStops[idx]
 	if s.end > s.start {
+		// Anchored at the placeholder's end, so the head, which the cursor
+		// always equals, is at its start, where typing replaces it.
 		m.sel = &Selection{
-			Anchor: document.Pos{Line: m.snippetLine, Col: s.start},
-			Head:   document.Pos{Line: m.snippetLine, Col: s.end - 1}, // selection end is inclusive
+			Anchor: document.Pos{Line: m.snippetLine, Col: s.end},
+			Head:   document.Pos{Line: m.snippetLine, Col: s.start},
 		}
-		m.cursor = document.Pos{Line: m.snippetLine, Col: s.start}
+		m.cursor = m.sel.Head
 	} else {
 		m.sel = nil
 		m.cursor = document.Pos{Line: m.snippetLine, Col: s.start}

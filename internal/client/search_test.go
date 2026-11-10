@@ -239,7 +239,7 @@ func TestFindSubstituteMatchesLiteralHasNoBackreferences(t *testing.T) {
 
 func TestFindSubstituteMatchesBoundedToOneLine(t *testing.T) {
 	buf := document.New("", "foo\nfoo\nfoo\n")
-	bounds := &substituteBounds{from: document.Pos{Line: 1, Col: 0}, to: document.Pos{Line: 1, Col: 2}}
+	bounds := &substituteBounds{from: document.Pos{Line: 1, Col: 0}, to: document.Pos{Line: 1, Col: 3}}
 	matches, err := findSubstituteMatches(buf, "foo", "bar", bounds)
 	if err != nil {
 		t.Fatal(err)
@@ -252,7 +252,7 @@ func TestFindSubstituteMatchesBoundedToOneLine(t *testing.T) {
 func TestFindSubstituteMatchesBoundedPartialLine(t *testing.T) {
 	// Bounds cover only "foo foo" — up to but not including the third foo.
 	buf := document.New("", "foo foo foo\n")
-	bounds := &substituteBounds{from: document.Pos{Line: 0, Col: 0}, to: document.Pos{Line: 0, Col: 6}}
+	bounds := &substituteBounds{from: document.Pos{Line: 0, Col: 0}, to: document.Pos{Line: 0, Col: 7}}
 	matches, err := findSubstituteMatches(buf, "foo", "x", bounds)
 	if err != nil {
 		t.Fatal(err)
@@ -672,5 +672,43 @@ func TestNDoesNotReactivateOnFailedLiveSearch(t *testing.T) {
 	}
 	if got.cursor.Line != 1 || got.cursor.Col != 3 {
 		t.Errorf("cursor = %+v, want unchanged {1 3} (must not jump to \"hello\"'s first match)", got.cursor)
+	}
+}
+
+// TestFindSubstituteMatchesExcludesALineReachedAtColumnZero: a range ending
+// at column 0 of a later line (as x leaves it) holds none of that line, so a
+// zero-width match at its start is out of scope; one ending at column 0 of
+// its own starting line keeps that line.
+func TestFindSubstituteMatchesExcludesALineReachedAtColumnZero(t *testing.T) {
+	buf := document.New("t.txt", "foo\nfoo\nfoo\n")
+	got, err := findSubstituteMatches(buf, `\^`, "x", &substituteBounds{
+		from: document.Pos{Line: 0, Col: 0}, to: document.Pos{Line: 2, Col: 0},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].line != 0 || got[1].line != 1 {
+		t.Errorf("matches = %+v, want lines 0 and 1 only", got)
+	}
+	got, _ = findSubstituteMatches(buf, `\^`, "x", &substituteBounds{
+		from: document.Pos{Line: 1, Col: 0}, to: document.Pos{Line: 1, Col: 0},
+	})
+	if len(got) != 1 || got[0].line != 1 {
+		t.Errorf("same-line range: matches = %+v, want line 1", got)
+	}
+}
+
+// TestFindSubstituteMatchesExcludesAZeroWidthMatchAtTheEnd: a selection of
+// "foo" in "foo bar" holds the word boundary before it but not the one after.
+func TestFindSubstituteMatchesExcludesAZeroWidthMatchAtTheEnd(t *testing.T) {
+	buf := document.New("t.txt", "foo bar\n")
+	got, err := findSubstituteMatches(buf, `\\b`, "|", &substituteBounds{
+		from: document.Pos{Line: 0, Col: 0}, to: document.Pos{Line: 0, Col: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].col != 0 {
+		t.Errorf("matches = %+v, want only the boundary at column 0", got)
 	}
 }

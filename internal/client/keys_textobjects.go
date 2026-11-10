@@ -68,9 +68,9 @@ func executeSelectInsideWord(m Model) (tea.Model, tea.Cmd) {
 		}
 		m.sel = &Selection{
 			Anchor: document.Pos{Line: m.cursor.Line, Col: start},
-			Head:   document.Pos{Line: m.cursor.Line, Col: end},
+			Head:   document.Pos{Line: m.cursor.Line, Col: end + 1},
 		}
-		m.cursor = document.Pos{Line: m.cursor.Line, Col: end}
+		m.cursor = m.sel.Head
 	})
 	m.dedupeCursors(dedupeBySelection) // two cursors in one word resolve to the same range
 	return m, nil
@@ -100,9 +100,9 @@ func executeSelectInsideWhitespace(m Model) (tea.Model, tea.Cmd) {
 		}
 		m.sel = &Selection{
 			Anchor: document.Pos{Line: m.cursor.Line, Col: start},
-			Head:   document.Pos{Line: m.cursor.Line, Col: end},
+			Head:   document.Pos{Line: m.cursor.Line, Col: end + 1},
 		}
-		m.cursor = document.Pos{Line: m.cursor.Line, Col: end}
+		m.cursor = m.sel.Head
 	})
 	m.dedupeCursors(dedupeBySelection) // two cursors in one run resolve to the same range
 	return m, nil
@@ -288,35 +288,16 @@ func executeSelectInsideBrackets(m Model) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	// Select inside: from just after open to just before close (exclusive
-	// of both bracket characters). posBefore can land before anchor when
-	// the brackets are adjacent ("()"); clamp so the selection doesn't
-	// invert and swallow the brackets instead.
+	// Select inside: from just after open up to close, exclusive of both
+	// bracket characters. Adjacent brackets ("()") select nothing and leave
+	// the cursor between them.
 	anchor := document.Pos{Line: openL, Col: openC + 1}
-	head := posBefore(m, closeL, closeC)
-	if head.Line < anchor.Line || (head.Line == anchor.Line && head.Col < anchor.Col) {
-		head = anchor
-	}
+	head := document.Pos{Line: closeL, Col: closeC}
 	m.sel = &Selection{Anchor: anchor, Head: head}
 	m.cursor = head
+	m.dropEmptySelection()
 	m.scrollToCursor()
 	return m, nil
-}
-
-// posBefore returns the position immediately before (line, col) in
-// inclusive-selection terms: col > 0 is simply col-1 on the same line;
-// col == 0 means "through the end of the previous line" (using that
-// line's rune length, matching how selectedText/rendering already treat
-// an end column equal to a line's length as extending through its end).
-func posBefore(m Model, line, col int) document.Pos {
-	if col > 0 {
-		return document.Pos{Line: line, Col: col - 1}
-	}
-	if line == 0 {
-		return document.Pos{Line: 0, Col: 0}
-	}
-	prevLine := line - 1
-	return document.Pos{Line: prevLine, Col: len([]rune(m.buf.Line(prevLine)))}
 }
 
 func executeSelectInsideChar(m Model) (tea.Model, tea.Cmd) {
@@ -350,18 +331,14 @@ func executeSelectInsideChar(m Model) (tea.Model, tea.Cmd) {
 		if right < 0 {
 			continue
 		}
-		// Select inside: from just after left delim to just before right
-		// delim (exclusive of both delimiter characters). right-1 can land
-		// before anchor when the quoted text is empty (""); clamp so the
-		// selection doesn't invert.
+		// Select inside: from just after left delim up to right delim,
+		// exclusive of both. Empty quotes ("") select nothing and leave the
+		// cursor between them.
 		anchor := document.Pos{Line: line, Col: left + 1}
-		headCol := right - 1
-		if headCol < anchor.Col {
-			headCol = anchor.Col
-		}
-		head := document.Pos{Line: line, Col: headCol}
+		head := document.Pos{Line: line, Col: right}
 		m.sel = &Selection{Anchor: anchor, Head: head}
 		m.cursor = head
+		m.dropEmptySelection()
 		return m, nil
 	}
 	return m, nil
@@ -371,10 +348,13 @@ func applyTextObject(m Model, to highlight.TextObject) (tea.Model, tea.Cmd) {
 	if to.StartLine < 0 || to.EndLine < 0 {
 		return m, nil
 	}
+	// Spans are half-open like a selection. A block's EndCol can be
+	// math.MaxInt (blockInsideSpan) and must be clamped to its line.
 	anchor := document.Pos{Line: to.StartLine, Col: to.StartCol}
-	head := document.Pos{Line: to.EndLine, Col: to.EndCol}
+	head := document.Pos{Line: to.EndLine, Col: min(to.EndCol, m.buf.LineLen(to.EndLine))}
 	m.sel = &Selection{Anchor: anchor, Head: head}
 	m.cursor = head
+	m.dropEmptySelection()
 	m.scrollToCursor()
 	return m, nil
 }
@@ -556,15 +536,7 @@ const (
 func executeToggleComment(m Model) (tea.Model, tea.Cmd) {
 	prefix := m.lineCommentPrefix()
 
-	startLine, endLine := m.cursor.Line, m.cursor.Line
-	if m.sel != nil {
-		a, h := m.sel.Anchor, m.sel.Head
-		if a.Line <= h.Line {
-			startLine, endLine = a.Line, h.Line
-		} else {
-			startLine, endLine = h.Line, a.Line
-		}
-	}
+	startLine, endLine := m.selectionLineRange()
 	jsx := m.hlr.JSXChildLines([]byte(m.buf.Content()), startLine, endLine)
 	jsxFile := m.isJSXLanguage()
 
@@ -676,11 +648,7 @@ func commentedLine(runes []rune, prefix string, jsx bool) ([][2]int, bool) {
 // selectionLineRange returns the first and last line covered by the current
 // selection, falling back to the cursor line when there is no selection.
 func (m Model) selectionLineRange() (startLine, endLine int) {
-	if m.sel == nil {
-		return m.cursor.Line, m.cursor.Line
-	}
-	start, end := m.sel.ordered()
-	return start.Line, end.Line
+	return m.selectedLines()
 }
 
 // executeIndent adds one indent unit (the buffer's detected/configured tab
@@ -831,10 +799,10 @@ func executeMoveLineDown(m Model) (tea.Model, tea.Cmd) {
 // up, +1 down). The cursor and selection shift by dir so repeated presses
 // keep moving the same block further.
 //
-// The whole-line delete mirrors deleteSelection's IsLine branch: it consumes
-// the newline after its last line when a following line exists, and
-// otherwise stops at that line's content, since the last line in a buffer
-// with no trailing "\n" has none to consume.
+// The whole-line delete covers the same span as a whole-line selection
+// (lineSpanEnd): it consumes the newline after its last line when a following
+// line exists, and otherwise stops at that line's content, since the last
+// line in a buffer with no trailing "\n" has none to consume.
 func moveLines(m Model, dir int) (tea.Model, tea.Cmd) {
 	startLine, endLine := m.selectionLineRange()
 	lc := m.buf.LineCount()

@@ -546,8 +546,10 @@ func (m Model) gutterWidth() int {
 	return w
 }
 
-// selectionCols returns the inclusive [selA, selB] column range selected on
-// lineNum, or (-1, -1) when lineNum is not inside the current selection.
+// selectionCols returns the inclusive [selA, selB] range of cells to draw as
+// selected on lineNum, or (-1, -1) when none are. The selection itself is
+// half-open; a line whose line break is selected draws one cell past its last
+// character, so an empty line inside a selection still shows as selected.
 func (m Model) selectionCols(lineNum, lineLen int) (selA, selB int) {
 	if m.sel == nil {
 		return -1, -1
@@ -560,9 +562,9 @@ func (m Model) selectionCols(lineNum, lineLen int) (selA, selB int) {
 	if lineNum == start.Line {
 		selA = start.Col
 	}
-	selB = max(0, lineLen-1)
-	if !m.sel.IsLine && lineNum == end.Line {
-		selB = min(end.Col, max(0, lineLen-1))
+	selB = lineLen // the line break, selected when the selection goes past it
+	if lineNum == end.Line {
+		selB = end.Col - 1
 	}
 	if selA > selB {
 		return -1, -1
@@ -965,7 +967,7 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 		}
 		selA, selB := m.selectionCols(lineNum, 0)
 		switch {
-		case m.paintsBufferCursor() && lineNum == m.cursor.Line && chunk == 0:
+		case m.paintsBufferCursor() && lineNum == m.cursorCell().Line && chunk == 0:
 			sb.WriteString(cursorStyle.Render(" "))
 		case selA >= 0 && selA <= selB:
 			sb.WriteString(selectionStyle.Render(" "))
@@ -1101,8 +1103,8 @@ func (m Model) renderLineChunk(entry layoutEntry, cw int, overlays []lineOverlay
 	// moves to the prompt on the bottom line, so the painted cell stays on as
 	// the reminder of where in the buffer you'll land on Esc/Enter.
 	curCol := -1
-	if m.paintsBufferCursor() && lineNum == m.cursor.Line {
-		c := min(m.cursor.Col, len(runes))
+	if cell := m.cursorCell(); m.paintsBufferCursor() && lineNum == cell.Line {
+		c := min(cell.Col, len(runes))
 		absVisCol := colMap[c]
 		if absVisCol >= chunkStart && absVisCol < chunkStart+cw {
 			curCol = absVisCol - chunkStart

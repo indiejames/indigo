@@ -118,11 +118,10 @@ func TestSearchReplaceBackreferences(t *testing.T) {
 func TestSearchReplaceScopedToSelection(t *testing.T) {
 	m := newTestModel("foo\nfoo\nfoo\n")
 	m.rpc = &RPC{}
-	// Linewise selection covering just line 1 (0-based).
+	// A selection covering line 1's text (0-based).
 	m.sel = &Selection{
 		Anchor: document.Pos{Line: 1, Col: 0},
-		Head:   document.Pos{Line: 1, Col: 2},
-		IsLine: true,
+		Head:   document.Pos{Line: 1, Col: 3},
 	}
 	got := typeInSearch(t, m, "foo/bar")
 	if len(got.searchMatches) != 1 || got.searchMatches[0].line != 1 {
@@ -146,8 +145,7 @@ func TestSearchScopedToSelectionWhenNotReplacing(t *testing.T) {
 	m := newTestModel("foo\nfoo\nfoo\n")
 	m.sel = &Selection{
 		Anchor: document.Pos{Line: 1, Col: 0},
-		Head:   document.Pos{Line: 1, Col: 2},
-		IsLine: true,
+		Head:   document.Pos{Line: 1, Col: 3},
 	}
 	got := typeInSearch(t, m, "foo")
 	if len(got.searchMatches) != 1 || got.searchMatches[0].line != 1 {

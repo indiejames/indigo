@@ -129,7 +129,8 @@ func (m Model) fetchSemanticTokens() tea.Cmd {
 func (m Model) fetchHover() tea.Cmd {
 	bufID := m.bufID
 	at := m.cursor
-	line, col := at.Line, at.Col
+	cell := m.cursorCell() // the character the block is on, inside a selection
+	line, col := cell.Line, cell.Col
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -193,7 +194,8 @@ func (m Model) resolveCompletionCmd(item ClientCompletion, at document.Pos, pref
 
 func (m Model) fetchDefinition() tea.Cmd {
 	bufID := m.bufID
-	line, col := m.cursor.Line, m.cursor.Col
+	cell := m.cursorCell()
+	line, col := cell.Line, cell.Col
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -207,7 +209,8 @@ func (m Model) fetchDefinition() tea.Cmd {
 
 func (m Model) fetchReferences() tea.Cmd {
 	bufID := m.bufID
-	line, col := m.cursor.Line, m.cursor.Col
+	cell := m.cursorCell()
+	line, col := cell.Line, cell.Col
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -259,7 +262,7 @@ func (m Model) fixableDecorationAtCursor() *ClientDecoration {
 		if !d.Fixable || d.Kind != ClientDecorationUnderline {
 			continue
 		}
-		if int(d.Line) == m.cursor.Line && m.cursor.Col >= int(d.Col) && m.cursor.Col < int(d.EndCol) {
+		if c := m.cursorCell(); int(d.Line) == c.Line && c.Col >= int(d.Col) && c.Col < int(d.EndCol) {
 			return d
 		}
 	}
@@ -281,7 +284,8 @@ func (m Model) doMoveFunctionToFile(destPath string) tea.Cmd {
 			return moveFunctionDoneMsg{err: fmt.Errorf("no syntax support for this file type"), bufID: msgBufID}
 		}
 	}
-	to, ok := m.hlr.TextObjectAround([]byte(m.buf.Content()), m.cursor.Line, m.cursor.Col, "function")
+	cell := m.cursorCell()
+	to, ok := m.hlr.TextObjectAround([]byte(m.buf.Content()), cell.Line, cell.Col, "function")
 	if !ok {
 		return func() tea.Msg {
 			return moveFunctionDoneMsg{err: fmt.Errorf("no function found around the cursor"), bufID: msgBufID}
@@ -323,7 +327,8 @@ func resolveDestPath(workDir, path string) (string, error) {
 func (m Model) doRenameSymbol(newName string) tea.Cmd {
 	rpc := m.rpc
 	bufID := m.bufID
-	line, col := m.cursor.Line, m.cursor.Col
+	cell := m.cursorCell()
+	line, col := cell.Line, cell.Col
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -353,14 +358,14 @@ func (m Model) doOrganizeImports() tea.Cmd {
 // codeActionRange returns the request range for LSP code actions: the active
 // selection's ordered bounds if one exists (letting the server offer
 // range-only actions like Extract Function/Extract Variable), or a
-// zero-width point at the cursor otherwise. Selection.Anchor/Head are
-// inclusive on both ends; LSP ranges are exclusive on the end, hence the +1.
+// zero-width point at the cursor otherwise. A selection is half-open, the
+// same as an LSP range.
 func codeActionRange(cursor document.Pos, sel *Selection) (startLine, startCol, endLine, endCol int) {
 	if sel == nil {
 		return cursor.Line, cursor.Col, cursor.Line, cursor.Col
 	}
 	start, end := sel.ordered()
-	return start.Line, start.Col, end.Line, end.Col + 1
+	return start.Line, start.Col, end.Line, end.Col
 }
 
 // fetchFixes collects fix items from the fixable decoration at the cursor (if any)
@@ -371,8 +376,9 @@ func (m Model) fetchFixes() tea.Cmd {
 	bufID := m.bufID
 	at := m.cursor
 	version := m.buf.Version()
-	line := uint32(m.cursor.Line)
-	col := uint32(m.cursor.Col)
+	cell := m.cursorCell()
+	line := uint32(cell.Line)
+	col := uint32(cell.Col)
 
 	startLine, startCol, endLine, endCol := codeActionRange(m.cursor, m.sel)
 
@@ -543,8 +549,9 @@ func (m Model) applyFixCmd(idx int) tea.Cmd {
 	item := m.fixItems[idx]
 	if item.IsAction {
 		bufID := m.bufID
-		line := uint32(m.cursor.Line)
-		col := uint32(m.cursor.Col)
+		cell := m.cursorCell()
+		line := uint32(cell.Line)
+		col := uint32(cell.Col)
 		return func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()

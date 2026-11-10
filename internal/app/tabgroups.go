@@ -215,29 +215,28 @@ func (a App) cycleBuffer(delta int) App {
 }
 
 // maxTabNumber is the highest digit that selects a tab. It always selects the
-// group's last tab, as in a browser, so every tab past the eighth is reached
-// some other way and the last is always one key away.
+// last tab the bar shows, as in a browser, so the last is always one key away.
 const maxTabNumber = 9
 
-// tabByNumber returns the index in a.buffers of the active group's tab
-// numbered n, or -1 when there is none: 1 to 8 count from the left, and
-// maxTabNumber is the last tab however many there are.
+// tabByNumber returns the index in a.buffers of the tab numbered n, or -1
+// when there is none. The numbers count the tabs the bar shows (tabLayout),
+// not the group's: 1 to 8 from the left, and maxTabNumber the last shown.
 func (a App) tabByNumber(n int) int {
-	tabs := a.groupTabs()
+	slots, _ := a.tabLayout()
 	switch {
-	case len(tabs) == 0 || n < 1 || n > maxTabNumber:
+	case len(slots) == 0 || n < 1 || n > maxTabNumber:
 		return -1
 	case n == maxTabNumber:
-		return tabs[len(tabs)-1]
-	case n > len(tabs):
+		return slots[len(slots)-1].idx
+	case n > len(slots):
 		return -1
 	}
-	return tabs[n-1]
+	return slots[n-1].idx
 }
 
-// tabNumberAt is the digit that selects the tab at position pos of a group
-// of count tabs (tabByNumber), or 0 when none does: tabs between the eighth
-// and the last have no number.
+// tabNumberAt is the digit that selects the tab at position pos of count
+// tabs shown (tabByNumber), or 0 when none does: tabs between the eighth and
+// the last have no number.
 func tabNumberAt(pos, count int) int {
 	switch {
 	case pos < 0 || pos >= count:

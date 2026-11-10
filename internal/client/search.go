@@ -51,6 +51,7 @@ func isSmartCaseSensitive(pattern string) bool {
 	return false
 }
 
+// runesMatch reports whether line begins with pat.
 func runesMatch(line, pat []rune) bool {
 	for i, r := range pat {
 		if i >= len(line) || line[i] != r {
@@ -71,12 +72,11 @@ type substituteMatch struct {
 	replacement       string
 }
 
-// substituteBounds restricts findSubstituteMatches to an inclusive document
-// range — used to scope / search (and search-and-replace) to the active
-// selection instead of the whole buffer. Both charwise and linewise
-// selections store Anchor/Head such that end.Col+1 is the right exclusive
-// bound, so no separate IsLine handling is needed here. A nil
-// *substituteBounds passed to findSubstituteMatches means the whole buffer.
+// substituteBounds restricts findSubstituteMatches to the half-open document
+// range [from, to) — used to scope / search (and search-and-replace) to the
+// active selection instead of the whole buffer, so it has the selection's own
+// shape. A nil *substituteBounds passed to findSubstituteMatches means the
+// whole buffer.
 type substituteBounds struct {
 	from, to document.Pos
 }
@@ -84,7 +84,7 @@ type substituteBounds struct {
 // findSubstituteMatches finds every match of pattern in buf and pairs each
 // with its replacement text, in document order (top to bottom, left to
 // right — the same order findMatches uses). bounds, if non-nil, restricts
-// matches to that inclusive range.
+// matches to that range.
 //
 // Pattern syntax matches findMatches: \expr triggers Go regexp, and
 // replacement may reference captured groups with $1, $2, ${name}, etc.
@@ -99,6 +99,14 @@ func findSubstituteMatches(buf *document.Buffer, pattern, replacement string, bo
 	if bounds != nil {
 		startLine, endLine = bounds.from.Line, bounds.to.Line
 	}
+	// atEnd reports a zero-width match exactly at the end of a nonempty
+	// range, which lies outside [from, to): \b after a selected word, or \^
+	// on the line an x selection reaches at column 0. An empty range keeps
+	// the match at its one position.
+	atEnd := func(l, startCol, endCol int) bool {
+		return bounds != nil && startCol == endCol && bounds.from != bounds.to &&
+			l == bounds.to.Line && startCol == bounds.to.Col
+	}
 	// colBounds returns the [lo, hi) column window to search within on line
 	// l, given lineLen runes on that line — the full line except on the
 	// first/last line of a bounded range, mirroring textForSelection.
@@ -111,7 +119,7 @@ func findSubstituteMatches(buf *document.Buffer, pattern, replacement string, bo
 			lo = bounds.from.Col
 		}
 		if l == bounds.to.Line {
-			hi = min(hi, bounds.to.Col+1)
+			hi = min(hi, bounds.to.Col)
 		}
 		return
 	}
@@ -134,7 +142,7 @@ func findSubstituteMatches(buf *document.Buffer, pattern, replacement string, bo
 			for _, sub := range re.FindAllStringSubmatchIndex(lineStr, -1) {
 				startCol := utf8.RuneCountInString(lineStr[:sub[0]])
 				endCol := utf8.RuneCountInString(lineStr[:sub[1]])
-				if startCol < lo || endCol > hi {
+				if startCol < lo || endCol > hi || atEnd(l, startCol, endCol) {
 					continue
 				}
 				rep := re.ExpandString(nil, replacement, lineStr, sub)

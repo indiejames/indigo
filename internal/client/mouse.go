@@ -72,28 +72,36 @@ func (m *Model) handleMousePress(x, y int) {
 		if s, e, ok := findWholeWordAt(runes, pos.Col); ok {
 			m.sel = &Selection{
 				Anchor: document.Pos{Line: pos.Line, Col: s},
-				Head:   document.Pos{Line: pos.Line, Col: e},
+				Head:   document.Pos{Line: pos.Line, Col: e + 1}, // findWholeWordAt's end is inclusive
 			}
 			m.cursor = m.sel.Head
 		}
 		m.dragging = false
 		return
 	}
+	// No selection until the pointer moves: a click alone just places the
+	// cursor, and an empty selection is no selection.
 	m.cursor = pos
-	m.sel = &Selection{Anchor: pos, Head: pos}
+	m.sel = nil
+	m.dragAnchor = pos
 	m.dragging = true
 }
 
+// handleMouseDrag selects from the cell the drag started on to the cell under
+// the pointer, both included, as dragging across characters on a terminal
+// grid reads.
 func (m *Model) handleMouseDrag(x, y int) {
 	pos, ok := m.clickToPos(x, y)
-	if !ok {
-		return
+	if !ok || !m.dragging {
+		return // a drag with no press first has no anchor to select from
 	}
 	m.goalCol = -1
-	m.cursor = pos
-	if m.sel != nil {
-		m.sel.Head = pos
+	if pos == m.dragAnchor {
+		m.sel = nil
+		m.cursor = pos
+		return
 	}
+	m.selectCells(m.dragAnchor, pos)
 }
 
 // wheelScrollLines is how many buffer lines one wheel tick scrolls.

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -143,11 +144,13 @@ func TestApplyRulerColumnStaysFixedDespiteInlayHint(t *testing.T) {
 }
 
 // TestApplyRulerColumnSkipsCursorCell verifies the ruler never overwrites
-// the cursor's own cell — otherwise the cursor would be invisible whenever
-// it coincides with the ruler column.
+// a painted cursor's cell — otherwise the cursor would be invisible whenever
+// it coincides with the ruler column. In command mode the buffer cursor is
+// painted into the row (paintsBufferCursor).
 func TestApplyRulerColumnSkipsCursorCell(t *testing.T) {
 	m := newTestModel("0123456789\n")
 	m.cfg = &config.Config{RulerColumn: 8} // 0-based col 7
+	m.mode = ModeCommand
 	m.cursor.Col = 7
 	cw := 80
 	layout := m.buildScreenLayout(1, cw)
@@ -185,5 +188,91 @@ func TestApplyRulerColumnSkipsExtraCursorCell(t *testing.T) {
 	// rather than it having failed to draw anywhere.
 	if lines[0] == beforeRow0 {
 		t.Error("sanity check failed: ruler didn't render on the row with no cursor on its column")
+	}
+}
+
+// rulerMarks renders m's frame with the ruler drawn as "|" (a style with
+// no colour, so it shows in a test) and returns the frame's buffer rows.
+// It swaps the package-level rulerStyle for the test's duration, so a test
+// that calls it must not use t.Parallel.
+func rulerMarks(t *testing.T, m Model) []string {
+	t.Helper()
+	old := rulerStyle
+	rulerStyle = lipgloss.NewStyle().Transform(func(string) string { return "|" })
+	t.Cleanup(func() { rulerStyle = old })
+	out, _ := m.renderFrame()
+	rows := strings.Split(out, "\n")
+	rows = rows[:len(rows)-1] // the status bar
+	for i := range rows {
+		rows[i] = ansi.Strip(rows[i])
+	}
+	return rows
+}
+
+// TestRulerIsUnbrokenOnEveryRow is the reported gap: the ruler skipped a
+// wrapped line's continuation rows and the rows past the end of the buffer.
+func TestRulerIsUnbrokenOnEveryRow(t *testing.T) {
+	m := newTestModel("short\n" + strings.Repeat("y", 70) + "\nok\n")
+	m.cfg = &config.Config{RulerColumn: 20}
+	m.width, m.height = 40, 10
+	rows := rulerMarks(t, m)
+	for i, row := range rows {
+		if r := []rune(row); len(r) < 20 || r[19] != '|' {
+			t.Errorf("row %d = %q, want the ruler in column 20", i, row)
+		}
+	}
+}
+
+// TestRulerIsNotHiddenUnderTheTerminalCursor: Normal mode's cursor is the
+// terminal's own, drawn over the ruler, so skipping its cell only left a
+// gap there.
+func TestRulerIsNotHiddenUnderTheTerminalCursor(t *testing.T) {
+	m := newTestModel("0123456789\n")
+	m.cfg = &config.Config{RulerColumn: 8}
+	m.cursor.Col = 7
+	if row := rulerMarks(t, m)[0]; !strings.HasPrefix(row, "0123456|89") {
+		t.Errorf("row = %q, want the ruler under the Normal-mode cursor", row)
+	}
+}
+
+// TestRulerSkipsThePaintedBlockNotTheRawCursor: with a forward selection the
+// cursor is drawn on the last selected character (cursorCell), one left of
+// m.cursor; the ruler must step around that cell, not the one after it.
+func TestRulerSkipsThePaintedBlockNotTheRawCursor(t *testing.T) {
+	m := newTestModel("0123456789\n")
+	m.cfg = &config.Config{RulerColumn: 8} // 0-based col 7
+	m.mode = ModeCommand
+	m.sel = &Selection{Anchor: document.Pos{Line: 0, Col: 2}, Head: document.Pos{Line: 0, Col: 8}}
+	m.cursor = m.sel.Head
+	cw := 80
+	layout := m.buildScreenLayout(1, cw)
+	lines := []string{m.renderLineChunk(layout[0], cw, nil, -1, -1, false)}
+	before := lines[0]
+	m.applyRulerColumn(lines, layout, cw)
+	if lines[0] != before {
+		t.Errorf("ruler drew over the painted cursor on column 8")
+	}
+}
+
+// TestRulerTintsAWideCharacterWhole: a wide character covering the ruler's
+// column used to be cut in half and dropped from the row.
+func TestRulerTintsAWideCharacterWhole(t *testing.T) {
+	for _, col := range []int{2, 3} { // 本 covers columns 2 and 3
+		if got := ansi.Strip(overlayRulerColumn("日本語x", col)); got != "日本語x" {
+			t.Errorf("ruler at column %d: row = %q, want %q", col, got, "日本語x")
+		}
+	}
+}
+
+// TestNoRulerInAWindowNarrowerThanIt: it used to show only on wrapped
+// continuation rows, at an offset, as broken segments.
+func TestNoRulerInAWindowNarrowerThanIt(t *testing.T) {
+	m := newTestModel(strings.Repeat("y", 70) + "\n")
+	m.cfg = &config.Config{RulerColumn: 50}
+	m.width, m.height = 40, 6
+	for i, row := range rulerMarks(t, m) {
+		if strings.Contains(row, "|") {
+			t.Errorf("row %d = %q, want no ruler", i, row)
+		}
 	}
 }

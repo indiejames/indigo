@@ -116,7 +116,7 @@ var prefixCmds = []command{
 	}},
 	{key: "i", name: "insert-before-cursor", category: "Editing", label: "Insert before cursor", execute: func(m Model) (tea.Model, tea.Cmd) {
 		m = m.withClearedSearch()
-		m.sel = nil
+		m.collapseToCell()
 		m.currentGroup = []document.Op{}
 		m.groupBefore = m.cursorSnap()
 		m.insertLineCount = m.buf.LineCount()

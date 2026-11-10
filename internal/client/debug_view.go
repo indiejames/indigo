@@ -539,7 +539,7 @@ func (m Model) expressionAtCursor() string {
 		if start.Line == end.Line {
 			line := []rune(m.buf.Line(start.Line))
 			if start.Col < len(line) {
-				return strings.TrimSpace(string(line[start.Col:min(end.Col+1, len(line))]))
+				return strings.TrimSpace(string(line[start.Col:min(end.Col, len(line))]))
 			}
 		}
 	}

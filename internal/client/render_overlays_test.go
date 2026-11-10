@@ -193,6 +193,8 @@ func TestApplyRulerColumnSkipsExtraCursorCell(t *testing.T) {
 
 // rulerMarks renders m's frame with the ruler drawn as "|" (a style with
 // no colour, so it shows in a test) and returns the frame's buffer rows.
+// It swaps the package-level rulerStyle for the test's duration, so a test
+// that calls it must not use t.Parallel.
 func rulerMarks(t *testing.T, m Model) []string {
 	t.Helper()
 	old := rulerStyle

@@ -180,7 +180,22 @@ func TestHiddenTabsAreCountedAtTheirEnd(t *testing.T) {
 	if _, ok := a.tabAtColumn(0); ok {
 		t.Error("a click on the left marker selected a tab")
 	}
-	if got, ok := a.tabAtColumn(len("  ‹2  ")); !ok || a.buffers[got].BufID() != 3 {
+	if got, ok := a.tabAtColumn(ansi.StringWidth("  ‹2  ")); !ok || a.buffers[got].BufID() != 3 {
 		t.Errorf("a click just past the left marker selected buffer index %d, want buffer 3", got)
+	}
+}
+
+// TestALoneTabIsNotTruncatedForMarkersItDoesNotShow: a group of one tab hides
+// nothing, so the tab may use the whole bar rather than the room left after
+// both overflow markers.
+func TestALoneTabIsNotTruncatedForMarkersItDoesNotShow(t *testing.T) {
+	a := newGroupApp("main.go") // "  1 main.go  " is 13 columns
+	a.width = 16                // fits, but not with two 6-column markers
+	slots, hidden := a.tabLayout()
+	if hidden != 0 || len(slots) != 1 {
+		t.Fatalf("slots = %d, hidden = %d, want the one tab and none hidden", len(slots), hidden)
+	}
+	if got := slots[0].label; got != "  1 main.go  " {
+		t.Errorf("label = %q, want it whole", got)
 	}
 }

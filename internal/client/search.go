@@ -97,6 +97,11 @@ func findSubstituteMatches(buf *document.Buffer, pattern, replacement string, bo
 	startLine, endLine := 0, buf.LineCount()-1
 	if bounds != nil {
 		startLine, endLine = bounds.from.Line, bounds.to.Line
+		// A range ending at column 0 of a later line holds none of that line,
+		// not even a zero-width match (\^) at its start.
+		if bounds.to.Col == 0 && endLine > startLine {
+			endLine--
+		}
 	}
 	// colBounds returns the [lo, hi) column window to search within on line
 	// l, given lineLen runes on that line — the full line except on the

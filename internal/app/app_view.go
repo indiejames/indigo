@@ -518,6 +518,8 @@ func (a App) tabLayout() (slots []tabSlot, hidden int) {
 	return r.slots, r.left + r.right
 }
 
+// tabRowLayout is tabLayout with the hidden tabs counted per side, which the
+// renderer and click handling need to place the left marker.
 func (a App) tabRowLayout() tabRow {
 	tabs := a.groupTabs()
 	first, end := a.tabWindow()
@@ -531,8 +533,14 @@ func (a App) tabRowLayout() tabRow {
 
 	// The active tab is shown even when it alone is wider than the room the
 	// bar has, truncated rather than dropped, since a tab bar that can't show
-	// where you are is no use.
-	if room := a.tabRoom(len(tabs)); a.width > 0 && len(r.slots) == 1 && r.slots[0].width > room {
+	// where you are is no use. Room for the markers is kept only when one is
+	// shown: a lone tab in a group of one has none.
+	room := a.tabRoom(len(tabs))
+	if r.left+r.right == 0 {
+		_, stripW := a.groupStrip()
+		room = a.tabBudget() - stripW
+	}
+	if a.width > 0 && len(r.slots) == 1 && r.slots[0].width > room {
 		t := r.slots[0]
 		t.label = ansi.Truncate(t.label, max(room, 0), "")
 		t.width = lipgloss.Width(t.label)
@@ -728,12 +736,13 @@ func (a App) tabBudget() int {
 	return budget
 }
 
-// tabOverflowLeft and tabOverflowRight are the markers at each end of a bar
-// hiding tabs on that side, sized to match the tab padding around them.
+// tabOverflowLeft is the marker for the tabs hidden to the left. Both markers
+// are sized to match the tab padding around them.
 func tabOverflowLeft(hidden int) string {
 	return fmt.Sprintf("  ‹%d  ", hidden)
 }
 
+// tabOverflowRight is the marker for the tabs hidden to the right.
 func tabOverflowRight(hidden int) string {
 	return fmt.Sprintf("  %d›  ", hidden)
 }
@@ -762,6 +771,8 @@ func (a App) tabAtColumn(x int) (int, bool) {
 	return -1, false
 }
 
+// renderTabBar draws the tab bar row: the group strip, the tabs tabRowLayout
+// chose with a marker for the hidden ones at each end, and the status.
 func (a App) renderTabBar() string {
 	var sb strings.Builder
 	used := 0

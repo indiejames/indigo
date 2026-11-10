@@ -51,6 +51,7 @@ func isSmartCaseSensitive(pattern string) bool {
 	return false
 }
 
+// runesMatch reports whether line begins with pat.
 func runesMatch(line, pat []rune) bool {
 	for i, r := range pat {
 		if i >= len(line) || line[i] != r {
@@ -97,11 +98,14 @@ func findSubstituteMatches(buf *document.Buffer, pattern, replacement string, bo
 	startLine, endLine := 0, buf.LineCount()-1
 	if bounds != nil {
 		startLine, endLine = bounds.from.Line, bounds.to.Line
-		// A range ending at column 0 of a later line holds none of that line,
-		// not even a zero-width match (\^) at its start.
-		if bounds.to.Col == 0 && endLine > startLine {
-			endLine--
-		}
+	}
+	// atEnd reports a zero-width match exactly at the end of a nonempty
+	// range, which lies outside [from, to): \b after a selected word, or \^
+	// on the line an x selection reaches at column 0. An empty range keeps
+	// the match at its one position.
+	atEnd := func(l, startCol, endCol int) bool {
+		return bounds != nil && startCol == endCol && bounds.from != bounds.to &&
+			l == bounds.to.Line && startCol == bounds.to.Col
 	}
 	// colBounds returns the [lo, hi) column window to search within on line
 	// l, given lineLen runes on that line — the full line except on the
@@ -138,7 +142,7 @@ func findSubstituteMatches(buf *document.Buffer, pattern, replacement string, bo
 			for _, sub := range re.FindAllStringSubmatchIndex(lineStr, -1) {
 				startCol := utf8.RuneCountInString(lineStr[:sub[0]])
 				endCol := utf8.RuneCountInString(lineStr[:sub[1]])
-				if startCol < lo || endCol > hi {
+				if startCol < lo || endCol > hi || atEnd(l, startCol, endCol) {
 					continue
 				}
 				rep := re.ExpandString(nil, replacement, lineStr, sub)

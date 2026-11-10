@@ -697,3 +697,18 @@ func TestFindSubstituteMatchesExcludesALineReachedAtColumnZero(t *testing.T) {
 		t.Errorf("same-line range: matches = %+v, want line 1", got)
 	}
 }
+
+// TestFindSubstituteMatchesExcludesAZeroWidthMatchAtTheEnd: a selection of
+// "foo" in "foo bar" holds the word boundary before it but not the one after.
+func TestFindSubstituteMatchesExcludesAZeroWidthMatchAtTheEnd(t *testing.T) {
+	buf := document.New("t.txt", "foo bar\n")
+	got, err := findSubstituteMatches(buf, `\\b`, "|", &substituteBounds{
+		from: document.Pos{Line: 0, Col: 0}, to: document.Pos{Line: 0, Col: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].col != 0 {
+		t.Errorf("matches = %+v, want only the boundary at column 0", got)
+	}
+}

@@ -11,7 +11,12 @@
 //   - Fixed-width gutter: always emits a decoration for every visible line so
 //     layout never shifts when a file gains or loses diff markers
 //   - Immediate updates: polls .git/HEAD and .git/index every 500ms for branch
-//     and staged-change detection; OnSave triggers an immediate re-diff
+//     and staged-change detection; OnSave triggers an immediate re-diff. The
+//     poll re-diffs only once the repository has settled, and never while a
+//     rebase, merge, cherry-pick, revert or bisect is under way or another
+//     git holds index.lock
+//   - Never takes index.lock: every git command it runs only reads, with
+//     optional locks off (see gitCommand and diffHEADArgs)
 //   - Inline blame: toggle per-buffer end-of-line annotations (short hash,
 //     author, relative date) via the Command menu or alt+b
 //   - Blame details: a popup with the full commit (hash/author/date/summary)
@@ -185,15 +190,66 @@ func (g *GitPlugin) onClose(bufID uint32, _ string) {
 	g.mu.Unlock()
 }
 
+// repoPoll is what pollLoop remembers about one repository between ticks.
+type repoPoll struct {
+	head, index         string // HEAD's content and the index's mtime, last tick
+	diffHead, diffIndex string // the same, when the buffers were last re-diffed
+	diffed              bool   // whether they ever have been
+}
+
+// observe takes this tick's HEAD and index and says whether to re-read the
+// branch and whether to re-diff the repository's buffers.
+//
+// The branch is a file read and follows HEAD at once. A re-diff runs git, so
+// it waits until the repository has settled: it is skipped while busy (an
+// operation such as a rebase is under way, or another git holds index.lock),
+// and until HEAD and the index are unchanged since the previous tick. A
+// rebase rewrites the index once per commit; without this, each rewrite set
+// off a round of git commands racing the next. A skipped change is not lost:
+// the state is compared with the last re-diff's, so it runs once things
+// settle.
+func (p *repoPoll) observe(head, index string, busy bool) (branch, rediff bool) {
+	branch = head != p.head
+	settled := head == p.head && index == p.index
+	p.head, p.index = head, index
+	if busy || !settled {
+		return branch, false
+	}
+	if p.diffed && head == p.diffHead && index == p.diffIndex {
+		return branch, false
+	}
+	p.diffHead, p.diffIndex, p.diffed = head, index, true
+	return branch, true
+}
+
+// busyMarkers are the files and directories git keeps in its git directory
+// while it is in the middle of changing the index or HEAD: its lock, and each
+// multi-step operation that writes the index once per step.
+var busyMarkers = []string{
+	"index.lock",
+	"rebase-merge", "rebase-apply",
+	"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
+	"BISECT_LOG",
+}
+
+// repoBusy reports whether git is mid-operation in the git directory dir, when
+// background work should leave the repository alone.
+func repoBusy(dir string) bool {
+	for _, m := range busyMarkers {
+		if _, err := os.Lstat(filepath.Join(dir, m)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // pollLoop polls .git/HEAD and .git/index every 500ms so branch changes and
-// staged changes (git add, git checkout, etc.) are picked up immediately.
+// staged changes (git add, git checkout, etc.) are picked up without a save.
 func (g *GitPlugin) pollLoop() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	// Per repository: what HEAD held and when the index last changed, the last
-	// time each was looked at.
-	lastHead, lastIndex := map[string]string{}, map[string]string{}
+	polls := map[string]*repoPoll{}
 
 	for range ticker.C {
 		g.mu.RLock()
@@ -218,14 +274,17 @@ func (g *GitPlugin) pollLoop() {
 			if info, err := os.Stat(filepath.Join(dir, "index")); err == nil {
 				indexStr = fmt.Sprintf("%d", info.ModTime().UnixNano())
 			}
-			headChanged := string(headData) != lastHead[root]
-			indexChanged := indexStr != lastIndex[root]
-			lastHead[root], lastIndex[root] = string(headData), indexStr
-			if headChanged {
+			p := polls[root]
+			if p == nil {
+				p = &repoPoll{}
+				polls[root] = p
+			}
+			branch, rediff := p.observe(string(headData), indexStr, repoBusy(dir))
+			if branch {
 				g.updateBranch(root)
 			}
 			// A branch switch, git add, git reset and the like → re-diff.
-			if headChanged || indexChanged {
+			if rediff {
 				for bufID, bs := range bufs {
 					g.updateDiff(bufID, bs.path, root)
 					g.refreshBlameIfEnabled(bufID, bs.path, root)
@@ -233,10 +292,9 @@ func (g *GitPlugin) pollLoop() {
 			}
 		}
 		// Forget repositories no buffer is in any more.
-		for root := range lastHead {
+		for root := range polls {
 			if byRoot[root] == nil {
-				delete(lastHead, root)
-				delete(lastIndex, root)
+				delete(polls, root)
 			}
 		}
 	}
@@ -327,7 +385,7 @@ func (g *GitPlugin) updateDiffFromBuffer(bufID uint32, path, root string) {
 	}
 
 	// Extract the HEAD version of the file into a temp file.
-	headContent, _, _, err := g.api.RunProcess("git", "-C", root, "show", "HEAD:"+relPath)
+	headContent, _, _, err := g.api.RunProcess("git", gitArgs("-C", root, "show", "HEAD:"+relPath)...)
 	if err != nil {
 		// Staged new file not yet in HEAD — treat HEAD as empty.
 		headContent = ""
@@ -368,16 +426,31 @@ func (g *GitPlugin) updateDiffFromBuffer(bufID uint32, path, root string) {
 	g.mu.Unlock()
 }
 
-// updateDiff runs git diff HEAD -- <path> and stores the result.
+// diffHEADArgs are the arguments that diff path's file on disk against HEAD.
+//
+// It is the plumbing diff-index, never porcelain `git diff HEAD`. The porcelain
+// command refreshes the index's stat cache and writes the index back, taking
+// .git/index.lock to do it, and GIT_OPTIONAL_LOCKS=0 does not stop it (checked
+// against git 2.49). Run on every index change, that write collided with the
+// user's own git: a rebase failed with "Unable to create index.lock: File
+// exists". diff-index never writes the index; a file whose stat is stale but
+// whose content is not shows a header and no hunks, which parseDiff ignores.
+func diffHEADArgs(path string) []string {
+	return []string{"diff-index", "-p", "--unified=0", "HEAD", "--", path}
+}
+
+// updateDiff diffs path's file on disk against HEAD and stores the result.
 func (g *GitPlugin) updateDiff(bufID uint32, path, root string) {
 	if !isTracked(root, path) {
 		g.clearLines(bufID)
 		return
 	}
-	out, err := runGit(root, "diff", "HEAD", "--unified=0", "--", path)
+	out, err := runGit(root, diffHEADArgs(path)...)
 	gitLog("updateDiff bufID=%d path=%s root=%s err=%v outputLen=%d", bufID, path, root, err, len(out))
 	if err != nil {
-		// Staged new file not yet in HEAD — diff against empty to show added lines.
+		// No HEAD yet (a new repository) — diff the index against the empty
+		// tree to show its staged lines as added. --cached reads no file
+		// from disk, so it never refreshes or writes the index.
 		out, err = runGit(root, "diff", "--unified=0", "--cached", "--", path)
 		gitLog("updateDiff fallback bufID=%d err=%v outputLen=%d", bufID, err, len(out))
 		if err != nil {
@@ -1162,10 +1235,27 @@ func gitDir(root string) string {
 	return dir
 }
 
+// gitArgs puts --no-optional-locks in front of a git command's arguments.
+// Everything this plugin runs only reads, and the flag (the same as
+// GIT_OPTIONAL_LOCKS=0) stops git taking a lock it does not need — `git
+// status` would otherwise write a refreshed index. It is not enough on its
+// own: see diffHEADArgs.
+func gitArgs(args ...string) []string {
+	return append([]string{"--no-optional-locks"}, args...)
+}
+
+// gitCommand builds the git command runGit runs: --no-optional-locks, and
+// GIT_OPTIONAL_LOCKS=0 for any git it starts in turn.
+func gitCommand(dir string, args ...string) *exec.Cmd {
+	cmd := exec.Command("git", gitArgs(args...)...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	return cmd
+}
+
 // runGit runs a git command in the given working directory and returns stdout.
 func runGit(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
+	cmd := gitCommand(dir, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

@@ -9,6 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/indiejames/indigo/internal/highlight"
 )
 
 // displayPath returns a project-relative path for status bar display.
@@ -556,11 +558,16 @@ func (m Model) effectiveFileTypeName() string {
 // fileTypeName maps a file extension to a human-readable language name.
 func fileTypeName(path string) string {
 	ext := strings.TrimPrefix(filepath.Ext(path), ".")
-	if name, ok := extDisplayName(ext); ok {
+	// Lowercased, as highlight.lookupKey does: DATA.JSON is highlighted as
+	// JSON, so it is labelled as JSON.
+	if name, ok := extDisplayName(strings.ToLower(ext)); ok {
 		return name
 	}
 	if name, ok := filenameStyleDisplayName(strings.ToLower(filepath.Base(path))); ok {
 		return name
+	}
+	if highlight.IsDotenvVariant(filepath.Base(path)) {
+		return "env" // as .env itself is labelled
 	}
 	if ext != "" {
 		return ext

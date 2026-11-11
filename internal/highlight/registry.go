@@ -142,7 +142,21 @@ func lookupKey(filePath string) string {
 			return ext
 		}
 	}
+	if IsDotenvVariant(base) {
+		if _, ok := langRegistry[".env"]; ok {
+			return ".env"
+		}
+	}
 	return ""
+}
+
+// IsDotenvVariant reports whether base is a dotenv file named for an
+// environment or purpose, such as .env.local, .env.production or
+// .env.example. Its last extension names the variant, not the language, so
+// it is looked up as ".env". A real extension still wins (.env.json is
+// JSON), since the extension lookup runs first.
+func IsDotenvVariant(base string) bool {
+	return strings.HasPrefix(strings.ToLower(base), ".env.")
 }
 
 // defaultLineComment is the prefix for a file whose language isn't in

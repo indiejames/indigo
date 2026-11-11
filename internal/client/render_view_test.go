@@ -24,6 +24,9 @@ func TestFileTypeNameFilenameStyleKeys(t *testing.T) {
 		{"/w/.env", "env"},
 		{"/w/.env.local", "env"}, // not "local"
 		{"/w/.env.production", "env"},
+		{"/w/DATA.JSON", "JSON"}, // labelled as data.json is
+		{"/w/Main.GO", "Go"},     // not "GO"
+		{"/w/.ENV.Local", "env"},
 	}
 	for _, c := range cases {
 		if got := fileTypeName(c.path); got != c.want {

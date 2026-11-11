@@ -9,6 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/indiejames/indigo/internal/highlight"
 )
 
 // displayPath returns a project-relative path for status bar display.
@@ -561,6 +563,9 @@ func fileTypeName(path string) string {
 	}
 	if name, ok := filenameStyleDisplayName(strings.ToLower(filepath.Base(path))); ok {
 		return name
+	}
+	if highlight.IsDotenvVariant(filepath.Base(path)) {
+		return "env" // as .env itself is labelled
 	}
 	if ext != "" {
 		return ext

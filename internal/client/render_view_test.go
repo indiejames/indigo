@@ -21,6 +21,9 @@ func TestFileTypeNameFilenameStyleKeys(t *testing.T) {
 		{"Dockerfile", "Dockerfile"},
 		{"/some/project/Dockerfile", "Dockerfile"},
 		{".git/COMMIT_EDITMSG", "Git Commit"},
+		{"/w/.env", "env"},
+		{"/w/.env.local", "env"}, // not "local"
+		{"/w/.env.production", "env"},
 	}
 	for _, c := range cases {
 		if got := fileTypeName(c.path); got != c.want {
